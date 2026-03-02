@@ -1,0 +1,10 @@
+{
+	"dependencies": {
+		"js-sha3": "^0.9.3",
+		"localforage": "^1.10.0",
+		"random-int": "^3.1.0"
+	},
+	"devDependencies": {
+		"@types/chrome": "^0.1.37"
+	}
+}

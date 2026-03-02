@@ -1,0 +1,36 @@
+import localforage from 'localforage';
+import { IStorageProvider, Conversation } from '../interfaces/IStorageProvider';
+
+export class IndexedDBStorageProvider implements IStorageProvider {
+    public id = 'indexeddb-storage';
+    private store: LocalForage;
+
+    constructor() {
+        this.store = localforage.createInstance({
+            name: 'chatprism',
+            storeName: 'conversations'
+        });
+    }
+
+    async saveConversation(chat: Conversation): Promise<void> {
+        await this.store.setItem(chat.id, chat);
+    }
+
+    async getConversation(id: string): Promise<Conversation | null> {
+        const chat = await this.store.getItem<Conversation>(id);
+        return chat;
+    }
+
+    async getAllConversations(): Promise<Conversation[]> {
+        const conversations: Conversation[] = [];
+        await this.store.iterate((value: Conversation) => {
+            conversations.push(value);
+        });
+        // Sort by updatedAt descending
+        return conversations.sort((a, b) => b.updatedAt - a.updatedAt);
+    }
+
+    async deleteConversation(id: string): Promise<void> {
+        await this.store.removeItem(id);
+    }
+}

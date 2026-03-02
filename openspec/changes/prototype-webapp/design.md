@@ -1,67 +1,156 @@
 ## Context
 
-本项目旨在构建一个跨平台的 AI 聊天客户端。目前第一阶段（Phase 1）的目标是产出一个以浏览器插件形式运行的 WebApp 模式 MVP。在浏览器插件环境下，前端直接请求大模型接口会面临严重的 CORS 跨域问题。同时，为了保证未来的跨端能力（如迁移至基于 Tauri 的桌面端），我们需要在架构设计阶段就将 UI 层、业务逻辑层（特别是网络通信和数据存储）彻底解耦。
+当前代码基线已经具备扩展宿主能力：UI 通过 `IModelProvider` 与 `IStorageProvider` 交互，扩展端通过 `BackgroundProxyProvider` 间接调用真实 Provider。`prototype-webapp` 需要新增纯 Web 宿主，但必须保持“宿主与具体 Provider 解耦”的架构原则，避免在 `apps/web` 页面层直接依赖 `GeminiApiProvider` 等实现类。
+
+主要约束：
+- 纯 Web 环境无法使用 `chatgpt-web`（依赖官网 Cookie）。
+- UI 层已沉淀为可复用组件，应继续只依赖接口，不感知宿主差异。
+- Web 与 Extension 需要共享同一套 Provider/Model 配置来源，但按宿主能力过滤。
+
+## 参与方与协同边界
+
+1. `Provider` 实现（`IModelProvider`）
+- 位置：`packages/core/src/providers/**`
+- 职责：实现 `checkAuth/sendMessage/abort`，不负责判断运行模式，不直接参与 UI 渲染。
+
+2. 静态配置（Provider 能力声明）
+- 位置：`packages/core/config.ts`
+- 职责：声明 provider 的模型与可用运行模式（`supportedRuntimeModes`），作为运行时筛选依据。
+
+3. `ProviderRuntime`（运行时装配层）
+- 位置：`packages/core/src/runtime/**`
+- 职责：接收宿主初始化参数，过滤当前运行模式可用 provider，按需实例化并返回 `IModelProvider`。
+
+4. 宿主应用（`apps/web` / `apps/extension`）
+- 位置：`apps/*`
+- 职责：读取环境变量和宿主上下文，调用 `createProviderRuntime`，把可用 provider 列表与实例注入 UI。
+
+5. UI + Store（`packages/ui`）
+- 位置：`packages/ui/src/**`
+- 职责：展示可选 provider/model，保存用户选择，调用统一 `IModelProvider` 接口；不感知具体实现类。
+
+初始化协同流程（启动阶段）：
+1. 宿主读取上下文与凭据，调用 `createProviderRuntime({ runtimeMode, credentials })`。
+2. Runtime 根据 `supportedRuntimeModes` 过滤 provider，返回可用 provider 列表。
+3. 宿主把可用列表注入 UI store，UI 渲染选择器并设置默认 provider/model。
+4. 用户首次发起请求时，store 通过 `runtime.getProvider(providerId)` 获取实例并调用 `sendMessage`。
 
 ## Goals / Non-Goals
 
 **Goals:**
-- 实现跨端 Monorepo 工程的物理隔离与环境搭建。
-- 设计双核抽象（Provider Pattern），实现网络通信与数据持久化的接口化。
-- 在插件环境中实现 WebApp 模式的网络通信架构，通过 Background 特权规避 CORS 限制。
-- 逆向 ChatGPT Web API，实现鉴权、真实请求发起和 SSE 流式解析。
-- 利用 IndexedDB 实现插件端的聊天对话持久化。
+- 新增 `apps/web` 宿主工程并复用现有 `packages/ui` 聊天界面。
+- 由宿主基于能力声明过滤 Provider，并向 UI 提供可选列表。
+- 通过宿主运行时装配层注入 `IModelProvider`，页面层不直接 `new` 具体 Provider。
+- 在 Web 端复用 `IndexedDBStorageProvider`，保持会话持久化能力一致。
 
 **Non-Goals:**
-- 第一阶段不包含 Tauri 桌面端的具体实现，仅为其预留核心契约与架构空间。
-- 不包括复杂的多模型支持体系，重心放在跑通 ChatGPT Web 单一通路的 MVP。
+- 不改造现有扩展端代理主流程（`BackgroundProxyProvider` + background 路由）作为本次交付重点。
+- 不在本阶段引入新的大模型服务商。
+- 不新增后端服务或服务端转发层。
 
 ## Decisions
 
-### 1. 跨端 Monorepo 物理结构设计
-- **变更文件**: `pnpm-workspace.yaml`, `packages/core/`, `packages/ui/`, `apps/extension/`
-- **说明**: 采用 pnpm workspaces（或 Turborepo）管理。`core` 包专注于纯业务逻辑与契约层（禁绝 DOM API）；`ui` 包负责基于 Vue 3 的界面的纯渲染；`apps/extension` 基于 WXT 框架，在此处组装依赖。这样可以保证核心代码在多种宿主环境间无缝复用。
+### 决策 1：在核心层引入“宿主运行时装配”而非页面直接依赖 Provider 实现
 
-### 2. 双核抽象设计 (Provider Pattern)
-- **变更文件**: 
-  - `packages/core/src/interfaces/IModelProvider.ts`
-  - `packages/core/src/interfaces/IStorageProvider.ts`
-- **接口签名变更**:
-  - `IModelProvider`: 
-    - `checkAuth(): Promise<boolean>;`
-    - `sendMessage(prompt: string, context: any, onUpdate: Function): Promise<any>;`
-    - `abort(): void;`
-  - `IStorageProvider`: 
-    - `saveConversation(chat: Conversation): Promise<void>;`
-    - `getConversation(id: string): Promise<Conversation | null>;`
-    - `getAllConversations(): Promise<Conversation[]>;`
-    - `deleteConversation(id: string): Promise<void>;`
-- **说明**: 在 `core` 层定义两大核心契约，屏蔽底层实现细节。UI 层仅面向契约编程。
+变更说明：
+- 在 `packages/core` 新增运行时装配模块，对外提供按宿主筛选与 Provider 实例获取能力。
+- `apps/web` 仅依赖装配层接口，不直接 import 具体 Provider 类。
 
-### 3. WebApp 模式的网络通信架构 (规避 CORS)
-- **变更文件**: 
-  - `packages/core/src/providers/ChatGPTWebProvider.ts` (真实引擎)
-  - `apps/extension/entrypoints/background.ts` (后台代理)
-  - `apps/extension/src/utils/BackgroundProxyProvider.ts` (UI 层替身)
-- **说明**: 宿主后台环境 (`background.ts`) 实例化 `ChatGPTWebProvider` 利用插件跨域特权发起真实网络请求并处理 SSE；UI 层则调用伪装的 `BackgroundProxyProvider`，通过插件通信机制（如长连接）将指令与数据与后台交互。此架构解决了浏览器环境下的跨域和流传输障碍。
+涉及文件（新增/修改）：
+- `packages/core/src/runtime/createProviderRuntime.ts`（新增）
+- `packages/core/src/runtime/types.ts`（新增）
+- `packages/core/src/index.ts`（修改，导出运行时装配 API）
+- `apps/web/src/providerRuntime.ts`（新增，宿主侧初始化）
+- `apps/web/src/App.vue` 或 `apps/web/src/main.ts`（修改，注入 runtime/provider）
 
-### 4. API 逆向实现设计 (参考 ChatGPTBox 源码)
-- **变更文件**: `packages/core/src/providers/ChatGPTWebProvider.ts`
-- **说明**: 编写 `ChatGPTWebProvider.ts` 时，定向提取（但不直接引用）开源项目如 [ChatGPTBox](https://github.com/josStorer/chatGPTBox) 的纯函数逻辑：
-  - **鉴权**: 模拟 `GET https://chatgpt.com/api/auth/session` 获取 `accessToken`。
-  - **防爬 (可选)**: 模拟 `POST .../sentinel/chat-requirements` 获取 `token`。
-  - **Payload**: 使用 `uuid` 生成 V4 格式 `message_id`，构造包含 `action: 'next'` 的深层 JSON。
-  - **SSE 流解析**: 使用 `TextDecoder('utf-8')` 解码二进制块，按 `\n\n` 分割，剥离 `data: ` 前缀，过滤 `[DONE]`，全量覆盖解析出的 `parts[0]` 文本。
+函数/方法签名（新增）：
+```ts
+export type RuntimeMode = 'extension' | 'web';
 
-### 4. 存储适配层实现
-- **变更文件**: 
-  - `packages/core/src/providers/IndexedDBStorageProvider.ts`
-- **说明**: 使用 localforage 或 dexie.js 等库实现 `IStorageProvider`。状态机（Pinia）在 `apps/extension/` 被初始化时注入此 IndexedDB 实例，从而实现将打字机效果对话持久化落盘。
+export interface ProviderRuntime {
+  getAvailableProviders(): ProviderConfig[];
+  getProvider(providerId: string): IModelProvider;
+}
+
+export function createProviderRuntime(options: {
+  runtimeMode: RuntimeMode;
+  credentials?: Record<string, string>;
+}): ProviderRuntime;
+```
+
+备选方案：
+- 方案 A：在 `apps/web` 直接 `new GeminiApiProvider()`。
+  - 放弃原因：宿主和具体实现耦合，后续新增 Provider 需要改页面逻辑，违背当前目标。
+- 方案 B：继续沿用扩展端 Background Proxy 到 Web。
+  - 放弃原因：纯 Web 不具备扩展 Background 能力，且会引入不必要的跨层复杂度。
+
+### 决策 2：Provider 能力由静态配置声明，宿主按能力过滤后供用户选择
+
+变更说明：
+- 在静态配置中为 Provider 增加运行模式声明（如 `supportedRuntimeModes`），并保留模型列表与默认模型。
+- UI 选择器只展示 runtime 返回的可用 Provider，避免展示不可运行项。
+
+涉及文件（新增/修改）：
+- `packages/core/config.ts`（修改，Provider 元数据增加运行模式字段）
+- `packages/ui/src/components/ProviderModelSelector.vue`（修改，改为接收可用 providers 数据源）
+- `packages/ui/src/ChatApp.vue`（修改，初始化时加载 runtime 提供的 provider 列表）
+- `packages/ui/src/store/chat.ts`（修改，保存当前 provider/model 选择并暴露初始化入口）
+
+函数/方法签名（建议调整）：
+```ts
+// packages/ui/src/store/chat.ts
+setAvailableProviders(providers: ProviderConfig[]): void;
+
+// packages/ui/src/components/ProviderModelSelector.vue
+// props 新增
+providers: ProviderConfig[];
+```
+
+备选方案：
+- 方案 A：继续从 `APP_CONFIG.providers` 直接全量渲染后前端写死过滤 `chatgpt-web`。
+  - 放弃原因：过滤逻辑分散，扩展到更多宿主/Provider 时不可维护。
+
+### 决策 3：密钥由宿主读取并注入运行时，Provider 内部不依赖单一宿主命名
+
+变更说明：
+- `apps/web` 读取 `VITE_LLM_API_KEY`（或后续按 provider 拆分的键），通过 `createProviderRuntime` 传入。
+- 运行时将宿主密钥映射到对应 Provider 所需参数；Provider 接收构造参数优先，环境变量为兼容回退路径。
+
+涉及文件（新增/修改）：
+- `apps/web/.env`（新增，宿主密钥）
+- `apps/web/src/providerRuntime.ts`（新增，密钥映射与 runtime 创建）
+- `packages/core/src/providers/GeminiApiProvider.ts`（修改，支持构造参数注入 key）
+
+函数/方法签名（建议调整）：
+```ts
+// packages/core/src/providers/GeminiApiProvider.ts
+constructor(options?: { apiKey?: string });
+```
+
+备选方案：
+- 方案 A：继续只读 `import.meta.env.WXT_GEMINI_API_KEY`。
+  - 放弃原因：仅适配扩展构建约定，难以满足 Web 宿主注入诉求。
 
 ## Risks / Trade-offs
 
-- **Risk: 非官方 API 的不稳定性**
-  - **描述**: 我们通过逆向页面鉴权来调用 ChatGPT Web 内部 API，若其接口结构（包含 Payload 格式和 SSE 数据结构）变化，可能会破坏应用。
-  - **Mitigation**: 在 `ChatGPTWebProvider` 内将请求构建与 SSE 解析过程抽离为高内聚的纯函数，并辅以单元测试。当 API 变更时仅需定位修改这些纯函数，降低维护成本。
-- **Trade-off: 增加的代理层复杂性**
-  - **描述**: 直接使用浏览器的 `fetch` 是最简单的，但因引入了 `BackgroundProxyProvider` 及后台消息转发机制，增添了调试与维护难度。
-  - **Rationale**: 插件环境跨域通信的硬性限制以及长连接 SSE 流的正确处理，使得这种中转架构成为不可避免的最优解。
+- [Risk] 运行时装配层引入新抽象，初期实现成本增加。 → Mitigation：接口最小化（仅筛选和实例化），先覆盖 Web/Extension 两宿主。
+- [Risk] UI 从全局静态配置切换到宿主注入数据源，可能影响现有默认值逻辑。 → Mitigation：在 store 层统一默认 provider/model 选择规则并补充回归测试。
+- [Risk] Provider 构造参数与环境变量双通路可能产生优先级混淆。 → Mitigation：固定优先级“显式注入 > 环境变量回退”，并在文档中明确。
+
+## Migration Plan
+
+1. 新增 `apps/web` 基础工程，接入 `@packages/core` 与 `@packages/ui`。
+2. 在 `packages/core` 引入 runtime 装配层并补充导出。
+3. 扩展 `packages/core/config.ts` Provider 元数据，标注 `supportedRuntimeModes`。
+4. 改造 UI 层 Provider 列表来源为 runtime 注入。
+5. 接入 `IndexedDBStorageProvider` 并完成 Web 端聊天主流程联调。
+6. 验证扩展端行为不回归（Provider 选择、发送、历史记录）。
+
+回滚策略：
+- 保留旧的 `APP_CONFIG.providers` 直读路径开关；若新 runtime 引入问题，可临时切回旧数据源并仅保留 `apps/web` 脚手架。
+
+## Open Questions
+
+- `supportedRuntimeModes` 字段是否需要细分为“可见（selectable）”与“可运行（runnable）”两层语义？
+- `credentials` 是否需要标准化成按 providerId 分组结构（如 `{ gemini: { apiKey } }`）以避免键名冲突？
+- `apps/web` 是否需要在首版即支持多 Provider 密钥输入（而非单一 `VITE_LLM_API_KEY`）？

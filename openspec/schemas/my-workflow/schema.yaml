@@ -167,6 +167,10 @@ artifacts:
 
       - **Decisions**: Key technical choices with rationale (why X over Y?).
       Include alternatives considered for each decision.
+      
+      should include at least 
+        1. files(full path with package/folder) need to be added/changed 
+        2. function/method signature if changed 3. change description
 
       - **Risks / Trade-offs**: Known limitations, things that could go wrong.
       Format: [Risk] → Mitigation
