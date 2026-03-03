@@ -1,4 +1,7 @@
 {
+	"name": "@packages/core",
+	"version": "1.0.0",
+	"main": "src/index.ts",
 	"dependencies": {
 		"js-sha3": "^0.9.3",
 		"localforage": "^1.10.0",

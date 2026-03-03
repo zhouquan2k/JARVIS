@@ -2,9 +2,9 @@
   <div class="chat-container">
     <div class="chat-header">
       <h2>ChatPrism (WebApp MVP)</h2>
-      <ProviderModelSelector @change="onProviderModelChange" />
+      <ProviderModelSelector :providers="chatStore.availableProviders" @change="onProviderModelChange" />
       <div v-if="!isAuthenticated" class="auth-warning">
-        Please login to ChatGPT Web first
+        当前 Provider 鉴权不可用
       </div>
     </div>
     
@@ -74,8 +74,7 @@ const messagesRef = ref<HTMLElement | null>(null);
 
 onMounted(async () => {
   await chatStore.init();
-  const auth = await chatStore.checkAuth();
-  isAuthenticated.value = auth;
+  isAuthenticated.value = await chatStore.checkAuth();
 });
 
 watch(() => chatStore.currentConversation?.messages, () => {
@@ -85,6 +84,10 @@ watch(() => chatStore.currentConversation?.messages, () => {
     }
   });
 }, { deep: true });
+
+watch(() => chatStore.currentProviderId, async () => {
+  isAuthenticated.value = await chatStore.checkAuth();
+});
 
 async function send(e?: Event) {
   if (e) e.preventDefault();

@@ -3,12 +3,22 @@ import { IModelProvider } from '../interfaces/IModelProvider';
 export class GeminiApiProvider implements IModelProvider {
     public id = 'gemini-api';
     private abortController: AbortController | null = null;
+    private apiKey?: string;
+
+    constructor(options?: { apiKey?: string }) {
+        this.apiKey = options?.apiKey;
+    }
+
+    private resolveApiKey(): string | undefined {
+        if (this.apiKey) {
+            return this.apiKey;
+        }
+        // @ts-ignore
+        return import.meta.env?.WXT_GEMINI_API_KEY || import.meta.env?.VITE_GEMINI_API_KEY;
+    }
 
     async checkAuth(): Promise<boolean> {
-        // As long as we have the API key in environment, we consider it authenticated
-        // @ts-ignore
-        const apiKey = import.meta.env.WXT_GEMINI_API_KEY;
-        return !!apiKey;
+        return !!this.resolveApiKey();
     }
 
     async sendMessage(
@@ -19,8 +29,7 @@ export class GeminiApiProvider implements IModelProvider {
         } = {},
         onUpdate: (chunk: string) => void
     ): Promise<{ text: string, conversationId: string, messageId: string }> {
-        // @ts-ignore
-        const apiKey = import.meta.env.WXT_GEMINI_API_KEY;
+        const apiKey = this.resolveApiKey();
         if (!apiKey) {
             throw new Error('No Gemini API Key found in environment variables');
         }

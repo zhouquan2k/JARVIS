@@ -1,23 +1,17 @@
-import { ChatGPTWebProvider } from '@packages/core/src/providers/ChatGPTWebProvider';
-import { GeminiApiProvider } from '@packages/core/src/providers/GeminiApiProvider';
+import { createProviderRuntime } from '@packages/core/src/runtime/createProviderRuntime';
 import { IModelProvider } from '@packages/core/src/interfaces/IModelProvider';
 
 export default defineBackground(() => {
     chrome.runtime.onConnect.addListener((port) => {
         if (port.name === 'ai-provider-proxy') {
+            const runtime = createProviderRuntime({ runtimeMode: 'extension' });
             let currentProvider: IModelProvider | null = null;
 
             const getProvider = (providerId: string): IModelProvider => {
                 if (currentProvider && currentProvider.id === providerId) {
                     return currentProvider;
                 }
-                if (providerId === 'chatgpt-web') {
-                    currentProvider = new ChatGPTWebProvider();
-                } else if (providerId === 'gemini-api') {
-                    currentProvider = new GeminiApiProvider();
-                } else {
-                    throw new Error(`Unknown providerId: ${providerId}`);
-                }
+                currentProvider = runtime.getProvider(providerId);
                 return currentProvider;
             };
 

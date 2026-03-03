@@ -1,11 +1,11 @@
 <template>
   <div class="provider-model-selector">
-    <select v-model="selectedProviderId" @change="onProviderChange">
+    <select v-model="selectedProviderId" @change="onProviderChange" :disabled="providers.length === 0">
       <option v-for="p in providers" :key="p.id" :value="p.id">
         {{ p.name }}
       </option>
     </select>
-    <select v-model="selectedModelId" @change="onModelChange">
+    <select v-model="selectedModelId" @change="onModelChange" :disabled="currentModels.length === 0">
       <option v-for="m in currentModels" :key="m.id" :value="m.id">
         {{ m.name }}
       </option>
@@ -15,19 +15,21 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
-import { APP_CONFIG } from '@packages/core/config';
+import type { ProviderConfig } from '@packages/core/config';
+
+const props = defineProps<{
+  providers: ProviderConfig[];
+}>();
 
 const emit = defineEmits<{
   (e: 'change', payload: { providerId: string; modelId: string }): void
 }>();
 
-const providers = APP_CONFIG.providers;
-
 const selectedProviderId = ref('');
 const selectedModelId = ref('');
 
 const currentProvider = computed(() => {
-  return providers.find(p => p.id === selectedProviderId.value) || providers[0];
+  return props.providers.find(p => p.id === selectedProviderId.value) || props.providers[0];
 });
 
 const currentModels = computed(() => {
@@ -35,9 +37,9 @@ const currentModels = computed(() => {
 });
 
 function init() {
-  if (providers.length > 0) {
-    selectedProviderId.value = providers[0].id;
-    selectedModelId.value = providers[0].defaultModel;
+  if (props.providers.length > 0) {
+    selectedProviderId.value = props.providers[0].id;
+    selectedModelId.value = props.providers[0].defaultModel;
     emitChange();
   }
 }
@@ -52,8 +54,13 @@ function onModelChange() {
 }
 
 function emitChange() {
+  if (!selectedProviderId.value || !selectedModelId.value) return;
   emit('change', { providerId: selectedProviderId.value, modelId: selectedModelId.value });
 }
+
+watch(() => props.providers, () => {
+  init();
+}, { deep: true });
 
 onMounted(() => {
   init();

@@ -6,7 +6,8 @@
 import { ChatApp, useChatStore } from '@packages/ui';
 import { BackgroundProxyProvider } from './utils/BackgroundProxyProvider';
 import { IndexedDBStorageProvider } from '@packages/core/src/providers/IndexedDBStorageProvider';
-import { onMounted, watch } from 'vue';
+import { APP_CONFIG } from '@packages/core/config';
+import { onMounted } from 'vue';
 
 const chatStore = useChatStore();
 const proxyProvider = new BackgroundProxyProvider('');
@@ -17,12 +18,10 @@ onMounted(() => {
     proxyProvider,
     new IndexedDBStorageProvider()
   );
-});
 
-watch(() => chatStore.currentProviderId, (newId) => {
-  if (newId) {
-    proxyProvider.id = newId;
-  }
+  chatStore.setAvailableProviders(
+    APP_CONFIG.providers.filter((provider) => provider.supportedRuntimeModes.includes('extension'))
+  );
 });
 </script>
 
