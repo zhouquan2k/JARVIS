@@ -22,6 +22,7 @@ onMounted(() => {
   chatStore.setAvailableProviders(
     APP_CONFIG.providers.filter((provider) => provider.supportedRuntimeModes.includes('extension'))
   );
+  void chatStore.init();
 });
 </script>
 

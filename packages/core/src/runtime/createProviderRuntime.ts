@@ -24,10 +24,19 @@ export function createProviderRuntime(options: ProviderRuntimeOptions): Provider
             return availableProviders;
         },
 
-        getProvider(providerId: string) {
+        getProvider(providerId: string, getProviderOptions?: { fresh?: boolean }) {
             const providerConfig = availableProviders.find((item) => item.id === providerId);
             if (!providerConfig) {
                 throw new Error(`Provider '${providerId}' is not available in runtimeMode '${options.runtimeMode}'`);
+            }
+
+            const shouldUseFreshInstance = getProviderOptions?.fresh === true;
+            if (shouldUseFreshInstance) {
+                const factory = DEFAULT_FACTORIES[providerId];
+                if (!factory) {
+                    throw new Error(`No provider factory registered for '${providerId}'`);
+                }
+                return factory(options);
             }
 
             const cached = cache.get(providerId);

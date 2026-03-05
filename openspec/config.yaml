@@ -20,3 +20,6 @@ context: |
 #       - Always include a "Non-goals" section
 #     tasks:
 #       - Break tasks into chunks of max 2 hours
+rules:
+  tasks:
+    - generate e2e testcases. use playwright as the testing framework.

@@ -1,6 +1,10 @@
 {
     "name": "chatprism-workspace",
     "private": true,
+    "scripts": {
+        "test:core": "pnpm --filter @packages/core test",
+        "test:e2e:web": "pnpm --filter web test:e2e"
+    },
     "engines": {
         "node": ">=18"
     },

@@ -10,5 +10,5 @@ export interface ProviderRuntimeOptions {
 
 export interface ProviderRuntime {
     getAvailableProviders(): ProviderConfig[];
-    getProvider(providerId: string): IModelProvider;
+    getProvider(providerId: string, options?: { fresh?: boolean }): IModelProvider;
 }

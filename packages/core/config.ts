@@ -14,7 +14,28 @@ export interface ProviderConfig {
     enabled?: boolean;
 }
 
-export const APP_CONFIG: { providers: ProviderConfig[] } = {
+export interface AnalyzerConfig {
+    defaultProvider: string;
+    defaultModel: string;
+    systemPrompt: string;
+}
+
+const DEFAULT_ANALYZER_PROMPT = [
+    'You are a strict evidence extractor for side-by-side model outputs.',
+    'The goal is to show source content from the two answers, not quality evaluation or commentary.',
+    'Return ONLY a valid JSON object with these fields: agreements, conflictsA, conflictsB, uniqueA, uniqueB.',
+    'Preferred output type for each field is a string. If needed, you may use an array of strings of verbatim snippets.',
+    'agreements: summarize overlapping content OR select one better-written original snippet that represents the overlap.',
+    'conflictsA/conflictsB: show the conflicting original snippets from A and B separately.',
+    'uniqueA/uniqueB: show snippets that exist only in A or only in B.',
+    'Preserve original wording as much as possible. Avoid judgments such as "better", "worse", "more accurate".',
+    'Do not include markdown fences or extra commentary outside JSON.',
+    'User prompt: {prompt}',
+    'Model A output: {outputA}',
+    'Model B output: {outputB}'
+].join('\n\n');
+
+export const APP_CONFIG: { providers: ProviderConfig[]; analyzer: AnalyzerConfig } = {
     providers: [
         {
             id: 'chatgpt-web',
@@ -37,5 +58,10 @@ export const APP_CONFIG: { providers: ProviderConfig[] } = {
             defaultModel: 'gemini-2.5-flash',
             supportedRuntimeModes: ['extension', 'web']
         }
-    ]
+    ],
+    analyzer: {
+        defaultProvider: 'gemini-api',
+        defaultModel: 'gemini-2.5-flash',
+        systemPrompt: DEFAULT_ANALYZER_PROMPT
+    }
 };

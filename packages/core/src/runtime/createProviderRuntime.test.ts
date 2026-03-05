@@ -17,6 +17,25 @@ describe('createProviderRuntime', () => {
         expect(typeof provider.abort).toBe('function');
     });
 
+    it('returns cached instance in default mode', () => {
+        const runtime = createProviderRuntime({ runtimeMode: 'web' });
+        const providerA = runtime.getProvider('gemini-api');
+        const providerB = runtime.getProvider('gemini-api');
+        expect(providerA).toBe(providerB);
+    });
+
+    it('returns fresh instance when fresh option is true', () => {
+        const runtime = createProviderRuntime({ runtimeMode: 'web' });
+        const cached = runtime.getProvider('gemini-api');
+        const freshA = runtime.getProvider('gemini-api', { fresh: true });
+        const freshB = runtime.getProvider('gemini-api', { fresh: true });
+
+        expect(freshA).not.toBe(cached);
+        expect(freshB).not.toBe(cached);
+        expect(freshA).not.toBe(freshB);
+        expect(runtime.getProvider('gemini-api')).toBe(cached);
+    });
+
     it('uses injected credentials with higher priority', async () => {
         const runtime = createProviderRuntime({
             runtimeMode: 'web',

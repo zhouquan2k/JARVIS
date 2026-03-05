@@ -1,11 +1,11 @@
 <template>
   <div class="provider-model-selector">
-    <select v-model="selectedProviderId" @change="onProviderChange" :disabled="providers.length === 0">
+    <select data-testid="normal-provider" v-model="selectedProviderId" @change="onProviderChange" :disabled="providers.length === 0">
       <option v-for="p in providers" :key="p.id" :value="p.id">
         {{ p.name }}
       </option>
     </select>
-    <select v-model="selectedModelId" @change="onModelChange" :disabled="currentModels.length === 0">
+    <select data-testid="normal-model" v-model="selectedModelId" @change="onModelChange" :disabled="currentModels.length === 0">
       <option v-for="m in currentModels" :key="m.id" :value="m.id">
         {{ m.name }}
       </option>

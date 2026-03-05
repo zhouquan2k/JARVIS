@@ -6,3 +6,6 @@ export * from './providers/GeminiApiProvider';
 export * from './providers/IndexedDBStorageProvider';
 export * from './runtime/types';
 export * from './runtime/createProviderRuntime';
+export * from './analysis/types';
+export * from './analysis/ComparisonAnalyzer';
+export * from './workflows/CompareWorkflowController';
