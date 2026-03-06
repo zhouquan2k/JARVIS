@@ -1,4 +1,4 @@
-import { createProviderRuntime } from '@packages/core/src/runtime/createProviderRuntime';
+import { createProviderRuntime } from '@packages/core/src';
 import { createMockRuntime } from './testing/createMockRuntime';
 
 const useMockRuntime = import.meta.env.VITE_E2E === '1';

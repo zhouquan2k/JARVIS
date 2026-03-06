@@ -37,7 +37,7 @@
 </template>
 
 <script setup lang="ts">
-import type { AnalysisResult } from '@packages/core/src/analysis/types';
+import type { AnalysisResult } from '@packages/core/src';
 
 defineProps<{
   result: AnalysisResult | null;

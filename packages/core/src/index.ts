@@ -9,3 +9,4 @@ export * from './runtime/createProviderRuntime';
 export * from './analysis/types';
 export * from './analysis/ComparisonAnalyzer';
 export * from './workflows/CompareWorkflowController';
+export * from './testing/createMockRuntime';

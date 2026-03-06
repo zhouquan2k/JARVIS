@@ -1,7 +1,6 @@
 /// <reference types="chrome"/>
 import { IModelProvider } from '../interfaces/IModelProvider';
 import { sha3_512 } from 'js-sha3';
-import randomInt from 'random-int';
 
 // UUID v4 generator helper
 function generateUUID() {
@@ -11,6 +10,12 @@ function generateUUID() {
         return v.toString(16);
     });
 }
+
+const randomIntInclusive = (min: number, max: number): number => {
+    const lower = Math.min(min, max);
+    const upper = Math.max(min, max);
+    return Math.floor(Math.random() * (upper - lower + 1) + lower);
+};
 
 function generateProofToken(seed: string, diff: string, userAgent: string): string {
     const cores = [1, 2, 4];
@@ -22,10 +27,10 @@ function generateProofToken(seed: string, diff: string, userAgent: string): stri
     ];
     const acts = ['alert', 'ontransitionend', 'onprogress'];
 
-    const core = cores[randomInt(0, cores.length - 1)];
-    const screen = screens[randomInt(0, screens.length - 1)] + core;
-    const react = reacts[randomInt(0, reacts.length - 1)];
-    const act = acts[randomInt(0, acts.length - 1)];
+    const core = cores[randomIntInclusive(0, cores.length - 1)];
+    const screen = screens[randomIntInclusive(0, screens.length - 1)] + core;
+    const react = reacts[randomIntInclusive(0, reacts.length - 1)];
+    const act = acts[randomIntInclusive(0, acts.length - 1)];
 
     const parseTime = new Date().toString();
 
@@ -54,8 +59,7 @@ function generateProofToken(seed: string, diff: string, userAgent: string): stri
         const hashValue = sha3_512.create().update(seed + base);
 
         if (hashValue.hex().substring(0, diffLen) <= diff) {
-            const result = 'gAAAAAB' + base;
-            return result;
+            return 'gAAAAAB' + base;
         }
     }
 
@@ -195,7 +199,9 @@ export class ChatGPTWebProvider implements IModelProvider {
         });
 
         if (!response.ok) {
-            throw new Error(`ChatGPT API request failed: ${response.status} ${response.statusText}`);
+            const errorDetail = await response.text().catch(() => '');
+            const detailSuffix = errorDetail ? ` - ${errorDetail}` : '';
+            throw new Error(`ChatGPT API request failed: ${response.status} ${response.statusText}${detailSuffix}`);
         }
 
         const reader = response.body?.getReader();

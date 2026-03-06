@@ -2,7 +2,7 @@ import { APP_CONFIG } from '../../config';
 import { IModelProvider } from '../interfaces/IModelProvider';
 import { ChatGPTWebProvider } from '../providers/ChatGPTWebProvider';
 import { GeminiApiProvider } from '../providers/GeminiApiProvider';
-import { ProviderRuntime, ProviderRuntimeOptions } from './types';
+import { ProviderRuntime, ProviderRuntimeOptions, RuntimeProviderFactory } from './types';
 
 type ProviderFactory = (options: ProviderRuntimeOptions) => IModelProvider;
 
@@ -10,6 +10,23 @@ const DEFAULT_FACTORIES: Record<string, ProviderFactory> = {
     'chatgpt-web': () => new ChatGPTWebProvider(),
     'gemini-api': (options) => new GeminiApiProvider({ apiKey: options.credentials?.geminiApiKey })
 };
+
+function createProviderInstance(
+    providerId: string,
+    options: ProviderRuntimeOptions,
+    customFactory?: RuntimeProviderFactory
+): IModelProvider {
+    const customInstance = customFactory?.(providerId, options);
+    if (customInstance) {
+        return customInstance;
+    }
+
+    const factory = DEFAULT_FACTORIES[providerId];
+    if (!factory) {
+        throw new Error(`No provider factory registered for '${providerId}'`);
+    }
+    return factory(options);
+}
 
 export function createProviderRuntime(options: ProviderRuntimeOptions): ProviderRuntime {
     const cache = new Map<string, IModelProvider>();
@@ -32,11 +49,7 @@ export function createProviderRuntime(options: ProviderRuntimeOptions): Provider
 
             const shouldUseFreshInstance = getProviderOptions?.fresh === true;
             if (shouldUseFreshInstance) {
-                const factory = DEFAULT_FACTORIES[providerId];
-                if (!factory) {
-                    throw new Error(`No provider factory registered for '${providerId}'`);
-                }
-                return factory(options);
+                return createProviderInstance(providerId, options, options.providerFactory);
             }
 
             const cached = cache.get(providerId);
@@ -44,12 +57,7 @@ export function createProviderRuntime(options: ProviderRuntimeOptions): Provider
                 return cached;
             }
 
-            const factory = DEFAULT_FACTORIES[providerId];
-            if (!factory) {
-                throw new Error(`No provider factory registered for '${providerId}'`);
-            }
-
-            const instance = factory(options);
+            const instance = createProviderInstance(providerId, options, options.providerFactory);
             cache.set(providerId, instance);
             return instance;
         }

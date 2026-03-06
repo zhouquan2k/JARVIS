@@ -1,5 +1,32 @@
 import { describe, expect, it } from 'vitest';
 import { createProviderRuntime } from './createProviderRuntime';
+import type { IModelProvider } from '../interfaces/IModelProvider';
+
+class CustomGeminiProvider implements IModelProvider {
+    public id = 'custom-gemini';
+
+    async checkAuth(): Promise<boolean> {
+        return true;
+    }
+
+    async sendMessage(
+        _prompt: string,
+        _options: {
+            context?: { parentMessageId?: string; conversationId?: string };
+            modelId?: string;
+        },
+        onUpdate: (chunk: string) => void
+    ): Promise<{ text: string; conversationId: string; messageId: string }> {
+        onUpdate('custom');
+        return {
+            text: 'custom',
+            conversationId: 'conversation-id',
+            messageId: 'message-id'
+        };
+    }
+
+    abort(): void {}
+}
 
 describe('createProviderRuntime', () => {
     it('filters providers by runtimeMode', () => {
@@ -46,5 +73,20 @@ describe('createProviderRuntime', () => {
 
         const provider = runtime.getProvider('gemini-api');
         await expect(provider.checkAuth()).resolves.toBe(true);
+    });
+
+    it('uses custom providerFactory when provided', () => {
+        const runtime = createProviderRuntime({
+            runtimeMode: 'web',
+            providerFactory(providerId) {
+                if (providerId !== 'gemini-api') {
+                    return undefined;
+                }
+                return new CustomGeminiProvider();
+            }
+        });
+
+        const provider = runtime.getProvider('gemini-api');
+        expect(provider.id).toBe('custom-gemini');
     });
 });

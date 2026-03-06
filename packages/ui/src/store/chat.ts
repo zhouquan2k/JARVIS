@@ -1,6 +1,5 @@
 import { defineStore } from 'pinia';
-import { IStorageProvider, Conversation } from '@packages/core/src/interfaces/IStorageProvider';
-import { IModelProvider } from '@packages/core/src/interfaces/IModelProvider';
+import { IStorageProvider, Conversation, IModelProvider } from '@packages/core/src';
 import type { ProviderConfig } from '@packages/core/config';
 import { toRaw, markRaw } from 'vue';
 

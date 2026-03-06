@@ -10,7 +10,7 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue';
 import { AppTopBar, useChatStore, useCompareStore } from '@packages/ui';
-import { IndexedDBStorageProvider } from '@packages/core/src/providers/IndexedDBStorageProvider';
+import { IndexedDBStorageProvider } from '@packages/core/src';
 import { currentRoute, navigateTo } from './router';
 import { providerRuntime } from './providerRuntime';
 

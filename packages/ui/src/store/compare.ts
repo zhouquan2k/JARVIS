@@ -1,8 +1,6 @@
 import { defineStore } from 'pinia';
 import type { ProviderConfig } from '@packages/core/config';
-import type { AnalysisResult } from '@packages/core/src/analysis/types';
-import { CompareWorkflowController, type CompareWorkflowStage } from '@packages/core/src/workflows/CompareWorkflowController';
-import type { ProviderRuntime } from '@packages/core/src/runtime/types';
+import { CompareWorkflowController, type CompareWorkflowStage, type AnalysisResult, type ProviderRuntime } from '@packages/core/src';
 import { markRaw } from 'vue';
 
 export type CompareTab = 'native' | 'analysis';

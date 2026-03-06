@@ -36,8 +36,22 @@ export class ComparisonAnalyzer {
         onUpdate: (chunk: string) => void
     ): Promise<AnalysisResult> {
         const provider = this.runtime.getProvider(this.analyzerConfig.defaultProvider, { fresh: true });
-        const analysisPrompt = this.buildPrompt(prompt, outputA, outputB);
+        const analyzeComparison = (provider as Partial<AnalyzableProvider>).analyzeComparison;
+        if (typeof analyzeComparison === 'function') {
+            return analyzeComparison.call(
+                provider,
+                {
+                    prompt,
+                    outputA,
+                    outputB,
+                    analyzerProviderId: this.analyzerConfig.defaultProvider,
+                    analyzerModelId: this.analyzerConfig.defaultModel
+                },
+                onUpdate
+            );
+        }
 
+        const analysisPrompt = this.buildPrompt(prompt, outputA, outputB);
         let streamText = '';
         const result = await provider.sendMessage(
             analysisPrompt,
@@ -184,3 +198,16 @@ export class ComparisonAnalyzer {
 }
 
 export type AnalyzerProvider = IModelProvider;
+
+interface AnalyzableProvider extends IModelProvider {
+    analyzeComparison: (
+        payload: {
+            prompt: string;
+            outputA: string;
+            outputB: string;
+            analyzerProviderId?: string;
+            analyzerModelId?: string;
+        },
+        onUpdate: (chunk: string) => void
+    ) => Promise<AnalysisResult>;
+}

@@ -5,8 +5,9 @@ import { resolve } from 'path';
 export default defineConfig({
     manifest: {
         name: 'ChatPrism',
+        action: {},
         host_permissions: ['*://chatgpt.com/*'],
-        permissions: ['storage', 'cookies']
+        permissions: ['storage', 'cookies', 'tabs']
     },
     srcDir: 'src',
     outDir: 'dist',
