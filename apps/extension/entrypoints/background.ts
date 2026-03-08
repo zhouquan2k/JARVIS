@@ -1,9 +1,12 @@
 /// <reference types="chrome"/>
-import type { IModelProvider, ProviderRuntime } from '@packages/core/src';
+import type { IHistoryProvider, IModelProvider, ProviderRuntime } from '@packages/core/src';
 import type {
     AbortRequest,
     AnalyzeComparisonRequest,
     CheckAuthRequest,
+    GetAvailableModelsRequest,
+    GetHistoryDetailRequest,
+    GetHistoryListRequest,
     ProxyRequest,
     ProxyResponse,
     SendMessageRequest
@@ -92,6 +95,17 @@ export default defineBackground(() => {
                 return runtime.getProvider(providerId, { fresh: true });
             };
 
+            const resolveHistoryProvider = async (providerId: string): Promise<IHistoryProvider> => {
+                const provider = await resolveProvider(providerId);
+                if (
+                    typeof (provider as Partial<IHistoryProvider>).getHistoryList !== 'function' ||
+                    typeof (provider as Partial<IHistoryProvider>).getHistoryDetail !== 'function'
+                ) {
+                    throw new Error(`Provider '${providerId}' does not support history queries`);
+                }
+                return provider as IHistoryProvider;
+            };
+
             const trackActiveRequest = (requestId: string, channelId: string, provider: IModelProvider) => {
                 activeRequests.set(requestId, { provider, channelId });
                 ownedRequestIds.add(requestId);
@@ -152,6 +166,12 @@ export default defineBackground(() => {
                         getAvailableProviders() {
                             return runtime.getAvailableProviders();
                         },
+                        getProviderCatalog() {
+                            return runtime.getProviderCatalog();
+                        },
+                        getProviderModels(providerId: string) {
+                            return runtime.getProviderModels(providerId);
+                        },
                         getProvider(providerId: string, options?: { fresh?: boolean }) {
                             const provider = runtime.getProvider(providerId, options);
                             trackActiveRequest(msg.requestId, msg.channelId, provider);
@@ -196,6 +216,51 @@ export default defineBackground(() => {
                 }
             };
 
+            const handleGetAvailableModels = async (msg: GetAvailableModelsRequest) => {
+                try {
+                    const runtime = await getRuntime();
+                    const result = await runtime.getProviderModels(msg.providerId);
+                    postResponse({
+                        type: 'DONE',
+                        requestId: msg.requestId,
+                        channelId: msg.channelId,
+                        result
+                    });
+                } catch (error) {
+                    postError(msg.requestId, msg.channelId, error);
+                }
+            };
+
+            const handleGetHistoryList = async (msg: GetHistoryListRequest) => {
+                try {
+                    const provider = await resolveHistoryProvider(msg.providerId);
+                    const result = await provider.getHistoryList();
+                    postResponse({
+                        type: 'DONE',
+                        requestId: msg.requestId,
+                        channelId: msg.channelId,
+                        result
+                    });
+                } catch (error) {
+                    postError(msg.requestId, msg.channelId, error);
+                }
+            };
+
+            const handleGetHistoryDetail = async (msg: GetHistoryDetailRequest) => {
+                try {
+                    const provider = await resolveHistoryProvider(msg.providerId);
+                    const result = await provider.getHistoryDetail(msg.externalId);
+                    postResponse({
+                        type: 'DONE',
+                        requestId: msg.requestId,
+                        channelId: msg.channelId,
+                        result
+                    });
+                } catch (error) {
+                    postError(msg.requestId, msg.channelId, error);
+                }
+            };
+
             const handleAbort = (msg: AbortRequest) => {
                 if (msg.targetRequestId) {
                     const active = activeRequests.get(msg.targetRequestId);
@@ -226,6 +291,15 @@ export default defineBackground(() => {
                         break;
                     case 'ANALYZE_COMPARISON':
                         void handleAnalyzeComparison(msg);
+                        break;
+                    case 'GET_AVAILABLE_MODELS':
+                        void handleGetAvailableModels(msg);
+                        break;
+                    case 'GET_HISTORY_LIST':
+                        void handleGetHistoryList(msg);
+                        break;
+                    case 'GET_HISTORY_DETAIL':
+                        void handleGetHistoryDetail(msg);
                         break;
                     case 'ABORT':
                         handleAbort(msg);

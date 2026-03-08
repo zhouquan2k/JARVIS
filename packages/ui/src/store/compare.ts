@@ -1,14 +1,21 @@
 import { defineStore } from 'pinia';
 import type { ProviderConfig } from '@packages/core/config';
-import { CompareWorkflowController, type CompareWorkflowStage, type AnalysisResult, type ProviderRuntime } from '@packages/core/src';
+import { CompareWorkflowController, type CompareWorkflowStage, type AnalysisResult, type ProviderRuntime } from '../../../core/src';
 import { markRaw } from 'vue';
 
 export type CompareTab = 'native' | 'analysis';
 
+type ProviderModelLoadState = {
+    loading: boolean;
+    loaded: boolean;
+};
+
 export interface CompareState {
     runtime: ProviderRuntime | null;
     controller: CompareWorkflowController | null;
+    providerCatalog: ProviderConfig[];
     availableProviders: ProviderConfig[];
+    providerModelStates: Record<string, ProviderModelLoadState>;
     modelAProviderId: string;
     modelAModelId: string;
     modelBProviderId: string;
@@ -24,6 +31,23 @@ export interface CompareState {
     stage: 'idle' | CompareWorkflowStage;
 }
 
+function cloneProviderConfig(provider: ProviderConfig): ProviderConfig {
+    return {
+        ...provider,
+        models: provider.models.map((model) => ({ ...model }))
+    };
+}
+
+function cloneProviders(providers: ProviderConfig[]): ProviderConfig[] {
+    return providers.map(cloneProviderConfig);
+}
+
+function buildProviderModelStates(providers: ProviderConfig[]): Record<string, ProviderModelLoadState> {
+    return Object.fromEntries(
+        providers.map((provider) => [provider.id, { loading: false, loaded: false } satisfies ProviderModelLoadState])
+    );
+}
+
 function resolveModelId(provider: ProviderConfig, modelId?: string): string {
     if (modelId && provider.models.some((item) => item.id === modelId)) {
         return modelId;
@@ -31,11 +55,17 @@ function resolveModelId(provider: ProviderConfig, modelId?: string): string {
     return provider.defaultModel;
 }
 
+function isConfiguredDefaultModelError(error: unknown): error is Error {
+    return error instanceof Error && error.name === 'ConfiguredDefaultModelNotFoundError';
+}
+
 export const useCompareStore = defineStore('compare', {
     state: (): CompareState => ({
         runtime: null,
         controller: null,
+        providerCatalog: [],
         availableProviders: [],
+        providerModelStates: {},
         modelAProviderId: '',
         modelAModelId: '',
         modelBProviderId: '',
@@ -51,16 +81,38 @@ export const useCompareStore = defineStore('compare', {
         stage: 'idle'
     }),
 
-    actions: {
-        setRuntime(runtime: ProviderRuntime) {
-            this.runtime = markRaw(runtime);
-            this.controller = markRaw(new CompareWorkflowController(runtime));
-            this.setAvailableProviders(runtime.getAvailableProviders());
+    getters: {
+        isModelALoading(state): boolean {
+            if (!state.modelAProviderId) {
+                return false;
+            }
+
+            const loadState = state.providerModelStates[state.modelAProviderId];
+            return !loadState || loadState.loading || !loadState.loaded;
         },
 
-        setAvailableProviders(providers: ProviderConfig[]) {
-            this.availableProviders = providers;
-            if (providers.length === 0) {
+        isModelBLoading(state): boolean {
+            if (!state.modelBProviderId) {
+                return false;
+            }
+
+            const loadState = state.providerModelStates[state.modelBProviderId];
+            return !loadState || loadState.loading || !loadState.loaded;
+        }
+    },
+
+    actions: {
+        resolveProviderConfig(providerId: string): ProviderConfig | undefined {
+            return this.availableProviders.find((item) => item.id === providerId);
+        },
+
+        setProviderCatalog(providers: ProviderConfig[]) {
+            const nextCatalog = cloneProviders(providers);
+            this.providerCatalog = nextCatalog;
+            this.availableProviders = cloneProviders(nextCatalog);
+            this.providerModelStates = buildProviderModelStates(nextCatalog);
+
+            if (nextCatalog.length === 0) {
                 this.modelAProviderId = '';
                 this.modelAModelId = '';
                 this.modelBProviderId = '';
@@ -68,31 +120,169 @@ export const useCompareStore = defineStore('compare', {
                 return;
             }
 
-            const defaultA = providers[0];
-            const defaultB = providers[1] || providers[0];
+            const defaultA = nextCatalog[0];
+            const defaultB = nextCatalog[1] || nextCatalog[0];
 
-            this.setModelA(this.modelAProviderId || defaultA.id, this.modelAModelId || defaultA.defaultModel);
-            this.setModelB(this.modelBProviderId || defaultB.id, this.modelBModelId || defaultB.defaultModel);
+            this.modelAProviderId = nextCatalog.some((item) => item.id === this.modelAProviderId)
+                ? this.modelAProviderId
+                : defaultA.id;
+            this.modelBProviderId = nextCatalog.some((item) => item.id === this.modelBProviderId)
+                ? this.modelBProviderId
+                : defaultB.id;
+            this.modelAModelId = '';
+            this.modelBModelId = '';
         },
 
-        setModelA(providerId: string, modelId?: string) {
-            const provider = this.availableProviders.find((item) => item.id === providerId);
+        setAvailableProviders(providers: ProviderConfig[]) {
+            this.setProviderCatalog(providers);
+        },
+
+        setProviderModelState(providerId: string, nextState: Partial<ProviderModelLoadState>) {
+            const current = this.providerModelStates[providerId] || { loading: false, loaded: false };
+            this.providerModelStates = {
+                ...this.providerModelStates,
+                [providerId]: {
+                    ...current,
+                    ...nextState
+                }
+            };
+        },
+
+        applyProviderModelCatalog(providerId: string, models: ProviderConfig['models'], defaultModel: string) {
+            this.availableProviders = this.availableProviders.map((provider) => {
+                if (provider.id !== providerId) {
+                    return provider;
+                }
+
+                return {
+                    ...provider,
+                    models: models.map((model) => ({ ...model })),
+                    defaultModel
+                };
+            });
+
+            if (this.modelAProviderId === providerId) {
+                const provider = this.resolveProviderConfig(providerId);
+                if (provider) {
+                    this.modelAModelId = resolveModelId(provider, this.modelAModelId);
+                }
+            }
+
+            if (this.modelBProviderId === providerId) {
+                const provider = this.resolveProviderConfig(providerId);
+                if (provider) {
+                    this.modelBModelId = resolveModelId(provider, this.modelBModelId);
+                }
+            }
+        },
+
+        async ensureProviderModelsLoaded(providerId: string): Promise<ProviderConfig | null> {
+            const loadState = this.providerModelStates[providerId];
+            if (loadState?.loaded && !loadState.loading) {
+                return this.resolveProviderConfig(providerId) || null;
+            }
+
+            const baseProvider = this.providerCatalog.find((item) => item.id === providerId);
+            if (!baseProvider) {
+                return null;
+            }
+
+            this.setProviderModelState(providerId, { loading: true });
+
+            try {
+                const catalog = this.runtime
+                    ? await this.runtime.getProviderModels(providerId)
+                    : {
+                        models: baseProvider.models.map((model) => ({ ...model })),
+                        defaultModel: baseProvider.defaultModel
+                    };
+
+                this.applyProviderModelCatalog(providerId, catalog.models, catalog.defaultModel);
+            } catch (error) {
+                if (isConfiguredDefaultModelError(error)) {
+                    this.analysisError = error.message;
+                    this.setProviderModelState(providerId, { loading: false, loaded: false });
+                    throw error;
+                }
+
+                this.applyProviderModelCatalog(
+                    providerId,
+                    baseProvider.models.map((model) => ({ ...model })),
+                    baseProvider.defaultModel
+                );
+            } finally {
+                this.setProviderModelState(providerId, { loading: false, loaded: true });
+            }
+
+            return this.resolveProviderConfig(providerId) || null;
+        },
+
+        async setRuntime(runtime: ProviderRuntime) {
+            this.runtime = markRaw(runtime);
+            this.controller = markRaw(new CompareWorkflowController(runtime));
+            this.setProviderCatalog(runtime.getProviderCatalog());
+
+            if (!this.availableProviders.length) {
+                return;
+            }
+
+            const defaultA = this.availableProviders[0];
+            const defaultB = this.availableProviders[1] || defaultA;
+
+            await this.setModelA(this.modelAProviderId || defaultA.id);
+            await this.setModelB(this.modelBProviderId || defaultB.id);
+        },
+
+        async setModelA(providerId: string, modelId?: string) {
+            const baseProvider = this.providerCatalog.find((item) => item.id === providerId);
+            if (!baseProvider) {
+                return;
+            }
+
+            this.modelAProviderId = providerId;
+            this.modelAModelId = '';
+            this.analysisError = null;
+            const provider = await this.ensureProviderModelsLoaded(providerId);
             if (!provider) {
                 return;
             }
 
-            this.modelAProviderId = provider.id;
             this.modelAModelId = resolveModelId(provider, modelId);
         },
 
-        setModelB(providerId: string, modelId?: string) {
-            const provider = this.availableProviders.find((item) => item.id === providerId);
+        setModelAId(modelId: string) {
+            const provider = this.resolveProviderConfig(this.modelAProviderId);
+            if (!provider || !provider.models.some((item) => item.id === modelId)) {
+                return;
+            }
+
+            this.modelAModelId = modelId;
+        },
+
+        async setModelB(providerId: string, modelId?: string) {
+            const baseProvider = this.providerCatalog.find((item) => item.id === providerId);
+            if (!baseProvider) {
+                return;
+            }
+
+            this.modelBProviderId = providerId;
+            this.modelBModelId = '';
+            this.analysisError = null;
+            const provider = await this.ensureProviderModelsLoaded(providerId);
             if (!provider) {
                 return;
             }
 
-            this.modelBProviderId = provider.id;
             this.modelBModelId = resolveModelId(provider, modelId);
+        },
+
+        setModelBId(modelId: string) {
+            const provider = this.resolveProviderConfig(this.modelBProviderId);
+            if (!provider || !provider.models.some((item) => item.id === modelId)) {
+                return;
+            }
+
+            this.modelBModelId = modelId;
         },
 
         setActiveTab(tab: CompareTab) {
@@ -123,7 +313,7 @@ export const useCompareStore = defineStore('compare', {
             if (!this.controller) {
                 throw new Error('Compare workflow controller is not initialized');
             }
-            if (!this.modelAProviderId || !this.modelBProviderId) {
+            if (!this.modelAProviderId || !this.modelBProviderId || !this.modelAModelId || !this.modelBModelId) {
                 throw new Error('Provider/model selections are not initialized');
             }
 

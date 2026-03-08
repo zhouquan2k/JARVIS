@@ -1,6 +1,14 @@
-import type { AnalysisResult } from '@packages/core/src';
+import type { AnalysisResult, Conversation, ConversationHistorySummary } from '@packages/core/src';
+import type { ProviderModelCatalog } from '@packages/core/config';
 
-export type ProxyAction = 'CHECK_AUTH' | 'SEND_MESSAGE' | 'ANALYZE_COMPARISON' | 'ABORT';
+export type ProxyAction =
+    | 'CHECK_AUTH'
+    | 'SEND_MESSAGE'
+    | 'ANALYZE_COMPARISON'
+    | 'GET_AVAILABLE_MODELS'
+    | 'GET_HISTORY_LIST'
+    | 'GET_HISTORY_DETAIL'
+    | 'ABORT';
 
 export interface ProviderSendOptions {
     context?: { parentMessageId?: string; conversationId?: string };
@@ -34,15 +42,34 @@ export interface AnalyzeComparisonRequest extends ProxyRequestBase {
     analyzerModelId?: string;
 }
 
+export interface GetAvailableModelsRequest extends ProxyRequestBase {
+    action: 'GET_AVAILABLE_MODELS';
+    providerId: string;
+}
+
 export interface AbortRequest extends ProxyRequestBase {
     action: 'ABORT';
     targetRequestId?: string;
+}
+
+export interface GetHistoryListRequest extends ProxyRequestBase {
+    action: 'GET_HISTORY_LIST';
+    providerId: string;
+}
+
+export interface GetHistoryDetailRequest extends ProxyRequestBase {
+    action: 'GET_HISTORY_DETAIL';
+    providerId: string;
+    externalId: string;
 }
 
 export type ProxyRequest =
     | CheckAuthRequest
     | SendMessageRequest
     | AnalyzeComparisonRequest
+    | GetAvailableModelsRequest
+    | GetHistoryListRequest
+    | GetHistoryDetailRequest
     | AbortRequest;
 
 export interface ProxyResponseBase {
@@ -65,6 +92,9 @@ export interface DoneResponse extends ProxyResponseBase {
     result:
         | { text: string; conversationId: string; messageId: string }
         | AnalysisResult
+        | ProviderModelCatalog
+        | ConversationHistorySummary[]
+        | Conversation
         | null;
 }
 

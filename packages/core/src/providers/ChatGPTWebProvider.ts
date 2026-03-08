@@ -1,4 +1,7 @@
 /// <reference types="chrome"/>
+import { APP_CONFIG, type ModelConfig, type ProviderModelCatalog } from '../../config';
+import type { ConversationHistorySummary, ConversationSourceType, IHistoryProvider } from '../interfaces/IHistoryProvider';
+import type { Conversation } from '../interfaces/IStorageProvider';
 import { IModelProvider } from '../interfaces/IModelProvider';
 import { sha3_512 } from 'js-sha3';
 
@@ -67,7 +70,254 @@ function generateProofToken(seed: string, diff: string, userAgent: string): stri
     return 'gAAAAABwQ8Lk5FbGpA2NcR9dShT6gYjU7VxZ4D' + fallbackBase;
 }
 
-export class ChatGPTWebProvider implements IModelProvider {
+type ChatGPTListItem = {
+    id: string;
+    title?: string | null;
+    update_time?: number | string | null;
+};
+
+type ChatGPTMessageContent = {
+    content_type?: string;
+    parts?: unknown[];
+    text?: string;
+};
+
+type ChatGPTMappingNode = {
+    id?: string;
+    parent?: string | null;
+    children?: string[];
+    message?: {
+        id?: string;
+        author?: { role?: string | null };
+        content?: ChatGPTMessageContent | null;
+    } | null;
+};
+
+type ChatGPTConversationDetail = {
+    title?: string | null;
+    conversation_id?: string;
+    id?: string;
+    current_node?: string | null;
+    mapping?: Record<string, ChatGPTMappingNode>;
+    update_time?: number | string | null;
+    create_time?: number | string | null;
+};
+
+const CHATGPT_HISTORY_SOURCE: ConversationSourceType = 'chatgpt_web';
+
+function getStaticChatGPTModelCatalog(): ProviderModelCatalog {
+    const provider = APP_CONFIG.providers.find((item) => item.id === 'chatgpt-web');
+    if (!provider) {
+        throw new Error("Static config for 'chatgpt-web' is missing");
+    }
+
+    return {
+        models: provider.models.map((model) => ({ ...model })),
+        defaultModel: provider.defaultModel
+    };
+}
+
+function normalizeTimestamp(value: number | string | null | undefined): number {
+    if (typeof value === 'string') {
+        const parsed = Number(value);
+        if (!Number.isNaN(parsed)) {
+            value = parsed;
+        }
+    }
+
+    if (typeof value !== 'number' || Number.isNaN(value)) {
+        return Date.now();
+    }
+
+    return value < 1_000_000_000_000 ? Math.round(value * 1000) : Math.round(value);
+}
+
+function normalizeTitle(title: string | null | undefined): string {
+    const trimmed = title?.trim();
+    return trimmed || 'Untitled Conversation';
+}
+
+function extractTextPart(part: unknown): string {
+    if (typeof part === 'string') {
+        return part;
+    }
+
+    if (part && typeof part === 'object') {
+        const candidate = part as { text?: unknown; content?: unknown };
+        if (typeof candidate.text === 'string') {
+            return candidate.text;
+        }
+        if (typeof candidate.content === 'string') {
+            return candidate.content;
+        }
+    }
+
+    return '';
+}
+
+function extractMessageText(content: ChatGPTMessageContent | null | undefined): string {
+    if (!content) {
+        return '';
+    }
+
+    if (typeof content.text === 'string') {
+        return content.text.trim();
+    }
+
+    if (Array.isArray(content.parts)) {
+        return content.parts.map(extractTextPart).join('\n').trim();
+    }
+
+    return '';
+}
+
+function toRenderableRole(role?: string | null): 'user' | 'assistant' | null {
+    return role === 'user' || role === 'assistant' ? role : null;
+}
+
+function buildPrimaryNodeChain(detail: ChatGPTConversationDetail): ChatGPTMappingNode[] {
+    const mapping = detail.mapping || {};
+    const chain: ChatGPTMappingNode[] = [];
+    const visited = new Set<string>();
+    let currentId = detail.current_node || null;
+
+    while (currentId && !visited.has(currentId)) {
+        visited.add(currentId);
+        const node = mapping[currentId];
+        if (!node) {
+            break;
+        }
+        chain.unshift(node);
+        currentId = node.parent || null;
+    }
+
+    if (chain.length > 0) {
+        return chain;
+    }
+
+    const rootId = Object.keys(mapping).find((key) => !mapping[key]?.parent);
+    currentId = rootId || null;
+
+    while (currentId && !visited.has(currentId)) {
+        visited.add(currentId);
+        const node = mapping[currentId];
+        if (!node) {
+            break;
+        }
+        chain.push(node);
+        currentId = node.children?.[0] || null;
+    }
+
+    return chain;
+}
+
+function normalizeModelLabel(value: string): string {
+    return value
+        .replace(/[-_]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function toModelConfig(candidate: unknown): ModelConfig | null {
+    if (!candidate || typeof candidate !== 'object') {
+        return null;
+    }
+
+    const record = candidate as Record<string, unknown>;
+    const idCandidate = [record.slug, record.id, record.model_slug, record.model_id].find(
+        (value): value is string => typeof value === 'string' && value.trim().length > 0
+    );
+
+    if (!idCandidate) {
+        return null;
+    }
+
+    const nameCandidate = [
+        record.title,
+        record.name,
+        record.label,
+        record.display_name,
+        record.text
+    ].find((value): value is string => typeof value === 'string' && value.trim().length > 0);
+
+    return {
+        id: idCandidate,
+        name: nameCandidate || normalizeModelLabel(idCandidate)
+    };
+}
+
+function collectModelConfigs(input: unknown, acc: ModelConfig[] = [], visited = new Set<unknown>()): ModelConfig[] {
+    if (!input || typeof input !== 'object' || visited.has(input)) {
+        return acc;
+    }
+
+    visited.add(input);
+
+    if (Array.isArray(input)) {
+        for (const item of input) {
+            collectModelConfigs(item, acc, visited);
+        }
+        return acc;
+    }
+
+    const directCandidate = toModelConfig(input);
+    if (directCandidate && !acc.some((item) => item.id === directCandidate.id)) {
+        acc.push(directCandidate);
+    }
+
+    for (const value of Object.values(input as Record<string, unknown>)) {
+        collectModelConfigs(value, acc, visited);
+    }
+
+    return acc;
+}
+
+function resolveDefaultModel(models: ModelConfig[], fallbackDefaultModel: string): string {
+    if (models.some((model) => model.id === fallbackDefaultModel)) {
+        return fallbackDefaultModel;
+    }
+
+    return models[0]?.id || fallbackDefaultModel;
+}
+
+function isLikelyChatGPTModelId(value: string): boolean {
+    return /^(gpt|o[13]|o4|auto|text-|chatgpt-)/i.test(value);
+}
+
+export function normalizeChatGPTConversationDetail(
+    detail: ChatGPTConversationDetail,
+    fallbackExternalId: string
+): Conversation {
+    const backendId = detail.conversation_id || detail.id || fallbackExternalId;
+    const messages = buildPrimaryNodeChain(detail)
+        .map((node) => {
+            const role = toRenderableRole(node.message?.author?.role);
+            const content = extractMessageText(node.message?.content);
+            if (!role || !content) {
+                return null;
+            }
+
+            return {
+                id: node.message?.id || node.id || generateUUID(),
+                role,
+                content
+            };
+        })
+        .filter((item): item is Conversation['messages'][number] => item !== null);
+
+    return {
+        id: generateUUID(),
+        title: normalizeTitle(detail.title),
+        backendId,
+        externalId: backendId,
+        sourceType: CHATGPT_HISTORY_SOURCE,
+        messages,
+        updatedAt: normalizeTimestamp(detail.update_time ?? detail.create_time)
+    };
+}
+
+export class ChatGPTWebProvider implements IModelProvider, IHistoryProvider {
     public id = 'chatgpt-web';
     private accessToken: string | null = null;
     private abortController: AbortController | null = null;
@@ -90,6 +340,39 @@ export class ChatGPTWebProvider implements IModelProvider {
         }
     }
 
+    async getAvailableModels(): Promise<ProviderModelCatalog> {
+        const fallbackCatalog = getStaticChatGPTModelCatalog();
+        const payload = await this.fetchModelCatalogPayload();
+        const models = collectModelConfigs(payload).filter((model) => isLikelyChatGPTModelId(model.id));
+
+        if (models.length === 0) {
+            return fallbackCatalog;
+        }
+
+        return {
+            models,
+            defaultModel: resolveDefaultModel(models, fallbackCatalog.defaultModel)
+        };
+    }
+
+    private async fetchModelCatalogPayload(): Promise<unknown> {
+        const candidateUrls = [
+            'https://chatgpt.com/backend-api/models?history_and_training_disabled=false',
+            'https://chatgpt.com/backend-api/models'
+        ];
+        let lastError: unknown;
+
+        for (const url of candidateUrls) {
+            try {
+                return await this.fetchJson<unknown>(url);
+            } catch (error) {
+                lastError = error;
+            }
+        }
+
+        throw lastError instanceof Error ? lastError : new Error('Failed to fetch ChatGPT model catalog');
+    }
+
     private async getOaiDeviceId(): Promise<string> {
         try {
             // If in an extension background, we can try to extract from cookies
@@ -103,8 +386,64 @@ export class ChatGPTWebProvider implements IModelProvider {
         return generateUUID(); // fallback
     }
 
+    private async ensureAccessToken(): Promise<void> {
+        if (this.accessToken) {
+            return;
+        }
+
+        const isAuth = await this.checkAuth();
+        if (!isAuth) {
+            throw new Error('Not authenticated with ChatGPT Web');
+        }
+    }
+
+    private async fetchJson<T>(input: string, init: RequestInit = {}): Promise<T> {
+        await this.ensureAccessToken();
+
+        const headers: Record<string, string> = {
+            Authorization: `Bearer ${this.accessToken}`,
+            ...(init.headers as Record<string, string> | undefined)
+        };
+
+        const response = await fetch(input, {
+            ...init,
+            credentials: 'include',
+            headers
+        });
+
+        if (!response.ok) {
+            const errorDetail = await response.text().catch(() => '');
+            const detailSuffix = errorDetail ? ` - ${errorDetail}` : '';
+            throw new Error(`ChatGPT request failed: ${response.status} ${response.statusText}${detailSuffix}`);
+        }
+
+        return response.json() as Promise<T>;
+    }
+
+    async getHistoryList(): Promise<ConversationHistorySummary[]> {
+        const data = await this.fetchJson<{ items?: ChatGPTListItem[] }>(
+            'https://chatgpt.com/backend-api/conversations?offset=0&limit=28&order=updated'
+        );
+
+        return (data.items || []).map((item) => ({
+            id: item.id,
+            title: normalizeTitle(item.title),
+            updatedAt: normalizeTimestamp(item.update_time),
+            sourceType: CHATGPT_HISTORY_SOURCE
+        }));
+    }
+
+    async getHistoryDetail(externalId: string): Promise<Conversation> {
+        const detail = await this.fetchJson<ChatGPTConversationDetail>(
+            `https://chatgpt.com/backend-api/conversation/${externalId}`
+        );
+
+        return normalizeChatGPTConversationDetail(detail, externalId);
+    }
+
     async getChatRequirements(): Promise<any | null> {
         try {
+            await this.ensureAccessToken();
             const deviceId = await this.getOaiDeviceId();
             const resp = await fetch('https://chatgpt.com/backend-api/sentinel/chat-requirements', {
                 method: 'POST',
@@ -133,10 +472,7 @@ export class ChatGPTWebProvider implements IModelProvider {
         } = {},
         onUpdate: (chunk: string) => void
     ): Promise<{ text: string, conversationId: string, messageId: string }> {
-        if (!this.accessToken) {
-            const isAuth = await this.checkAuth();
-            if (!isAuth) throw new Error('Not authenticated with ChatGPT Web');
-        }
+        await this.ensureAccessToken();
 
         const requirements = await this.getChatRequirements();
         const requirementToken = requirements?.token;

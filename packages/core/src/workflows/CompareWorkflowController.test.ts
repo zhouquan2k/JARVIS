@@ -20,6 +20,13 @@ class AsyncMockProvider implements IModelProvider {
         return true;
     }
 
+    async getAvailableModels() {
+        return {
+            models: [{ id: `${this.id}-model`, name: `${this.id} Model` }],
+            defaultModel: `${this.id}-model`
+        };
+    }
+
     async sendMessage(
         _prompt: string,
         _options: { modelId?: string } = {},
@@ -50,6 +57,11 @@ describe('CompareWorkflowController', () => {
 
         const runtime: ProviderRuntime = {
             getAvailableProviders: () => [],
+            getProviderCatalog: () => [],
+            getProviderModels: async (providerId) => ({
+                models: [{ id: `${providerId}-model`, name: `${providerId} Model` }],
+                defaultModel: `${providerId}-model`
+            }),
             getProvider: (providerId, options) => {
                 runtimeCalls.push({ providerId, fresh: options?.fresh });
                 return providerId === 'a' ? providerA : providerB;
@@ -106,6 +118,11 @@ describe('CompareWorkflowController', () => {
         const providerB = new AsyncMockProvider('provider-b', 'final B', 10, true);
         const runtime: ProviderRuntime = {
             getAvailableProviders: () => [],
+            getProviderCatalog: () => [],
+            getProviderModels: async (providerId) => ({
+                models: [{ id: `${providerId}-model`, name: `${providerId} Model` }],
+                defaultModel: `${providerId}-model`
+            }),
             getProvider: (providerId) => (providerId === 'a' ? providerA : providerB)
         };
 

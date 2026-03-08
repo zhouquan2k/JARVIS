@@ -1,4 +1,57 @@
+import { APP_CONFIG, type ProviderModelCatalog } from '../../config';
 import { IModelProvider } from '../interfaces/IModelProvider';
+
+type GeminiModelListItem = {
+    name?: string;
+    baseModelId?: string;
+    displayName?: string;
+    supportedGenerationMethods?: string[];
+};
+
+type GeminiModelListResponse = {
+    models?: GeminiModelListItem[];
+    nextPageToken?: string;
+};
+
+function getGeminiModelCatalog(): ProviderModelCatalog {
+    const provider = APP_CONFIG.providers.find((item) => item.id === 'gemini-api');
+    if (!provider) {
+        throw new Error("Static config for 'gemini-api' is missing");
+    }
+
+    return {
+        models: provider.models.map((model) => ({ ...model })),
+        defaultModel: provider.defaultModel
+    };
+}
+
+function normalizeGeminiFallbackDefault(models: ProviderModelCatalog['models'], fallbackDefaultModel: string): string {
+    if (models.some((model) => model.id === fallbackDefaultModel)) {
+        return fallbackDefaultModel;
+    }
+
+    const preferredModel = models.find((model) => model.id === 'gemini-2.5-flash');
+    return preferredModel?.id || models[0]?.id || fallbackDefaultModel;
+}
+
+function isGeminiChatModel(model: GeminiModelListItem): boolean {
+    const baseModelId = model.baseModelId || model.name?.replace(/^models\//, '');
+    if (!baseModelId?.startsWith('gemini-')) {
+        return false;
+    }
+
+    const supportedMethods = model.supportedGenerationMethods || [];
+    const supportsGenerateContent =
+        supportedMethods.includes('generateContent') ||
+        supportedMethods.includes('streamGenerateContent');
+
+    if (!supportsGenerateContent) {
+        return false;
+    }
+
+    const excludedTokens = ['embedding', 'aqa', 'image', 'tts', 'live', 'veo'];
+    return !excludedTokens.some((token) => baseModelId.includes(token));
+}
 
 export class GeminiApiProvider implements IModelProvider {
     public id = 'gemini-api';
@@ -15,6 +68,71 @@ export class GeminiApiProvider implements IModelProvider {
         }
         // @ts-ignore
         return import.meta.env?.WXT_GEMINI_API_KEY || import.meta.env?.VITE_GEMINI_API_KEY;
+    }
+
+    async getAvailableModels(): Promise<ProviderModelCatalog> {
+        const fallbackCatalog = getGeminiModelCatalog();
+        const apiKey = this.resolveApiKey();
+
+        if (!apiKey) {
+            return fallbackCatalog;
+        }
+
+        try {
+            const models = new Map<string, ProviderModelCatalog['models'][number]>();
+            let pageToken: string | undefined;
+
+            do {
+                const url = new URL('https://generativelanguage.googleapis.com/v1beta/models');
+                url.searchParams.set('key', apiKey);
+                url.searchParams.set('pageSize', '1000');
+                if (pageToken) {
+                    url.searchParams.set('pageToken', pageToken);
+                }
+
+                const response = await fetch(url.toString(), {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Gemini models.list failed: ${response.status} ${response.statusText}`);
+                }
+
+                const payload = await response.json() as GeminiModelListResponse;
+                for (const model of payload.models || []) {
+                    if (!isGeminiChatModel(model)) {
+                        continue;
+                    }
+
+                    const id = model.baseModelId || model.name?.replace(/^models\//, '');
+                    if (!id || models.has(id)) {
+                        continue;
+                    }
+
+                    models.set(id, {
+                        id,
+                        name: model.displayName || id
+                    });
+                }
+
+                pageToken = payload.nextPageToken || undefined;
+            } while (pageToken);
+
+            const resolvedModels = Array.from(models.values());
+            if (resolvedModels.length === 0) {
+                return fallbackCatalog;
+            }
+
+            return {
+                models: resolvedModels,
+                defaultModel: normalizeGeminiFallbackDefault(resolvedModels, fallbackCatalog.defaultModel)
+            };
+        } catch {
+            return fallbackCatalog;
+        }
     }
 
     async checkAuth(): Promise<boolean> {

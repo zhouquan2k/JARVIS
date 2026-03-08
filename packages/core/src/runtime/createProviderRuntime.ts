@@ -1,10 +1,19 @@
-import { APP_CONFIG } from '../../config';
+import { APP_CONFIG, type ProviderConfig, type ProviderModelCatalog } from '../../config';
 import { IModelProvider } from '../interfaces/IModelProvider';
 import { ChatGPTWebProvider } from '../providers/ChatGPTWebProvider';
 import { GeminiApiProvider } from '../providers/GeminiApiProvider';
 import { ProviderRuntime, ProviderRuntimeOptions, RuntimeProviderFactory } from './types';
 
 type ProviderFactory = (options: ProviderRuntimeOptions) => IModelProvider;
+
+class ConfiguredDefaultModelNotFoundError extends Error {
+    public readonly code = 'CONFIGURED_DEFAULT_MODEL_NOT_FOUND';
+
+    constructor(providerId: string, configuredDefaultModel: string) {
+        super(`Configured default model '${configuredDefaultModel}' was not found in available models for provider '${providerId}'`);
+        this.name = 'ConfiguredDefaultModelNotFoundError';
+    }
+}
 
 const DEFAULT_FACTORIES: Record<string, ProviderFactory> = {
     'chatgpt-web': () => new ChatGPTWebProvider(),
@@ -28,8 +37,69 @@ function createProviderInstance(
     return factory(options);
 }
 
+function getStaticProviderCatalog(providerId: string, availableProviders: ProviderConfig[]): ProviderModelCatalog {
+    const providerConfig = availableProviders.find((item) => item.id === providerId);
+    if (!providerConfig) {
+        throw new Error(`Provider '${providerId}' is not available`);
+    }
+
+    return {
+        models: providerConfig.models.map((model) => ({ ...model })),
+        defaultModel: providerConfig.defaultModel
+    };
+}
+
+function validateProviderCatalog(providerId: string, catalog: ProviderModelCatalog): ProviderModelCatalog {
+    if (!Array.isArray(catalog.models) || catalog.models.length === 0) {
+        throw new Error(`Provider '${providerId}' returned an empty model catalog`);
+    }
+
+    if (!catalog.models.some((model) => model.id === catalog.defaultModel)) {
+        throw new Error(`Provider '${providerId}' returned an invalid defaultModel '${catalog.defaultModel}'`);
+    }
+
+    return {
+        models: catalog.models.map((model) => ({ ...model })),
+        defaultModel: catalog.defaultModel
+    };
+}
+
+function normalizeModelToken(value: string): string {
+    return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function applyConfiguredDefaultModel(
+    providerId: string,
+    catalog: ProviderModelCatalog,
+    providerConfig: ProviderConfig
+): ProviderModelCatalog {
+    const configuredDefaultModel = providerConfig.preferredDefaultModel?.trim();
+    if (!configuredDefaultModel) {
+        return catalog;
+    }
+
+    const normalizedConfiguredValue = normalizeModelToken(configuredDefaultModel);
+    const matchedModel = catalog.models.find((model) => {
+        return model.id === configuredDefaultModel
+            || model.name === configuredDefaultModel
+            || normalizeModelToken(model.id) === normalizedConfiguredValue
+            || normalizeModelToken(model.name) === normalizedConfiguredValue;
+    });
+
+    if (!matchedModel) {
+        throw new ConfiguredDefaultModelNotFoundError(providerId, configuredDefaultModel);
+    }
+
+    return {
+        models: catalog.models.map((model) => ({ ...model })),
+        defaultModel: matchedModel.id
+    };
+}
+
 export function createProviderRuntime(options: ProviderRuntimeOptions): ProviderRuntime {
     const cache = new Map<string, IModelProvider>();
+    const modelCatalogCache = new Map<string, ProviderModelCatalog>();
+    const inflightModelCatalogRequests = new Map<string, Promise<ProviderModelCatalog>>();
 
     const availableProviders = APP_CONFIG.providers.filter((provider) => {
         if (provider.enabled === false) return false;
@@ -39,6 +109,54 @@ export function createProviderRuntime(options: ProviderRuntimeOptions): Provider
     return {
         getAvailableProviders() {
             return availableProviders;
+        },
+
+        getProviderCatalog() {
+            return availableProviders;
+        },
+
+        async getProviderModels(providerId: string) {
+            const cachedCatalog = modelCatalogCache.get(providerId);
+            if (cachedCatalog) {
+                return cachedCatalog;
+            }
+
+            const inflightRequest = inflightModelCatalogRequests.get(providerId);
+            if (inflightRequest) {
+                return inflightRequest;
+            }
+
+            const request = (async () => {
+                const providerConfig = availableProviders.find((item) => item.id === providerId);
+                if (!providerConfig) {
+                    throw new Error(`Provider '${providerId}' is not available in runtimeMode '${options.runtimeMode}'`);
+                }
+
+                const fallbackCatalog = getStaticProviderCatalog(providerId, availableProviders);
+
+                try {
+                    const provider = this.getProvider(providerId);
+                    const dynamicCatalog = await provider.getAvailableModels();
+                    const validatedCatalog = applyConfiguredDefaultModel(
+                        providerId,
+                        validateProviderCatalog(providerId, dynamicCatalog),
+                        providerConfig
+                    );
+                    modelCatalogCache.set(providerId, validatedCatalog);
+                    return validatedCatalog;
+                } catch (error) {
+                    if (error instanceof ConfiguredDefaultModelNotFoundError) {
+                        throw error;
+                    }
+                    modelCatalogCache.set(providerId, fallbackCatalog);
+                    return fallbackCatalog;
+                } finally {
+                    inflightModelCatalogRequests.delete(providerId);
+                }
+            })();
+
+            inflightModelCatalogRequests.set(providerId, request);
+            return request;
         },
 
         getProvider(providerId: string, getProviderOptions?: { fresh?: boolean }) {

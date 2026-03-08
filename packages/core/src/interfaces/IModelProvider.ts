@@ -1,5 +1,8 @@
+import type { ProviderModelCatalog } from '../../config';
+
 export interface IModelProvider {
   id: string; // 如：'chatgpt-web'
+  getAvailableModels(): Promise<ProviderModelCatalog>;
   checkAuth(): Promise<boolean>;
   sendMessage(
     prompt: string,

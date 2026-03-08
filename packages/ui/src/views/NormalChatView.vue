@@ -1,22 +1,27 @@
 <template>
   <div class="chat-container" data-testid="normal-chat-view">
     <div class="chat-messages" ref="messagesRef" data-testid="normal-messages">
-      <div v-if="chatStore.conversations.length > 0 && !chatStore.currentConversation" class="history-list">
-        <h3>History</h3>
-        <button
-          v-for="c in chatStore.conversations"
-          :key="c.id"
-          @click="resumeChat(c.id)"
-          data-testid="history-item">
-          {{ c.title || 'Untitled' }}
-        </button>
+      <div v-if="displayConversation" class="conversation-header">
+        <div>
+          <p class="eyebrow">{{ isPreviewing ? '外部历史预览' : '活动会话' }}</p>
+          <h2>{{ displayConversation.title || 'Untitled' }}</h2>
+        </div>
+        <span class="source-chip">
+          {{ displayConversation.sourceType || 'local' }}
+        </span>
       </div>
 
-      <template v-if="chatStore.currentConversation">
+      <div v-if="!displayConversation" class="empty-state" data-testid="normal-empty">
+        <h3>从左侧选择一条历史，或者开始一段新聊天。</h3>
+        <p>普通模式下支持继续追问，外部历史会先以只读方式预览，再决定是否导入。</p>
+      </div>
+
+      <template v-else>
         <div
-          v-for="msg in chatStore.currentConversation.messages"
+          v-for="msg in displayConversation.messages"
           :key="msg.id"
-          :class="['message', msg.role]">
+          :class="['message', msg.role]"
+        >
           <div class="role-label">{{ msg.role === 'user' ? 'You' : 'Assistant' }}</div>
           <div v-if="msg.role === 'user'" class="content user-content">{{ msg.content }}</div>
           <MarkdownContent v-else class="content markdown-body" :source="msg.content" />
@@ -34,41 +39,79 @@
     </div>
 
     <div class="chat-inputarea">
-      <div class="selector-row">
-        <ProviderModelSelector :providers="chatStore.availableProviders" @change="onProviderModelChange" />
-        <div v-if="!isAuthenticated" class="auth-warning">
-          当前 Provider 鉴权不可用
+      <template v-if="!isPreviewing">
+        <div class="selector-row">
+          <ProviderModelSelector
+            :providers="chatStore.availableProviders"
+            :current-provider-id="chatStore.currentProviderId"
+            :current-model-id="chatStore.currentModelId"
+            :models-loading="chatStore.isCurrentProviderModelsLoading"
+            @provider-change="onProviderChange"
+            @model-change="onModelChange"
+          />
+          <div v-if="chatStore.isCurrentProviderModelsLoading" class="auth-warning">
+            正在加载当前 Provider 的模型目录
+          </div>
+          <div v-else-if="!isAuthenticated" class="auth-warning">
+            当前 Provider 鉴权不可用
+          </div>
         </div>
-      </div>
-      <div class="input-row">
-        <textarea
-          data-testid="normal-input"
-          v-model="inputPrompt"
-          @keydown.enter.prevent="send()"
-          placeholder="Type a message (Enter to send)..."
-          :disabled="chatStore.isGenerating || !isAuthenticated">
-        </textarea>
-        <button
-          data-testid="normal-send"
-          @click="send()"
-          :disabled="!inputPrompt.trim() || chatStore.isGenerating || !isAuthenticated">
-          Send
-        </button>
-        <button
-          v-if="chatStore.isGenerating"
-          @click="chatStore.abort()"
-          class="stop-btn"
-          data-testid="normal-stop">
-          Stop
-        </button>
-        <button @click="newChat()" class="new-btn" data-testid="normal-new">New</button>
+        <div class="input-row">
+          <textarea
+            data-testid="normal-input"
+            v-model="inputPrompt"
+            @keydown.enter.prevent="send()"
+            placeholder="Type a message (Enter to send)..."
+            :disabled="chatStore.isGenerating || !isAuthenticated || chatStore.isCurrentProviderModelsLoading || !chatStore.currentModelId"
+          />
+          <button
+            data-testid="normal-send"
+            @click="send()"
+            :disabled="!inputPrompt.trim() || chatStore.isGenerating || !isAuthenticated || chatStore.isCurrentProviderModelsLoading || !chatStore.currentModelId"
+          >
+            Send
+          </button>
+          <button
+            v-if="chatStore.isGenerating"
+            @click="chatStore.abort()"
+            class="stop-btn"
+            data-testid="normal-stop"
+          >
+            Stop
+          </button>
+        </div>
+      </template>
+
+      <div v-else class="preview-actions">
+        <div>
+          <p class="eyebrow">只读预览</p>
+          <h3>确认后将保存为本地会话，并立即恢复输入区。</h3>
+        </div>
+        <div class="preview-button-row">
+          <button
+            class="ghost-btn"
+            type="button"
+            data-testid="preview-back"
+            @click="chatStore.exitPreview()"
+          >
+            返回活动会话
+          </button>
+          <button
+            class="import-btn"
+            type="button"
+            data-testid="preview-import"
+            @click="chatStore.importPreviewConversation()"
+          >
+            导入到本地
+          </button>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick, watch } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useChatStore } from '../store/chat';
 import MarkdownContent from '../components/MarkdownContent.vue';
 import ProviderModelSelector from '../components/ProviderModelSelector.vue';
@@ -78,12 +121,15 @@ const isAuthenticated = ref(false);
 const inputPrompt = ref('');
 const messagesRef = ref<HTMLElement | null>(null);
 
+const displayConversation = computed(() => chatStore.displayConversation);
+const isPreviewing = computed(() => chatStore.isPreviewing);
+
 onMounted(async () => {
   await chatStore.init();
   isAuthenticated.value = await chatStore.checkAuth();
 });
 
-watch(() => chatStore.currentConversation?.messages, () => {
+watch(() => displayConversation.value?.messages, () => {
   nextTick(() => {
     if (messagesRef.value) {
       messagesRef.value.scrollTop = messagesRef.value.scrollHeight;
@@ -98,137 +144,227 @@ watch(() => chatStore.currentProviderId, async () => {
 async function send(e?: Event) {
   if (e) e.preventDefault();
   const text = inputPrompt.value.trim();
-  if (!text || !isAuthenticated.value || chatStore.isGenerating) return;
+  if (!text || !isAuthenticated.value || chatStore.isGenerating || isPreviewing.value || chatStore.isCurrentProviderModelsLoading || !chatStore.currentModelId) return;
 
   inputPrompt.value = '';
   await chatStore.sendMessage(text);
 }
 
-function newChat() {
-  chatStore.startNewConversation();
+async function onProviderChange(providerId: string) {
+  await chatStore.setCurrentModelProvider(providerId);
 }
 
-function resumeChat(id: string) {
-  chatStore.loadConversation(id);
-}
-
-function onProviderModelChange(payload: { providerId: string; modelId: string }) {
-  chatStore.setCurrentModelProvider(payload.providerId, payload.modelId);
+function onModelChange(modelId: string) {
+  chatStore.setCurrentModel(modelId);
 }
 </script>
 
-<style>
-body {
-  margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-}
+<style scoped>
 .chat-container {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
   width: 100%;
   box-sizing: border-box;
-  background-color: #f7f7f8;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(255, 247, 237, 0.7) 0%, rgba(255, 255, 255, 0.96) 100%);
 }
-.auth-warning {
-  color: red;
-  font-size: 12px;
-  white-space: nowrap;
-}
+
 .chat-messages {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  padding: 16px;
+  padding: 20px;
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
+
+.conversation-header,
+.empty-state,
+.preview-actions,
+.message.assistant,
+.chat-inputarea {
+  border: 1px solid #e7e5e4;
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(8px);
+}
+
+.conversation-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: 18px;
+}
+
+.conversation-header h2,
+.preview-actions h3,
+.empty-state h3 {
+  margin: 4px 0 0;
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #c2410c;
+}
+
+.source-chip {
+  align-self: flex-start;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #1c1917;
+  color: #fafaf9;
+  font-size: 12px;
+}
+
+.empty-state {
+  border-radius: 20px;
+  padding: 24px;
+  color: #44403c;
+}
+
+.empty-state p {
+  margin-bottom: 0;
+  line-height: 1.6;
+}
+
 .message {
-  padding: 12px;
-  border-radius: 8px;
+  padding: 14px 16px;
+  border-radius: 18px;
   max-width: 85%;
 }
+
 .message.user {
-  background: #10a37f;
+  background: linear-gradient(135deg, #ea580c 0%, #fb923c 100%);
   color: white;
   align-self: flex-end;
 }
+
 .message.assistant {
-  background: white;
-  border: 1px solid #ddd;
   align-self: flex-start;
 }
+
 .role-label {
   font-size: 11px;
   font-weight: bold;
   opacity: 0.8;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
+
 .content {
   word-wrap: break-word;
 }
+
 .user-content {
   white-space: pre-wrap;
 }
+
 .typing {
-  color: #888;
+  color: #78716c;
   font-style: italic;
 }
+
+.error {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #fee2e2;
+  color: #991b1b;
+}
+
 .chat-inputarea {
-  padding: 12px;
-  background: white;
-  border-top: 1px solid #ddd;
+  padding: 14px;
+  border-top: 1px solid #e7e5e4;
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
+
 .selector-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
 }
-.input-row {
+
+.auth-warning {
+  color: #dc2626;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.input-row,
+.preview-button-row {
   display: flex;
   gap: 8px;
 }
-.input-row textarea {
+
+textarea {
   flex: 1;
   resize: none;
-  height: 40px;
-  padding: 8px;
-  border-radius: 6px;
-  border: 1px solid #ddd;
+  min-height: 56px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid #d6d3d1;
+  background: #fff;
 }
+
 button {
-  padding: 8px 16px;
-  border-radius: 6px;
+  padding: 10px 16px;
+  border-radius: 12px;
   border: none;
-  background: #10a37f;
-  color: white;
   cursor: pointer;
 }
+
 button:disabled {
-  background: #ccc;
+  background: #d6d3d1;
+  color: #78716c;
   cursor: not-allowed;
 }
-.stop-btn { background: #e53e3e; }
-.new-btn { background: #3182ce; }
-.history-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+
+.input-row button {
+  background: #ea580c;
+  color: #fff7ed;
 }
-.history-list button {
-  background: white;
-  color: #333;
-  border: 1px solid #ddd;
-  padding: 12px;
-  text-align: left;
+
+.stop-btn {
+  background: #dc2626 !important;
+  color: #fff;
+}
+
+.preview-actions {
+  border-radius: 18px;
+  padding: 16px;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+}
+
+.preview-button-row {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.ghost-btn {
+  background: #e7e5e4;
+  color: #1c1917;
+}
+
+.import-btn {
+  background: #15803d;
+  color: #f0fdf4;
 }
 
 @media (max-width: 920px) {
-  .selector-row {
+  .selector-row,
+  .input-row,
+  .preview-actions {
     flex-direction: column;
     align-items: stretch;
   }
@@ -237,9 +373,12 @@ button:disabled {
     white-space: normal;
   }
 
-  .input-row {
-    flex-direction: column;
+  .preview-button-row {
+    justify-content: stretch;
+  }
+
+  .preview-button-row button {
+    width: 100%;
   }
 }
-
 </style>

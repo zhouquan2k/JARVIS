@@ -10,7 +10,9 @@ schema: my-workflow
 #     Domain: e-commerce platform
 context: |
   write all documents in Chinese
-
+  对于浏览器插件extension的e2e测试用例，因为codex沙盒的限制，需要提权运行。
+  extension e2e测试通过后，请运行pnpm --filter extension build
+  
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.
 # Example:

@@ -1,5 +1,6 @@
 export * from '../config';
 export * from './interfaces/IModelProvider';
+export * from './interfaces/IHistoryProvider';
 export * from './interfaces/IStorageProvider';
 export * from './providers/ChatGPTWebProvider';
 export * from './providers/GeminiApiProvider';

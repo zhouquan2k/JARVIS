@@ -1,4 +1,4 @@
-import type { ProviderConfig, RuntimeMode } from '../../config';
+import type { ProviderConfig, ProviderModelCatalog, RuntimeMode } from '../../config';
 import type { AnalysisResult } from '../analysis/types';
 import type { IModelProvider } from '../interfaces/IModelProvider';
 import type { ProviderRuntime } from '../runtime/types';
@@ -64,6 +64,7 @@ class MockStreamingProvider implements IModelProvider {
 
     constructor(
         providerId: string,
+        private readonly modelCatalog: ProviderModelCatalog,
         private readonly options: {
             defaultCharDelayMs: number;
             slowStreamTrigger: string;
@@ -75,6 +76,13 @@ class MockStreamingProvider implements IModelProvider {
 
     async checkAuth(): Promise<boolean> {
         return true;
+    }
+
+    async getAvailableModels(): Promise<ProviderModelCatalog> {
+        return {
+            models: this.modelCatalog.models.map((model) => ({ ...model })),
+            defaultModel: this.modelCatalog.defaultModel
+        };
     }
 
     async sendMessage(
@@ -179,6 +187,7 @@ class MockStreamingProvider implements IModelProvider {
 
 export function createMockRuntime(options: CreateMockRuntimeOptions): ProviderRuntime {
     const cache = new Map<string, IModelProvider>();
+    const modelCatalogCache = new Map<string, ProviderModelCatalog>();
     const mockProviders = buildMockProviders(options.runtimeMode);
     const defaultCharDelayMs = options.defaultCharDelayMs ?? 2;
     const slowStreamTrigger = options.slowStreamTrigger ?? 'TRIGGER_SLOW_STREAM';
@@ -189,6 +198,29 @@ export function createMockRuntime(options: CreateMockRuntimeOptions): ProviderRu
             return mockProviders;
         },
 
+        getProviderCatalog() {
+            return mockProviders;
+        },
+
+        async getProviderModels(providerId: string): Promise<ProviderModelCatalog> {
+            const providerConfig = mockProviders.find((item) => item.id === providerId);
+            if (!providerConfig) {
+                throw new Error(`Mock provider '${providerId}' is not available`);
+            }
+
+            const cached = modelCatalogCache.get(providerId);
+            if (cached) {
+                return cached;
+            }
+
+            const catalog = {
+                models: providerConfig.models.map((model) => ({ ...model })),
+                defaultModel: providerConfig.defaultModel
+            };
+            modelCatalogCache.set(providerId, catalog);
+            return catalog;
+        },
+
         getProvider(providerId: string, getProviderOptions?: { fresh?: boolean }): IModelProvider {
             const providerConfig = mockProviders.find((item) => item.id === providerId);
             if (!providerConfig) {
@@ -197,6 +229,9 @@ export function createMockRuntime(options: CreateMockRuntimeOptions): ProviderRu
 
             if (getProviderOptions?.fresh) {
                 return new MockStreamingProvider(providerId, {
+                    models: providerConfig.models.map((model) => ({ ...model })),
+                    defaultModel: providerConfig.defaultModel
+                }, {
                     defaultCharDelayMs,
                     slowStreamTrigger,
                     slowCharDelayMs
@@ -209,6 +244,9 @@ export function createMockRuntime(options: CreateMockRuntimeOptions): ProviderRu
             }
 
             const instance = new MockStreamingProvider(providerId, {
+                models: providerConfig.models.map((model) => ({ ...model })),
+                defaultModel: providerConfig.defaultModel
+            }, {
                 defaultCharDelayMs,
                 slowStreamTrigger,
                 slowCharDelayMs

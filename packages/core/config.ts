@@ -5,11 +5,17 @@ export interface ModelConfig {
     name: string;
 }
 
+export interface ProviderModelCatalog {
+    models: ModelConfig[];
+    defaultModel: string;
+}
+
 export interface ProviderConfig {
     id: string;
     name: string;
     models: ModelConfig[];
     defaultModel: string;
+    preferredDefaultModel?: string;
     supportedRuntimeModes: RuntimeMode[];
     enabled?: boolean;
 }
@@ -45,6 +51,7 @@ export const APP_CONFIG: { providers: ProviderConfig[]; analyzer: AnalyzerConfig
                 { id: 'gpt-4o', name: 'GPT-4o' }
             ],
             defaultModel: 'auto',
+            preferredDefaultModel: 'gpt5.4thinking',
             supportedRuntimeModes: ['extension']
         },
         {
@@ -56,6 +63,7 @@ export const APP_CONFIG: { providers: ProviderConfig[]; analyzer: AnalyzerConfig
                 { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' }
             ],
             defaultModel: 'gemini-2.5-flash',
+            preferredDefaultModel: 'Gemini Pro Latest',
             supportedRuntimeModes: ['extension', 'web']
         }
     ],

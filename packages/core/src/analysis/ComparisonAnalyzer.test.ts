@@ -17,6 +17,13 @@ class MockModelProvider implements IModelProvider {
         return true;
     }
 
+    async getAvailableModels() {
+        return {
+            models: [{ id: 'mock-model', name: 'Mock Model' }],
+            defaultModel: 'mock-model'
+        };
+    }
+
     async sendMessage(
         prompt: string,
         options: { modelId?: string } = {},
@@ -55,6 +62,8 @@ describe('ComparisonAnalyzer', () => {
         const runtimeCalls: Array<{ providerId: string; fresh?: boolean }> = [];
         const runtime: ProviderRuntime = {
             getAvailableProviders: () => [],
+            getProviderCatalog: () => [],
+            getProviderModels: async () => ({ models: [{ id: 'mock-model', name: 'Mock Model' }], defaultModel: 'mock-model' }),
             getProvider: (providerId, options) => {
                 runtimeCalls.push({ providerId, fresh: options?.fresh });
                 return provider;
@@ -85,6 +94,8 @@ describe('ComparisonAnalyzer', () => {
         );
         const runtime: ProviderRuntime = {
             getAvailableProviders: () => [],
+            getProviderCatalog: () => [],
+            getProviderModels: async () => ({ models: [{ id: 'mock', name: 'Mock' }], defaultModel: 'mock' }),
             getProvider: () => provider
         };
         const analyzer = new ComparisonAnalyzer(runtime, {
@@ -102,6 +113,8 @@ describe('ComparisonAnalyzer', () => {
         const provider = new MockModelProvider('not-json');
         const runtime: ProviderRuntime = {
             getAvailableProviders: () => [],
+            getProviderCatalog: () => [],
+            getProviderModels: async () => ({ models: [{ id: 'mock', name: 'Mock' }], defaultModel: 'mock' }),
             getProvider: () => provider
         };
         const analyzer = new ComparisonAnalyzer(runtime, {
@@ -125,6 +138,8 @@ describe('ComparisonAnalyzer', () => {
 \`\`\``);
         const runtime: ProviderRuntime = {
             getAvailableProviders: () => [],
+            getProviderCatalog: () => [],
+            getProviderModels: async () => ({ models: [{ id: 'mock', name: 'Mock' }], defaultModel: 'mock' }),
             getProvider: () => provider
         };
         const analyzer = new ComparisonAnalyzer(runtime, {

@@ -1,9 +1,12 @@
 import type { AnalysisResult } from '../analysis/types';
+import type { ConversationSourceType } from './IHistoryProvider';
 
 export interface Conversation {
     id: string; // Our internal UUID
     backendId?: string; // Real remote provider conversation ID
     title: string;
+    sourceType?: ConversationSourceType;
+    externalId?: string;
     messages: Array<{ role: 'user' | 'assistant', content: string, id: string }>;
     updatedAt: number;
     compare?: {

@@ -1,8 +1,10 @@
 /// <reference types="chrome"/>
 import { IModelProvider, type AnalysisResult } from '@packages/core/src';
+import type { ProviderModelCatalog } from '@packages/core/config';
 import type {
     AnalyzeComparisonRequest,
     CheckAuthRequest,
+    GetAvailableModelsRequest,
     ProviderSendOptions,
     ProxyRequest,
     ProxyResponse,
@@ -101,6 +103,17 @@ export class BackgroundProxyProvider implements IModelProvider {
         };
 
         return this.createTrackedRequest<boolean>(request);
+    }
+
+    getAvailableModels(): Promise<ProviderModelCatalog> {
+        const request: GetAvailableModelsRequest = {
+            action: 'GET_AVAILABLE_MODELS',
+            requestId: this.nextRequestId('GET_AVAILABLE_MODELS'),
+            channelId: this.channelId,
+            providerId: this.id
+        };
+
+        return this.createTrackedRequest<ProviderModelCatalog>(request);
     }
 
     sendMessage(

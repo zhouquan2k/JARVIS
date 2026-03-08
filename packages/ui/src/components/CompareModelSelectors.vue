@@ -14,8 +14,14 @@
       <select
         data-testid="compare-model-a"
         v-model="aModelId"
-        @change="emitModelA"
-        :disabled="disabled || modelsA.length === 0">
+        @change="emitModelAId"
+        :disabled="disabled || modelALoading || modelsA.length === 0">
+        <option v-if="modelALoading" value="">
+          加载模型中...
+        </option>
+        <option v-else-if="modelsA.length === 0" value="">
+          无可用模型
+        </option>
         <option v-for="model in modelsA" :key="model.id" :value="model.id">
           {{ model.name }}
         </option>
@@ -36,8 +42,14 @@
       <select
         data-testid="compare-model-b"
         v-model="bModelId"
-        @change="emitModelB"
-        :disabled="disabled || modelsB.length === 0">
+        @change="emitModelBId"
+        :disabled="disabled || modelBLoading || modelsB.length === 0">
+        <option v-if="modelBLoading" value="">
+          加载模型中...
+        </option>
+        <option v-else-if="modelsB.length === 0" value="">
+          无可用模型
+        </option>
         <option v-for="model in modelsB" :key="model.id" :value="model.id">
           {{ model.name }}
         </option>
@@ -59,12 +71,16 @@ const props = defineProps<{
   providers: ProviderConfig[];
   modelA: Selection;
   modelB: Selection;
+  modelALoading?: boolean;
+  modelBLoading?: boolean;
   disabled?: boolean;
 }>();
 
 const emit = defineEmits<{
-  (e: 'update:modelA', payload: Selection): void;
-  (e: 'update:modelB', payload: Selection): void;
+  (e: 'update:modelAProviderId', providerId: string): void;
+  (e: 'update:modelAModelId', modelId: string): void;
+  (e: 'update:modelBProviderId', providerId: string): void;
+  (e: 'update:modelBModelId', modelId: string): void;
 }>();
 
 const aProviderId = ref(props.modelA.providerId);
@@ -74,41 +90,39 @@ const bModelId = ref(props.modelB.modelId);
 
 const providerA = computed(() => props.providers.find((item) => item.id === aProviderId.value));
 const providerB = computed(() => props.providers.find((item) => item.id === bProviderId.value));
-const modelsA = computed(() => providerA.value?.models ?? []);
-const modelsB = computed(() => providerB.value?.models ?? []);
+const modelsA = computed(() => props.modelALoading ? [] : (providerA.value?.models ?? []));
+const modelsB = computed(() => props.modelBLoading ? [] : (providerB.value?.models ?? []));
 
 watch(() => props.modelA, (value) => {
   aProviderId.value = value.providerId;
   aModelId.value = value.modelId;
-}, { deep: true });
+}, { deep: true, immediate: true });
 
 watch(() => props.modelB, (value) => {
   bProviderId.value = value.providerId;
   bModelId.value = value.modelId;
-}, { deep: true });
+}, { deep: true, immediate: true });
 
 function onProviderAChange() {
-  const provider = providerA.value;
-  if (!provider) return;
-  aModelId.value = provider.defaultModel;
-  emitModelA();
+  if (!aProviderId.value) return;
+  aModelId.value = '';
+  emit('update:modelAProviderId', aProviderId.value);
 }
 
 function onProviderBChange() {
-  const provider = providerB.value;
-  if (!provider) return;
-  bModelId.value = provider.defaultModel;
-  emitModelB();
+  if (!bProviderId.value) return;
+  bModelId.value = '';
+  emit('update:modelBProviderId', bProviderId.value);
 }
 
-function emitModelA() {
-  if (!aProviderId.value || !aModelId.value) return;
-  emit('update:modelA', { providerId: aProviderId.value, modelId: aModelId.value });
+function emitModelAId() {
+  if (!aModelId.value) return;
+  emit('update:modelAModelId', aModelId.value);
 }
 
-function emitModelB() {
-  if (!bProviderId.value || !bModelId.value) return;
-  emit('update:modelB', { providerId: bProviderId.value, modelId: bModelId.value });
+function emitModelBId() {
+  if (!bModelId.value) return;
+  emit('update:modelBModelId', bModelId.value);
 }
 </script>
 

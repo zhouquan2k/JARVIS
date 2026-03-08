@@ -51,9 +51,13 @@
         :providers="compareStore.availableProviders"
         :model-a="{ providerId: compareStore.modelAProviderId, modelId: compareStore.modelAModelId }"
         :model-b="{ providerId: compareStore.modelBProviderId, modelId: compareStore.modelBModelId }"
+        :model-a-loading="compareStore.isModelALoading"
+        :model-b-loading="compareStore.isModelBLoading"
         :disabled="isBusy"
-        @update:model-a="onModelAChange"
-        @update:model-b="onModelBChange"
+        @update:model-a-provider-id="onModelAProviderChange"
+        @update:model-a-model-id="onModelAModelChange"
+        @update:model-b-provider-id="onModelBProviderChange"
+        @update:model-b-model-id="onModelBModelChange"
       />
 
       <div class="input-row">
@@ -62,12 +66,12 @@
           data-testid="compare-input"
           @keydown.enter.prevent="submitCompare"
           placeholder="输入问题后同时对比两个模型..."
-          :disabled="isBusy || compareStore.availableProviders.length === 0"
+          :disabled="isBusy || !isSelectionReady"
         />
         <button
           data-testid="compare-send"
           @click="submitCompare"
-          :disabled="!inputPrompt.trim() || isBusy || compareStore.availableProviders.length === 0"
+          :disabled="!inputPrompt.trim() || isBusy || !isSelectionReady"
         >
           开始对比
         </button>
@@ -89,6 +93,15 @@ const compareStore = useCompareStore();
 const inputPrompt = ref('');
 
 const isBusy = computed(() => compareStore.stage === 'generating' || compareStore.stage === 'analyzing');
+const isSelectionReady = computed(() => {
+  return compareStore.availableProviders.length > 0
+    && !!compareStore.modelAProviderId
+    && !!compareStore.modelAModelId
+    && !!compareStore.modelBProviderId
+    && !!compareStore.modelBModelId
+    && !compareStore.isModelALoading
+    && !compareStore.isModelBLoading;
+});
 
 const outputPlaceholder = computed(() => {
   if (compareStore.stage === 'idle') return '等待输入...';
@@ -98,17 +111,25 @@ const outputPlaceholder = computed(() => {
 
 async function submitCompare() {
   const prompt = inputPrompt.value.trim();
-  if (!prompt || isBusy.value) return;
+  if (!prompt || isBusy.value || !isSelectionReady.value) return;
   await compareStore.executeCompare(prompt);
   inputPrompt.value = '';
 }
 
-function onModelAChange(payload: { providerId: string; modelId: string }) {
-  compareStore.setModelA(payload.providerId, payload.modelId);
+async function onModelAProviderChange(providerId: string) {
+  await compareStore.setModelA(providerId);
 }
 
-function onModelBChange(payload: { providerId: string; modelId: string }) {
-  compareStore.setModelB(payload.providerId, payload.modelId);
+function onModelAModelChange(modelId: string) {
+  compareStore.setModelAId(modelId);
+}
+
+async function onModelBProviderChange(providerId: string) {
+  await compareStore.setModelB(providerId);
+}
+
+function onModelBModelChange(modelId: string) {
+  compareStore.setModelBId(modelId);
 }
 
 function startNewChat() {
@@ -119,11 +140,15 @@ function startNewChat() {
 
 <style scoped>
 .compare-container {
+  width: 100%;
   height: 100%;
+  min-height: 0;
+  min-width: 0;
   box-sizing: border-box;
   background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .sticky-top,
@@ -177,6 +202,8 @@ function startNewChat() {
 
 .scroll-panel {
   flex: 1;
+  min-height: 0;
+  min-width: 0;
   overflow-y: auto;
   padding: 12px;
 }
@@ -185,14 +212,19 @@ function startNewChat() {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
+  min-height: 100%;
+  align-content: start;
 }
 
 .output-card {
+  display: flex;
+  flex-direction: column;
   border: 1px solid #dbeafe;
   border-radius: 12px;
   background: #fff;
   padding: 12px;
   min-height: 240px;
+  min-width: 0;
 }
 
 .output-card h3 {
@@ -203,10 +235,14 @@ function startNewChat() {
 
 .analysis-panel {
   min-height: 100%;
+  min-width: 0;
 }
 
 .output-body {
+  flex: 1;
   min-height: 210px;
+  min-width: 0;
+  overflow: auto;
 }
 
 pre {
@@ -228,11 +264,13 @@ pre {
 .input-row {
   display: flex;
   gap: 8px;
+  min-width: 0;
 }
 
 textarea {
   flex: 1;
   min-height: 56px;
+  min-width: 0;
   resize: vertical;
   border-radius: 10px;
   border: 1px solid #cbd5e1;
