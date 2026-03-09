@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "vitest run",
     "dev": "wxt dev",
     "build": "wxt build",
     "test:e2e": "WXT_E2E=1 pnpm build && playwright test",
@@ -25,6 +25,7 @@
     "@vitejs/plugin-vue": "^6.0.4",
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
+    "vitest": "^2.1.8",
     "vue-tsc": "^3.2.5",
     "wxt": "^0.20.18"
   }

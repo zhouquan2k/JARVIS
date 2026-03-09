@@ -43,6 +43,7 @@ export interface ChatState {
 function cloneConversation(conversation: Conversation): Conversation {
     return {
         ...conversation,
+        sync: conversation.sync ? { ...conversation.sync } : undefined,
         compare: conversation.compare ? { ...conversation.compare } : undefined,
         messages: conversation.messages.map((message) => ({ ...message }))
     };
@@ -328,7 +329,7 @@ export const useChatStore = defineStore('chat', {
 
             const conversations = await this.storageProvider.getAllConversations();
             const localConversations = conversations
-                .filter((conversation) => !conversation.compare)
+                .filter((conversation) => !conversation.compare && !conversation.sync?.deleted)
                 .map(normalizeLocalConversation);
 
             this.conversations = localConversations;
@@ -337,6 +338,8 @@ export const useChatStore = defineStore('chat', {
                 const refreshed = localConversations.find((item) => item.id === this.currentConversation?.id);
                 if (refreshed) {
                     this.currentConversation = refreshed;
+                } else {
+                    this.currentConversation = null;
                 }
             }
 
@@ -348,7 +351,7 @@ export const useChatStore = defineStore('chat', {
         async loadConversation(id: string) {
             if (!this.storageProvider) return;
             const chat = await this.storageProvider.getConversation(id);
-            if (chat && !chat.compare) {
+            if (chat && !chat.compare && !chat.sync?.deleted) {
                 this.currentConversation = normalizeLocalConversation(chat);
             }
         },

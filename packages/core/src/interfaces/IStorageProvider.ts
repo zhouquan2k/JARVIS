@@ -1,6 +1,12 @@
 import type { AnalysisResult } from '../analysis/types';
 import type { ConversationSourceType } from './IHistoryProvider';
 
+export interface ConversationSyncState {
+    dirty?: boolean;
+    deleted?: boolean;
+    syncedAt?: number | null;
+}
+
 export interface Conversation {
     id: string; // Our internal UUID
     backendId?: string; // Real remote provider conversation ID
@@ -9,6 +15,7 @@ export interface Conversation {
     externalId?: string;
     messages: Array<{ role: 'user' | 'assistant', content: string, id: string }>;
     updatedAt: number;
+    sync?: ConversationSyncState;
     compare?: {
         prompt: string;
         modelAProviderId: string;

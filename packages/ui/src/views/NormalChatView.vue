@@ -33,7 +33,7 @@
         <div class="content typing">typing...</div>
       </div>
 
-      <div v-if="chatStore.currentError" class="error">
+      <div v-if="chatStore.currentError" class="error" data-testid="normal-error">
         {{ chatStore.currentError }}
       </div>
     </div>

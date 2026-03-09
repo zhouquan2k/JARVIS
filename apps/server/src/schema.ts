@@ -1,0 +1,36 @@
+export const SCHEMA_STATEMENTS = [
+    `
+    CREATE TABLE IF NOT EXISTS sync_cursor_state (
+        sync_key TEXT PRIMARY KEY,
+        current_cursor INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL
+    )
+    `,
+    `
+    CREATE TABLE IF NOT EXISTS synced_conversations (
+        sync_key TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        backend_id TEXT,
+        source_type TEXT,
+        external_id TEXT,
+        messages_json TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        deleted INTEGER NOT NULL DEFAULT 0,
+        synced_at INTEGER,
+        server_cursor INTEGER NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        last_seen_at INTEGER NOT NULL,
+        PRIMARY KEY (sync_key, conversation_id)
+    )
+    `,
+    `
+    CREATE INDEX IF NOT EXISTS idx_synced_conversations_sync_cursor
+    ON synced_conversations (sync_key, server_cursor)
+    `,
+    `
+    CREATE INDEX IF NOT EXISTS idx_synced_conversations_updated_at
+    ON synced_conversations (sync_key, updated_at)
+    `
+] as const;

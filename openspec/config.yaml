@@ -10,7 +10,7 @@ schema: my-workflow
 #     Domain: e-commerce platform
 context: |
   write all documents in Chinese
-  对于浏览器插件extension的e2e测试用例，因为codex沙盒的限制，需要提权运行。
+  对于浏览器插件extension的e2e测试用例，因为codex沙盒的限制，请申请提权运行。注意：MV3 扩展测试需要走 channel: 'chromium'，否则 Playwright 默认的 headless shell 拉不起扩展 service worker。
   extension e2e测试通过后，请运行pnpm --filter extension build
   
 # Per-artifact rules (optional)

@@ -2,11 +2,19 @@
     "name": "chatprism-workspace",
     "private": true,
     "scripts": {
+        "dev:server": "pnpm --filter server dev",
+        "build:server": "pnpm --filter server build",
+        "test:server": "pnpm --filter server test",
         "test:core": "pnpm --filter @packages/core test",
         "test:e2e:web": "pnpm --filter web test:e2e"
     },
     "engines": {
         "node": ">=18"
     },
-    "packageManager": "pnpm@10.15.1"
+    "packageManager": "pnpm@10.15.1",
+    "pnpm": {
+        "onlyBuiltDependencies": [
+            "better-sqlite3"
+        ]
+    }
 }

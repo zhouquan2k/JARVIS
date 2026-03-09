@@ -1,0 +1,98 @@
+import { Hono, type Context } from 'hono';
+import type { ServerConfig } from '../config.js';
+import { normalizePullRequest, normalizePushRequest } from '../types/sync.js';
+import { SyncService } from '../services/syncService.js';
+
+const ALLOW_HEADERS = 'content-type, x-sync-key';
+const ALLOW_METHODS = 'POST, OPTIONS';
+
+function resolveCorsOrigin(origin: string | undefined, config: ServerConfig): string | null {
+    if (!origin) {
+        return null;
+    }
+
+    if (config.isDevelopment) {
+        return '*';
+    }
+
+    return config.corsAllowlist.includes(origin) ? origin : null;
+}
+
+function applyCorsHeaders(c: Context, origin: string): void {
+    c.header('Access-Control-Allow-Origin', origin);
+    c.header('Access-Control-Allow-Headers', ALLOW_HEADERS);
+    c.header('Access-Control-Allow-Methods', ALLOW_METHODS);
+    c.header('Vary', 'Origin');
+}
+
+function resolveSyncKey(value: string | undefined, config: ServerConfig): string {
+    const normalized = value?.trim();
+    if (!normalized) {
+        throw new Error('syncKey 不能为空。');
+    }
+
+    if (normalized === '0' && !config.isDevelopment) {
+        throw new Error('syncKey=0 仅允许在开发环境使用，请先配置真实的 syncKey。');
+    }
+
+    return normalized;
+}
+
+async function readJsonBody(c: Context): Promise<unknown> {
+    try {
+        return await c.req.json();
+    } catch {
+        throw new Error('请求体必须是合法 JSON。');
+    }
+}
+
+export function createSyncRouter(options: { service: SyncService; config: ServerConfig }) {
+    const app = new Hono();
+    const { service, config } = options;
+
+    app.use('*', async (c, next) => {
+        const origin = c.req.header('origin');
+        const corsOrigin = resolveCorsOrigin(origin, config);
+
+        if (origin && !corsOrigin) {
+            return c.json({ error: 'Origin not allowed.' }, 403);
+        }
+
+        if (c.req.method === 'OPTIONS') {
+            if (corsOrigin) {
+                applyCorsHeaders(c, corsOrigin);
+            }
+            return c.body(null, 204);
+        }
+
+        await next();
+
+        if (corsOrigin) {
+            applyCorsHeaders(c, corsOrigin);
+        }
+    });
+
+    app.post('/push', async (c) => {
+        try {
+            const syncKey = resolveSyncKey(c.req.header('x-sync-key'), config);
+            const body = normalizePushRequest(await readJsonBody(c));
+            return c.json(service.push(syncKey, body.conversations));
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Invalid push request.';
+            return c.json({ error: message }, 400);
+        }
+    });
+
+    app.post('/pull', async (c) => {
+        try {
+            const syncKey = resolveSyncKey(c.req.header('x-sync-key'), config);
+            const body = normalizePullRequest(await readJsonBody(c));
+            return c.json(service.pull(syncKey, body.cursor));
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Invalid pull request.';
+            return c.json({ error: message }, 400);
+        }
+    });
+
+    return app;
+}

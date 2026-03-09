@@ -26,6 +26,23 @@ export interface AnalyzerConfig {
     systemPrompt: string;
 }
 
+export const DEFAULT_SYNC_KEY = '0';
+export const SYNC_KEY_STORAGE_KEY = 'chatprism:sync-key';
+export const DEFAULT_SYNC_BASE_URL = 'http://127.0.0.1:8787/api/sync';
+
+export interface SyncKeyOptions {
+    storage?: Pick<Storage, 'getItem'>;
+    env?: Record<string, string | undefined>;
+    isDevelopment?: boolean;
+}
+
+export interface SyncBaseUrlOptions {
+    env?: Record<string, string | undefined>;
+}
+
+const SYNC_KEY_ENV_KEYS = ['CHATPRISM_SYNC_KEY', 'VITE_SYNC_KEY', 'WXT_SYNC_KEY'] as const;
+const SYNC_BASE_URL_ENV_KEYS = ['CHATPRISM_SYNC_BASE_URL', 'VITE_SYNC_BASE_URL', 'WXT_SYNC_BASE_URL'] as const;
+
 const DEFAULT_ANALYZER_PROMPT = [
     'You are a strict evidence extractor for side-by-side model outputs.',
     'The goal is to show source content from the two answers, not quality evaluation or commentary.',
@@ -73,3 +90,60 @@ export const APP_CONFIG: { providers: ProviderConfig[]; analyzer: AnalyzerConfig
         systemPrompt: DEFAULT_ANALYZER_PROMPT
     }
 };
+
+function normalizeSyncKey(value?: string | null): string | null {
+    if (typeof value !== 'string') {
+        return null;
+    }
+
+    const normalized = value.trim();
+    return normalized ? normalized : null;
+}
+
+export function readSyncKey(options: SyncKeyOptions = {}): string {
+    const fromStorage = normalizeSyncKey(options.storage?.getItem(SYNC_KEY_STORAGE_KEY));
+    if (fromStorage) {
+        return fromStorage;
+    }
+
+    for (const key of SYNC_KEY_ENV_KEYS) {
+        const candidate = normalizeSyncKey(options.env?.[key]);
+        if (candidate) {
+            return candidate;
+        }
+    }
+
+    return DEFAULT_SYNC_KEY;
+}
+
+export function validateSyncKey(syncKey: string, options: SyncKeyOptions = {}): string {
+    const normalized = normalizeSyncKey(syncKey);
+    if (!normalized) {
+        throw new Error('syncKey 不能为空，请先配置有效的同步命名空间。');
+    }
+
+    if (normalized === DEFAULT_SYNC_KEY && !options.isDevelopment) {
+        throw new Error('syncKey=0 仅允许在开发环境使用，请先配置真实的 syncKey。');
+    }
+
+    return normalized;
+}
+
+export function resolveSyncKey(options: SyncKeyOptions = {}): string {
+    return validateSyncKey(readSyncKey(options), options);
+}
+
+export function readSyncBaseUrl(options: SyncBaseUrlOptions = {}): string {
+    for (const key of SYNC_BASE_URL_ENV_KEYS) {
+        const candidate = normalizeSyncKey(options.env?.[key]);
+        if (candidate) {
+            return candidate.replace(/\/$/, '');
+        }
+    }
+
+    return DEFAULT_SYNC_BASE_URL;
+}
+
+export function resolveSyncBaseUrl(options: SyncBaseUrlOptions = {}): string {
+    return readSyncBaseUrl(options);
+}

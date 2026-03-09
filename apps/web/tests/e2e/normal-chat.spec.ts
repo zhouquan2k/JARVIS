@@ -17,6 +17,10 @@ async function expectViewportBound(page: Page) {
   expect(metrics.workspaceHeight).toBeGreaterThan(0);
 }
 
+async function readMockSyncEvents(page: Page) {
+  return page.evaluate(() => JSON.parse(localStorage.getItem('chatprism:mock-sync-events') ?? '[]'));
+}
+
 test('normal chat can send message and recover local history after reload', async ({ page }) => {
   await page.goto('/#/');
   await expect(page.getByTestId('conversation-workspace')).toBeVisible();
@@ -39,6 +43,31 @@ test('normal chat can send message and recover local history after reload', asyn
   await expect(page.getByTestId('conversation-workspace')).toBeVisible();
   await expect(page.getByTestId('local-history-item').first()).toBeVisible();
   await expect(page.getByTestId('local-history-item').first()).toContainText('Playwright normal flow message');
+});
+
+test('web host initializes sync storage with configured syncKey', async ({ page }) => {
+  await page.addInitScript((syncKey: string) => {
+    localStorage.setItem('chatprism:sync-key', syncKey);
+    localStorage.setItem('chatprism:mock-sync-events', '[]');
+  }, 'web-sync-e2e');
+
+  await page.goto('/#/');
+  await expect(page.getByTestId('normal-chat-view')).toBeVisible();
+
+  await page.getByTestId('normal-input').fill('WEB_SYNC_READY');
+  await page.getByTestId('normal-send').click();
+  await expect(page.getByTestId('normal-messages')).toContainText('WEB_SYNC_READY');
+
+  await expect.poll(async () => {
+    const events = await readMockSyncEvents(page);
+    return events.filter((event: { type: string }) => event.type === 'push').length;
+  }).toBe(1);
+
+  const events = await readMockSyncEvents(page);
+  const pushEvent = events.find((event: { type: string }) => event.type === 'push');
+  expect(pushEvent.syncKey).toBe('web-sync-e2e');
+  expect(pushEvent.conversations).toHaveLength(1);
+  expect(pushEvent.conversations[0].compare).toBeUndefined();
 });
 
 test('local history supports switching between conversations from sidebar', async ({ page }) => {

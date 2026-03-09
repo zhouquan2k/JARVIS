@@ -3,6 +3,8 @@
 **/.env
 apps/extension/.wxt
 apps/extension/dist
+apps/server/.data
+apps/server/dist
 apps/web/playwright-report
 apps/web/dist
 apps/web/test-results

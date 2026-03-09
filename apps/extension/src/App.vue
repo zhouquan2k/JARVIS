@@ -11,23 +11,37 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, toRaw, watchEffect } from 'vue';
+import { computed, onMounted, onUnmounted, ref, toRaw, watchEffect } from 'vue';
 import { AppTopBar, ConversationWorkspaceView, useChatStore, useCompareStore } from '@packages/ui';
-import { IndexedDBStorageProvider } from '@packages/core/src';
+import { type SyncStorageProvider } from '@packages/core/src';
 import { currentRoute, navigateTo } from './router';
 import { createExtensionHistoryProvider, providerRuntime } from './providerRuntime';
 import { loadLatestCompareConversation, saveCompareConversation } from './persistence/saveCompareConversation';
+import { createExtensionSyncStorageProvider } from './sync';
 
 const chatStore = useChatStore();
 const compareStore = useCompareStore();
-const storageProvider = new IndexedDBStorageProvider();
 const historyProvider = createExtensionHistoryProvider();
 const isCompareMode = computed(() => currentRoute.value.path === '/compare');
 const isHydratingCompare = ref(false);
 const lastPersistedCompareKey = ref('');
+let storageProvider: SyncStorageProvider | null = null;
+let syncIntervalId: number | null = null;
+let onlineHandler: (() => void) | null = null;
+let visibilityHandler: (() => void) | null = null;
 
 function toggleMode() {
   navigateTo(isCompareMode.value ? '/' : '/compare');
+}
+
+function triggerSync() {
+  if (!storageProvider) {
+    return;
+  }
+
+  void storageProvider.syncNow().catch((error) => {
+    console.warn('Extension sync trigger failed.', error);
+  });
 }
 
 onMounted(() => {
@@ -41,6 +55,12 @@ onMounted(() => {
         return;
       }
 
+      storageProvider = createExtensionSyncStorageProvider({
+        storage: typeof localStorage !== 'undefined' ? localStorage : undefined,
+        env: import.meta.env as Record<string, string | undefined>,
+        isDevelopment: import.meta.env.DEV
+      });
+
       chatStore.setModelProviderResolver((providerId: string) => providerRuntime.getProvider(providerId));
       chatStore.setProviderModelsResolver((providerId: string) => providerRuntime.getProviderModels(providerId));
       chatStore.setProviders(
@@ -49,6 +69,9 @@ onMounted(() => {
         historyProvider
       );
       chatStore.setHistoryProvider(historyProvider);
+      await storageProvider.hydrate().catch((error) => {
+        console.warn('Extension sync hydration failed, continuing with local data only.', error);
+      });
       await chatStore.initializeProviderCatalog(providerCatalog);
       await chatStore.init();
 
@@ -78,6 +101,32 @@ onMounted(() => {
       console.error('Failed to initialize extension provider catalogs', error);
     }
   })();
+});
+
+onMounted(() => {
+  onlineHandler = () => triggerSync();
+  visibilityHandler = () => {
+    if (document.visibilityState === 'visible') {
+      triggerSync();
+    }
+  };
+  window.addEventListener('online', onlineHandler);
+  document.addEventListener('visibilitychange', visibilityHandler);
+  syncIntervalId = window.setInterval(() => {
+    triggerSync();
+  }, 30_000);
+});
+
+onUnmounted(() => {
+  if (onlineHandler) {
+    window.removeEventListener('online', onlineHandler);
+  }
+  if (visibilityHandler) {
+    document.removeEventListener('visibilitychange', visibilityHandler);
+  }
+  if (syncIntervalId !== null) {
+    window.clearInterval(syncIntervalId);
+  }
 });
 
 watchEffect(() => {

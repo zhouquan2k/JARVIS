@@ -13,9 +13,9 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue';
 import { AppTopBar, ConversationWorkspaceView, useChatStore, useCompareStore } from '@packages/ui';
-import { IndexedDBStorageProvider } from '@packages/core/src';
 import { currentRoute, navigateTo } from './router';
 import { providerRuntime } from './providerRuntime';
+import { createWebSyncStorageProvider } from './sync';
 
 const chatStore = useChatStore();
 const compareStore = useCompareStore();
@@ -36,12 +36,21 @@ onMounted(() => {
         return;
       }
 
+      const syncStorageProvider = createWebSyncStorageProvider({
+        storage: typeof localStorage !== 'undefined' ? localStorage : undefined,
+        env: import.meta.env as Record<string, string | undefined>,
+        isDevelopment: import.meta.env.DEV
+      });
+
       chatStore.setModelProviderResolver((providerId: string) => providerRuntime.getProvider(providerId));
       chatStore.setProviderModelsResolver((providerId: string) => providerRuntime.getProviderModels(providerId));
       chatStore.setProviders(
         providerRuntime.getProvider(providerCatalog[0].id),
-        new IndexedDBStorageProvider()
+        syncStorageProvider
       );
+      await syncStorageProvider.hydrate().catch((error) => {
+        console.warn('Web sync hydration failed, continuing with local data only.', error);
+      });
       await chatStore.initializeProviderCatalog(providerCatalog);
       await chatStore.init();
     } catch (error) {

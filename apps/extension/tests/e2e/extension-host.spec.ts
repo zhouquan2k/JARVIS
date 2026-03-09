@@ -5,11 +5,18 @@ import path from 'node:path';
 
 const EXTENSION_PATH = path.resolve(__dirname, '../../dist/chrome-mv3');
 
-async function launchExtensionPage(routeHash = '#/'): Promise<{
+async function launchExtensionPage(
+  options: {
+    routeHash?: string;
+    syncKey?: string | null;
+  } = {}
+): Promise<{
   context: BrowserContext;
   page: Page;
   close: () => Promise<void>;
 }> {
+  const routeHash = options.routeHash ?? '#/';
+  const syncKey = options.syncKey === undefined ? 'extension-e2e' : options.syncKey;
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'chatprism-ext-e2e-'));
   const context = await chromium.launchPersistentContext(userDataDir, {
     channel: 'chromium',
@@ -19,6 +26,13 @@ async function launchExtensionPage(routeHash = '#/'): Promise<{
       `--load-extension=${EXTENSION_PATH}`
     ]
   });
+  await context.addInitScript((payload: { syncKey: string | null }) => {
+    localStorage.removeItem('chatprism:sync-key');
+    localStorage.setItem('chatprism:mock-sync-events', '[]');
+    if (payload.syncKey !== null) {
+      localStorage.setItem('chatprism:sync-key', payload.syncKey);
+    }
+  }, { syncKey });
 
   const serviceWorker = context.serviceWorkers()[0] || (await context.waitForEvent('serviceworker'));
   const extensionId = serviceWorker.url().split('/')[2];
@@ -33,6 +47,10 @@ async function launchExtensionPage(routeHash = '#/'): Promise<{
       fs.rmSync(userDataDir, { recursive: true, force: true });
     }
   };
+}
+
+async function readMockSyncEvents(page: Page) {
+  return page.evaluate(() => JSON.parse(localStorage.getItem('chatprism:mock-sync-events') ?? '[]'));
 }
 
 test('extension host supports external history preview and import flow', async () => {
@@ -53,9 +71,46 @@ test('extension host supports external history preview and import flow', async (
     await expect(page.getByTestId('normal-input')).toBeVisible();
     await expect(page.getByTestId('local-history-item')).toHaveCount(1);
     await expect(page.getByTestId('normal-messages')).toContainText('Alpha 项目的主要风险包括');
+    await expect.poll(async () => {
+      const events = await readMockSyncEvents(page);
+      return events.filter((event: { type: string }) => event.type === 'push').length;
+    }).toBe(1);
+    const events = await readMockSyncEvents(page);
+    const pushEvent = events.find((event: { type: string }) => event.type === 'push');
+    expect(pushEvent.syncKey).toBe('extension-e2e');
 
     await page.getByTestId('history-source-external').click();
     await expect(page.getByTestId('history-imported-badge').first()).toBeVisible();
+  } finally {
+    await session.close();
+  }
+});
+
+test('extension host keeps compare history local-only when sync is enabled', async () => {
+  const session = await launchExtensionPage({ routeHash: '#/compare' });
+  try {
+    const { page } = session;
+    await expect(page.getByTestId('compare-chat-view')).toBeVisible();
+
+    await page.getByTestId('compare-input').fill('Extension compare stays local');
+    await page.getByTestId('compare-send').click();
+    await expect(page.getByTestId('analysis-grid')).toBeVisible();
+
+    const events = await readMockSyncEvents(page);
+    expect(events.filter((event: { type: string }) => event.type === 'push')).toHaveLength(0);
+  } finally {
+    await session.close();
+  }
+});
+
+test('extension host rejects default syncKey outside development', async () => {
+  const session = await launchExtensionPage({ syncKey: null });
+  try {
+    const { page } = session;
+    await expect(page.getByTestId('normal-error')).toContainText('syncKey=0 仅允许在开发环境使用');
+    await expect(page.getByTestId('normal-input')).toBeDisabled();
+    const events = await readMockSyncEvents(page);
+    expect(events.filter((event: { type: string }) => event.type === 'push')).toHaveLength(0);
   } finally {
     await session.close();
   }
