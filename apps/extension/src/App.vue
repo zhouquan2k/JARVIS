@@ -1,10 +1,12 @@
 <template>
   <div class="app-shell">
-    <AppTopBar :is-compare-mode="isCompareMode" :compare-stage="compareStore.stage" @toggle-mode="toggleMode" />
+    <AppTopBar :is-compare-mode="isCompareMode" :compare-stage="compareStore.stage" />
     <main class="view-host">
       <ConversationWorkspaceView
         :is-compare-mode="isCompareMode"
+        :show-history-source-switch="true"
         @request-normal-mode="navigateTo('/')"
+        @request-compare-mode="openCompareMode"
       />
     </main>
   </div>
@@ -30,8 +32,9 @@ let syncIntervalId: number | null = null;
 let onlineHandler: (() => void) | null = null;
 let visibilityHandler: (() => void) | null = null;
 
-function toggleMode() {
-  navigateTo(isCompareMode.value ? '/' : '/compare');
+function openCompareMode() {
+  compareStore.startNewCompare();
+  navigateTo('/compare');
 }
 
 function triggerSync() {

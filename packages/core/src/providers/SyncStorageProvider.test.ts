@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ISyncTransport, SyncPullResult, SyncPushResult } from '../interfaces/ISyncTransport';
-import type { Conversation, IStorageProvider } from '../interfaces/IStorageProvider';
+import { cloneConversationMessage, type Conversation, type IStorageProvider } from '../interfaces/IStorageProvider';
 import { SyncStorageProvider, type SyncStateStore } from './SyncStorageProvider';
 
 class MemoryStorageProvider implements IStorageProvider {
@@ -78,7 +78,7 @@ function cloneConversation(conversation: Conversation): Conversation {
                 analysisResult: { ...conversation.compare.analysisResult }
             }
             : undefined,
-        messages: conversation.messages.map((message) => ({ ...message }))
+        messages: conversation.messages.map(cloneConversationMessage)
     };
 }
 
@@ -119,7 +119,41 @@ describe('SyncStorageProvider', () => {
         await provider.saveConversation(createConversation({
             id: 'sync-1',
             updatedAt: 100,
-            title: 'Sync me'
+            title: 'Sync me',
+            messages: [
+                {
+                    id: 'message-1',
+                    role: 'user',
+                    content: 'hello',
+                    attachments: [
+                        {
+                            id: 'attachment-1',
+                            type: 'file',
+                            name: 'notes.txt',
+                            mimeType: 'text/plain',
+                            size: 42,
+                            base64Data: 'aGVsbG8='
+                        }
+                    ]
+                },
+                {
+                    id: 'message-2',
+                    role: 'assistant',
+                    content: '已处理 [1]',
+                    annotations: [
+                        {
+                            kind: 'cite',
+                            range: { start: 4, end: 7 },
+                            payload: {
+                                refId: 'source-1',
+                                label: '[1]',
+                                title: 'Spec',
+                                url: 'https://example.com/spec'
+                            }
+                        }
+                    ]
+                }
+            ]
         }));
 
         await provider.saveConversation(createConversation({
@@ -150,10 +184,14 @@ describe('SyncStorageProvider', () => {
         expect(transport.pushes[0][0].id).toBe('sync-1');
         expect(transport.pushes[0][0].compare).toBeUndefined();
         expect(transport.pushes[0][0].sync?.dirty).toBe(true);
+        expect(transport.pushes[0][0].messages[0].attachments?.[0]?.name).toBe('notes.txt');
+        expect(transport.pushes[0][0].messages[1].annotations?.[0]?.kind).toBe('cite');
 
         const persisted = await provider.getConversation('sync-1');
         expect(persisted?.sync?.dirty).toBe(false);
         expect(persisted?.sync?.syncedAt).toEqual(expect.any(Number));
+        expect(persisted?.messages[0].attachments?.[0]?.base64Data).toBe('aGVsbG8=');
+        expect(persisted?.messages[1].annotations?.[0]?.kind).toBe('cite');
         const compareOnlyConversation = await provider.getConversation('compare-only');
         expect(compareOnlyConversation?.compare?.prompt).toBe('compare');
         expect(compareOnlyConversation?.sync).toBeUndefined();

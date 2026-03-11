@@ -30,14 +30,14 @@ class AsyncMockProvider implements IModelProvider {
     async sendMessage(
         _prompt: string,
         _options: { modelId?: string } = {},
-        onUpdate: (chunk: string) => void
+        onUpdate: (update: { text: string }) => void
     ): Promise<{ text: string; conversationId: string; messageId: string }> {
-        onUpdate(`${this.id}:streaming`);
+        onUpdate({ text: `${this.id}:streaming` });
         await new Promise((resolve) => setTimeout(resolve, this.delayMs));
         if (this.shouldFail) {
             throw new Error(`${this.id} failed`);
         }
-        onUpdate(this.text);
+        onUpdate({ text: this.text });
         this.doneAt = Date.now();
         return {
             text: this.text,

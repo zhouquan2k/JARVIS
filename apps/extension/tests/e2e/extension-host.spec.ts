@@ -26,18 +26,19 @@ async function launchExtensionPage(
       `--load-extension=${EXTENSION_PATH}`
     ]
   });
-  await context.addInitScript((payload: { syncKey: string | null }) => {
+
+  const serviceWorker = context.serviceWorkers()[0] || (await context.waitForEvent('serviceworker'));
+  const extensionId = serviceWorker.url().split('/')[2];
+  const page = await context.newPage();
+  await page.goto(`chrome-extension://${extensionId}/index.html${routeHash}`);
+  await page.evaluate((payload: { syncKey: string | null }) => {
     localStorage.removeItem('chatprism:sync-key');
     localStorage.setItem('chatprism:mock-sync-events', '[]');
     if (payload.syncKey !== null) {
       localStorage.setItem('chatprism:sync-key', payload.syncKey);
     }
   }, { syncKey });
-
-  const serviceWorker = context.serviceWorkers()[0] || (await context.waitForEvent('serviceworker'));
-  const extensionId = serviceWorker.url().split('/')[2];
-  const page = await context.newPage();
-  await page.goto(`chrome-extension://${extensionId}/index.html${routeHash}`);
+  await page.reload();
 
   return {
     context,
@@ -103,14 +104,40 @@ test('extension host keeps compare history local-only when sync is enabled', asy
   }
 });
 
-test('extension host rejects default syncKey outside development', async () => {
-  const session = await launchExtensionPage({ syncKey: null });
+test('extension host rejects syncKey=0 outside development', async () => {
+  const session = await launchExtensionPage({ syncKey: '0' });
   try {
     const { page } = session;
     await expect(page.getByTestId('normal-error')).toContainText('syncKey=0 仅允许在开发环境使用');
     await expect(page.getByTestId('normal-input')).toBeDisabled();
     const events = await readMockSyncEvents(page);
     expect(events.filter((event: { type: string }) => event.type === 'push')).toHaveLength(0);
+  } finally {
+    await session.close();
+  }
+});
+
+test('extension host sends attachments through background proxy and renders structured annotations', async () => {
+  const session = await launchExtensionPage();
+  try {
+    const { page } = session;
+    await expect(page.getByTestId('normal-chat-view')).toBeVisible();
+
+    await page.locator('input[type="file"]').setInputFiles({
+      name: 'diagram.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from([1, 2, 3, 4])
+    });
+
+    await expect(page.locator('.draft-chip')).toContainText('diagram.png');
+    await page.getByTestId('normal-input').fill('TRIGGER_ANNOTATED_NATIVE');
+    await page.getByTestId('normal-send').click();
+
+    await expect(page.getByTestId('normal-messages')).toContainText('diagram.png');
+    await expect(page.getByTestId('normal-messages')).toContainText('返回了结构化消息');
+    await expect(page.locator('.inline-cite').first()).toContainText('[1]');
+    await expect(page.locator('.inline-cite').first()).toHaveAttribute('href', 'https://example.com/mock-source');
+    await expect(page.locator('.image-tile').first()).toBeVisible();
   } finally {
     await session.close();
   }

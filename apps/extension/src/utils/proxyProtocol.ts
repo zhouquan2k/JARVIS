@@ -1,4 +1,11 @@
-import type { AnalysisResult, Conversation, ConversationHistorySummary } from '@packages/core/src';
+import type {
+    AnalysisResult,
+    Conversation,
+    ConversationHistorySummary,
+    ProviderSendResult,
+    ProviderStreamUpdate,
+    SendMessageOptions
+} from '@packages/core/src';
 import type { ProviderModelCatalog } from '@packages/core/config';
 
 export type ProxyAction =
@@ -10,10 +17,7 @@ export type ProxyAction =
     | 'GET_HISTORY_DETAIL'
     | 'ABORT';
 
-export interface ProviderSendOptions {
-    context?: { parentMessageId?: string; conversationId?: string };
-    modelId?: string;
-}
+export type ProviderSendOptions = SendMessageOptions;
 
 export interface ProxyRequestBase {
     action: ProxyAction;
@@ -84,13 +88,13 @@ export interface AuthResultResponse extends ProxyResponseBase {
 
 export interface UpdateResponse extends ProxyResponseBase {
     type: 'UPDATE';
-    chunk: string;
+    chunk: ProviderStreamUpdate | string;
 }
 
 export interface DoneResponse extends ProxyResponseBase {
     type: 'DONE';
     result:
-        | { text: string; conversationId: string; messageId: string }
+        | ProviderSendResult
         | AnalysisResult
         | ProviderModelCatalog
         | ConversationHistorySummary[]

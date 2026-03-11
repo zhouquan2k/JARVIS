@@ -1,6 +1,22 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ChatGPTWebProvider, normalizeChatGPTConversationDetail } from './ChatGPTWebProvider';
 
+function createSseResponse(events: unknown[]) {
+    const encoder = new TextEncoder();
+    const chunks = events.map((event) => encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+    chunks.push(encoder.encode('data: [DONE]\n\n'));
+
+    return {
+        ok: true,
+        body: new ReadableStream({
+            start(controller) {
+                chunks.forEach((chunk) => controller.enqueue(chunk));
+                controller.close();
+            }
+        })
+    };
+}
+
 describe('normalizeChatGPTConversationDetail', () => {
     it('extracts the main branch from current_node ancestry', () => {
         const conversation = normalizeChatGPTConversationDetail(
@@ -147,6 +163,138 @@ describe('normalizeChatGPTConversationDetail', () => {
         expect(conversation.messages.every((item) => item.role === 'user' || item.role === 'assistant')).toBe(true);
     });
 
+    it('normalizes annotations and attachments from history detail', () => {
+        const conversation = normalizeChatGPTConversationDetail(
+            {
+                title: 'Annotated',
+                conversation_id: 'annotated-1',
+                current_node: 'assistant',
+                mapping: {
+                    user: {
+                        id: 'user',
+                        children: ['assistant'],
+                        message: {
+                            id: 'user-message',
+                            author: { role: 'user' },
+                            content: {
+                                content_type: 'multimodal_text',
+                                parts: [
+                                    '看一下附件',
+                                    {
+                                        id: 'file-1',
+                                        type: 'file_attachment',
+                                        name: 'spec.pdf',
+                                        mimeType: 'application/pdf',
+                                        size: 1024,
+                                        base64Data: 'data:application/pdf;base64,Zm9v'
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    assistant: {
+                        id: 'assistant',
+                        parent: 'user',
+                        children: [],
+                        message: {
+                            id: 'assistant-message',
+                            author: { role: 'assistant' },
+                            content: {
+                                parts: ['总结如下 citeref-a']
+                            },
+                            metadata: {
+                                annotations: [
+                                    {
+                                        kind: 'cite',
+                                        ref_id: 'ref-a',
+                                        label: '[1]',
+                                        title: 'Spec',
+                                        url: 'https://example.com/spec'
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            },
+            'fallback-id'
+        );
+
+        expect(conversation.messages[0]?.attachments?.[0]).toMatchObject({
+            id: 'file-1',
+            name: 'spec.pdf',
+            mimeType: 'application/pdf',
+            base64Data: 'Zm9v'
+        });
+        expect(conversation.messages[1]?.content).toBe('总结如下 [1]');
+        expect(conversation.messages[1]?.annotations?.[0]).toMatchObject({
+            kind: 'cite',
+            payload: {
+                refId: 'ref-a',
+                label: '[1]'
+            }
+        });
+    });
+
+    it('resolves citation url from nested metadata records by refId', () => {
+        const conversation = normalizeChatGPTConversationDetail(
+            {
+                title: 'Nested refs',
+                conversation_id: 'annotated-2',
+                current_node: 'assistant',
+                mapping: {
+                    user: {
+                        id: 'user',
+                        children: ['assistant'],
+                        message: {
+                            id: 'user-message',
+                            author: { role: 'user' },
+                            content: { parts: ['查一下来源'] }
+                        }
+                    },
+                    assistant: {
+                        id: 'assistant',
+                        parent: 'user',
+                        children: [],
+                        message: {
+                            id: 'assistant-message',
+                            author: { role: 'assistant' },
+                            content: {
+                                parts: ['结果如下 citeturn1search6']
+                            },
+                            metadata: {
+                                search_source_groups: [
+                                    {
+                                        entries: [
+                                            {
+                                                id: 'turn1search6',
+                                                title: 'Nested Source',
+                                                url: 'https://example.com/nested-source',
+                                                text: 'Nested snippet'
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            },
+            'fallback-id'
+        );
+
+        expect(conversation.messages[1]?.annotations?.[0]).toMatchObject({
+            kind: 'cite',
+            payload: {
+                refId: 'turn1search6',
+                label: '[1]',
+                title: 'Nested Source',
+                url: 'https://example.com/nested-source',
+                snippet: 'Nested snippet'
+            }
+        });
+    });
+
     it('falls back to default title and fallback external id', () => {
         const conversation = normalizeChatGPTConversationDetail(
             {
@@ -221,6 +369,167 @@ describe('normalizeChatGPTConversationDetail', () => {
             ],
             defaultModel: 'auto'
         });
+
+        vi.unstubAllGlobals();
+    });
+
+    it('sends multimodal payload and normalizes cite/image_group updates', async () => {
+        const provider = new ChatGPTWebProvider();
+        (provider as { accessToken: string }).accessToken = 'token';
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ token: 'requirements-token' })
+            })
+            .mockResolvedValueOnce(
+                createSseResponse([
+                    {
+                        conversation_id: 'conversation-123',
+                        message: {
+                            id: 'message-123',
+                            content: {
+                                parts: ['答案如下 citeref-a\nimage_groupgallery-1']
+                            },
+                            metadata: {
+                                annotations: [
+                                    {
+                                        kind: 'cite',
+                                        ref_id: 'ref-a',
+                                        label: '[1]',
+                                        title: 'Source A',
+                                        url: 'https://example.com/a'
+                                    },
+                                    {
+                                        kind: 'image_group',
+                                        group_id: 'gallery-1',
+                                        images: [
+                                            {
+                                                id: 'img-1',
+                                                mime_type: 'image/png',
+                                                preview_base64: 'data:image/png;base64,aW1hZ2U=',
+                                                width: 256,
+                                                height: 256
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                ])
+            );
+        vi.stubGlobal('fetch', fetchMock);
+
+        const updates: Array<{ text: string; annotations?: unknown[] }> = [];
+        const result = await provider.sendMessage(
+            '看看附件',
+            {
+                modelId: 'gpt-4o',
+                attachments: [
+                    {
+                        id: 'attachment-1',
+                        type: 'image',
+                        name: 'diagram.png',
+                        mimeType: 'image/png',
+                        size: 42,
+                        base64Data: 'data:image/png;base64,c25hcHNob3Q=',
+                        previewBase64: 'data:image/png;base64,cHJldmlldw=='
+                    }
+                ]
+            },
+            (update) => updates.push(update)
+        );
+
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        const requestBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+        expect(requestBody.model).toBe('gpt-4o');
+        expect(requestBody.messages[0]?.content?.content_type).toBe('multimodal_text');
+        expect(requestBody.messages[0]?.content?.parts[1]).toMatchObject({
+            id: 'attachment-1',
+            type: 'image',
+            mimeType: 'image/png',
+            base64Data: 'c25hcHNob3Q='
+        });
+
+        expect(updates[0]?.text).toBe('答案如下 [1]');
+        expect(result.text).toBe('答案如下 [1]');
+        expect(result.annotations).toEqual([
+            expect.objectContaining({
+                kind: 'cite',
+                payload: expect.objectContaining({
+                    refId: 'ref-a',
+                    label: '[1]'
+                })
+            }),
+            expect.objectContaining({
+                kind: 'image_group',
+                payload: expect.objectContaining({
+                    groupId: 'gallery-1'
+                })
+            })
+        ]);
+
+        vi.unstubAllGlobals();
+    });
+
+    it('resolves citation url from nested metadata during streaming updates', async () => {
+        const provider = new ChatGPTWebProvider();
+        (provider as { accessToken: string }).accessToken = 'token';
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ token: 'requirements-token' })
+            })
+            .mockResolvedValueOnce(
+                createSseResponse([
+                    {
+                        conversation_id: 'conversation-debug',
+                        message: {
+                            id: 'message-debug',
+                            content: {
+                                parts: ['答案如下 citeturn1search6']
+                            },
+                            metadata: {
+                                annotations: [
+                                    {
+                                        kind: 'cite',
+                                        ref_id: 'turn1search6',
+                                        label: '[1]'
+                                    }
+                                ],
+                                search_source_groups: [
+                                    {
+                                        entries: [
+                                            {
+                                                id: 'turn1search6',
+                                                title: 'Nested Stream Source',
+                                                url: 'https://example.com/stream-source',
+                                                text: 'Stream snippet'
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                ])
+            );
+        vi.stubGlobal('fetch', fetchMock);
+
+        const result = await provider.sendMessage('看看来源', {}, () => undefined);
+
+        expect(result.annotations).toEqual([
+            expect.objectContaining({
+                kind: 'cite',
+                payload: expect.objectContaining({
+                    refId: 'turn1search6',
+                    label: '[1]',
+                    title: 'Nested Stream Source',
+                    url: 'https://example.com/stream-source',
+                    snippet: 'Stream snippet'
+                })
+            })
+        ]);
 
         vi.unstubAllGlobals();
     });

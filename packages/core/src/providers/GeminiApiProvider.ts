@@ -1,5 +1,6 @@
 import { APP_CONFIG, type ProviderModelCatalog } from '../../config';
-import { IModelProvider } from '../interfaces/IModelProvider';
+import type { MessageAttachment } from '../interfaces/IStorageProvider';
+import { IModelProvider, type ProviderSendResult, type ProviderStreamUpdate, type SendMessageOptions } from '../interfaces/IModelProvider';
 
 type GeminiModelListItem = {
     name?: string;
@@ -51,6 +52,38 @@ function isGeminiChatModel(model: GeminiModelListItem): boolean {
 
     const excludedTokens = ['embedding', 'aqa', 'image', 'tts', 'live', 'veo'];
     return !excludedTokens.some((token) => baseModelId.includes(token));
+}
+
+function stripDataUriPrefix(data: string | undefined): string | undefined {
+    if (!data) {
+        return undefined;
+    }
+
+    return data.replace(/^data:[^;]+;base64,/, '');
+}
+
+function buildGeminiPartFromAttachment(attachment: MessageAttachment) {
+    return {
+        inlineData: {
+            mimeType: attachment.mimeType,
+            data: stripDataUriPrefix(attachment.base64Data) || ''
+        }
+    };
+}
+
+function buildGeminiParts(prompt: string, attachments: MessageAttachment[]) {
+    const parts: Array<{ text: string } | ReturnType<typeof buildGeminiPartFromAttachment>> = [];
+    if (prompt) {
+        parts.push({ text: prompt });
+    }
+
+    attachments
+        .filter((attachment) => !!stripDataUriPrefix(attachment.base64Data))
+        .forEach((attachment) => {
+            parts.push(buildGeminiPartFromAttachment(attachment));
+        });
+
+    return parts.length > 0 ? parts : [{ text: '' }];
 }
 
 export class GeminiApiProvider implements IModelProvider {
@@ -141,12 +174,9 @@ export class GeminiApiProvider implements IModelProvider {
 
     async sendMessage(
         prompt: string,
-        options: {
-            context?: { parentMessageId?: string, conversationId?: string },
-            modelId?: string
-        } = {},
-        onUpdate: (chunk: string) => void
-    ): Promise<{ text: string, conversationId: string, messageId: string }> {
+        options: SendMessageOptions = {},
+        onUpdate: (update: ProviderStreamUpdate) => void
+    ): Promise<ProviderSendResult> {
         const apiKey = this.resolveApiKey();
         if (!apiKey) {
             throw new Error('No Gemini API Key found in environment variables');
@@ -158,7 +188,7 @@ export class GeminiApiProvider implements IModelProvider {
         this.abortController = new AbortController();
 
         const payload = {
-            contents: [{ parts: [{ text: prompt }] }]
+            contents: [{ parts: buildGeminiParts(prompt, options.attachments || []) }]
         };
 
         const response = await fetch(url, {
@@ -205,7 +235,7 @@ export class GeminiApiProvider implements IModelProvider {
                         const chunkText = contents[0].text;
                         if (chunkText) {
                             fullText += chunkText;
-                            onUpdate(fullText);
+                            onUpdate({ text: fullText });
                         }
                     }
                 } catch (e) {

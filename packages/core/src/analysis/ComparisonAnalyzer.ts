@@ -56,9 +56,9 @@ export class ComparisonAnalyzer {
         const result = await provider.sendMessage(
             analysisPrompt,
             { modelId: this.analyzerConfig.defaultModel },
-            (chunk: string) => {
-                streamText = chunk;
-                onUpdate(chunk);
+            (update) => {
+                streamText = update.text;
+                onUpdate(update.text);
             }
         );
 

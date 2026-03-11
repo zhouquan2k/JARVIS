@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { useChatStore } from '@packages/ui';
-import type { Conversation, IModelProvider, IStorageProvider, SyncStateStore } from '@packages/core/src';
+import type {
+    Conversation,
+    IModelProvider,
+    IStorageProvider,
+    ProviderStreamUpdate,
+    SendMessageOptions,
+    SyncStateStore
+} from '@packages/core/src';
 import { createApp } from '../../server/src/app.js';
 import { createExtensionSyncStorageProvider } from './sync';
 
@@ -56,7 +63,7 @@ const dummyModelProvider: IModelProvider = {
     async checkAuth() {
         return true;
     },
-    async sendMessage() {
+    async sendMessage(_prompt: string, _options: SendMessageOptions, _onUpdate: (update: ProviderStreamUpdate) => void) {
         return {
             text: 'ok',
             conversationId: 'dummy-conversation',

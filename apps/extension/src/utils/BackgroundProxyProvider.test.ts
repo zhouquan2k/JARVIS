@@ -47,4 +47,108 @@ describe('BackgroundProxyProvider', () => {
             channelId: 'test-channel'
         }));
     });
+
+    it('forwards attachments and structured updates for sendMessage', async () => {
+        let onMessage: ((message: unknown) => void) | undefined;
+        const postMessage = vi.fn((message: { requestId: string; channelId: string; action: string; options?: unknown }) => {
+            if (message.action !== 'SEND_MESSAGE') {
+                return;
+            }
+
+            onMessage?.({
+                type: 'UPDATE',
+                requestId: message.requestId,
+                channelId: message.channelId,
+                chunk: {
+                    text: '阶段性结果 [1]',
+                    annotations: [
+                        {
+                            kind: 'cite',
+                            range: { start: 6, end: 9 },
+                            payload: {
+                                refId: 'ref-1',
+                                label: '[1]'
+                            }
+                        }
+                    ]
+                }
+            });
+            onMessage?.({
+                type: 'DONE',
+                requestId: message.requestId,
+                channelId: message.channelId,
+                result: {
+                    text: '阶段性结果 [1]',
+                    conversationId: 'conversation-1',
+                    messageId: 'message-1',
+                    annotations: [
+                        {
+                            kind: 'cite',
+                            range: { start: 6, end: 9 },
+                            payload: {
+                                refId: 'ref-1',
+                                label: '[1]'
+                            }
+                        }
+                    ]
+                }
+            });
+        });
+
+        // @ts-expect-error simplified test double
+        globalThis.chrome = {
+            runtime: {
+                connect: () => ({
+                    postMessage,
+                    onDisconnect: { addListener: vi.fn() },
+                    onMessage: {
+                        addListener: (listener: (message: unknown) => void) => {
+                            onMessage = listener;
+                        }
+                    }
+                })
+            }
+        };
+
+        const provider = new BackgroundProxyProvider('chatgpt-web', { channelId: 'test-channel' });
+        const updates: Array<{ text: string; annotations?: unknown[] }> = [];
+        const result = await provider.sendMessage(
+            '分析附件',
+            {
+                modelId: 'gpt-4o',
+                attachments: [
+                    {
+                        id: 'attachment-1',
+                        type: 'image',
+                        name: 'diagram.png',
+                        mimeType: 'image/png',
+                        size: 128,
+                        base64Data: 'c25hcHNob3Q='
+                    }
+                ]
+            },
+            (update) => {
+                if (typeof update !== 'string') {
+                    updates.push(update);
+                }
+            }
+        );
+
+        expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            action: 'SEND_MESSAGE',
+            providerId: 'chatgpt-web',
+            channelId: 'test-channel',
+            options: expect.objectContaining({
+                modelId: 'gpt-4o',
+                attachments: [
+                    expect.objectContaining({
+                        id: 'attachment-1',
+                        type: 'image'
+                    })
+                ]
+            })
+        }));
+        expect(updates[0]?.text).toBe('阶段性结果 [1]');
+        expect(result.annotations).toHaveLength(1);
+    });
 });

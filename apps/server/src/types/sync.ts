@@ -1,9 +1,57 @@
 export type ConversationRole = 'user' | 'assistant';
 
+export interface MessageAttachment {
+    id: string;
+    type: 'image' | 'file';
+    name: string;
+    mimeType: string;
+    size: number;
+    base64Data?: string;
+    previewBase64?: string;
+}
+
+export interface AnnotationRange {
+    start: number;
+    end: number;
+}
+
+export interface CiteAnnotation {
+    kind: 'cite';
+    range: AnnotationRange;
+    payload: {
+        refId: string;
+        label: string;
+        title?: string;
+        url?: string;
+        snippet?: string;
+    };
+}
+
+export interface ImageGroupAnnotation {
+    kind: 'image_group';
+    range: AnnotationRange | null;
+    payload: {
+        groupId: string;
+        images: Array<{
+            id: string;
+            mimeType: string;
+            alt?: string;
+            previewBase64?: string;
+            remoteUrl?: string;
+            width?: number;
+            height?: number;
+        }>;
+    };
+}
+
+export type MessageAnnotation = CiteAnnotation | ImageGroupAnnotation;
+
 export interface ConversationMessage {
     id: string;
     role: ConversationRole;
     content: string;
+    attachments?: MessageAttachment[];
+    annotations?: MessageAnnotation[];
 }
 
 export interface ConversationSyncState {
@@ -77,6 +125,120 @@ function readRequiredTimestamp(record: JsonRecord, key: string, fieldName: strin
     return value;
 }
 
+function readRequiredNumber(record: JsonRecord, key: string, fieldName: string): number {
+    const value = record[key];
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+        throw new Error(`${fieldName} 必须是有效数字。`);
+    }
+
+    return value;
+}
+
+function readOptionalNumber(record: JsonRecord, key: string): number | undefined {
+    const value = record[key];
+    if (value === undefined || value === null) {
+        return undefined;
+    }
+
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+        throw new Error(`${key} 必须是数字。`);
+    }
+
+    return value;
+}
+
+function normalizeAttachment(value: unknown, index: number, messageIndex: number): MessageAttachment {
+    if (!isRecord(value)) {
+        throw new Error(`messages[${messageIndex}].attachments[${index}] 必须是对象。`);
+    }
+
+    const type = readRequiredString(value, 'type', `messages[${messageIndex}].attachments[${index}].type`);
+    if (type !== 'image' && type !== 'file') {
+        throw new Error(`messages[${messageIndex}].attachments[${index}].type 必须是 image 或 file。`);
+    }
+
+    return {
+        id: readRequiredString(value, 'id', `messages[${messageIndex}].attachments[${index}].id`),
+        type,
+        name: readRequiredString(value, 'name', `messages[${messageIndex}].attachments[${index}].name`),
+        mimeType: readRequiredString(value, 'mimeType', `messages[${messageIndex}].attachments[${index}].mimeType`),
+        size: readRequiredNumber(value, 'size', `messages[${messageIndex}].attachments[${index}].size`),
+        base64Data: readOptionalString(value, 'base64Data'),
+        previewBase64: readOptionalString(value, 'previewBase64')
+    };
+}
+
+function normalizeRange(value: unknown, fieldName: string): AnnotationRange {
+    if (!isRecord(value)) {
+        throw new Error(`${fieldName} 必须是对象。`);
+    }
+
+    return {
+        start: readRequiredNumber(value, 'start', `${fieldName}.start`),
+        end: readRequiredNumber(value, 'end', `${fieldName}.end`)
+    };
+}
+
+function normalizeAnnotation(value: unknown, index: number, messageIndex: number): MessageAnnotation {
+    if (!isRecord(value)) {
+        throw new Error(`messages[${messageIndex}].annotations[${index}] 必须是对象。`);
+    }
+
+    const kind = readRequiredString(value, 'kind', `messages[${messageIndex}].annotations[${index}].kind`);
+    const payload = value.payload;
+    if (!isRecord(payload)) {
+        throw new Error(`messages[${messageIndex}].annotations[${index}].payload 必须是对象。`);
+    }
+
+    if (kind === 'cite') {
+        return {
+            kind: 'cite',
+            range: normalizeRange(value.range, `messages[${messageIndex}].annotations[${index}].range`),
+            payload: {
+                refId: readRequiredString(payload, 'refId', `messages[${messageIndex}].annotations[${index}].payload.refId`),
+                label: readRequiredString(payload, 'label', `messages[${messageIndex}].annotations[${index}].payload.label`),
+                title: readOptionalString(payload, 'title'),
+                url: readOptionalString(payload, 'url'),
+                snippet: readOptionalString(payload, 'snippet')
+            }
+        };
+    }
+
+    if (kind === 'image_group') {
+        const images = payload.images;
+        if (!Array.isArray(images) || images.length === 0) {
+            throw new Error(`messages[${messageIndex}].annotations[${index}].payload.images 必须是非空数组。`);
+        }
+
+        return {
+            kind: 'image_group',
+            range: value.range === null || value.range === undefined
+                ? null
+                : normalizeRange(value.range, `messages[${messageIndex}].annotations[${index}].range`),
+            payload: {
+                groupId: readRequiredString(payload, 'groupId', `messages[${messageIndex}].annotations[${index}].payload.groupId`),
+                images: images.map((image, imageIndex) => {
+                    if (!isRecord(image)) {
+                        throw new Error(`messages[${messageIndex}].annotations[${index}].payload.images[${imageIndex}] 必须是对象。`);
+                    }
+
+                    return {
+                        id: readRequiredString(image, 'id', `messages[${messageIndex}].annotations[${index}].payload.images[${imageIndex}].id`),
+                        mimeType: readRequiredString(image, 'mimeType', `messages[${messageIndex}].annotations[${index}].payload.images[${imageIndex}].mimeType`),
+                        alt: readOptionalString(image, 'alt'),
+                        previewBase64: readOptionalString(image, 'previewBase64'),
+                        remoteUrl: readOptionalString(image, 'remoteUrl'),
+                        width: readOptionalNumber(image, 'width'),
+                        height: readOptionalNumber(image, 'height')
+                    };
+                })
+            }
+        };
+    }
+
+    throw new Error(`messages[${messageIndex}].annotations[${index}].kind 不受支持。`);
+}
+
 function normalizeMessage(value: unknown, index: number): ConversationMessage {
     if (!isRecord(value)) {
         throw new Error(`messages[${index}] 必须是对象。`);
@@ -90,7 +252,13 @@ function normalizeMessage(value: unknown, index: number): ConversationMessage {
     return {
         id: readRequiredString(value, 'id', `messages[${index}].id`),
         role,
-        content: readRequiredString(value, 'content', `messages[${index}].content`)
+        content: readRequiredString(value, 'content', `messages[${index}].content`),
+        attachments: Array.isArray(value.attachments)
+            ? value.attachments.map((attachment, attachmentIndex) => normalizeAttachment(attachment, attachmentIndex, index))
+            : undefined,
+        annotations: Array.isArray(value.annotations)
+            ? value.annotations.map((annotation, annotationIndex) => normalizeAnnotation(annotation, annotationIndex, index))
+            : undefined
     };
 }
 

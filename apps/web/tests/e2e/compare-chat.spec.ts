@@ -1,7 +1,9 @@
 import { expect, test } from '@playwright/test';
 
 test('compare chat streams A/B and auto switches to analysis tab', async ({ page }) => {
-  await page.goto('/#/compare');
+  await page.goto('/#/');
+  await page.getByTestId('sidebar-new-chat-menu').click();
+  await page.getByTestId('sidebar-new-chat-compare').click();
   await expect(page.getByTestId('compare-chat-view')).toBeVisible();
 
   await page.getByTestId('compare-input').fill('Compare this question with two models');

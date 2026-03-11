@@ -1,5 +1,5 @@
 import type { ISyncTransport, SyncPullResult, SyncPushResult } from '../interfaces/ISyncTransport';
-import type { Conversation } from '../interfaces/IStorageProvider';
+import { cloneConversation, type Conversation } from '../interfaces/IStorageProvider';
 
 export const MOCK_SYNC_EVENTS_STORAGE_KEY = 'chatprism:mock-sync-events';
 
@@ -13,20 +13,6 @@ export interface MockSyncEvent {
 
 export interface MockSyncTransportOptions {
     storage?: Pick<Storage, 'getItem' | 'setItem'>;
-}
-
-function cloneConversation(conversation: Conversation): Conversation {
-    return {
-        ...conversation,
-        sync: conversation.sync ? { ...conversation.sync } : undefined,
-        compare: conversation.compare
-            ? {
-                ...conversation.compare,
-                analysisResult: { ...conversation.compare.analysisResult }
-            }
-            : undefined,
-        messages: conversation.messages.map((message) => ({ ...message }))
-    };
 }
 
 function readEvents(storage?: Pick<Storage, 'getItem'>): MockSyncEvent[] {

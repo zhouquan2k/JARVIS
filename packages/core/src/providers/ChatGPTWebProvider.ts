@@ -1,8 +1,8 @@
 /// <reference types="chrome"/>
 import { APP_CONFIG, type ModelConfig, type ProviderModelCatalog } from '../../config';
 import type { ConversationHistorySummary, ConversationSourceType, IHistoryProvider } from '../interfaces/IHistoryProvider';
-import type { Conversation } from '../interfaces/IStorageProvider';
-import { IModelProvider } from '../interfaces/IModelProvider';
+import type { Conversation, ConversationMessage, MessageAnnotation, MessageAttachment } from '../interfaces/IStorageProvider';
+import { IModelProvider, type ProviderSendResult, type ProviderStreamUpdate, type SendMessageOptions } from '../interfaces/IModelProvider';
 import { sha3_512 } from 'js-sha3';
 
 // UUID v4 generator helper
@@ -90,6 +90,7 @@ type ChatGPTMappingNode = {
         id?: string;
         author?: { role?: string | null };
         content?: ChatGPTMessageContent | null;
+        metadata?: Record<string, unknown> | null;
     } | null;
 };
 
@@ -104,6 +105,8 @@ type ChatGPTConversationDetail = {
 };
 
 const CHATGPT_HISTORY_SOURCE: ConversationSourceType = 'chatgpt_web';
+const PRIVATE_CITE_PATTERN = /cite(?:([^]+))?/g;
+const PRIVATE_IMAGE_GROUP_PATTERN = /image_group(?:([^]+))??/g;
 
 function getStaticChatGPTModelCatalog(): ProviderModelCatalog {
     const provider = APP_CONFIG.providers.find((item) => item.id === 'chatgpt-web');
@@ -169,6 +172,411 @@ function extractMessageText(content: ChatGPTMessageContent | null | undefined): 
     }
 
     return '';
+}
+
+function toRecord(value: unknown): Record<string, unknown> | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return null;
+    }
+
+    return value as Record<string, unknown>;
+}
+
+function toRecordArray(value: unknown): Record<string, unknown>[] {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+
+    return value
+        .map((item) => toRecord(item))
+        .filter((item): item is Record<string, unknown> => !!item);
+}
+
+function stripDataUriPrefix(data: string | undefined): string | undefined {
+    if (!data) {
+        return undefined;
+    }
+
+    return data.replace(/^data:[^;]+;base64,/, '');
+}
+
+function normalizeAttachmentPartType(part: Record<string, unknown>): MessageAttachment['type'] | null {
+    const rawType = [part.type, part.kind, part.content_type].find((value) => typeof value === 'string');
+    if (rawType === 'image') {
+        return 'image';
+    }
+
+    if (
+        rawType === 'file'
+        || rawType === 'attachment'
+        || rawType === 'input_file'
+        || rawType === 'file_attachment'
+    ) {
+        return 'file';
+    }
+
+    const mimeType = typeof part.mimeType === 'string'
+        ? part.mimeType
+        : typeof part.mime_type === 'string'
+            ? part.mime_type
+            : '';
+    if (mimeType.startsWith('image/')) {
+        return 'image';
+    }
+
+    if (mimeType) {
+        return 'file';
+    }
+
+    return null;
+}
+
+function extractAttachmentFromPart(part: unknown, index: number): MessageAttachment | null {
+    const record = toRecord(part);
+    if (!record) {
+        return null;
+    }
+
+    const attachmentType = normalizeAttachmentPartType(record);
+    const mimeType = typeof record.mimeType === 'string'
+        ? record.mimeType
+        : typeof record.mime_type === 'string'
+            ? record.mime_type
+            : '';
+    const name = typeof record.name === 'string'
+        ? record.name
+        : typeof record.filename === 'string'
+            ? record.filename
+            : '';
+    if (!attachmentType || !mimeType || !name) {
+        return null;
+    }
+
+    const base64Data = typeof record.base64Data === 'string'
+        ? record.base64Data
+        : typeof record.data === 'string'
+            ? record.data
+            : typeof record.inline_data === 'string'
+                ? record.inline_data
+                : undefined;
+    const previewBase64 = typeof record.previewBase64 === 'string'
+        ? record.previewBase64
+        : typeof record.preview_base64 === 'string'
+            ? record.preview_base64
+            : undefined;
+    const size = typeof record.size === 'number'
+        ? record.size
+        : typeof record.size_bytes === 'number'
+            ? record.size_bytes
+            : 0;
+
+    return {
+        id: typeof record.id === 'string' ? record.id : `attachment-${index}`,
+        type: attachmentType,
+        name,
+        mimeType,
+        size,
+        base64Data: stripDataUriPrefix(base64Data),
+        previewBase64: stripDataUriPrefix(previewBase64)
+    };
+}
+
+function extractMessageAttachments(content: ChatGPTMessageContent | null | undefined): MessageAttachment[] | undefined {
+    if (!content?.parts || !Array.isArray(content.parts)) {
+        return undefined;
+    }
+
+    const attachments = content.parts
+        .map((part, index) => extractAttachmentFromPart(part, index))
+        .filter((item): item is MessageAttachment => !!item);
+
+    return attachments.length > 0 ? attachments : undefined;
+}
+
+function firstString(...values: unknown[]): string | undefined {
+    return values.find((value): value is string => typeof value === 'string' && value.trim().length > 0);
+}
+
+function getCandidateRefId(candidate: Record<string, unknown>): string | undefined {
+    return firstString(candidate.refId, candidate.ref_id, candidate.id, candidate.search_id, candidate.searchId);
+}
+
+function getCandidateLabel(candidate: Record<string, unknown>, index: number): string {
+    return firstString(candidate.label, candidate.citation_label, candidate.citationLabel) || `[${index + 1}]`;
+}
+
+function getCandidateUrl(candidate: Record<string, unknown>): string | undefined {
+    return firstString(
+        candidate.url,
+        candidate.uri,
+        candidate.href,
+        candidate.link,
+        candidate.link_url,
+        candidate.linkUrl,
+        candidate.source_url,
+        candidate.sourceUrl,
+        candidate.target_url,
+        candidate.targetUrl,
+        candidate.canonical_url,
+        candidate.canonicalUrl
+    );
+}
+
+function getCandidateTitle(candidate: Record<string, unknown>): string | undefined {
+    return firstString(
+        candidate.title,
+        candidate.name,
+        candidate.display_name,
+        candidate.displayName,
+        candidate.source_title,
+        candidate.sourceTitle
+    );
+}
+
+function getCandidateSnippet(candidate: Record<string, unknown>): string | undefined {
+    return firstString(
+        candidate.snippet,
+        candidate.text,
+        candidate.excerpt,
+        candidate.summary,
+        candidate.description
+    );
+}
+
+function isLikelyCiteCandidate(candidate: Record<string, unknown>): boolean {
+    const type = typeof candidate.kind === 'string' ? candidate.kind : candidate.type;
+    return type === 'cite' || !!getCandidateUrl(candidate) || !!getCandidateRefId(candidate);
+}
+
+function isLikelyImageGroupCandidate(candidate: Record<string, unknown>): boolean {
+    const type = typeof candidate.kind === 'string' ? candidate.kind : candidate.type;
+    return type === 'image_group' || Array.isArray(candidate.images);
+}
+
+function buildCandidateFingerprint(candidate: Record<string, unknown>): string {
+    return [
+        typeof candidate.kind === 'string' ? candidate.kind : candidate.type,
+        getCandidateRefId(candidate),
+        getCandidateUrl(candidate),
+        getCandidateTitle(candidate),
+        Array.isArray(candidate.images) ? `images:${candidate.images.length}` : '',
+        firstString(candidate.groupId, candidate.group_id)
+    ].filter(Boolean).join('|');
+}
+
+function collectChatGPTAnnotationCandidates(
+    input: unknown,
+    acc: Record<string, unknown>[] = [],
+    visited = new Set<unknown>(),
+    fingerprints = new Set<string>()
+): Record<string, unknown>[] {
+    if (!input || typeof input !== 'object' || visited.has(input)) {
+        return acc;
+    }
+
+    visited.add(input);
+
+    if (Array.isArray(input)) {
+        for (const item of input) {
+            collectChatGPTAnnotationCandidates(item, acc, visited, fingerprints);
+        }
+        return acc;
+    }
+
+    const record = toRecord(input);
+    if (!record) {
+        return acc;
+    }
+
+    if (isLikelyCiteCandidate(record) || isLikelyImageGroupCandidate(record)) {
+        const fingerprint = buildCandidateFingerprint(record);
+        if (fingerprint && !fingerprints.has(fingerprint)) {
+            fingerprints.add(fingerprint);
+            acc.push(record);
+        }
+    }
+
+    for (const value of Object.values(record)) {
+        collectChatGPTAnnotationCandidates(value, acc, visited, fingerprints);
+    }
+
+    return acc;
+}
+
+function scoreCiteCandidate(candidate: Record<string, unknown>): number {
+    return (getCandidateUrl(candidate) ? 4 : 0)
+        + (getCandidateTitle(candidate) ? 2 : 0)
+        + (getCandidateSnippet(candidate) ? 1 : 0);
+}
+
+function buildBestCiteCandidateMap(candidates: Record<string, unknown>[]): Map<string, Record<string, unknown>> {
+    const bestByRefId = new Map<string, Record<string, unknown>>();
+
+    for (const candidate of candidates) {
+        const refId = getCandidateRefId(candidate);
+        if (!refId) {
+            continue;
+        }
+
+        const existing = bestByRefId.get(refId);
+        if (!existing || scoreCiteCandidate(candidate) > scoreCiteCandidate(existing)) {
+            bestByRefId.set(refId, candidate);
+        }
+    }
+
+    return bestByRefId;
+}
+
+function buildCitePayload(candidate: Record<string, unknown> | undefined, index: number): MessageAnnotation | null {
+    if (!candidate) {
+        return null;
+    }
+
+    const label = getCandidateLabel(candidate, index);
+    const refId = getCandidateRefId(candidate) || `cite-${index + 1}`;
+
+    return {
+        kind: 'cite',
+        range: { start: 0, end: 0 },
+        payload: {
+            refId,
+            label,
+            title: getCandidateTitle(candidate),
+            url: getCandidateUrl(candidate),
+            snippet: getCandidateSnippet(candidate)
+        }
+    };
+}
+
+function buildImageGroupPayload(candidate: Record<string, unknown> | undefined, index: number): MessageAnnotation | null {
+    if (!candidate) {
+        return null;
+    }
+
+    const images = toRecordArray(candidate.images).map((image, imageIndex) => ({
+        id: typeof image.id === 'string' ? image.id : `image-${index + 1}-${imageIndex + 1}`,
+        mimeType: typeof image.mimeType === 'string'
+            ? image.mimeType
+            : typeof image.mime_type === 'string'
+                ? image.mime_type
+                : 'image/png',
+        alt: typeof image.alt === 'string' ? image.alt : undefined,
+        previewBase64: stripDataUriPrefix(
+            typeof image.previewBase64 === 'string'
+                ? image.previewBase64
+                : typeof image.preview_base64 === 'string'
+                    ? image.preview_base64
+                    : undefined
+        ),
+        remoteUrl: typeof image.remoteUrl === 'string'
+            ? image.remoteUrl
+            : typeof image.url === 'string'
+                ? image.url
+                : undefined,
+        width: typeof image.width === 'number' ? image.width : undefined,
+        height: typeof image.height === 'number' ? image.height : undefined
+    }));
+
+    if (images.length === 0) {
+        return null;
+    }
+
+    return {
+        kind: 'image_group',
+        range: null,
+        payload: {
+            groupId: typeof candidate.groupId === 'string'
+                ? candidate.groupId
+                : typeof candidate.group_id === 'string'
+                    ? candidate.group_id
+                    : `image-group-${index + 1}`,
+            images
+        }
+    };
+}
+
+function normalizeChatGPTResponseSnapshot(
+    rawText: string,
+    metadata?: Record<string, unknown> | null
+): Pick<ProviderStreamUpdate, 'text' | 'annotations'> {
+    const candidates = collectChatGPTAnnotationCandidates(metadata);
+    const citeCandidates = candidates.filter((candidate) => isLikelyCiteCandidate(candidate));
+    const imageGroupCandidates = candidates.filter((candidate) => isLikelyImageGroupCandidate(candidate));
+    const citeCandidatesByRefId = buildBestCiteCandidateMap(citeCandidates);
+
+    const annotations: MessageAnnotation[] = [];
+    let normalizedText = '';
+    let cursor = 0;
+    let citeIndex = 0;
+
+    for (const match of rawText.matchAll(PRIVATE_CITE_PATTERN)) {
+        const matchIndex = match.index ?? 0;
+        normalizedText += rawText.slice(cursor, matchIndex);
+        const refIdFromMarker = match[1];
+        const matchedCandidate = refIdFromMarker
+            ? citeCandidatesByRefId.get(refIdFromMarker) || citeCandidates[citeIndex]
+            : citeCandidates[citeIndex];
+        const fallbackCandidate = refIdFromMarker ? { ref_id: refIdFromMarker } : undefined;
+        const citeAnnotation = buildCitePayload(matchedCandidate || fallbackCandidate, citeIndex);
+        const label = citeAnnotation?.payload.label || `[${citeIndex + 1}]`;
+        const start = normalizedText.length;
+        normalizedText += label;
+        if (citeAnnotation) {
+            annotations.push({
+                ...citeAnnotation,
+                range: { start, end: start + label.length }
+            });
+        }
+        cursor = matchIndex + match[0].length;
+        citeIndex += 1;
+    }
+
+    normalizedText += rawText.slice(cursor);
+    normalizedText = normalizedText.replace(PRIVATE_IMAGE_GROUP_PATTERN, '').replace(/\n{3,}/g, '\n\n').trim();
+
+    imageGroupCandidates
+        .map((candidate, index) => buildImageGroupPayload(candidate, index))
+        .filter((item): item is MessageAnnotation => !!item)
+        .forEach((annotation) => annotations.push(annotation));
+
+    return {
+        text: normalizedText,
+        annotations: annotations.length > 0 ? annotations : undefined
+    };
+}
+
+function normalizeChatGPTMessage(
+    content: ChatGPTMessageContent | null | undefined,
+    metadata?: Record<string, unknown> | null
+): Pick<ConversationMessage, 'content' | 'attachments' | 'annotations'> {
+    const textSnapshot = normalizeChatGPTResponseSnapshot(extractMessageText(content), metadata);
+    return {
+        content: textSnapshot.text,
+        attachments: extractMessageAttachments(content),
+        annotations: textSnapshot.annotations
+    };
+}
+
+function buildChatGPTRequestContent(prompt: string, attachments: MessageAttachment[]): ChatGPTMessageContent {
+    if (attachments.length === 0) {
+        return { content_type: 'text', parts: [prompt] };
+    }
+
+    return {
+        content_type: 'multimodal_text',
+        parts: [
+            prompt,
+            ...attachments.map((attachment) => ({
+                id: attachment.id,
+                type: attachment.type === 'image' ? 'image' : 'file_attachment',
+                name: attachment.name,
+                mimeType: attachment.mimeType,
+                size: attachment.size,
+                base64Data: stripDataUriPrefix(attachment.base64Data),
+                previewBase64: stripDataUriPrefix(attachment.previewBase64)
+            }))
+        ]
+    };
 }
 
 function toRenderableRole(role?: string | null): 'user' | 'assistant' | null {
@@ -293,15 +701,17 @@ export function normalizeChatGPTConversationDetail(
     const messages = buildPrimaryNodeChain(detail)
         .map((node) => {
             const role = toRenderableRole(node.message?.author?.role);
-            const content = extractMessageText(node.message?.content);
-            if (!role || !content) {
+            const message = normalizeChatGPTMessage(node.message?.content, node.message?.metadata);
+            if (!role || !message.content) {
                 return null;
             }
 
             return {
                 id: node.message?.id || node.id || generateUUID(),
                 role,
-                content
+                content: message.content,
+                attachments: message.attachments,
+                annotations: message.annotations
             };
         })
         .filter((item): item is Conversation['messages'][number] => item !== null);
@@ -466,12 +876,9 @@ export class ChatGPTWebProvider implements IModelProvider, IHistoryProvider {
 
     async sendMessage(
         prompt: string,
-        options: {
-            context?: { parentMessageId?: string, conversationId?: string },
-            modelId?: string
-        } = {},
-        onUpdate: (chunk: string) => void
-    ): Promise<{ text: string, conversationId: string, messageId: string }> {
+        options: SendMessageOptions = {},
+        onUpdate: (update: ProviderStreamUpdate) => void
+    ): Promise<ProviderSendResult> {
         await this.ensureAccessToken();
 
         const requirements = await this.getChatRequirements();
@@ -490,6 +897,7 @@ export class ChatGPTWebProvider implements IModelProvider, IHistoryProvider {
         const context = options.context || {};
         const parentMessageId = context.parentMessageId || generateUUID();
         const messageId = generateUUID();
+        const attachments = options.attachments || [];
 
         const payload: any = {
             action: 'next',
@@ -497,7 +905,7 @@ export class ChatGPTWebProvider implements IModelProvider, IHistoryProvider {
                 {
                     id: messageId,
                     author: { role: 'user' },
-                    content: { content_type: 'text', parts: [prompt] }
+                    content: buildChatGPTRequestContent(prompt, attachments)
                 }
             ],
             parent_message_id: parentMessageId,
@@ -548,6 +956,7 @@ export class ChatGPTWebProvider implements IModelProvider, IHistoryProvider {
         let fullText = '';
         let replyConversationId = context.conversationId || '';
         let replyMessageId = '';
+        let latestAnnotations: MessageAnnotation[] | undefined;
 
         while (true) {
             const { done, value } = await reader.read();
@@ -568,12 +977,20 @@ export class ChatGPTWebProvider implements IModelProvider, IHistoryProvider {
 
                 try {
                     const data = JSON.parse(dataStr);
-                    if (data.message?.content?.parts?.[0]) {
+                    const normalizedMessage = normalizeChatGPTMessage(
+                        data.message?.content,
+                        toRecord(data.message?.metadata)
+                    );
+                    if (normalizedMessage.content) {
                         // ChatGPT provides full text replacement
-                        fullText = data.message.content.parts[0];
+                        fullText = normalizedMessage.content;
+                        latestAnnotations = normalizedMessage.annotations;
                         replyConversationId = data.conversation_id || replyConversationId;
                         replyMessageId = data.message.id || replyMessageId;
-                        onUpdate(fullText);
+                        onUpdate({
+                            text: fullText,
+                            annotations: normalizedMessage.annotations
+                        });
                     }
                 } catch (e) {
                     console.warn('Error parsing SSE data line', dataStr, e);
@@ -585,7 +1002,8 @@ export class ChatGPTWebProvider implements IModelProvider, IHistoryProvider {
         return {
             text: fullText,
             conversationId: replyConversationId,
-            messageId: replyMessageId
+            messageId: replyMessageId,
+            annotations: latestAnnotations
         };
     }
 

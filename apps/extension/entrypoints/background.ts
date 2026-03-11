@@ -16,6 +16,7 @@ type RuntimeDeps = {
     createProviderRuntime: typeof import('@packages/core/src/runtime/createProviderRuntime').createProviderRuntime;
     ComparisonAnalyzer: typeof import('@packages/core/src/analysis/ComparisonAnalyzer').ComparisonAnalyzer;
     APP_CONFIG: typeof import('@packages/core/config').APP_CONFIG;
+    createMockRuntime: typeof import('../src/testing/createMockRuntime').createMockRuntime;
 };
 
 let runtimeDepsPromise: Promise<RuntimeDeps> | null = null;
@@ -25,12 +26,14 @@ const loadRuntimeDeps = async (): Promise<RuntimeDeps> => {
         runtimeDepsPromise = Promise.all([
             import('@packages/core/src/runtime/createProviderRuntime'),
             import('@packages/core/src/analysis/ComparisonAnalyzer'),
-            import('@packages/core/config')
+            import('@packages/core/config'),
+            import('../src/testing/createMockRuntime')
         ])
-            .then(([runtimeModule, analysisModule, configModule]) => ({
+            .then(([runtimeModule, analysisModule, configModule, mockRuntimeModule]) => ({
                 createProviderRuntime: runtimeModule.createProviderRuntime,
                 ComparisonAnalyzer: analysisModule.ComparisonAnalyzer,
-                APP_CONFIG: configModule.APP_CONFIG
+                APP_CONFIG: configModule.APP_CONFIG,
+                createMockRuntime: mockRuntimeModule.createMockRuntime
             }))
             .catch((error) => {
                 runtimeDepsPromise = null;
@@ -70,9 +73,11 @@ export default defineBackground(() => {
 
             const getRuntime = async (): Promise<ProviderRuntime> => {
                 if (!runtimePromise) {
-                    runtimePromise = loadRuntimeDeps().then(({ createProviderRuntime }) =>
-                        createProviderRuntime({ runtimeMode: 'extension' })
-                    );
+                    runtimePromise = loadRuntimeDeps().then(({ createMockRuntime, createProviderRuntime }) => (
+                        import.meta.env.WXT_E2E === '1'
+                            ? createMockRuntime()
+                            : createProviderRuntime({ runtimeMode: 'extension' })
+                    ));
                 }
                 return runtimePromise;
             };

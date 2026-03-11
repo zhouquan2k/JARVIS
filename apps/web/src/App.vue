@@ -1,10 +1,12 @@
 <template>
   <div class="app-shell">
-    <AppTopBar :is-compare-mode="isCompareMode" :compare-stage="compareStore.stage" @toggle-mode="toggleMode" />
+    <AppTopBar :is-compare-mode="isCompareMode" :compare-stage="compareStore.stage" />
     <main class="view-host">
       <ConversationWorkspaceView
         :is-compare-mode="isCompareMode"
+        :show-history-source-switch="false"
         @request-normal-mode="navigateTo('/')"
+        @request-compare-mode="openCompareMode"
       />
     </main>
   </div>
@@ -14,15 +16,17 @@
 import { computed, onMounted } from 'vue';
 import { AppTopBar, ConversationWorkspaceView, useChatStore, useCompareStore } from '@packages/ui';
 import { currentRoute, navigateTo } from './router';
-import { providerRuntime } from './providerRuntime';
+import { createWebHistoryProvider, providerRuntime } from './providerRuntime';
 import { createWebSyncStorageProvider } from './sync';
 
 const chatStore = useChatStore();
 const compareStore = useCompareStore();
+const historyProvider = createWebHistoryProvider();
 const isCompareMode = computed(() => currentRoute.value.path === '/compare');
 
-function toggleMode() {
-  navigateTo(isCompareMode.value ? '/' : '/compare');
+function openCompareMode() {
+  compareStore.startNewCompare();
+  navigateTo('/compare');
 }
 
 onMounted(() => {
@@ -46,8 +50,10 @@ onMounted(() => {
       chatStore.setProviderModelsResolver((providerId: string) => providerRuntime.getProviderModels(providerId));
       chatStore.setProviders(
         providerRuntime.getProvider(providerCatalog[0].id),
-        syncStorageProvider
+        syncStorageProvider,
+        historyProvider
       );
+      chatStore.setHistoryProvider(historyProvider);
       await syncStorageProvider.hydrate().catch((error) => {
         console.warn('Web sync hydration failed, continuing with local data only.', error);
       });

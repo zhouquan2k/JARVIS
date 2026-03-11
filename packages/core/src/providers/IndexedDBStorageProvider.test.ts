@@ -44,7 +44,58 @@ describe('IndexedDBStorageProvider', () => {
             id: 'conversation-1',
             title: 'Synced conversation',
             sourceType: 'local',
-            messages: [{ id: 'm1', role: 'user', content: 'hello' }],
+            messages: [
+                {
+                    id: 'm1',
+                    role: 'user',
+                    content: 'hello',
+                    attachments: [
+                        {
+                            id: 'a1',
+                            type: 'image',
+                            name: 'hello.png',
+                            mimeType: 'image/png',
+                            size: 128,
+                            base64Data: 'Zm9v',
+                            previewBase64: 'YmFy'
+                        }
+                    ]
+                },
+                {
+                    id: 'm2',
+                    role: 'assistant',
+                    content: '引用内容 [1]',
+                    annotations: [
+                        {
+                            kind: 'cite',
+                            range: { start: 5, end: 8 },
+                            payload: {
+                                refId: 'ref-1',
+                                label: '[1]',
+                                title: 'Source title',
+                                url: 'https://example.com',
+                                snippet: 'quoted'
+                            }
+                        },
+                        {
+                            kind: 'image_group',
+                            range: null,
+                            payload: {
+                                groupId: 'group-1',
+                                images: [
+                                    {
+                                        id: 'img-1',
+                                        mimeType: 'image/png',
+                                        previewBase64: 'cHJldmlldw==',
+                                        width: 512,
+                                        height: 512
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ],
             updatedAt: 123,
             sync: {
                 dirty: true,

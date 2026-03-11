@@ -1,5 +1,5 @@
 import localforage from 'localforage';
-import { IStorageProvider, Conversation } from '../interfaces/IStorageProvider';
+import { IStorageProvider, Conversation, normalizeConversation } from '../interfaces/IStorageProvider';
 
 export class IndexedDBStorageProvider implements IStorageProvider {
     public id = 'indexeddb-storage';
@@ -13,18 +13,19 @@ export class IndexedDBStorageProvider implements IStorageProvider {
     }
 
     async saveConversation(chat: Conversation): Promise<void> {
-        await this.store.setItem(chat.id, chat);
+        const normalized = normalizeConversation(chat);
+        await this.store.setItem(normalized.id, normalized);
     }
 
     async getConversation(id: string): Promise<Conversation | null> {
         const chat = await this.store.getItem<Conversation>(id);
-        return chat;
+        return chat ? normalizeConversation(chat) : null;
     }
 
     async getAllConversations(): Promise<Conversation[]> {
         const conversations: Conversation[] = [];
         await this.store.iterate((value: Conversation) => {
-            conversations.push(value);
+            conversations.push(normalizeConversation(value));
         });
         // Sort by updatedAt descending
         return conversations.sort((a, b) => b.updatedAt - a.updatedAt);

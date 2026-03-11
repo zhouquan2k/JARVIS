@@ -2,6 +2,8 @@ import { defineStore } from 'pinia';
 import {
     type Conversation,
     type ConversationHistorySummary,
+    cloneConversationMessage,
+    type MessageAttachment,
     type ConversationSourceType,
     type IHistoryProvider,
     type IModelProvider,
@@ -38,6 +40,38 @@ export interface ChatState {
     currentError: string | null;
     currentProviderId: string;
     currentModelId: string;
+    draftAttachments: MessageAttachment[];
+    attachmentError: string | null;
+}
+
+const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
+
+function toBase64(bytes: Uint8Array): string {
+    if (typeof Buffer !== 'undefined') {
+        return Buffer.from(bytes).toString('base64');
+    }
+
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let index = 0; index < bytes.length; index += chunkSize) {
+        const chunk = bytes.subarray(index, index + chunkSize);
+        binary += String.fromCharCode(...chunk);
+    }
+    return btoa(binary);
+}
+
+async function fileToAttachment(file: File): Promise<MessageAttachment> {
+    const buffer = await file.arrayBuffer();
+    const base64Data = toBase64(new Uint8Array(buffer));
+    return {
+        id: crypto.randomUUID(),
+        type: file.type.startsWith('image/') ? 'image' : 'file',
+        name: file.name,
+        mimeType: file.type || 'application/octet-stream',
+        size: file.size,
+        base64Data,
+        previewBase64: file.type.startsWith('image/') ? base64Data : undefined
+    };
 }
 
 function cloneConversation(conversation: Conversation): Conversation {
@@ -45,7 +79,7 @@ function cloneConversation(conversation: Conversation): Conversation {
         ...conversation,
         sync: conversation.sync ? { ...conversation.sync } : undefined,
         compare: conversation.compare ? { ...conversation.compare } : undefined,
-        messages: conversation.messages.map((message) => ({ ...message }))
+        messages: conversation.messages.map(cloneConversationMessage)
     };
 }
 
@@ -108,7 +142,9 @@ export const useChatStore = defineStore('chat', {
         isGenerating: false,
         currentError: null,
         currentProviderId: '',
-        currentModelId: ''
+        currentModelId: '',
+        draftAttachments: [],
+        attachmentError: null
     }),
 
     getters: {
@@ -459,6 +495,11 @@ export const useChatStore = defineStore('chat', {
                 return;
             }
 
+            const pendingAttachments = this.draftAttachments.map((attachment) => ({ ...attachment }));
+            if (!prompt.trim() && pendingAttachments.length === 0) {
+                return;
+            }
+
             if (!this.currentConversation) {
                 await this.startNewConversation();
             }
@@ -473,7 +514,8 @@ export const useChatStore = defineStore('chat', {
             this.currentConversation!.messages.push({
                 id: userMsgId,
                 role: 'user',
-                content: prompt
+                content: prompt,
+                attachments: pendingAttachments.length > 0 ? pendingAttachments : undefined
             });
 
             this.currentConversation!.messages.push({
@@ -484,6 +526,8 @@ export const useChatStore = defineStore('chat', {
 
             this.isGenerating = true;
             this.currentError = null;
+            this.attachmentError = null;
+            this.draftAttachments = [];
 
             try {
                 const provider = this.resolveModelProvider();
@@ -496,11 +540,16 @@ export const useChatStore = defineStore('chat', {
 
                 const result = await provider.sendMessage(
                     prompt,
-                    { context: { conversationId: backendId }, modelId: this.currentModelId },
-                    (chunk: string) => {
+                    {
+                        context: { conversationId: backendId },
+                        modelId: this.currentModelId,
+                        attachments: pendingAttachments
+                    },
+                    (update) => {
                         const lastMsg = this.currentConversation!.messages[this.currentConversation!.messages.length - 1];
                         if (lastMsg.role === 'assistant') {
-                            lastMsg.content = chunk;
+                            lastMsg.content = update.text;
+                            lastMsg.annotations = update.annotations;
                         }
                     }
                 );
@@ -509,10 +558,12 @@ export const useChatStore = defineStore('chat', {
                 const lastMsg = this.currentConversation!.messages[this.currentConversation!.messages.length - 1];
                 if (lastMsg.role === 'assistant') {
                     lastMsg.content = result.text;
+                    lastMsg.annotations = result.annotations;
                 }
 
                 if (this.currentConversation!.title === 'New Chat') {
-                    this.currentConversation!.title = prompt.substring(0, 30) + (prompt.length > 30 ? '...' : '');
+                    const seedTitle = prompt.trim() || pendingAttachments[0]?.name || 'New Chat';
+                    this.currentConversation!.title = seedTitle.substring(0, 30) + (seedTitle.length > 30 ? '...' : '');
                 }
 
                 this.currentConversation!.updatedAt = Date.now();
@@ -526,6 +577,35 @@ export const useChatStore = defineStore('chat', {
             } finally {
                 this.isGenerating = false;
             }
+        },
+
+        async queueAttachments(files: File[]) {
+            if (!files.length) {
+                return;
+            }
+
+            this.attachmentError = null;
+            const nextAttachments: MessageAttachment[] = [];
+            for (const file of files) {
+                if (file.size > MAX_ATTACHMENT_SIZE) {
+                    this.attachmentError = `单个附件不能超过 ${Math.floor(MAX_ATTACHMENT_SIZE / (1024 * 1024))}MB`;
+                    continue;
+                }
+
+                nextAttachments.push(await fileToAttachment(file));
+            }
+
+            if (nextAttachments.length > 0) {
+                this.draftAttachments = [...this.draftAttachments, ...nextAttachments];
+            }
+        },
+
+        removeDraftAttachment(attachmentId: string) {
+            this.draftAttachments = this.draftAttachments.filter((attachment) => attachment.id !== attachmentId);
+        },
+
+        clearDraftAttachments() {
+            this.draftAttachments = [];
         },
 
         abort() {

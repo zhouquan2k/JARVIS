@@ -6,6 +6,7 @@ import { useChatStore } from './chat';
 
 class MockModelProvider implements IModelProvider {
     id = 'mock-provider';
+    optionsUsed: Array<Record<string, unknown>> = [];
 
     async getAvailableModels() {
         return {
@@ -20,15 +21,38 @@ class MockModelProvider implements IModelProvider {
 
     async sendMessage(
         prompt: string,
-        _options: { modelId?: string } = {},
-        onUpdate: (chunk: string) => void
+        _options = {},
+        onUpdate: (update: { text: string }) => void
     ): Promise<{ text: string; conversationId: string; messageId: string }> {
+        this.optionsUsed.push(_options as Record<string, unknown>);
         const text = `reply:${prompt}`;
-        onUpdate(text);
+        onUpdate({
+            text,
+            annotations: [
+                {
+                    kind: 'cite',
+                    range: { start: 0, end: text.length },
+                    payload: {
+                        refId: 'ref-1',
+                        label: '[1]'
+                    }
+                }
+            ]
+        });
         return {
             text,
             conversationId: 'conversation-id',
-            messageId: 'message-id'
+            messageId: 'message-id',
+            annotations: [
+                {
+                    kind: 'cite',
+                    range: { start: 0, end: text.length },
+                    payload: {
+                        refId: 'ref-1',
+                        label: '[1]'
+                    }
+                }
+            ]
         };
     }
 
@@ -214,5 +238,55 @@ describe('useChatStore workspace history flow', () => {
         await store.setCurrentModelProvider('other-provider');
         expect(store.currentProviderId).toBe('other-provider');
         expect(store.currentModelId).toBe('other-dynamic');
+    });
+
+    it('queues attachments, sends them with the prompt, and persists assistant annotations', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+
+        const file = {
+            name: 'diagram.png',
+            type: 'image/png',
+            size: 3,
+            async arrayBuffer() {
+                return new Uint8Array([1, 2, 3]).buffer;
+            }
+        } as File;
+
+        await store.queueAttachments([file]);
+        expect(store.draftAttachments).toHaveLength(1);
+        expect(store.draftAttachments[0]).toMatchObject({
+            type: 'image',
+            name: 'diagram.png',
+            previewBase64: 'AQID'
+        });
+
+        await store.sendMessage('请分析');
+
+        expect(provider.optionsUsed[0]?.attachments).toEqual([
+            expect.objectContaining({
+                name: 'diagram.png',
+                mimeType: 'image/png',
+                base64Data: 'AQID'
+            })
+        ]);
+        expect(store.draftAttachments).toHaveLength(0);
+        expect(store.currentConversation?.messages[0]).toMatchObject({
+            role: 'user',
+            content: '请分析',
+            attachments: [
+                expect.objectContaining({
+                    name: 'diagram.png'
+                })
+            ]
+        });
+        expect(store.currentConversation?.messages[1]?.annotations).toEqual([
+            expect.objectContaining({
+                kind: 'cite'
+            })
+        ]);
     });
 });

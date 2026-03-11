@@ -21,9 +21,9 @@ class MockCompareProvider implements IModelProvider {
     async sendMessage(
         prompt: string,
         _options: { modelId?: string } = {},
-        onUpdate: (chunk: string) => void
+        onUpdate: (update: { text: string }) => void
     ): Promise<{ text: string; conversationId: string; messageId: string }> {
-        onUpdate(`${this.id}:${prompt}`);
+        onUpdate({ text: `${this.id}:${prompt}` });
         return {
             text: `${this.id}:${prompt}`,
             conversationId: `${this.id}-conversation`,

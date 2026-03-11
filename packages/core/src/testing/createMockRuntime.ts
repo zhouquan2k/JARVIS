@@ -1,6 +1,7 @@
-import type { ProviderConfig, ProviderModelCatalog, RuntimeMode } from '../../config';
+import { APP_CONFIG, type ModelConfig, type ProviderConfig, type ProviderModelCatalog, type RuntimeMode } from '../../config';
 import type { AnalysisResult } from '../analysis/types';
-import type { IModelProvider } from '../interfaces/IModelProvider';
+import type { IModelProvider, ProviderSendResult, ProviderStreamUpdate, SendMessageOptions } from '../interfaces/IModelProvider';
+import type { MessageAnnotation } from '../interfaces/IStorageProvider';
 import type { ProviderRuntime } from '../runtime/types';
 
 export interface CreateMockRuntimeOptions {
@@ -11,28 +12,48 @@ export interface CreateMockRuntimeOptions {
 }
 
 function buildMockProviders(runtimeMode: RuntimeMode): ProviderConfig[] {
-    return [
-        {
-            id: 'gemini-api',
-            name: 'Gemini (Mock)',
-            models: [
-                { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash (Mock)' },
-                { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro (Mock)' }
-            ],
-            defaultModel: 'gemini-2.5-flash',
-            supportedRuntimeModes: [runtimeMode]
-        },
-        {
-            id: 'mock-second',
-            name: 'Second Provider (Mock)',
-            models: [
-                { id: 'second-fast', name: 'Second Fast' },
-                { id: 'second-precise', name: 'Second Precise' }
-            ],
-            defaultModel: 'second-fast',
-            supportedRuntimeModes: [runtimeMode]
-        }
-    ];
+    return APP_CONFIG.providers
+        .filter((provider) => provider.supportedRuntimeModes.includes(runtimeMode))
+        .map((provider) => ({
+            ...provider,
+            name: provider.name.includes('(Mock)') ? provider.name : `${provider.name} (Mock)`,
+            supportedRuntimeModes: [runtimeMode],
+            models: ensurePreferredDefaultModel(provider).map((model) => ({ ...model }))
+        }));
+}
+
+function normalizeModelToken(value: string): string {
+    return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function toMockModelId(providerId: string, preferredDefaultModel: string): string {
+    return `${providerId}-${normalizeModelToken(preferredDefaultModel) || 'preferred-default'}`;
+}
+
+function ensurePreferredDefaultModel(provider: ProviderConfig): ModelConfig[] {
+    const models = provider.models.map((model) => ({ ...model }));
+    const preferredDefaultModel = provider.preferredDefaultModel?.trim();
+    if (!preferredDefaultModel) {
+        return models;
+    }
+
+    const normalizedPreferred = normalizeModelToken(preferredDefaultModel);
+    const hasMatch = models.some((model) => {
+        return model.id === preferredDefaultModel
+            || model.name === preferredDefaultModel
+            || normalizeModelToken(model.id) === normalizedPreferred
+            || normalizeModelToken(model.name) === normalizedPreferred;
+    });
+
+    if (hasMatch) {
+        return models;
+    }
+
+    models.push({
+        id: toMockModelId(provider.id, preferredDefaultModel),
+        name: preferredDefaultModel
+    });
+    return models;
 }
 
 function sleep(ms: number) {
@@ -56,6 +77,41 @@ function extractByLabel(text: string, label: string): string {
 function excerpt(text: string, maxLen = 96): string {
     if (!text) return '';
     return text.length <= maxLen ? text : `${text.slice(0, maxLen)}...`;
+}
+
+function buildStructuredMockResponse(providerId: string, modelId?: string): { text: string; annotations?: MessageAnnotation[] } {
+    const text = `${providerId}/${modelId || 'default'} 返回了结构化消息 [1]`;
+    return {
+        text,
+        annotations: [
+            {
+                kind: 'cite',
+                range: { start: text.length - 3, end: text.length },
+                payload: {
+                    refId: 'ref-1',
+                    label: '[1]',
+                    title: 'Mock Source',
+                    url: 'https://example.com/mock-source',
+                    snippet: 'Mock citation payload'
+                }
+            },
+            {
+                kind: 'image_group',
+                range: null,
+                payload: {
+                    groupId: 'mock-gallery',
+                    images: [
+                        {
+                            id: 'mock-image-1',
+                            mimeType: 'image/png',
+                            previewBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2ZQ1EAAAAASUVORK5CYII=',
+                            alt: 'Mock image'
+                        }
+                    ]
+                }
+            }
+        ]
+    };
 }
 
 class MockStreamingProvider implements IModelProvider {
@@ -87,12 +143,9 @@ class MockStreamingProvider implements IModelProvider {
 
     async sendMessage(
         prompt: string,
-        options: {
-            context?: { parentMessageId?: string; conversationId?: string };
-            modelId?: string;
-        } = {},
-        onUpdate: (chunk: string) => void
-    ): Promise<{ text: string; conversationId: string; messageId: string }> {
+        options: SendMessageOptions = {},
+        onUpdate: (update: ProviderStreamUpdate) => void
+    ): Promise<ProviderSendResult> {
         this.aborted = false;
 
         const isAnalysisPrompt =
@@ -103,9 +156,12 @@ class MockStreamingProvider implements IModelProvider {
         const outputA = extractByLabel(prompt, 'Model A output:');
         const outputB = extractByLabel(prompt, 'Model B output:');
 
+        const structuredResponse = prompt.includes('TRIGGER_ANNOTATED_NATIVE')
+            ? buildStructuredMockResponse(this.id, options.modelId)
+            : null;
         const finalText = isAnalysisPrompt
             ? this.buildAnalysisText(userPrompt, outputA, outputB)
-            : this.buildNativeText(prompt, options.modelId);
+            : structuredResponse?.text || this.buildNativeText(prompt, options.modelId);
 
         const charDelay = prompt.includes(this.options.slowStreamTrigger)
             ? this.options.slowCharDelayMs
@@ -116,14 +172,20 @@ class MockStreamingProvider implements IModelProvider {
                 throw new Error('Request aborted');
             }
             partial += char;
-            onUpdate(partial);
+            onUpdate({
+                text: partial,
+                annotations: structuredResponse && partial.length === finalText.length
+                    ? structuredResponse.annotations
+                    : undefined
+            });
             await sleep(charDelay);
         }
 
         return {
             text: finalText,
             conversationId: options.context?.conversationId || crypto.randomUUID(),
-            messageId: crypto.randomUUID()
+            messageId: crypto.randomUUID(),
+            annotations: structuredResponse?.annotations
         };
     }
 

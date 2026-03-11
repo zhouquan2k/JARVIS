@@ -3,7 +3,10 @@ export { default as ConversationWorkspaceView } from './src/views/ConversationWo
 export { default as NormalChatView } from './src/views/NormalChatView.vue';
 export { default as CompareChatView } from './src/views/CompareChatView.vue';
 export { default as AppTopBar } from './src/components/AppTopBar.vue';
+export { default as AttachmentComposer } from './src/components/AttachmentComposer.vue';
 export { default as ConversationSidebar } from './src/components/ConversationSidebar.vue';
+export { default as MessageAnnotationLayer } from './src/components/MessageAnnotationLayer.vue';
+export { default as MessageAttachmentStrip } from './src/components/MessageAttachmentStrip.vue';
 export { useChatStore } from './src/store/chat';
 export { useCompareStore } from './src/store/compare';
 export { CHAT_ROUTES, type ChatRoute, type ChatRoutePath } from './src/routes';

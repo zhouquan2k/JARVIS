@@ -1,0 +1,16 @@
+:root {
+  --cp-bg: #0f1115;
+  --cp-bg-elevated: #171b22;
+  --cp-panel: rgba(255, 255, 255, 0.04);
+  --cp-border: rgba(255, 255, 255, 0.08);
+  --cp-border-subtle: rgba(255, 255, 255, 0.05);
+  --cp-text-primary: #f3f4f6;
+  --cp-text-muted: #9ca3af;
+  --cp-text-faint: rgba(243, 244, 246, 0.56);
+  --cp-accent: #3b82f6;
+  --cp-accent-soft: rgba(59, 130, 246, 0.12);
+  --cp-user-bubble: #1f6feb;
+  --cp-shadow: 0 24px 48px rgba(0, 0, 0, 0.28);
+  --cp-sidebar-hover: rgba(255, 255, 255, 0.06);
+  --cp-sidebar-active: rgba(255, 255, 255, 0.1);
+}

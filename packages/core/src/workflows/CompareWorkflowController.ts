@@ -58,13 +58,13 @@ export class CompareWorkflowController {
 
         try {
             const [resultA, resultB] = await Promise.all([
-                providerA.sendMessage(prompt, { modelId: modelA.modelId }, (chunk: string) => {
-                    outputA = chunk;
-                    onOutputA(chunk);
+                providerA.sendMessage(prompt, { modelId: modelA.modelId }, (update) => {
+                    outputA = update.text;
+                    onOutputA(update.text);
                 }),
-                providerB.sendMessage(prompt, { modelId: modelB.modelId }, (chunk: string) => {
-                    outputB = chunk;
-                    onOutputB(chunk);
+                providerB.sendMessage(prompt, { modelId: modelB.modelId }, (update) => {
+                    outputB = update.text;
+                    onOutputB(update.text);
                 })
             ]);
 

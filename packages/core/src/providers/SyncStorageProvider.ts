@@ -1,6 +1,12 @@
 import localforage from 'localforage';
 import type { ISyncTransport, SyncPushResult } from '../interfaces/ISyncTransport';
-import type { Conversation, ConversationSyncState, IStorageProvider } from '../interfaces/IStorageProvider';
+import {
+    cloneConversation,
+    normalizeConversation,
+    type Conversation,
+    type ConversationSyncState,
+    type IStorageProvider
+} from '../interfaces/IStorageProvider';
 
 export interface SyncStateStore {
     getCursor(syncKey: string): Promise<number | null>;
@@ -13,20 +19,6 @@ export interface SyncStorageProviderOptions {
     syncKey: string;
     initialCursor?: number | null;
     stateStore?: SyncStateStore;
-}
-
-function cloneConversation(conversation: Conversation): Conversation {
-    return {
-        ...conversation,
-        sync: conversation.sync ? { ...conversation.sync } : undefined,
-        compare: conversation.compare
-            ? {
-                ...conversation.compare,
-                analysisResult: { ...conversation.compare.analysisResult }
-            }
-            : undefined,
-        messages: conversation.messages.map((message) => ({ ...message }))
-    };
 }
 
 function stripComparePayload(conversation: Conversation): Conversation {
@@ -94,11 +86,11 @@ export class SyncStorageProvider implements IStorageProvider {
 
     async saveConversation(chat: Conversation): Promise<void> {
         if (chat.compare) {
-            await this.localStore.saveConversation(cloneConversation(chat));
+            await this.localStore.saveConversation(cloneConversation(normalizeConversation(chat)));
             return;
         }
 
-        const nextConversation = this.prepareLocalConversation(chat, {
+        const nextConversation = this.prepareLocalConversation(normalizeConversation(chat), {
             deleted: chat.sync?.deleted ?? false
         });
         await this.localStore.saveConversation(nextConversation);
@@ -106,11 +98,13 @@ export class SyncStorageProvider implements IStorageProvider {
     }
 
     async getConversation(id: string): Promise<Conversation | null> {
-        return this.localStore.getConversation(id);
+        const conversation = await this.localStore.getConversation(id);
+        return conversation ? normalizeConversation(conversation) : null;
     }
 
     async getAllConversations(): Promise<Conversation[]> {
-        return this.localStore.getAllConversations();
+        const conversations = await this.localStore.getAllConversations();
+        return conversations.map(normalizeConversation);
     }
 
     async deleteConversation(id: string): Promise<void> {

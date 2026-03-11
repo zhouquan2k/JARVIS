@@ -183,4 +183,115 @@ describe('sync api', () => {
             nextCursor: 1
         });
     });
+
+    it('preserves message attachments and annotations across push and pull', async () => {
+        const app = createApp({ config: createConfig({ isDevelopment: true }) });
+
+        const pushResponse = await app.request('/api/sync/push', {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                'x-sync-key': 'workspace-rich'
+            },
+            body: JSON.stringify({
+                conversations: [
+                    createConversationPayload('conv-rich', 100, {
+                        messages: [
+                            {
+                                id: 'conv-rich-m1',
+                                role: 'user',
+                                content: 'hello',
+                                attachments: [
+                                    {
+                                        id: 'attachment-1',
+                                        type: 'file',
+                                        name: 'notes.txt',
+                                        mimeType: 'text/plain',
+                                        size: 42,
+                                        base64Data: 'aGVsbG8='
+                                    }
+                                ]
+                            },
+                            {
+                                id: 'conv-rich-m2',
+                                role: 'assistant',
+                                content: 'answer [1]',
+                                annotations: [
+                                    {
+                                        kind: 'cite',
+                                        range: { start: 7, end: 10 },
+                                        payload: {
+                                            refId: 'turn0search0',
+                                            label: '[1]',
+                                            title: 'Example',
+                                            url: 'https://example.com/article',
+                                            snippet: 'Example snippet'
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    })
+                ]
+            })
+        });
+
+        expect(pushResponse.status).toBe(200);
+
+        const pullResponse = await app.request('/api/sync/pull', {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                'x-sync-key': 'workspace-rich'
+            },
+            body: JSON.stringify({ cursor: null })
+        });
+
+        expect(pullResponse.status).toBe(200);
+        await expect(pullResponse.json()).resolves.toEqual({
+            conversations: [
+                {
+                    id: 'conv-rich',
+                    title: 'Conversation conv-rich',
+                    updatedAt: 100,
+                    messages: [
+                        {
+                            id: 'conv-rich-m1',
+                            role: 'user',
+                            content: 'hello',
+                            attachments: [
+                                {
+                                    id: 'attachment-1',
+                                    type: 'file',
+                                    name: 'notes.txt',
+                                    mimeType: 'text/plain',
+                                    size: 42,
+                                    base64Data: 'aGVsbG8='
+                                }
+                            ]
+                        },
+                        {
+                            id: 'conv-rich-m2',
+                            role: 'assistant',
+                            content: 'answer [1]',
+                            annotations: [
+                                {
+                                    kind: 'cite',
+                                    range: { start: 7, end: 10 },
+                                    payload: {
+                                        refId: 'turn0search0',
+                                        label: '[1]',
+                                        title: 'Example',
+                                        url: 'https://example.com/article',
+                                        snippet: 'Example snippet'
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ],
+            nextCursor: 1
+        });
+    });
 });

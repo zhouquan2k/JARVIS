@@ -3,6 +3,7 @@
     <ConversationSidebar
       :collapsed="chatStore.sidebarCollapsed"
       :history-source="chatStore.historySource"
+      :show-history-source-switch="showHistorySourceSwitch"
       :local-items="chatStore.conversations"
       :external-items="chatStore.externalHistoryItems"
       :active-local-id="chatStore.workspaceMode === 'active' ? chatStore.currentConversation?.id : null"
@@ -13,9 +14,10 @@
       @select-local="onSelectLocal"
       @select-external="onSelectExternal"
       @new-chat="onNewChat"
+      @new-compare="onNewCompare"
     />
 
-    <div class="workspace-main">
+    <div class="workspace-main" :class="{ 'compare-mode': isCompareMode }">
       <CompareChatView v-if="isCompareMode" />
       <NormalChatView v-else />
     </div>
@@ -23,6 +25,7 @@
 </template>
 
 <script setup lang="ts">
+import '../theme/chatgpt-dark.css';
 import CompareChatView from './CompareChatView.vue';
 import ConversationSidebar from '../components/ConversationSidebar.vue';
 import NormalChatView from './NormalChatView.vue';
@@ -30,10 +33,12 @@ import { useChatStore } from '../store/chat';
 
 const props = defineProps<{
   isCompareMode: boolean;
+  showHistorySourceSwitch?: boolean;
 }>();
 
 const emit = defineEmits<{
   (event: 'request-normal-mode'): void;
+  (event: 'request-compare-mode'): void;
 }>();
 
 const chatStore = useChatStore();
@@ -62,6 +67,10 @@ async function onNewChat() {
   }
   await chatStore.startNewConversation();
 }
+
+function onNewCompare() {
+  emit('request-compare-mode');
+}
 </script>
 
 <style scoped>
@@ -73,8 +82,9 @@ async function onNewChat() {
   height: 100%;
   overflow: hidden;
   background:
-    linear-gradient(135deg, rgba(251, 191, 36, 0.08), transparent 30%),
-    linear-gradient(180deg, #fafaf9 0%, #f5f5f4 100%);
+    radial-gradient(circle at top left, rgba(59, 130, 246, 0.12), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(56, 189, 248, 0.08), transparent 24%),
+    linear-gradient(180deg, #090b10 0%, #11151d 100%);
 }
 
 .workspace-main {
@@ -84,6 +94,13 @@ async function onNewChat() {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+.workspace-main.compare-mode {
+  background:
+    radial-gradient(circle at top left, rgba(120, 128, 150, 0.1), transparent 34%),
+    radial-gradient(circle at bottom right, rgba(71, 85, 105, 0.12), transparent 28%),
+    linear-gradient(180deg, #1a1d24 0%, #20242d 100%);
 }
 
 .workspace-main > * {

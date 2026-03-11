@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createProviderRuntime } from './createProviderRuntime';
-import type { IModelProvider } from '../interfaces/IModelProvider';
+import type { IModelProvider, ProviderStreamUpdate, SendMessageOptions } from '../interfaces/IModelProvider';
 
 class CustomGeminiProvider implements IModelProvider {
     public id = 'custom-gemini';
@@ -23,13 +23,10 @@ class CustomGeminiProvider implements IModelProvider {
 
     async sendMessage(
         _prompt: string,
-        _options: {
-            context?: { parentMessageId?: string; conversationId?: string };
-            modelId?: string;
-        },
-        onUpdate: (chunk: string) => void
+        _options: SendMessageOptions,
+        onUpdate: (update: ProviderStreamUpdate) => void
     ): Promise<{ text: string; conversationId: string; messageId: string }> {
-        onUpdate('custom');
+        onUpdate({ text: 'custom' });
         return {
             text: 'custom',
             conversationId: 'conversation-id',
@@ -196,8 +193,8 @@ describe('createProviderRuntime', () => {
                     async checkAuth() {
                         return true;
                     },
-                    async sendMessage(_prompt: string, _options: { modelId?: string }, onUpdate: (chunk: string) => void) {
-                        onUpdate('ok');
+                    async sendMessage(_prompt: string, _options: SendMessageOptions, onUpdate: (update: ProviderStreamUpdate) => void) {
+                        onUpdate({ text: 'ok' });
                         return { text: 'ok', conversationId: 'c', messageId: 'm' };
                     },
                     abort() {}
@@ -233,8 +230,8 @@ describe('createProviderRuntime', () => {
                     async checkAuth() {
                         return true;
                     },
-                    async sendMessage(_prompt: string, _options: { modelId?: string }, onUpdate: (chunk: string) => void) {
-                        onUpdate('ok');
+                    async sendMessage(_prompt: string, _options: SendMessageOptions, onUpdate: (update: ProviderStreamUpdate) => void) {
+                        onUpdate({ text: 'ok' });
                         return { text: 'ok', conversationId: 'c', messageId: 'm' };
                     },
                     abort() {}

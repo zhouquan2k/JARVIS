@@ -20,14 +20,14 @@
 
     <main class="scroll-panel">
       <section v-if="compareStore.activeTab === 'native'" class="native-grid">
-        <article class="output-card">
+        <article class="output-card output-card-a">
           <h3>Model A</h3>
           <div class="output-body" data-testid="output-a">
             <MarkdownContent v-if="compareStore.outputA" :source="compareStore.outputA" />
             <pre v-else>{{ outputPlaceholder }}</pre>
           </div>
         </article>
-        <article class="output-card">
+        <article class="output-card output-card-b">
           <h3>Model B</h3>
           <div class="output-body" data-testid="output-b">
             <MarkdownContent v-if="compareStore.outputB" :source="compareStore.outputB" />
@@ -145,7 +145,10 @@ function startNewChat() {
   min-height: 0;
   min-width: 0;
   box-sizing: border-box;
-  background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+  background:
+    radial-gradient(circle at top left, rgba(148, 163, 184, 0.08), transparent 30%),
+    radial-gradient(circle at bottom right, rgba(71, 85, 105, 0.14), transparent 24%),
+    linear-gradient(180deg, #22262f 0%, #2a2f39 100%);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -155,23 +158,23 @@ function startNewChat() {
 .sticky-bottom {
   position: sticky;
   z-index: 2;
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(4px);
+  background: rgba(28, 33, 41, 0.9);
+  backdrop-filter: blur(10px);
 }
 
 .sticky-top {
   top: 0;
-  border-bottom: 1px solid #dbeafe;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   padding: 8px 12px;
 }
 
 .prompt-line {
   margin: 10px 0 0;
   padding: 10px 12px;
-  border: 1px solid #dbeafe;
-  border-radius: 10px;
-  background: #f8fafc;
-  color: #334155;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #d1d5db;
   font-size: 14px;
   line-height: 1.5;
   white-space: pre-wrap;
@@ -182,7 +185,7 @@ function startNewChat() {
   margin-top: 10px;
   display: flex;
   gap: 16px;
-  border-bottom: 1px solid #dbeafe;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .tab-row button {
@@ -190,14 +193,14 @@ function startNewChat() {
   background: transparent;
   border-bottom: 2px solid transparent;
   border-radius: 0;
-  color: #64748b;
+  color: #9ca3af;
   padding: 8px 2px;
   font-size: 14px;
 }
 
 .tab-row button.active {
-  color: #1d4ed8;
-  border-bottom-color: #1d4ed8;
+  color: #f3f4f6;
+  border-bottom-color: #cbd5e1;
 }
 
 .scroll-panel {
@@ -219,18 +222,30 @@ function startNewChat() {
 .output-card {
   display: flex;
   flex-direction: column;
-  border: 1px solid #dbeafe;
-  border-radius: 12px;
-  background: #fff;
-  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 14px;
   min-height: 240px;
   min-width: 0;
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.12);
+}
+
+.output-card-a {
+  background:
+    linear-gradient(180deg, rgba(56, 68, 86, 0.5), rgba(39, 47, 60, 0.72)),
+    rgba(41, 49, 61, 0.9);
+}
+
+.output-card-b {
+  background:
+    linear-gradient(180deg, rgba(72, 64, 82, 0.42), rgba(46, 44, 57, 0.72)),
+    rgba(49, 47, 60, 0.9);
 }
 
 .output-card h3 {
   margin: 0 0 8px 0;
   font-size: 14px;
-  color: #1e3a8a;
+  color: #e5e7eb;
 }
 
 .analysis-panel {
@@ -249,12 +264,12 @@ pre {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
-  color: #0f172a;
+  color: #e5e7eb;
 }
 
 .sticky-bottom {
   bottom: 0;
-  border-top: 1px solid #dbeafe;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -272,9 +287,17 @@ textarea {
   min-height: 56px;
   min-width: 0;
   resize: vertical;
-  border-radius: 10px;
-  border: 1px solid #cbd5e1;
-  padding: 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #f3f4f6;
+}
+
+textarea:focus {
+  outline: none;
+  border-color: rgba(203, 213, 225, 0.28);
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.12);
 }
 
 .input-row button {
@@ -290,12 +313,12 @@ textarea {
 }
 
 .stop-btn {
-  background: #dc2626;
+  background: rgba(220, 38, 38, 0.92);
   color: #fff;
 }
 
 .new-btn {
-  background: #2563eb;
+  background: rgba(255, 255, 255, 0.08);
   color: #fff;
 }
 

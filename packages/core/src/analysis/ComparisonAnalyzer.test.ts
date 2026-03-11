@@ -27,13 +27,13 @@ class MockModelProvider implements IModelProvider {
     async sendMessage(
         prompt: string,
         options: { modelId?: string } = {},
-        onUpdate: (chunk: string) => void
+        onUpdate: (update: { text: string }) => void
     ): Promise<{ text: string; conversationId: string; messageId: string }> {
         this.prompts.push(prompt);
         this.optionsUsed.push(options);
 
         for (const chunk of this.streamChunks) {
-            onUpdate(chunk);
+            onUpdate({ text: chunk });
         }
 
         return {

@@ -1,5 +1,5 @@
 /// <reference types="chrome"/>
-import { IModelProvider, type AnalysisResult } from '@packages/core/src';
+import { IModelProvider, type AnalysisResult, type ProviderSendResult, type ProviderStreamUpdate } from '@packages/core/src';
 import type { ProviderModelCatalog } from '@packages/core/config';
 import type {
     AnalyzeComparisonRequest,
@@ -12,7 +12,7 @@ import type {
 } from './proxyProtocol';
 
 type PendingRequest = {
-    onUpdate?: (chunk: string) => void;
+    onUpdate?: (update: ProviderStreamUpdate | string) => void;
     resolve: (value: any) => void;
     reject: (reason: Error) => void;
 };
@@ -85,7 +85,7 @@ export class BackgroundProxyProvider implements IModelProvider {
 
     private createTrackedRequest<T>(
         message: ProxyRequest,
-        onUpdate?: (chunk: string) => void
+        onUpdate?: (update: ProviderStreamUpdate | string) => void
     ): Promise<T> {
         return new Promise((resolve, reject) => {
             const port = this.ensureConnection();
@@ -119,8 +119,8 @@ export class BackgroundProxyProvider implements IModelProvider {
     sendMessage(
         prompt: string,
         options: ProviderSendOptions = {},
-        onUpdate: (chunk: string) => void
-    ): Promise<{ text: string, conversationId: string, messageId: string }> {
+        onUpdate: (update: ProviderStreamUpdate) => void
+    ): Promise<ProviderSendResult> {
         const request: SendMessageRequest = {
             action: 'SEND_MESSAGE',
             requestId: this.nextRequestId('SEND_MESSAGE'),
@@ -130,7 +130,7 @@ export class BackgroundProxyProvider implements IModelProvider {
             options
         };
 
-        return this.createTrackedRequest<{ text: string, conversationId: string, messageId: string }>(
+        return this.createTrackedRequest<ProviderSendResult>(
             request,
             onUpdate
         );

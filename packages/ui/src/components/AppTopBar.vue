@@ -1,18 +1,10 @@
 <template>
   <header class="top-nav">
     <h1 class="brand">{{ title }}</h1>
-    <button
-      class="mode-switch"
-      :class="{ active: isCompareMode }"
-      @click="$emit('toggleMode')"
-      data-testid="mode-switch"
-      :aria-pressed="isCompareMode">
-      <span class="switch-label">对比模式</span>
-      <span class="switch-track">
-        <span class="switch-thumb" />
-      </span>
-    </button>
-    <span v-if="isCompareMode" class="compare-stage">{{ compareStageLabel }}</span>
+    <div class="top-meta">
+      <span v-if="isCompareMode" class="mode-pill">对比聊天</span>
+      <span v-if="isCompareMode" class="compare-stage">{{ compareStageLabel }}</span>
+    </div>
   </header>
 </template>
 
@@ -30,7 +22,6 @@ const props = withDefaults(defineProps<{
 });
 
 defineEmits<{
-  (event: 'toggleMode'): void;
 }>();
 
 const compareStageLabel = computed(() => {
@@ -56,9 +47,11 @@ const compareStageLabel = computed(() => {
   align-items: center;
   gap: 12px;
   padding: 10px 14px;
-  border-bottom: 1px solid #e2e8f0;
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(6px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(15, 19, 27, 0.94), rgba(11, 14, 20, 0.9)),
+    rgba(7, 10, 18, 0.92);
+  backdrop-filter: blur(10px);
   z-index: 20;
 }
 
@@ -66,69 +59,35 @@ const compareStageLabel = computed(() => {
   margin: 0;
   font-size: 22px;
   line-height: 1;
-  color: #0f172a;
+  color: #f3f4f6;
 }
 
-.mode-switch {
-  border: 1px solid #cbd5e1;
-  background: #f8fafc;
-  border-radius: 999px;
-  padding: 6px 10px 6px 12px;
+.top-meta {
+  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  cursor: pointer;
 }
 
-.switch-label {
-  font-size: 13px;
-  color: #334155;
-}
-
-.switch-track {
-  width: 34px;
-  height: 20px;
+.mode-pill,
+.compare-stage {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
   border-radius: 999px;
-  background: #cbd5e1;
-  position: relative;
-  transition: background-color 0.2s ease;
+  font-size: 12px;
 }
 
-.switch-thumb {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: #fff;
-  transition: transform 0.2s ease;
-}
-
-.mode-switch.active {
-  border-color: #1d4ed8;
-  background: #eff6ff;
-}
-
-.mode-switch.active .switch-label {
-  color: #1d4ed8;
-}
-
-.mode-switch.active .switch-track {
-  background: #3b82f6;
-}
-
-.mode-switch.active .switch-thumb {
-  transform: translateX(14px);
+.mode-pill {
+  border: 1px solid rgba(129, 140, 248, 0.22);
+  background: rgba(99, 102, 241, 0.12);
+  color: #c7d2fe;
 }
 
 .compare-stage {
-  margin-left: auto;
-  font-size: 12px;
-  color: #1d4ed8;
-  background: #dbeafe;
-  padding: 4px 10px;
-  border-radius: 999px;
+  color: #d1d5db;
+  background: rgba(255, 255, 255, 0.06);
 }
 
 @media (max-width: 920px) {

@@ -1,7 +1,6 @@
 import { createProviderRuntime, type IHistoryProvider, type ProviderRuntime } from '@packages/core/src';
 import { BackgroundProxyProvider } from './utils/BackgroundProxyProvider';
 import { BackgroundHistoryProxy } from './utils/BackgroundHistoryProxy';
-import { createMockRuntime } from './testing/createMockRuntime';
 import { createMockHistoryProvider } from './testing/createMockHistoryProvider';
 
 function createChannelId(providerId: string): string {
@@ -19,7 +18,7 @@ export function createExtensionProxyRuntime(): ProviderRuntime {
 
 const useMockRuntime = import.meta.env.WXT_E2E === '1';
 
-export const providerRuntime = useMockRuntime ? createMockRuntime() : createExtensionProxyRuntime();
+export const providerRuntime = createExtensionProxyRuntime();
 
 export function createExtensionHistoryProvider(providerId = 'chatgpt-web'): IHistoryProvider {
     if (useMockRuntime) {

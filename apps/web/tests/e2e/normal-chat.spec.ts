@@ -98,13 +98,14 @@ test('workspace sidebar persists while switching between normal and compare view
   await expect(page.getByTestId('normal-chat-view')).toBeVisible();
   await expect(page.getByTestId('normal-model')).toHaveValue('gemini-2.5-flash');
 
-  await page.getByTestId('mode-switch').click();
+  await page.getByTestId('sidebar-new-chat-menu').click();
+  await page.getByTestId('sidebar-new-chat-compare').click();
   await expect(page.getByTestId('compare-chat-view')).toBeVisible();
   await expect(page.getByTestId('workspace-sidebar')).toBeVisible();
-  await expect(page.getByTestId('history-source-local')).toBeVisible();
+  await expect(page.getByTestId('history-source-local')).toHaveCount(0);
   await expect(page.getByTestId('compare-model-a')).toHaveValue('gemini-2.5-flash');
 
-  await page.getByTestId('mode-switch').click();
+  await page.getByTestId('sidebar-new-chat').click();
   await expect(page.getByTestId('normal-chat-view')).toBeVisible();
   await expect(page.getByTestId('workspace-sidebar')).toBeVisible();
 });
@@ -125,17 +126,16 @@ test('normal chat renders markdown from assistant output', async ({ page }) => {
 test('provider selectors use runtime model catalogs instead of static defaults', async ({ page }) => {
   await page.goto('/#/');
   await expect(page.getByTestId('normal-provider')).toHaveValue('gemini-api');
+  await expect(page.getByTestId('normal-provider').locator('option:checked')).toHaveText('Gemini (API) (Mock)');
   await expect(page.getByTestId('normal-model')).toHaveValue('gemini-2.5-flash');
-  await expect(page.getByTestId('normal-model')).toContainText('Gemini 2.5 Flash (Mock)');
+  await expect(page.getByTestId('normal-model').locator('option:checked')).toHaveText('Gemini 2.5 Flash');
+  await expect(page.getByTestId('normal-model').locator('option')).toContainText(['Gemini 2.5 Flash', 'Gemini Pro Latest']);
 
-  await page.getByTestId('normal-provider').selectOption('mock-second');
-  await expect(page.getByTestId('normal-model')).toHaveValue('second-fast');
-  await expect(page.getByTestId('normal-model')).toContainText('Second Fast');
-
-  await page.getByTestId('mode-switch').click();
+  await page.getByTestId('sidebar-new-chat-menu').click();
+  await page.getByTestId('sidebar-new-chat-compare').click();
   await expect(page.getByTestId('compare-chat-view')).toBeVisible();
   await expect(page.getByTestId('compare-model-a')).toHaveValue('gemini-2.5-flash');
-  await expect(page.getByTestId('compare-model-b')).toHaveValue('second-fast');
+  await expect(page.getByTestId('compare-model-b')).toHaveValue('gemini-2.5-flash');
 });
 
 test('normal and compare views stay bounded to the viewport', async ({ page }) => {
@@ -144,7 +144,29 @@ test('normal and compare views stay bounded to the viewport', async ({ page }) =
   await expect(page.getByTestId('normal-chat-view')).toBeVisible();
   await expectViewportBound(page);
 
-  await page.getByTestId('mode-switch').click();
+  await page.getByTestId('sidebar-new-chat-menu').click();
+  await page.getByTestId('sidebar-new-chat-compare').click();
   await expect(page.getByTestId('compare-chat-view')).toBeVisible();
   await expectViewportBound(page);
+});
+
+test('normal chat supports attachment composition and structured annotations', async ({ page }) => {
+  await page.goto('/#/');
+  await expect(page.getByTestId('normal-chat-view')).toBeVisible();
+
+  await page.locator('input[type="file"]').setInputFiles({
+    name: 'diagram.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from([1, 2, 3, 4])
+  });
+
+  await expect(page.locator('.draft-chip')).toContainText('diagram.png');
+  await page.getByTestId('normal-input').fill('TRIGGER_ANNOTATED_NATIVE');
+  await page.getByTestId('normal-send').click();
+
+  await expect(page.getByTestId('normal-messages')).toContainText('diagram.png');
+  await expect(page.getByTestId('normal-messages')).toContainText('返回了结构化消息');
+  await expect(page.locator('.inline-cite').first()).toContainText('[1]');
+  await expect(page.locator('.inline-cite').first()).toHaveAttribute('href', 'https://example.com/mock-source');
+  await expect(page.locator('.image-tile').first()).toBeVisible();
 });
