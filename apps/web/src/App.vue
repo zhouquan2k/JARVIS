@@ -14,14 +14,20 @@
 
 <script setup lang="ts">
 import { computed, onMounted } from 'vue';
-import { AppTopBar, ConversationWorkspaceView, useChatStore, useCompareStore } from '@packages/ui';
+import {
+  AppTopBar,
+  ConversationWorkspaceView,
+  openConversationImportDialog,
+  useChatStore,
+  useCompareStore
+} from '@packages/ui';
 import { currentRoute, navigateTo } from './router';
-import { createWebHistoryProvider, providerRuntime } from './providerRuntime';
+import { createWebHistoryProviders, providerRuntime } from './providerRuntime';
 import { createWebSyncStorageProvider } from './sync';
 
 const chatStore = useChatStore();
 const compareStore = useCompareStore();
-const historyProvider = createWebHistoryProvider();
+const historyProviders = createWebHistoryProviders();
 const isCompareMode = computed(() => currentRoute.value.path === '/compare');
 
 function openCompareMode() {
@@ -50,10 +56,12 @@ onMounted(() => {
       chatStore.setProviderModelsResolver((providerId: string) => providerRuntime.getProviderModels(providerId));
       chatStore.setProviders(
         providerRuntime.getProvider(providerCatalog[0].id),
-        syncStorageProvider,
-        historyProvider
+        syncStorageProvider
       );
-      chatStore.setHistoryProvider(historyProvider);
+      chatStore.setHistoryProviders(historyProviders);
+      chatStore.setExternalFileImportHandler(async () => {
+        return openConversationImportDialog();
+      });
       await syncStorageProvider.hydrate().catch((error) => {
         console.warn('Web sync hydration failed, continuing with local data only.', error);
       });

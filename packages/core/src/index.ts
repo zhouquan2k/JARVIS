@@ -3,6 +3,7 @@ export * from './interfaces/IModelProvider';
 export * from './interfaces/IHistoryProvider';
 export * from './interfaces/IStorageProvider';
 export * from './interfaces/ISyncTransport';
+export * from './interfaces/ProviderRemoteConfig';
 export * from './providers/ChatGPTWebProvider';
 export * from './providers/FetchSyncTransport';
 export * from './providers/GeminiApiProvider';

@@ -1,6 +1,10 @@
 <template>
   <div class="chat-container" data-testid="normal-chat-view">
     <div class="chat-messages" ref="messagesRef" data-testid="normal-messages">
+      <div v-if="chatStore.isExternalPreviewLoading" class="loading-banner" data-testid="external-preview-loading">
+        正在加载对话内容...
+      </div>
+
       <div v-if="displayConversation" class="conversation-header">
         <h2>{{ displayConversation.title || 'Untitled' }}</h2>
         <span class="source-chip">
@@ -150,12 +154,28 @@ onMounted(async () => {
 });
 
 watch(() => displayConversation.value?.messages, () => {
+  if (isPreviewing.value) {
+    return;
+  }
   nextTick(() => {
     if (messagesRef.value) {
       messagesRef.value.scrollTop = messagesRef.value.scrollHeight;
     }
   });
 }, { deep: true });
+
+watch(
+  () => [displayConversation.value?.id, isPreviewing.value] as const,
+  () => {
+    nextTick(() => {
+      if (!messagesRef.value) {
+        return;
+      }
+
+      messagesRef.value.scrollTop = isPreviewing.value ? 0 : messagesRef.value.scrollHeight;
+    });
+  }
+);
 
 watch(() => chatStore.currentProviderId, async () => {
   isAuthenticated.value = await chatStore.checkAuth();
@@ -231,6 +251,15 @@ function onModelChange(modelId: string) {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.loading-banner {
+  align-self: flex-start;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(59, 130, 246, 0.12);
+  color: #bfdbfe;
+  font-size: 13px;
 }
 
 .conversation-header {

@@ -31,7 +31,7 @@ function createConversation(
             }
         ],
         backendId: overrides.backendId,
-        sourceType: overrides.sourceType,
+        origin: overrides.origin,
         externalId: overrides.externalId,
         sync: overrides.sync
     };
@@ -44,7 +44,7 @@ describe('SyncService', () => {
 
         const firstPush = service.push('workspace-a', [
             createConversation('shared', 100, {
-                sourceType: 'external',
+                origin: 'chatgpt-web',
                 externalId: 'import-1'
             })
         ]);

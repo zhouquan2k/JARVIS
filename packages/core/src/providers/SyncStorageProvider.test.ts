@@ -88,7 +88,7 @@ function createConversation(
     return {
         id: overrides.id,
         title: overrides.title ?? `Conversation ${overrides.id}`,
-        sourceType: overrides.sourceType ?? 'local',
+        origin: overrides.origin ?? 'local',
         messages: overrides.messages ?? [],
         updatedAt: overrides.updatedAt,
         backendId: overrides.backendId,

@@ -54,24 +54,29 @@ async function readMockSyncEvents(page: Page) {
   return page.evaluate(() => JSON.parse(localStorage.getItem('chatprism:mock-sync-events') ?? '[]'));
 }
 
-test('extension host supports external history preview and import flow', async () => {
+test('extension host supports external provider switching, Gemini preview/error fallback, and file import', async () => {
   const session = await launchExtensionPage();
   try {
     const { page } = session;
     await expect(page.getByTestId('conversation-workspace')).toBeVisible();
 
     await page.getByTestId('history-source-external').click();
+    await expect(page.getByTestId('external-provider-chatgpt-web')).toBeVisible();
+    await expect(page.getByTestId('external-provider-gemini-web')).toBeVisible();
+    await expect(page.getByTestId('external-provider-external-file')).toBeVisible();
+    await expect(page.getByTestId('external-history-item')).toHaveCount(2);
+
+    await page.getByTestId('external-provider-gemini-web').click();
     await expect(page.getByTestId('external-history-item')).toHaveCount(2);
     await page.getByTestId('external-history-item').first().click();
-
     await expect(page.getByTestId('preview-import')).toBeVisible();
     await expect(page.getByTestId('normal-input')).toHaveCount(0);
-    await expect(page.getByTestId('normal-messages')).toContainText('Alpha 项目的主要风险包括');
+    await expect(page.getByTestId('normal-messages')).toContainText('规则远程化');
 
     await page.getByTestId('preview-import').click();
     await expect(page.getByTestId('normal-input')).toBeVisible();
     await expect(page.getByTestId('local-history-item')).toHaveCount(1);
-    await expect(page.getByTestId('normal-messages')).toContainText('Alpha 项目的主要风险包括');
+    await expect(page.getByTestId('normal-messages')).toContainText('规则远程化');
     await expect.poll(async () => {
       const events = await readMockSyncEvents(page);
       return events.filter((event: { type: string }) => event.type === 'push').length;
@@ -81,7 +86,32 @@ test('extension host supports external history preview and import flow', async (
     expect(pushEvent.syncKey).toBe('extension-e2e');
 
     await page.getByTestId('history-source-external').click();
+    await page.getByTestId('external-provider-gemini-web').click();
     await expect(page.getByTestId('history-imported-badge').first()).toBeVisible();
+    await page.getByTestId('external-history-item').nth(1).click();
+    await expect(page.getByTestId('normal-error')).toContainText('页面结构已变化');
+
+    const fileChooserPromise = page.waitForEvent('filechooser');
+    await page.getByTestId('external-provider-external-file').click();
+    const fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles({
+      name: 'external-history.json',
+      mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify({
+        title: 'Imported File Session',
+        messages: [
+          { id: 'file-u1', role: 'user', content: '从文件导入的用户问题' },
+          { id: 'file-a1', role: 'assistant', content: '从文件导入的助手回答' }
+        ]
+      }))
+    });
+
+    await expect(page.getByTestId('normal-messages')).toContainText('从文件导入的助手回答');
+    await expect(page.getByTestId('local-history-item')).toHaveCount(2);
+    await expect.poll(async () => {
+      const mockEvents = await readMockSyncEvents(page);
+      return mockEvents.filter((event: { type: string }) => event.type === 'push').length;
+    }).toBe(2);
   } finally {
     await session.close();
   }

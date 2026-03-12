@@ -1,0 +1,28 @@
+{
+  "providerId": "gemini-web",
+  "version": "2026-03-11.1",
+  "matchOrigins": [
+    "https://gemini.google.com"
+  ],
+  "selectors": {
+    "historyListContainer": "conversations-list[data-test-id=\"all-conversations\"], nav[aria-label=\"Chat history\"], [data-test-id=\"conversation-list\"]",
+    "historyListItem": "a[data-test-id=\"conversation\"], a[href*=\"/app/\"]",
+    "historyTitle": ".conversation-title, [data-test-id=\"conversation-title\"]",
+    "historyLink": "a[data-test-id=\"conversation\"], a[href*=\"/app/\"]",
+    "conversationRoot": "main, [data-test-id=\"conversation-root\"]",
+    "userBubble": "[data-test-id=\"user-query\"], user-query, [data-message-author=\"user\"]",
+    "assistantBubble": "[data-test-id=\"model-response\"], model-response, [data-message-author=\"assistant\"]",
+    "lazyLoadSentinel": "[data-test-id=\"history-load-more\"], [aria-label=\"Load more\"]",
+    "loginGate": "a[href*=\"ServiceLogin\"], form[action*=\"ServiceLogin\"]"
+  },
+  "healthCheck": {
+    "requiredSelectors": [
+      "historyListContainer",
+      "historyListItem",
+      "conversationRoot",
+      "userBubble",
+      "assistantBubble"
+    ],
+    "maxMissingCount": 2
+  }
+}

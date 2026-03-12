@@ -31,7 +31,7 @@ function createConversation(
             }
         ],
         backendId: overrides.backendId,
-        sourceType: overrides.sourceType,
+        origin: overrides.origin,
         externalId: overrides.externalId,
         sync: deleted ? { deleted: true } : overrides.sync
     };

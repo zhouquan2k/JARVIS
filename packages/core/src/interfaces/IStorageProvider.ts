@@ -1,5 +1,5 @@
 import type { AnalysisResult } from '../analysis/types';
-import type { ConversationSourceType } from './IHistoryProvider';
+import type { ConversationOrigin } from './IHistoryProvider';
 
 export type ConversationRole = 'user' | 'assistant';
 export type MessageAttachmentType = 'image' | 'file';
@@ -68,7 +68,7 @@ export interface Conversation {
     id: string; // Our internal UUID
     backendId?: string; // Real remote provider conversation ID
     title: string;
-    sourceType?: ConversationSourceType;
+    origin?: ConversationOrigin;
     externalId?: string;
     messages: ConversationMessage[];
     updatedAt: number;
@@ -275,6 +275,7 @@ export function cloneConversation(conversation: Conversation): Conversation {
 export function normalizeConversation(conversation: Conversation): Conversation {
     return {
         ...conversation,
+        origin: conversation.origin ?? 'local',
         sync: conversation.sync ? { ...conversation.sync } : undefined,
         compare: conversation.compare
             ? {

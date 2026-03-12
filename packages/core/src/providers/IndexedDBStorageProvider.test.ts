@@ -43,7 +43,7 @@ describe('IndexedDBStorageProvider', () => {
         const conversation: Conversation = {
             id: 'conversation-1',
             title: 'Synced conversation',
-            sourceType: 'local',
+            origin: 'local',
             messages: [
                 {
                     id: 'm1',

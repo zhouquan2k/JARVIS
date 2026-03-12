@@ -6,8 +6,8 @@ export default defineConfig({
     manifest: {
         name: 'ChatPrism',
         action: {},
-        host_permissions: ['*://chatgpt.com/*'],
-        permissions: ['storage', 'cookies', 'tabs']
+        host_permissions: ['*://chatgpt.com/*', 'https://gemini.google.com/*'],
+        permissions: ['storage', 'cookies', 'tabs', 'scripting']
     },
     srcDir: 'src',
     outDir: 'dist',

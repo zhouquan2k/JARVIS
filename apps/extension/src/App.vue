@@ -14,16 +14,22 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, toRaw, watchEffect } from 'vue';
-import { AppTopBar, ConversationWorkspaceView, useChatStore, useCompareStore } from '@packages/ui';
+import {
+  AppTopBar,
+  ConversationWorkspaceView,
+  openConversationImportDialog,
+  useChatStore,
+  useCompareStore
+} from '@packages/ui';
 import { type SyncStorageProvider } from '@packages/core/src';
 import { currentRoute, navigateTo } from './router';
-import { createExtensionHistoryProvider, providerRuntime } from './providerRuntime';
+import { createExtensionHistoryProviders, providerRuntime } from './providerRuntime';
 import { loadLatestCompareConversation, saveCompareConversation } from './persistence/saveCompareConversation';
 import { createExtensionSyncStorageProvider } from './sync';
 
 const chatStore = useChatStore();
 const compareStore = useCompareStore();
-const historyProvider = createExtensionHistoryProvider();
+const historyProviders = createExtensionHistoryProviders();
 const isCompareMode = computed(() => currentRoute.value.path === '/compare');
 const isHydratingCompare = ref(false);
 const lastPersistedCompareKey = ref('');
@@ -68,10 +74,12 @@ onMounted(() => {
       chatStore.setProviderModelsResolver((providerId: string) => providerRuntime.getProviderModels(providerId));
       chatStore.setProviders(
         providerRuntime.getProvider(providerCatalog[0].id),
-        storageProvider,
-        historyProvider
+        storageProvider
       );
-      chatStore.setHistoryProvider(historyProvider);
+      chatStore.setHistoryProviders(historyProviders);
+      chatStore.setExternalFileImportHandler(async () => {
+        return openConversationImportDialog();
+      });
       await storageProvider.hydrate().catch((error) => {
         console.warn('Extension sync hydration failed, continuing with local data only.', error);
       });

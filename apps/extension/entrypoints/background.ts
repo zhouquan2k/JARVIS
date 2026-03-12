@@ -1,5 +1,8 @@
 /// <reference types="chrome"/>
 import type { IHistoryProvider, IModelProvider, ProviderRuntime } from '@packages/core/src';
+import { GeminiHistoryConfigLoader } from '../src/history/GeminiHistoryConfigLoader';
+import { GeminiHistoryTabBridge } from '../src/history/GeminiHistoryTabBridge';
+import { GeminiDomHistoryProvider } from '../src/history/GeminiDomHistoryProvider';
 import type {
     AbortRequest,
     AnalyzeComparisonRequest,
@@ -20,6 +23,7 @@ type RuntimeDeps = {
 };
 
 let runtimeDepsPromise: Promise<RuntimeDeps> | null = null;
+let geminiHistoryProvider: IHistoryProvider | null = null;
 
 const loadRuntimeDeps = async (): Promise<RuntimeDeps> => {
     if (!runtimeDepsPromise) {
@@ -101,6 +105,21 @@ export default defineBackground(() => {
             };
 
             const resolveHistoryProvider = async (providerId: string): Promise<IHistoryProvider> => {
+                if (providerId === 'gemini-web') {
+                    if (!geminiHistoryProvider) {
+                        geminiHistoryProvider = new GeminiDomHistoryProvider({
+                            configLoader: new GeminiHistoryConfigLoader({
+                                env: import.meta.env as Record<string, string | undefined>
+                            }),
+                            tabBridge: new GeminiHistoryTabBridge({
+                                env: import.meta.env as Record<string, string | undefined>
+                            })
+                        });
+                    }
+
+                    return geminiHistoryProvider;
+                }
+
                 const provider = await resolveProvider(providerId);
                 if (
                     typeof (provider as Partial<IHistoryProvider>).getHistoryList !== 'function' ||

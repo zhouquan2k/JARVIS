@@ -1,6 +1,6 @@
 /// <reference types="chrome"/>
 import { APP_CONFIG, type ModelConfig, type ProviderModelCatalog } from '../../config';
-import type { ConversationHistorySummary, ConversationSourceType, IHistoryProvider } from '../interfaces/IHistoryProvider';
+import type { ConversationHistorySummary, ExternalHistoryProviderId, IHistoryProvider } from '../interfaces/IHistoryProvider';
 import type { Conversation, ConversationMessage, MessageAnnotation, MessageAttachment } from '../interfaces/IStorageProvider';
 import { IModelProvider, type ProviderSendResult, type ProviderStreamUpdate, type SendMessageOptions } from '../interfaces/IModelProvider';
 import { sha3_512 } from 'js-sha3';
@@ -104,7 +104,7 @@ type ChatGPTConversationDetail = {
     create_time?: number | string | null;
 };
 
-const CHATGPT_HISTORY_SOURCE: ConversationSourceType = 'chatgpt_web';
+const CHATGPT_HISTORY_ORIGIN: ExternalHistoryProviderId = 'chatgpt-web';
 const PRIVATE_CITE_PATTERN = /cite(?:([^]+))?/g;
 const PRIVATE_IMAGE_GROUP_PATTERN = /image_group(?:([^]+))??/g;
 
@@ -721,7 +721,7 @@ export function normalizeChatGPTConversationDetail(
         title: normalizeTitle(detail.title),
         backendId,
         externalId: backendId,
-        sourceType: CHATGPT_HISTORY_SOURCE,
+        origin: CHATGPT_HISTORY_ORIGIN,
         messages,
         updatedAt: normalizeTimestamp(detail.update_time ?? detail.create_time)
     };
@@ -839,7 +839,7 @@ export class ChatGPTWebProvider implements IModelProvider, IHistoryProvider {
             id: item.id,
             title: normalizeTitle(item.title),
             updatedAt: normalizeTimestamp(item.update_time),
-            sourceType: CHATGPT_HISTORY_SOURCE
+            origin: CHATGPT_HISTORY_ORIGIN
         }));
     }
 

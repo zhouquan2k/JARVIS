@@ -72,7 +72,7 @@
           :class="{ active: historySource === 'local' }"
           @click="$emit('switch-source', 'local')"
         >
-          聊天
+          本地
         </button>
         <button
           type="button"
@@ -80,7 +80,7 @@
           :class="{ active: historySource === 'external' }"
           @click="$emit('switch-source', 'external')"
         >
-          导入
+          外部
         </button>
       </div>
     </div>
@@ -104,26 +104,59 @@
         <p v-if="localItems.length === 0" class="empty-text">暂无本地历史</p>
       </div>
 
-      <div v-else class="history-list">
-        <button
-          v-for="item in externalItems"
-          :key="item.id"
-          class="history-item"
-          :class="{ active: activeExternalId === item.id }"
-          data-testid="external-history-item"
-          @click="$emit('select-external', item.id)"
-        >
-          <span class="title">{{ item.title || 'Untitled' }}</span>
-          <span
-            v-if="item.isImported"
-            class="imported-badge"
-            data-testid="history-imported-badge"
-            aria-hidden="true"
+      <div v-else class="external-panel">
+        <div class="provider-switch" data-testid="external-provider-switch">
+          <button
+            v-for="provider in externalProviders"
+            :key="provider.id"
+            type="button"
+            class="provider-chip"
+            :class="{ active: activeExternalProviderId === provider.id }"
+            :data-testid="`external-provider-${provider.id}`"
+            @click="$emit('select-external-provider', provider.id)"
           >
-            ·
-          </span>
-        </button>
-        <p v-if="externalItems.length === 0" class="empty-text">暂无可导入历史</p>
+            {{ provider.label }}
+          </button>
+        </div>
+
+        <div class="history-list">
+          <p
+            v-if="externalHistoryLoading"
+            class="empty-text"
+            data-testid="external-history-loading"
+          >
+            正在加载对话历史...
+          </p>
+          <button
+            v-for="item in externalItems"
+            :key="item.id"
+            class="history-item"
+            :class="{ active: activeExternalId === item.id, loading: externalPreviewLoadingId === item.id }"
+            data-testid="external-history-item"
+            @click="$emit('select-external', item.id)"
+          >
+            <span class="title">{{ item.title || 'Untitled' }}</span>
+            <span
+              v-if="externalPreviewLoadingId === item.id"
+              class="loading-status"
+              data-testid="external-history-item-loading"
+            >
+              等待加载...
+            </span>
+            <span
+              v-if="item.isImported"
+              class="imported-badge"
+              data-testid="history-imported-badge"
+              aria-hidden="true"
+            >
+              ·
+            </span>
+          </button>
+          <p v-if="activeExternalProviderId === 'external-file'" class="empty-text">
+            选择文件后会直接导入到本地工作台。
+          </p>
+          <p v-else-if="!externalHistoryLoading && externalItems.length === 0" class="empty-text">暂无可导入历史</p>
+        </div>
       </div>
     </div>
   </aside>
@@ -131,14 +164,23 @@
 
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue';
-import type { Conversation, ConversationHistorySummary } from '@packages/core/src';
+import type {
+  Conversation,
+  ConversationHistorySummary,
+  ExternalHistoryProviderEntry,
+  ExternalHistoryProviderId
+} from '@packages/core/src';
 import type { WorkspaceHistorySource } from '../store/chat';
 
-const props = defineProps<{
+defineProps<{
   collapsed: boolean;
   historySource: WorkspaceHistorySource;
   localItems: Conversation[];
+  externalProviders: ExternalHistoryProviderEntry[];
   externalItems: ConversationHistorySummary[];
+  externalHistoryLoading: boolean;
+  externalPreviewLoadingId?: string | null;
+  activeExternalProviderId: ExternalHistoryProviderId;
   activeLocalId?: string | null;
   activeExternalId?: string | null;
   isCompareMode: boolean;
@@ -148,6 +190,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (event: 'toggle-collapse', value: boolean): void;
   (event: 'switch-source', value: WorkspaceHistorySource): void;
+  (event: 'select-external-provider', id: ExternalHistoryProviderId): void;
   (event: 'select-local', id: string): void;
   (event: 'select-external', id: string): void;
   (event: 'new-chat'): void;
@@ -221,6 +264,7 @@ onUnmounted(() => {
 .collapse-toggle,
 .new-chat-btn,
 .source-switch button,
+.provider-chip,
 .history-item {
   border: none;
   border-radius: 14px;
@@ -376,32 +420,46 @@ onUnmounted(() => {
 }
 
 .sidebar-nav {
-  padding: 0 12px 10px;
+  padding: 0 12px 8px;
 }
 
 .source-switch {
-  display: inline-grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px;
-  padding: 4px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.035);
-  border: 1px solid var(--cp-border-subtle);
+  display: inline-flex;
+  align-items: flex-end;
+  width: 100%;
+  gap: 2px;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  box-shadow: none;
 }
 
 .source-switch button {
-  min-height: 30px;
-  padding: 0 12px;
-  border-radius: 10px;
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 0 16px;
+  border-radius: 12px 12px 0 0;
   background: transparent;
   color: var(--cp-text-faint);
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  border-bottom: 2px solid transparent;
+  transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+}
+
+.source-switch button:hover,
+.source-switch button:focus-visible {
+  color: var(--cp-text-primary);
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .source-switch button.active {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--cp-text-primary);
+  background: rgba(255, 255, 255, 0.05);
+  color: #f8fafc;
+  border-bottom-color: rgba(96, 165, 250, 0.9);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .sidebar-content {
@@ -419,6 +477,34 @@ onUnmounted(() => {
   color: var(--cp-text-muted);
   font-size: 11px;
   line-height: 1.3;
+}
+
+.external-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.provider-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-right: 8px;
+}
+
+.provider-chip {
+  min-height: 34px;
+  padding: 0 12px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--cp-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.provider-chip.active {
+  background: rgba(59, 130, 246, 0.2);
+  color: #eef5ff;
+  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.3);
 }
 
 .history-list {
@@ -450,9 +536,14 @@ onUnmounted(() => {
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
 }
 
+.history-item.loading {
+  background: rgba(30, 41, 59, 0.88);
+  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.28);
+}
+
 .title {
   display: block;
-  padding-right: 18px;
+  padding-right: 88px;
   font-size: 13px;
   font-weight: 500;
   line-height: 1.35;
@@ -460,6 +551,15 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   width: 100%;
+}
+
+.loading-status {
+  position: absolute;
+  top: 50%;
+  right: 24px;
+  transform: translateY(-50%);
+  font-size: 12px;
+  color: #93c5fd;
 }
 
 .imported-badge {

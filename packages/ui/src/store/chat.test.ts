@@ -113,6 +113,23 @@ class MockHistoryProvider implements IHistoryProvider {
     }
 }
 
+class DeferredHistoryProvider extends MockHistoryProvider {
+    private pendingResolve: (() => void) | null = null;
+
+    async getHistoryDetail(externalId: string): Promise<Conversation> {
+        await new Promise<void>((resolve) => {
+            this.pendingResolve = resolve;
+        });
+
+        return super.getHistoryDetail(externalId);
+    }
+
+    resolvePendingDetail() {
+        this.pendingResolve?.();
+        this.pendingResolve = null;
+    }
+}
+
 describe('useChatStore workspace history flow', () => {
     const providerCatalog: ProviderConfig[] = [
         {
@@ -140,7 +157,7 @@ describe('useChatStore workspace history flow', () => {
             {
                 id: 'local-1',
                 title: 'Imported chat',
-                sourceType: 'chatgpt_web',
+                origin: 'chatgpt-web',
                 externalId: 'remote-1',
                 backendId: 'remote-1',
                 updatedAt: 3,
@@ -149,8 +166,8 @@ describe('useChatStore workspace history flow', () => {
         ]);
         const history = new MockHistoryProvider(
             [
-                { id: 'remote-1', title: 'Imported chat', updatedAt: 2, sourceType: 'chatgpt_web' },
-                { id: 'remote-2', title: 'Fresh chat', updatedAt: 1, sourceType: 'chatgpt_web' }
+                { id: 'remote-1', title: 'Imported chat', updatedAt: 2, origin: 'chatgpt-web' },
+                { id: 'remote-2', title: 'Fresh chat', updatedAt: 1, origin: 'chatgpt-web' }
             ],
             {}
         );
@@ -171,7 +188,7 @@ describe('useChatStore workspace history flow', () => {
         const existingConversation: Conversation = {
             id: 'local-existing',
             title: 'Imported chat',
-            sourceType: 'chatgpt_web',
+            origin: 'chatgpt-web',
             externalId: 'remote-1',
             backendId: 'remote-1',
             updatedAt: 100,
@@ -181,12 +198,12 @@ describe('useChatStore workspace history flow', () => {
         };
         const storage = new MockStorageProvider([existingConversation]);
         const history = new MockHistoryProvider(
-            [{ id: 'remote-1', title: 'Imported chat', updatedAt: 90, sourceType: 'chatgpt_web' }],
+            [{ id: 'remote-1', title: 'Imported chat', updatedAt: 90, origin: 'chatgpt-web' }],
             {
                 'remote-1': {
                     id: 'preview-1',
                     title: 'Imported chat',
-                    sourceType: 'chatgpt_web',
+                    origin: 'chatgpt-web',
                     externalId: 'remote-1',
                     backendId: 'remote-1',
                     updatedAt: 90,
@@ -201,7 +218,7 @@ describe('useChatStore workspace history flow', () => {
         store.setProviders(new MockModelProvider(), storage, history);
 
         await store.init();
-        await store.previewExternalConversation('remote-1');
+        await store.previewExternalConversation('chatgpt-web', 'remote-1');
         expect(store.workspaceMode).toBe('preview');
         expect(store.previewConversation?.externalId).toBe('remote-1');
 
@@ -211,6 +228,41 @@ describe('useChatStore workspace history flow', () => {
         expect(store.historySource).toBe('local');
         expect(store.currentConversation?.id).toBe('local-existing');
         expect((await storage.getAllConversations()).length).toBe(1);
+    });
+
+    it('tracks the loading external item while preview detail is pending', async () => {
+        const storage = new MockStorageProvider([]);
+        const history = new DeferredHistoryProvider(
+            [{ id: 'remote-1', title: 'Imported chat', updatedAt: 90, origin: 'chatgpt-web' }],
+            {
+                'remote-1': {
+                    id: 'preview-1',
+                    title: 'Imported chat',
+                    origin: 'chatgpt-web',
+                    externalId: 'remote-1',
+                    backendId: 'remote-1',
+                    updatedAt: 90,
+                    messages: [
+                        { id: 'pm1', role: 'user', content: 'preview' }
+                    ]
+                }
+            }
+        );
+
+        const store = useChatStore();
+        store.setProviders(new MockModelProvider(), storage, history);
+
+        await store.init();
+        const loadingPromise = store.previewExternalConversation('chatgpt-web', 'remote-1');
+
+        expect(store.isExternalPreviewLoading).toBe(true);
+        expect(store.externalPreviewLoadingId).toBe('remote-1');
+
+        history.resolvePendingDetail();
+        await loadingPromise;
+
+        expect(store.isExternalPreviewLoading).toBe(false);
+        expect(store.externalPreviewLoadingId).toBeNull();
     });
 
     it('loads provider-driven model catalogs before enabling selections', async () => {
@@ -288,5 +340,74 @@ describe('useChatStore workspace history flow', () => {
                 kind: 'cite'
             })
         ]);
+    });
+
+    it('imports external files and preserves origin metadata', async () => {
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(new MockModelProvider(), storage);
+        store.setHistoryProviders([
+            {
+                id: 'external-file',
+                label: '外部文件导入',
+                kind: 'file-import'
+            }
+        ]);
+        store.setExternalFileImportHandler(async () => ({
+            id: 'file-preview',
+            title: 'Imported File Chat',
+            origin: 'external-file',
+            externalId: 'file-1',
+            backendId: 'file-1',
+            updatedAt: 50,
+            messages: [
+                { id: 'm1', role: 'user', content: 'from file' }
+            ]
+        }));
+
+        await store.setHistorySource('external');
+
+        expect(store.historySource).toBe('local');
+        expect(store.currentConversation?.title).toBe('Imported File Chat');
+        expect(store.currentConversation?.origin).toBe('external-file');
+        expect((await storage.getAllConversations())[0]?.origin).toBe('external-file');
+    });
+
+    it('marks external history loading while provider history is being fetched', async () => {
+        let resolveHistoryList: ((value: ConversationHistorySummary[]) => void) | null = null;
+        const historyProvider: IHistoryProvider = {
+            id: 'chatgpt-web',
+            getHistoryList() {
+                return new Promise((resolve) => {
+                    resolveHistoryList = resolve;
+                });
+            },
+            async getHistoryDetail() {
+                throw new Error('not used');
+            }
+        };
+
+        const store = useChatStore();
+        store.setProviders(new MockModelProvider(), new MockStorageProvider([]));
+        store.setHistoryProviders([
+            {
+                id: 'chatgpt-web',
+                label: 'ChatGPT',
+                kind: 'history-provider',
+                provider: historyProvider
+            }
+        ]);
+
+        const pending = store.setHistorySource('external');
+        expect(store.isExternalHistoryLoading).toBe(true);
+        expect(store.externalHistoryItems).toEqual([]);
+
+        resolveHistoryList?.([
+            { id: 'remote-1', title: 'Remote Chat', updatedAt: 1, origin: 'chatgpt-web' }
+        ]);
+        await pending;
+
+        expect(store.isExternalHistoryLoading).toBe(false);
+        expect(store.externalHistoryItems).toHaveLength(1);
     });
 });

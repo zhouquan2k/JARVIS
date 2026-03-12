@@ -105,7 +105,7 @@ describe('web sync bootstrap', () => {
 
         await sourceProvider.saveConversation(createConversation('normal-1', 100));
         await sourceProvider.saveConversation(createConversation('import-1', 110, {
-            sourceType: 'external',
+            origin: 'chatgpt-web',
             externalId: 'external-42'
         }));
         await sourceProvider.saveConversation(createConversation('compare-1', 120, {

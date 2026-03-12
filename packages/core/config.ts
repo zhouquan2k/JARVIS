@@ -29,6 +29,11 @@ export interface AnalyzerConfig {
 export const DEFAULT_SYNC_KEY = '0';
 export const SYNC_KEY_STORAGE_KEY = 'chatprism:sync-key';
 export const DEFAULT_SYNC_BASE_URL = 'http://127.0.0.1:8787/api/sync';
+export const DEFAULT_PROVIDER_CONFIG_BASE_URL = 'http://127.0.0.1:8787/api/provider-configs';
+export const DEFAULT_GEMINI_HISTORY_PAGE_ORIGIN = 'https://gemini.google.com';
+export const DEFAULT_GEMINI_HISTORY_PAGE_URL = `${DEFAULT_GEMINI_HISTORY_PAGE_ORIGIN}/app`;
+export const DEFAULT_GEMINI_HISTORY_CONFIG_STORAGE_KEY = 'chatprism:provider-config:gemini-history';
+export const DEFAULT_GEMINI_HISTORY_REQUEST_TIMEOUT_MS = 10_000;
 
 export interface SyncKeyOptions {
     storage?: Pick<Storage, 'getItem'>;
@@ -40,8 +45,30 @@ export interface SyncBaseUrlOptions {
     env?: Record<string, string | undefined>;
 }
 
+export interface ProviderConfigBaseUrlOptions {
+    env?: Record<string, string | undefined>;
+}
+
+export interface GeminiHistoryRuntimeConfigOptions {
+    env?: Record<string, string | undefined>;
+}
+
+export interface GeminiHistoryRuntimeConfig {
+    providerConfigBaseUrl: string;
+    providerConfigPath: string;
+    pageOrigin: string;
+    pageUrl: string;
+    storageKey: string;
+    requestTimeoutMs: number;
+}
+
 const SYNC_KEY_ENV_KEYS = ['CHATPRISM_SYNC_KEY', 'VITE_SYNC_KEY', 'WXT_SYNC_KEY'] as const;
 const SYNC_BASE_URL_ENV_KEYS = ['CHATPRISM_SYNC_BASE_URL', 'VITE_SYNC_BASE_URL', 'WXT_SYNC_BASE_URL'] as const;
+const PROVIDER_CONFIG_BASE_URL_ENV_KEYS = [
+    'CHATPRISM_PROVIDER_CONFIG_BASE_URL',
+    'VITE_PROVIDER_CONFIG_BASE_URL',
+    'WXT_PROVIDER_CONFIG_BASE_URL'
+] as const;
 
 const DEFAULT_ANALYZER_PROMPT = [
     'You are a strict evidence extractor for side-by-side model outputs.',
@@ -100,6 +127,25 @@ function normalizeSyncKey(value?: string | null): string | null {
     return normalized ? normalized : null;
 }
 
+function normalizeUrl(value?: string | null): string | null {
+    const normalized = normalizeSyncKey(value);
+    if (!normalized) {
+        return null;
+    }
+
+    return normalized.replace(/\/$/, '');
+}
+
+function readOptionalPositiveInt(value?: string | null): number | null {
+    const normalized = normalizeSyncKey(value);
+    if (!normalized) {
+        return null;
+    }
+
+    const parsed = Number.parseInt(normalized, 10);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 export function readSyncKey(options: SyncKeyOptions = {}): string {
     const fromStorage = normalizeSyncKey(options.storage?.getItem(SYNC_KEY_STORAGE_KEY));
     if (fromStorage) {
@@ -135,9 +181,9 @@ export function resolveSyncKey(options: SyncKeyOptions = {}): string {
 
 export function readSyncBaseUrl(options: SyncBaseUrlOptions = {}): string {
     for (const key of SYNC_BASE_URL_ENV_KEYS) {
-        const candidate = normalizeSyncKey(options.env?.[key]);
+        const candidate = normalizeUrl(options.env?.[key]);
         if (candidate) {
-            return candidate.replace(/\/$/, '');
+            return candidate;
         }
     }
 
@@ -146,4 +192,46 @@ export function readSyncBaseUrl(options: SyncBaseUrlOptions = {}): string {
 
 export function resolveSyncBaseUrl(options: SyncBaseUrlOptions = {}): string {
     return readSyncBaseUrl(options);
+}
+
+export function readProviderConfigBaseUrl(options: ProviderConfigBaseUrlOptions = {}): string {
+    for (const key of PROVIDER_CONFIG_BASE_URL_ENV_KEYS) {
+        const candidate = normalizeUrl(options.env?.[key]);
+        if (candidate) {
+            return candidate;
+        }
+    }
+
+    return DEFAULT_PROVIDER_CONFIG_BASE_URL;
+}
+
+export function resolveProviderConfigBaseUrl(options: ProviderConfigBaseUrlOptions = {}): string {
+    return readProviderConfigBaseUrl(options);
+}
+
+export function resolveGeminiHistoryRuntimeConfig(
+    options: GeminiHistoryRuntimeConfigOptions = {}
+): GeminiHistoryRuntimeConfig {
+    const providerConfigBaseUrl = resolveProviderConfigBaseUrl(options);
+    const pageOrigin = normalizeUrl(options.env?.CHATPRISM_GEMINI_HISTORY_PAGE_ORIGIN)
+        || normalizeUrl(options.env?.WXT_GEMINI_HISTORY_PAGE_ORIGIN)
+        || DEFAULT_GEMINI_HISTORY_PAGE_ORIGIN;
+    const pageUrl = normalizeUrl(options.env?.CHATPRISM_GEMINI_HISTORY_PAGE_URL)
+        || normalizeUrl(options.env?.WXT_GEMINI_HISTORY_PAGE_URL)
+        || DEFAULT_GEMINI_HISTORY_PAGE_URL;
+    const storageKey = normalizeSyncKey(options.env?.CHATPRISM_GEMINI_HISTORY_CONFIG_STORAGE_KEY)
+        || normalizeSyncKey(options.env?.WXT_GEMINI_HISTORY_CONFIG_STORAGE_KEY)
+        || DEFAULT_GEMINI_HISTORY_CONFIG_STORAGE_KEY;
+    const requestTimeoutMs = readOptionalPositiveInt(options.env?.CHATPRISM_GEMINI_HISTORY_REQUEST_TIMEOUT_MS)
+        || readOptionalPositiveInt(options.env?.WXT_GEMINI_HISTORY_REQUEST_TIMEOUT_MS)
+        || DEFAULT_GEMINI_HISTORY_REQUEST_TIMEOUT_MS;
+
+    return {
+        providerConfigBaseUrl,
+        providerConfigPath: `${providerConfigBaseUrl}/gemini-history`,
+        pageOrigin,
+        pageUrl,
+        storageKey,
+        requestTimeoutMs
+    };
 }

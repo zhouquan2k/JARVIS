@@ -1,19 +1,23 @@
 import { defineStore } from 'pinia';
 import {
+    cloneConversation,
     type Conversation,
     type ConversationHistorySummary,
     cloneConversationMessage,
-    type MessageAttachment,
-    type ConversationSourceType,
+    ExternalHistoryError,
+    type ExternalHistoryProviderEntry,
+    type ExternalHistoryProviderId,
     type IHistoryProvider,
     type IModelProvider,
-    type IStorageProvider
+    type IStorageProvider,
+    type MessageAttachment
 } from '@packages/core/src';
 import type { ProviderConfig, ProviderModelCatalog } from '@packages/core/config';
 import { markRaw, toRaw } from 'vue';
 
 export type WorkspaceHistorySource = 'local' | 'external';
 export type WorkspaceMode = 'active' | 'preview';
+export type ExternalFileImportHandler = () => Promise<Conversation | Conversation[] | null>;
 
 type ProviderModelLoadState = {
     loading: boolean;
@@ -25,13 +29,18 @@ export interface ChatState {
     modelProviderResolver: ((providerId: string) => IModelProvider) | null;
     providerModelsResolver: ((providerId: string) => Promise<ProviderModelCatalog>) | null;
     storageProvider: IStorageProvider | null;
-    historyProvider: IHistoryProvider | null;
+    historyProviders: ExternalHistoryProviderEntry[];
+    externalFileImportHandler: ExternalFileImportHandler | null;
+    activeExternalProviderId: ExternalHistoryProviderId;
     providerCatalog: ProviderConfig[];
     availableProviders: ProviderConfig[];
     providerModelStates: Record<string, ProviderModelLoadState>;
     conversations: Conversation[];
     currentConversation: Conversation | null;
     externalHistoryItems: ConversationHistorySummary[];
+    isExternalHistoryLoading: boolean;
+    isExternalPreviewLoading: boolean;
+    externalPreviewLoadingId: string | null;
     previewConversation: Conversation | null;
     historySource: WorkspaceHistorySource;
     workspaceMode: WorkspaceMode;
@@ -74,15 +83,6 @@ async function fileToAttachment(file: File): Promise<MessageAttachment> {
     };
 }
 
-function cloneConversation(conversation: Conversation): Conversation {
-    return {
-        ...conversation,
-        sync: conversation.sync ? { ...conversation.sync } : undefined,
-        compare: conversation.compare ? { ...conversation.compare } : undefined,
-        messages: conversation.messages.map(cloneConversationMessage)
-    };
-}
-
 function cloneProviderConfig(provider: ProviderConfig): ProviderConfig {
     return {
         ...provider,
@@ -94,22 +94,40 @@ function cloneProviders(providers: ProviderConfig[]): ProviderConfig[] {
     return providers.map(cloneProviderConfig);
 }
 
-function normalizeLocalConversation(conversation: Conversation): Conversation {
+function cloneHistoryProviderEntry(entry: ExternalHistoryProviderEntry): ExternalHistoryProviderEntry {
     return {
-        ...cloneConversation(conversation),
-        sourceType: conversation.sourceType || 'local'
+        ...entry,
+        provider: entry.provider ? markRaw(entry.provider) : undefined
     };
 }
 
-function buildImportKey(sourceType?: ConversationSourceType, externalId?: string): string | null {
-    if (!sourceType || !externalId) {
+function resolveProviderLabel(providerId: ExternalHistoryProviderId): string {
+    switch (providerId) {
+        case 'chatgpt-web':
+            return 'ChatGPT';
+        case 'gemini-web':
+            return 'Gemini';
+        case 'external-file':
+            return '外部文件导入';
+        default:
+            return providerId;
+    }
+}
+
+function normalizeStoredConversation(conversation: Conversation): Conversation {
+    return cloneConversation(conversation);
+}
+
+function buildImportKey(origin?: Conversation['origin'], externalId?: string): string | null {
+    if (!origin || origin === 'local' || !externalId) {
         return null;
     }
-    return `${sourceType}:${externalId}`;
+
+    return `${origin}:${externalId}`;
 }
 
 function getImportedConversationKey(conversation: Conversation): string | null {
-    return buildImportKey(conversation.sourceType, conversation.externalId);
+    return buildImportKey(conversation.origin, conversation.externalId);
 }
 
 function buildProviderModelStates(providers: ProviderConfig[]): Record<string, ProviderModelLoadState> {
@@ -122,19 +140,45 @@ function isConfiguredDefaultModelError(error: unknown): error is Error {
     return error instanceof Error && error.name === 'ConfiguredDefaultModelNotFoundError';
 }
 
+function formatHistoryError(error: unknown): string {
+    if (error instanceof ExternalHistoryError) {
+        switch (error.code) {
+            case 'AUTH_REQUIRED':
+                return '请先登录对应站点后再重试。';
+            case 'CONFIG_UNAVAILABLE':
+                return '远程抓取配置当前不可用，请稍后再试。';
+            case 'SELECTOR_MISMATCH':
+                return '页面结构已变化，当前暂时无法抓取该来源历史。';
+            case 'DETAIL_NOT_FOUND':
+                return '未找到这条外部会话详情。';
+            case 'TAB_UNAVAILABLE':
+                return error.message || '无法准备外部站点标签页，请稍后再试。';
+            default:
+                return error.message;
+        }
+    }
+
+    return error instanceof Error ? error.message : '外部历史加载失败。';
+}
+
 export const useChatStore = defineStore('chat', {
     state: (): ChatState => ({
         modelProvider: null,
         modelProviderResolver: null,
         providerModelsResolver: null,
         storageProvider: null,
-        historyProvider: null,
+        historyProviders: [],
+        externalFileImportHandler: null,
+        activeExternalProviderId: 'chatgpt-web',
         providerCatalog: [],
         availableProviders: [],
         providerModelStates: {},
         conversations: [],
         currentConversation: null,
         externalHistoryItems: [],
+        isExternalHistoryLoading: false,
+        isExternalPreviewLoading: false,
+        externalPreviewLoadingId: null,
         previewConversation: null,
         historySource: 'local',
         workspaceMode: 'active',
@@ -163,6 +207,10 @@ export const useChatStore = defineStore('chat', {
 
             const loadState = state.providerModelStates[state.currentProviderId];
             return !loadState || loadState.loading || !loadState.loaded;
+        },
+
+        activeExternalProvider(state): ExternalHistoryProviderEntry | null {
+            return state.historyProviders.find((entry) => entry.id === state.activeExternalProviderId) || null;
         }
     },
 
@@ -179,6 +227,15 @@ export const useChatStore = defineStore('chat', {
             return this.availableProviders.find((item) => item.id === providerId);
         },
 
+        resolveHistoryProviderEntry(providerId = this.activeExternalProviderId): ExternalHistoryProviderEntry | null {
+            return this.historyProviders.find((entry) => entry.id === providerId) || null;
+        },
+
+        resolveHistoryProvider(providerId = this.activeExternalProviderId): IHistoryProvider | null {
+            const entry = this.resolveHistoryProviderEntry(providerId);
+            return entry?.kind === 'history-provider' && entry.provider ? entry.provider : null;
+        },
+
         setProviders(
             modelProvider: IModelProvider,
             storageProvider: IStorageProvider,
@@ -193,12 +250,33 @@ export const useChatStore = defineStore('chat', {
             }
             this.storageProvider = markRaw(storageProvider);
             if (historyProvider) {
-                this.historyProvider = markRaw(historyProvider);
+                this.setHistoryProvider(historyProvider);
             }
         },
 
         setHistoryProvider(provider: IHistoryProvider) {
-            this.historyProvider = markRaw(provider);
+            const currentEntries = this.historyProviders.filter((entry) => entry.id !== provider.id);
+            this.setHistoryProviders([
+                ...currentEntries,
+                {
+                    id: provider.id,
+                    label: resolveProviderLabel(provider.id),
+                    kind: 'history-provider',
+                    provider
+                }
+            ]);
+        },
+
+        setHistoryProviders(entries: ExternalHistoryProviderEntry[]) {
+            this.historyProviders = entries.map(cloneHistoryProviderEntry);
+
+            if (!this.historyProviders.some((entry) => entry.id === this.activeExternalProviderId)) {
+                this.activeExternalProviderId = this.historyProviders[0]?.id || 'chatgpt-web';
+            }
+        },
+
+        setExternalFileImportHandler(handler: ExternalFileImportHandler | null) {
+            this.externalFileImportHandler = handler ? markRaw(handler) : null;
         },
 
         setModelProviderResolver(resolver: (providerId: string) => IModelProvider) {
@@ -321,8 +399,8 @@ export const useChatStore = defineStore('chat', {
             }
 
             await this.loadLocalConversations();
-            if (this.historySource === 'external' && this.historyProvider) {
-                await this.loadExternalHistory();
+            if (this.historySource === 'external') {
+                await this.refreshActiveExternalSource();
             }
         },
 
@@ -356,27 +434,27 @@ export const useChatStore = defineStore('chat', {
 
         async checkAuth() {
             const provider = this.resolveModelProvider();
-            if (!provider) return false;
+            if (!provider) {
+                return false;
+            }
             return provider.checkAuth();
         },
 
         async loadLocalConversations() {
-            if (!this.storageProvider) return;
+            if (!this.storageProvider) {
+                return;
+            }
 
             const conversations = await this.storageProvider.getAllConversations();
             const localConversations = conversations
                 .filter((conversation) => !conversation.compare && !conversation.sync?.deleted)
-                .map(normalizeLocalConversation);
+                .map(normalizeStoredConversation);
 
             this.conversations = localConversations;
 
             if (this.currentConversation) {
                 const refreshed = localConversations.find((item) => item.id === this.currentConversation?.id);
-                if (refreshed) {
-                    this.currentConversation = refreshed;
-                } else {
-                    this.currentConversation = null;
-                }
+                this.currentConversation = refreshed || null;
             }
 
             if (this.externalHistoryItems.length > 0) {
@@ -385,10 +463,13 @@ export const useChatStore = defineStore('chat', {
         },
 
         async loadConversation(id: string) {
-            if (!this.storageProvider) return;
+            if (!this.storageProvider) {
+                return;
+            }
+
             const chat = await this.storageProvider.getConversation(id);
             if (chat && !chat.compare && !chat.sync?.deleted) {
-                this.currentConversation = normalizeLocalConversation(chat);
+                this.currentConversation = normalizeStoredConversation(chat);
             }
         },
 
@@ -404,7 +485,7 @@ export const useChatStore = defineStore('chat', {
             this.currentConversation = {
                 id: crypto.randomUUID(),
                 title: 'New Chat',
-                sourceType: 'local',
+                origin: 'local',
                 messages: [],
                 updatedAt: Date.now()
             };
@@ -420,74 +501,180 @@ export const useChatStore = defineStore('chat', {
 
         async setHistorySource(source: WorkspaceHistorySource) {
             this.historySource = source;
-            if (source === 'external' && this.historyProvider) {
-                await this.loadExternalHistory();
+            this.currentError = null;
+
+            if (source === 'external') {
+                await this.refreshActiveExternalSource();
             }
         },
 
-        async loadExternalHistory() {
-            if (!this.historyProvider) {
+        async setActiveExternalProvider(providerId: ExternalHistoryProviderId) {
+            this.activeExternalProviderId = providerId;
+            this.workspaceMode = 'active';
+            this.previewConversation = null;
+            this.currentError = null;
+
+            if (this.historySource === 'external') {
+                await this.refreshActiveExternalSource();
+            }
+        },
+
+        async refreshActiveExternalSource() {
+            const entry = this.resolveHistoryProviderEntry();
+            if (!entry) {
+                this.isExternalHistoryLoading = false;
+                this.externalHistoryItems = [];
                 return;
             }
 
-            const items = await this.historyProvider.getHistoryList();
-            this.externalHistoryItems = this.applyImportedFlags(items);
+            if (entry.kind === 'file-import') {
+                this.isExternalHistoryLoading = false;
+                this.externalHistoryItems = [];
+                await this.openExternalFileImport();
+                return;
+            }
+
+            await this.loadExternalHistory(entry.id);
         },
 
-        async previewExternalConversation(externalId: string) {
-            if (!this.historyProvider) {
-                throw new Error('History provider is not initialized');
+        async loadExternalHistory(providerId = this.activeExternalProviderId) {
+            const provider = this.resolveHistoryProvider(providerId);
+            if (!provider) {
+                this.isExternalHistoryLoading = false;
+                this.externalHistoryItems = [];
+                return;
+            }
+
+            this.isExternalHistoryLoading = true;
+            this.externalHistoryItems = [];
+            try {
+                const items = await provider.getHistoryList();
+                this.externalHistoryItems = this.applyImportedFlags(items);
+            } catch (error) {
+                this.externalHistoryItems = [];
+                this.currentError = formatHistoryError(error);
+                throw error;
+            } finally {
+                this.isExternalHistoryLoading = false;
+            }
+        },
+
+        async previewExternalConversation(providerId: ExternalHistoryProviderId, externalId: string) {
+            const provider = this.resolveHistoryProvider(providerId);
+            if (!provider) {
+                throw new Error(`History provider '${providerId}' is not initialized`);
             }
 
             this.currentError = null;
-            const conversation = await this.historyProvider.getHistoryDetail(externalId);
-            this.previewConversation = cloneConversation(conversation);
-            this.workspaceMode = 'preview';
-            this.historySource = 'external';
+            this.isExternalPreviewLoading = true;
+            this.externalPreviewLoadingId = externalId;
+            try {
+                const conversation = await provider.getHistoryDetail(externalId);
+                this.previewConversation = cloneConversation(conversation);
+                this.workspaceMode = 'preview';
+                this.historySource = 'external';
+                this.activeExternalProviderId = providerId;
+            } catch (error) {
+                this.currentError = formatHistoryError(error);
+                throw error;
+            } finally {
+                this.isExternalPreviewLoading = false;
+                this.externalPreviewLoadingId = null;
+            }
         },
 
         exitPreview() {
             this.workspaceMode = 'active';
             this.previewConversation = null;
+            this.isExternalPreviewLoading = false;
+            this.externalPreviewLoadingId = null;
             this.historySource = 'local';
         },
 
-        async importPreviewConversation() {
-            if (!this.storageProvider || !this.previewConversation) {
+        async openExternalFileImport() {
+            if (!this.externalFileImportHandler) {
+                this.currentError = '当前宿主未注入文件导入能力。';
                 return;
             }
 
-            const preview = this.previewConversation;
-            const importKey = buildImportKey(preview.sourceType, preview.externalId);
+            try {
+                const result = await this.externalFileImportHandler();
+                if (!result) {
+                    return;
+                }
+
+                const importedItems = Array.isArray(result) ? result : [result];
+                const normalizedImportedItems = importedItems.filter(Boolean);
+                if (normalizedImportedItems.length === 0) {
+                    return;
+                }
+
+                let activatedConversation: Conversation | null = null;
+                for (const item of normalizedImportedItems) {
+                    activatedConversation = await this.importConversation(item, 'external-file');
+                }
+
+                await this.loadLocalConversations();
+                this.currentConversation = activatedConversation;
+                this.workspaceMode = 'active';
+                this.historySource = 'local';
+                this.previewConversation = null;
+                this.currentError = null;
+            } catch (error) {
+                this.currentError = error instanceof Error ? error.message : '外部文件导入失败。';
+                throw error;
+            }
+        },
+
+        async importPreviewConversation() {
+            if (!this.previewConversation) {
+                return;
+            }
+
+            const importedConversation = await this.importConversation(
+                this.previewConversation,
+                this.activeExternalProviderId
+            );
+
+            await this.loadLocalConversations();
+            if (this.resolveHistoryProvider()) {
+                await this.loadExternalHistory().catch(() => undefined);
+            }
+
+            this.currentConversation = importedConversation;
+            this.workspaceMode = 'active';
+            this.historySource = 'local';
+            this.previewConversation = null;
+            this.currentError = null;
+        },
+
+        async importConversation(preview: Conversation, defaultOrigin: ExternalHistoryProviderId): Promise<Conversation> {
+            if (!this.storageProvider) {
+                throw new Error('Storage provider is not initialized');
+            }
+
+            const previewOrigin = preview.origin && preview.origin !== 'local' ? preview.origin : defaultOrigin;
+            const previewExternalId = preview.externalId || preview.backendId;
+            const importKey = buildImportKey(previewOrigin, previewExternalId);
             const existingConversation = importKey
                 ? this.conversations.find((conversation) => getImportedConversationKey(conversation) === importKey)
                 : null;
 
             if (existingConversation) {
-                this.currentConversation = existingConversation;
-            } else {
-                const importedConversation: Conversation = {
-                    ...cloneConversation(preview),
-                    id: crypto.randomUUID(),
-                    sourceType: preview.sourceType || 'chatgpt_web',
-                    externalId: preview.externalId || preview.backendId,
-                    backendId: preview.backendId || preview.externalId,
-                    updatedAt: Date.now()
-                };
-
-                await this.storageProvider.saveConversation(toRaw(importedConversation));
-                this.currentConversation = importedConversation;
+                return existingConversation;
             }
 
-            await this.loadLocalConversations();
-            if (this.historyProvider) {
-                await this.loadExternalHistory();
-            }
+            const importedConversation: Conversation = {
+                ...cloneConversation(preview),
+                id: crypto.randomUUID(),
+                origin: previewOrigin,
+                externalId: previewExternalId,
+                backendId: preview.backendId || preview.externalId,
+                updatedAt: Date.now()
+            };
 
-            this.workspaceMode = 'active';
-            this.historySource = 'local';
-            this.previewConversation = null;
-            this.currentError = null;
+            await this.storageProvider.saveConversation(toRaw(importedConversation));
+            return importedConversation;
         },
 
         async sendMessage(prompt: string) {
@@ -535,7 +722,7 @@ export const useChatStore = defineStore('chat', {
                     throw new Error('Providers not initialized');
                 }
 
-                this.currentConversation!.sourceType = this.currentConversation!.sourceType || 'local';
+                this.currentConversation!.origin = this.currentConversation!.origin || 'local';
                 const backendId = this.currentConversation!.backendId;
 
                 const result = await provider.sendMessage(
@@ -569,8 +756,8 @@ export const useChatStore = defineStore('chat', {
                 this.currentConversation!.updatedAt = Date.now();
                 await this.storageProvider.saveConversation(toRaw(this.currentConversation!));
                 await this.loadLocalConversations();
-                if (this.historyProvider && this.externalHistoryItems.length > 0) {
-                    await this.loadExternalHistory();
+                if (this.resolveHistoryProvider() && this.externalHistoryItems.length > 0) {
+                    await this.loadExternalHistory().catch(() => undefined);
                 }
             } catch (err: unknown) {
                 this.currentError = err instanceof Error ? err.message : 'Error sending message';
@@ -625,7 +812,7 @@ export const useChatStore = defineStore('chat', {
 
             return items.map((item) => ({
                 ...item,
-                isImported: importedKeys.has(buildImportKey(item.sourceType, item.id) || '')
+                isImported: importedKeys.has(buildImportKey(item.origin, item.id) || '')
             }));
         }
     }

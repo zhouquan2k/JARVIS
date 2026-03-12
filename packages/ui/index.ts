@@ -10,3 +10,4 @@ export { default as MessageAttachmentStrip } from './src/components/MessageAttac
 export { useChatStore } from './src/store/chat';
 export { useCompareStore } from './src/store/compare';
 export { CHAT_ROUTES, type ChatRoute, type ChatRoutePath } from './src/routes';
+export { openConversationImportDialog, parseConversationImportPayload } from './src/utils/externalFileImport';

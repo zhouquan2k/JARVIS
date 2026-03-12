@@ -113,7 +113,7 @@ describe('sync api', () => {
             body: JSON.stringify({
                 conversations: [
                     createConversationPayload('conv-1', 100, {
-                        sourceType: 'external',
+                        origin: 'chatgpt-web',
                         externalId: 'import-1',
                         compare: {
                             prompt: 'should-be-dropped'
@@ -155,7 +155,7 @@ describe('sync api', () => {
                     id: 'conv-1',
                     title: 'Conversation conv-1',
                     updatedAt: 100,
-                    sourceType: 'external',
+                    origin: 'chatgpt-web',
                     externalId: 'import-1',
                     messages: [
                         {

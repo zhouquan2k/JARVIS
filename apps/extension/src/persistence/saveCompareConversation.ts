@@ -30,7 +30,7 @@ export async function saveCompareConversation(
     const conversation: Conversation = {
         id: crypto.randomUUID(),
         title: buildTitle(payload.prompt),
-        sourceType: 'local',
+        origin: 'local',
         messages: [
             {
                 id: crypto.randomUUID(),
@@ -84,7 +84,7 @@ export async function loadLatestCompareConversation(
                     snapshotConversation = {
                         id: `compare-snapshot-${parsed.updatedAt || Date.now()}`,
                         title: buildTitle(parsed.compare.prompt),
-                        sourceType: 'local',
+                        origin: 'local',
                         messages: [],
                         updatedAt: parsed.updatedAt || Date.now(),
                         compare: parsed.compare

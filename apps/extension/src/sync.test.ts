@@ -134,7 +134,7 @@ describe('extension sync bootstrap', () => {
         });
 
         await sourceProvider.saveConversation(createConversation('import-1', 100, {
-            sourceType: 'external',
+            origin: 'chatgpt-web',
             externalId: 'history-1'
         }));
         await sourceProvider.saveConversation(createConversation('soft-delete-1', 110));
@@ -189,7 +189,7 @@ describe('extension sync bootstrap', () => {
             isDevelopment: true,
             localStore: new MemoryStorageProvider([
                 createConversation('legacy-import', 410, {
-                    sourceType: 'external',
+                    origin: 'chatgpt-web',
                     externalId: 'history-legacy'
                 }),
                 createConversation('compare-legacy', 411, {

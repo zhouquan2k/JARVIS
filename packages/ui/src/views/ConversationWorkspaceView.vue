@@ -5,12 +5,17 @@
       :history-source="chatStore.historySource"
       :show-history-source-switch="showHistorySourceSwitch"
       :local-items="chatStore.conversations"
+      :external-providers="chatStore.historyProviders"
       :external-items="chatStore.externalHistoryItems"
+      :external-history-loading="chatStore.isExternalHistoryLoading"
+      :external-preview-loading-id="chatStore.externalPreviewLoadingId"
+      :active-external-provider-id="chatStore.activeExternalProviderId"
       :active-local-id="chatStore.workspaceMode === 'active' ? chatStore.currentConversation?.id : null"
       :active-external-id="chatStore.workspaceMode === 'preview' ? chatStore.previewConversation?.externalId : null"
       :is-compare-mode="isCompareMode"
       @toggle-collapse="chatStore.setSidebarCollapsed"
       @switch-source="onSwitchSource"
+      @select-external-provider="onSelectExternalProvider"
       @select-local="onSelectLocal"
       @select-external="onSelectExternal"
       @new-chat="onNewChat"
@@ -30,6 +35,7 @@ import CompareChatView from './CompareChatView.vue';
 import ConversationSidebar from '../components/ConversationSidebar.vue';
 import NormalChatView from './NormalChatView.vue';
 import { useChatStore } from '../store/chat';
+import type { ExternalHistoryProviderId } from '@packages/core/src';
 
 const props = defineProps<{
   isCompareMode: boolean;
@@ -58,7 +64,14 @@ async function onSelectExternal(id: string) {
   if (props.isCompareMode) {
     emit('request-normal-mode');
   }
-  await chatStore.previewExternalConversation(id);
+  await chatStore.previewExternalConversation(chatStore.activeExternalProviderId, id);
+}
+
+async function onSelectExternalProvider(providerId: ExternalHistoryProviderId) {
+  if (props.isCompareMode) {
+    emit('request-normal-mode');
+  }
+  await chatStore.setActiveExternalProvider(providerId);
 }
 
 async function onNewChat() {

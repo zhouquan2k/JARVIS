@@ -97,7 +97,7 @@ describe('normalizeChatGPTConversationDetail', () => {
 
         expect(conversation.externalId).toBe('remote-conversation');
         expect(conversation.backendId).toBe('remote-conversation');
-        expect(conversation.sourceType).toBe('chatgpt_web');
+        expect(conversation.origin).toBe('chatgpt-web');
         expect(conversation.messages.map((item) => `${item.role}:${item.content}`)).toEqual([
             'user:hello',
             'assistant:world',
