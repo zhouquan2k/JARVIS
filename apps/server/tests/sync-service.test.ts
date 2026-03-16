@@ -38,30 +38,61 @@ function createConversation(
 }
 
 describe('SyncService', () => {
-    it('enforces namespace isolation and last-write-wins semantics', () => {
+    it('enforces namespace isolation and last-write-wins semantics for conversations and delete events', () => {
         const database = createDatabase(createConfig());
         const service = new SyncService(new SyncRepository(database));
 
         const firstPush = service.push('workspace-a', [
             createConversation('shared', 100, {
                 origin: 'chatgpt-web',
-                externalId: 'import-1'
+                externalId: 'import-1',
+                messages: [
+                    {
+                        id: 'shared-m1',
+                        role: 'user',
+                        content: 'question',
+                        createdAt: 99,
+                        questionId: 'question-shared',
+                        starred: true,
+                        deleted: true
+                    }
+                ]
             })
         ]);
         expect(firstPush.processedIds).toEqual(['shared']);
+        expect(firstPush.processedDeletedIds).toEqual([]);
         expect(firstPush.nextCursor).toBe(1);
 
         const olderPush = service.push('workspace-a', [createConversation('shared', 90)]);
         expect(olderPush.processedIds).toEqual([]);
         expect(olderPush.nextCursor).toBe(1);
 
-        const equalTimestampDelete = service.push('workspace-a', [
-            createConversation('shared', 100, {
-                sync: { deleted: true }
+        const deletePush = service.push('workspace-a', [], [
+            {
+                id: 'shared',
+                updatedAt: 110
+            }
+        ]);
+        expect(deletePush.processedIds).toEqual([]);
+        expect(deletePush.processedDeletedIds).toEqual(['shared']);
+        expect(deletePush.nextCursor).toBe(2);
+
+        const staleDelete = service.push('workspace-a', [], [
+            {
+                id: 'shared',
+                updatedAt: 105
+            }
+        ]);
+        expect(staleDelete.processedDeletedIds).toEqual([]);
+        expect(staleDelete.nextCursor).toBe(2);
+
+        const newerConversation = service.push('workspace-a', [
+            createConversation('shared', 120, {
+                title: 'Recreated after delete'
             })
         ]);
-        expect(equalTimestampDelete.processedIds).toEqual(['shared']);
-        expect(equalTimestampDelete.nextCursor).toBe(2);
+        expect(newerConversation.processedIds).toEqual(['shared']);
+        expect(newerConversation.nextCursor).toBe(3);
 
         const otherNamespacePush = service.push('workspace-b', [createConversation('shared', 50)]);
         expect(otherNamespacePush.processedIds).toEqual(['shared']);
@@ -69,12 +100,19 @@ describe('SyncService', () => {
 
         const workspaceAPull = service.pull('workspace-a', null);
         expect(workspaceAPull.conversations).toHaveLength(1);
-        expect(workspaceAPull.conversations[0].sync?.deleted).toBe(true);
-        expect(workspaceAPull.nextCursor).toBe(2);
+        expect(workspaceAPull.conversations[0].title).toBe('Recreated after delete');
+        expect(workspaceAPull.deletedConversations).toEqual([
+            {
+                id: 'shared',
+                updatedAt: 110
+            }
+        ]);
+        expect(workspaceAPull.nextCursor).toBe(3);
 
         const workspaceBPull = service.pull('workspace-b', null);
         expect(workspaceBPull.conversations).toHaveLength(1);
         expect(workspaceBPull.conversations[0].updatedAt).toBe(50);
+        expect(workspaceBPull.deletedConversations).toEqual([]);
         expect(workspaceBPull.nextCursor).toBe(1);
     });
 });

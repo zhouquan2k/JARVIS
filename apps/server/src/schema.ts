@@ -32,5 +32,25 @@ export const SCHEMA_STATEMENTS = [
     `
     CREATE INDEX IF NOT EXISTS idx_synced_conversations_updated_at
     ON synced_conversations (sync_key, updated_at)
+    `,
+    `
+    CREATE TABLE IF NOT EXISTS sync_deleted_conversations (
+        sync_key TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        server_cursor INTEGER NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        last_seen_at INTEGER NOT NULL,
+        PRIMARY KEY (sync_key, conversation_id)
+    )
+    `,
+    `
+    CREATE INDEX IF NOT EXISTS idx_sync_deleted_conversations_sync_cursor
+    ON sync_deleted_conversations (sync_key, server_cursor)
+    `,
+    `
+    CREATE INDEX IF NOT EXISTS idx_sync_deleted_conversations_updated_at
+    ON sync_deleted_conversations (sync_key, updated_at)
     `
 ] as const;

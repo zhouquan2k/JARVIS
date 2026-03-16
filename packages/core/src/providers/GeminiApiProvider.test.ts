@@ -145,4 +145,96 @@ describe('GeminiApiProvider', () => {
 
         vi.unstubAllGlobals();
     });
+
+    it('normalizes markdown attachments to text/plain for Gemini document input', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(
+            createGeminiSseResponse([
+                {
+                    candidates: [
+                        {
+                            content: {
+                                parts: [{ text: '已分析' }]
+                            }
+                        }
+                    ]
+                }
+            ])
+        );
+        vi.stubGlobal('fetch', fetchMock);
+
+        const provider = new GeminiApiProvider({ apiKey: 'test-key' });
+        await provider.sendMessage(
+            '分析附件',
+            {
+                modelId: 'gemini-2.5-flash',
+                attachments: [
+                    {
+                        id: 'file-1',
+                        type: 'file',
+                        name: 'notes.md',
+                        mimeType: 'application/octet-stream',
+                        size: 12,
+                        base64Data: 'IyBUaXRsZQ=='
+                    }
+                ]
+            },
+            () => undefined
+        );
+
+        const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+        expect(requestBody.contents[0]?.parts).toEqual([
+            { text: '分析附件' },
+            { inlineData: { mimeType: 'text/plain', data: 'IyBUaXRsZQ==' } }
+        ]);
+
+        vi.unstubAllGlobals();
+    });
+
+    it('replays prior conversation history in Gemini contents', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(
+            createGeminiSseResponse([
+                {
+                    candidates: [
+                        {
+                            content: {
+                                parts: [{ text: '继续回答' }]
+                            }
+                        }
+                    ]
+                }
+            ])
+        );
+        vi.stubGlobal('fetch', fetchMock);
+
+        const provider = new GeminiApiProvider({ apiKey: 'test-key' });
+        await provider.sendMessage(
+            '第二问',
+            {
+                modelId: 'gemini-2.5-flash',
+                history: [
+                    { role: 'user', content: '第一问' },
+                    { role: 'assistant', content: '第一答' }
+                ]
+            },
+            () => undefined
+        );
+
+        const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+        expect(requestBody.contents).toEqual([
+            {
+                role: 'user',
+                parts: [{ text: '第一问' }]
+            },
+            {
+                role: 'model',
+                parts: [{ text: '第一答' }]
+            },
+            {
+                role: 'user',
+                parts: [{ text: '第二问' }]
+            }
+        ]);
+
+        vi.unstubAllGlobals();
+    });
 });

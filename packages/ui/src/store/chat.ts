@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import {
     cloneConversation,
     type Conversation,
+    type ConversationMessage,
     type ConversationHistorySummary,
     cloneConversationMessage,
     ExternalHistoryError,
@@ -18,11 +19,20 @@ import { markRaw, toRaw } from 'vue';
 export type WorkspaceHistorySource = 'local' | 'external';
 export type WorkspaceMode = 'active' | 'preview';
 export type ExternalFileImportHandler = () => Promise<Conversation | Conversation[] | null>;
+export type QuestionIndexFilter = 'all' | 'starred';
 
 type ProviderModelLoadState = {
     loading: boolean;
     loaded: boolean;
 };
+
+export interface QuestionIndexItem {
+    questionId: string;
+    title: string;
+    starred: boolean;
+    deleted: boolean;
+    messageId: string;
+}
 
 export interface ChatState {
     modelProvider: IModelProvider | null;
@@ -46,14 +56,34 @@ export interface ChatState {
     workspaceMode: WorkspaceMode;
     sidebarCollapsed: boolean;
     isGenerating: boolean;
+    isAbortRequested: boolean;
     currentError: string | null;
     currentProviderId: string;
     currentModelId: string;
+    questionIndexFilter: QuestionIndexFilter;
+    isQuestionIndexPanelOpen: boolean;
+    activeQuestionId: string | null;
+    pendingScrollQuestionId: string | null;
+    draftPrompt: string;
+    lastSubmittedPrompt: string | null;
+    draftFocusRequestKey: number;
     draftAttachments: MessageAttachment[];
     attachmentError: string | null;
 }
 
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
+const FILE_EXTENSION_MIME_TYPES: Record<string, string> = {
+    txt: 'text/plain',
+    md: 'text/markdown',
+    markdown: 'text/markdown',
+    csv: 'text/csv',
+    json: 'application/json',
+    xml: 'application/xml',
+    html: 'text/html',
+    htm: 'text/html',
+    yml: 'application/yaml',
+    yaml: 'application/yaml'
+};
 
 function toBase64(bytes: Uint8Array): string {
     if (typeof Buffer !== 'undefined') {
@@ -72,14 +102,18 @@ function toBase64(bytes: Uint8Array): string {
 async function fileToAttachment(file: File): Promise<MessageAttachment> {
     const buffer = await file.arrayBuffer();
     const base64Data = toBase64(new Uint8Array(buffer));
+    const extension = file.name.includes('.') ? file.name.split('.').pop()?.toLowerCase() || '' : '';
+    const inferredMimeType = FILE_EXTENSION_MIME_TYPES[extension];
+    const resolvedMimeType = file.type || inferredMimeType || 'application/octet-stream';
+
     return {
         id: crypto.randomUUID(),
-        type: file.type.startsWith('image/') ? 'image' : 'file',
+        type: resolvedMimeType.startsWith('image/') ? 'image' : 'file',
         name: file.name,
-        mimeType: file.type || 'application/octet-stream',
+        mimeType: resolvedMimeType,
         size: file.size,
         base64Data,
-        previewBase64: file.type.startsWith('image/') ? base64Data : undefined
+        previewBase64: resolvedMimeType.startsWith('image/') ? base64Data : undefined
     };
 }
 
@@ -116,6 +150,85 @@ function resolveProviderLabel(providerId: ExternalHistoryProviderId): string {
 
 function normalizeStoredConversation(conversation: Conversation): Conversation {
     return cloneConversation(conversation);
+}
+
+function getQuestionKey(message: ConversationMessage): string {
+    return message.questionId || `legacy:${message.id}`;
+}
+
+function getQuestionTitle(message: ConversationMessage): string {
+    const firstLine = message.content.split(/\r?\n/u, 1)[0]?.trim() || '';
+    if (firstLine) {
+        return firstLine;
+    }
+
+    return message.attachments?.length ? '已发送附件' : '空白问题';
+}
+
+function isAbortError(error: unknown): boolean {
+    return error instanceof Error && error.name === 'AbortError';
+}
+
+function resolveQuestionPairIndices(messages: ConversationMessage[], questionId: string): number[] {
+    const userIndex = messages.findIndex((message) => {
+        return message.role === 'user' && getQuestionKey(message) === questionId;
+    });
+    if (userIndex < 0) {
+        return [];
+    }
+
+    const userMessage = messages[userIndex];
+    if (userMessage.questionId) {
+        return messages.reduce<number[]>((indices, message, index) => {
+            if (message.questionId === userMessage.questionId) {
+                indices.push(index);
+            }
+            return indices;
+        }, []);
+    }
+
+    const indices = [userIndex];
+    for (let index = userIndex + 1; index < messages.length; index += 1) {
+        const message = messages[index];
+        if (message.role === 'assistant') {
+            indices.push(index);
+            break;
+        }
+
+        if (message.role === 'user') {
+            break;
+        }
+    }
+
+    return indices;
+}
+
+function buildQuestionIndexItems(
+    messages: ConversationMessage[],
+    filter: QuestionIndexFilter
+): QuestionIndexItem[] {
+    return messages
+        .filter((message) => message.role === 'user' && message.deleted !== true)
+        .map((message) => ({
+            questionId: getQuestionKey(message),
+            title: getQuestionTitle(message),
+            starred: message.starred === true,
+            deleted: message.deleted === true,
+            messageId: message.id
+        }))
+        .filter((item) => filter === 'all' || item.starred);
+}
+
+function buildVisibleMessages(messages: ConversationMessage[]): ConversationMessage[] {
+    return messages.filter((message) => message.deleted !== true);
+}
+
+function buildProviderHistory(messages: ConversationMessage[]) {
+    return buildVisibleMessages(messages).map((message) => ({
+        role: message.role,
+        content: message.content,
+        attachments: message.attachments?.map((attachment) => ({ ...attachment }))
+    }));
 }
 
 function buildImportKey(origin?: Conversation['origin'], externalId?: string): string | null {
@@ -184,9 +297,17 @@ export const useChatStore = defineStore('chat', {
         workspaceMode: 'active',
         sidebarCollapsed: false,
         isGenerating: false,
+        isAbortRequested: false,
         currentError: null,
         currentProviderId: '',
         currentModelId: '',
+        questionIndexFilter: 'all',
+        isQuestionIndexPanelOpen: true,
+        activeQuestionId: null,
+        pendingScrollQuestionId: null,
+        draftPrompt: '',
+        lastSubmittedPrompt: null,
+        draftFocusRequestKey: 0,
         draftAttachments: [],
         attachmentError: null
     }),
@@ -211,6 +332,25 @@ export const useChatStore = defineStore('chat', {
 
         activeExternalProvider(state): ExternalHistoryProviderEntry | null {
             return state.historyProviders.find((entry) => entry.id === state.activeExternalProviderId) || null;
+        },
+
+        questionIndexItems(state): QuestionIndexItem[] {
+            if (state.workspaceMode === 'preview' || !state.currentConversation) {
+                return [];
+            }
+
+            return buildQuestionIndexItems(state.currentConversation.messages, state.questionIndexFilter);
+        },
+
+        visibleMessages(state): ConversationMessage[] {
+            const conversation = state.workspaceMode === 'preview' ? state.previewConversation : state.currentConversation;
+            if (!conversation) {
+                return [];
+            }
+
+            return state.workspaceMode === 'preview'
+                ? conversation.messages.map(cloneConversationMessage)
+                : buildVisibleMessages(conversation.messages).map(cloneConversationMessage);
         }
     },
 
@@ -432,6 +572,26 @@ export const useChatStore = defineStore('chat', {
             this.currentModelId = modelId;
         },
 
+        setDraftPrompt(prompt: string) {
+            this.draftPrompt = prompt;
+        },
+
+        setQuestionIndexFilter(filter: QuestionIndexFilter) {
+            this.questionIndexFilter = filter;
+        },
+
+        setQuestionIndexPanelOpen(open: boolean) {
+            this.isQuestionIndexPanelOpen = open;
+        },
+
+        requestScrollToQuestion(questionId: string | null) {
+            this.pendingScrollQuestionId = questionId;
+        },
+
+        setActiveQuestion(questionId: string | null) {
+            this.activeQuestionId = questionId;
+        },
+
         async checkAuth() {
             const provider = this.resolveModelProvider();
             if (!provider) {
@@ -479,6 +639,32 @@ export const useChatStore = defineStore('chat', {
             this.workspaceMode = 'active';
             this.previewConversation = null;
             this.currentError = null;
+            this.isQuestionIndexPanelOpen = true;
+            this.activeQuestionId = null;
+            this.pendingScrollQuestionId = null;
+        },
+
+        async deleteLocalConversation(id: string) {
+            if (!this.storageProvider) {
+                return;
+            }
+
+            const isDeletingCurrentConversation = this.workspaceMode === 'active' && this.currentConversation?.id === id;
+
+            await this.storageProvider.deleteConversation(id);
+            await this.loadLocalConversations();
+
+            if (!isDeletingCurrentConversation) {
+                return;
+            }
+
+            const fallbackConversation = this.conversations.find((conversation) => conversation.id !== id) ?? null;
+            if (fallbackConversation) {
+                await this.selectLocalConversation(fallbackConversation.id);
+                return;
+            }
+
+            await this.startNewConversation();
         },
 
         async startNewConversation() {
@@ -493,6 +679,9 @@ export const useChatStore = defineStore('chat', {
             this.historySource = 'local';
             this.previewConversation = null;
             this.currentError = null;
+            this.isQuestionIndexPanelOpen = true;
+            this.activeQuestionId = null;
+            this.pendingScrollQuestionId = null;
         },
 
         setSidebarCollapsed(collapsed: boolean) {
@@ -620,6 +809,7 @@ export const useChatStore = defineStore('chat', {
                 this.historySource = 'local';
                 this.previewConversation = null;
                 this.currentError = null;
+                this.isQuestionIndexPanelOpen = true;
             } catch (error) {
                 this.currentError = error instanceof Error ? error.message : '外部文件导入失败。';
                 throw error;
@@ -646,6 +836,20 @@ export const useChatStore = defineStore('chat', {
             this.historySource = 'local';
             this.previewConversation = null;
             this.currentError = null;
+            this.isQuestionIndexPanelOpen = true;
+        },
+
+        async persistCurrentConversation() {
+            if (!this.storageProvider || !this.currentConversation) {
+                return;
+            }
+
+            this.currentConversation.updatedAt = Date.now();
+            await this.storageProvider.saveConversation(toRaw(this.currentConversation));
+            await this.loadLocalConversations();
+            if (this.resolveHistoryProvider() && this.externalHistoryItems.length > 0) {
+                await this.loadExternalHistory().catch(() => undefined);
+            }
         },
 
         async importConversation(preview: Conversation, defaultOrigin: ExternalHistoryProviderId): Promise<Conversation> {
@@ -678,12 +882,19 @@ export const useChatStore = defineStore('chat', {
         },
 
         async sendMessage(prompt: string) {
+            this.setDraftPrompt(prompt);
+            await this.sendDraft();
+        },
+
+        async sendDraft() {
             if (this.workspaceMode === 'preview') {
                 return;
             }
 
+            const prompt = this.draftPrompt;
+            const trimmedPrompt = prompt.trim();
             const pendingAttachments = this.draftAttachments.map((attachment) => ({ ...attachment }));
-            if (!prompt.trim() && pendingAttachments.length === 0) {
+            if (!trimmedPrompt && pendingAttachments.length === 0) {
                 return;
             }
 
@@ -695,25 +906,38 @@ export const useChatStore = defineStore('chat', {
                 throw new Error('Provider model catalog is not ready');
             }
 
+            const history = this.currentConversation
+                ? buildProviderHistory(this.currentConversation.messages)
+                : [];
+
+            const questionId = crypto.randomUUID();
+            const createdAt = Date.now();
             const userMsgId = crypto.randomUUID();
             const assistantMsgId = crypto.randomUUID();
 
             this.currentConversation!.messages.push({
                 id: userMsgId,
                 role: 'user',
-                content: prompt,
+                content: trimmedPrompt,
+                createdAt,
+                questionId,
                 attachments: pendingAttachments.length > 0 ? pendingAttachments : undefined
             });
 
             this.currentConversation!.messages.push({
                 id: assistantMsgId,
                 role: 'assistant',
-                content: ''
+                content: '',
+                createdAt: createdAt + 1,
+                questionId
             });
 
             this.isGenerating = true;
+            this.isAbortRequested = false;
             this.currentError = null;
             this.attachmentError = null;
+            this.lastSubmittedPrompt = prompt;
+            this.draftPrompt = '';
             this.draftAttachments = [];
 
             try {
@@ -726,11 +950,12 @@ export const useChatStore = defineStore('chat', {
                 const backendId = this.currentConversation!.backendId;
 
                 const result = await provider.sendMessage(
-                    prompt,
+                    trimmedPrompt,
                     {
                         context: { conversationId: backendId },
                         modelId: this.currentModelId,
-                        attachments: pendingAttachments
+                        attachments: pendingAttachments,
+                        history
                     },
                     (update) => {
                         const lastMsg = this.currentConversation!.messages[this.currentConversation!.messages.length - 1];
@@ -749,20 +974,22 @@ export const useChatStore = defineStore('chat', {
                 }
 
                 if (this.currentConversation!.title === 'New Chat') {
-                    const seedTitle = prompt.trim() || pendingAttachments[0]?.name || 'New Chat';
+                    const seedTitle = trimmedPrompt || pendingAttachments[0]?.name || 'New Chat';
                     this.currentConversation!.title = seedTitle.substring(0, 30) + (seedTitle.length > 30 ? '...' : '');
                 }
 
-                this.currentConversation!.updatedAt = Date.now();
-                await this.storageProvider.saveConversation(toRaw(this.currentConversation!));
-                await this.loadLocalConversations();
-                if (this.resolveHistoryProvider() && this.externalHistoryItems.length > 0) {
-                    await this.loadExternalHistory().catch(() => undefined);
-                }
+                await this.persistCurrentConversation();
             } catch (err: unknown) {
-                this.currentError = err instanceof Error ? err.message : 'Error sending message';
+                if (this.isAbortRequested || isAbortError(err)) {
+                    this.currentError = null;
+                    await this.persistCurrentConversation();
+                } else {
+                    this.currentError = err instanceof Error ? err.message : 'Error sending message';
+                }
             } finally {
                 this.isGenerating = false;
+                this.isAbortRequested = false;
+                this.lastSubmittedPrompt = null;
             }
         },
 
@@ -795,12 +1022,57 @@ export const useChatStore = defineStore('chat', {
             this.draftAttachments = [];
         },
 
-        abort() {
+        async toggleQuestionStar(questionId: string) {
+            if (!this.currentConversation) {
+                return;
+            }
+
+            const indices = resolveQuestionPairIndices(this.currentConversation.messages, questionId);
+            const userIndex = indices.find((index) => this.currentConversation!.messages[index]?.role === 'user');
+            if (userIndex === undefined) {
+                return;
+            }
+
+            const userMessage = this.currentConversation.messages[userIndex];
+            userMessage.starred = userMessage.starred !== true;
+            await this.persistCurrentConversation();
+        },
+
+        async softDeleteQuestionPair(questionId: string) {
+            if (!this.currentConversation) {
+                return;
+            }
+
+            const indices = resolveQuestionPairIndices(this.currentConversation.messages, questionId);
+            if (indices.length === 0) {
+                return;
+            }
+
+            indices.forEach((index) => {
+                this.currentConversation!.messages[index].deleted = true;
+            });
+
+            if (this.activeQuestionId === questionId) {
+                this.activeQuestionId = null;
+            }
+            if (this.pendingScrollQuestionId === questionId) {
+                this.pendingScrollQuestionId = null;
+            }
+
+            await this.persistCurrentConversation();
+        },
+
+        abortGeneration() {
             const provider = this.resolveModelProvider();
             if (provider) {
                 provider.abort();
             }
+            this.isAbortRequested = true;
             this.isGenerating = false;
+            if (this.lastSubmittedPrompt !== null) {
+                this.draftPrompt = this.lastSubmittedPrompt;
+                this.draftFocusRequestKey += 1;
+            }
         },
 
         applyImportedFlags(items: ConversationHistorySummary[]): ConversationHistorySummary[] {

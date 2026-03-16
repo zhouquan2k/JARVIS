@@ -17,6 +17,7 @@
       @switch-source="onSwitchSource"
       @select-external-provider="onSelectExternalProvider"
       @select-local="onSelectLocal"
+      @delete-local="onDeleteLocal"
       @select-external="onSelectExternal"
       @new-chat="onNewChat"
       @new-compare="onNewCompare"
@@ -24,7 +25,7 @@
 
     <div class="workspace-main" :class="{ 'compare-mode': isCompareMode }">
       <CompareChatView v-if="isCompareMode" />
-      <NormalChatView v-else />
+      <NormalChatView v-else class="workspace-thread" :show-question-index="true" />
     </div>
   </section>
 </template>
@@ -58,6 +59,13 @@ async function onSelectLocal(id: string) {
     emit('request-normal-mode');
   }
   await chatStore.selectLocalConversation(id);
+}
+
+async function onDeleteLocal(id: string) {
+  if (props.isCompareMode) {
+    emit('request-normal-mode');
+  }
+  await chatStore.deleteLocalConversation(id);
 }
 
 async function onSelectExternal(id: string) {
@@ -117,9 +125,12 @@ function onNewCompare() {
 }
 
 .workspace-main > * {
-  flex: 1;
   min-width: 0;
   min-height: 0;
+}
+
+.workspace-thread {
+  flex: 1;
 }
 
 @media (max-width: 920px) {

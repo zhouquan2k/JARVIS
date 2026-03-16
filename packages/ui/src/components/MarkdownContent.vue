@@ -319,6 +319,37 @@ function renderMarkdown(
   padding-left: 20px;
 }
 
+.markdown-content :deep(h1),
+.markdown-content :deep(h2),
+.markdown-content :deep(h3),
+.markdown-content :deep(h4),
+.markdown-content :deep(h5),
+.markdown-content :deep(h6) {
+  line-height: 1.3;
+  font-weight: 700;
+}
+
+.markdown-content :deep(h1) {
+  font-size: 1.6rem;
+}
+
+.markdown-content :deep(h2) {
+  font-size: 1.35rem;
+}
+
+.markdown-content :deep(h3) {
+  font-size: 1.15rem;
+}
+
+.markdown-content :deep(h4) {
+  font-size: 1rem;
+}
+
+.markdown-content :deep(h5),
+.markdown-content :deep(h6) {
+  font-size: 0.94rem;
+}
+
 .markdown-content :deep(code) {
   background: rgba(255, 255, 255, 0.08);
   border-radius: 4px;

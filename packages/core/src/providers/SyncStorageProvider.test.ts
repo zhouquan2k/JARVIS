@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import type { ISyncTransport, SyncPullResult, SyncPushResult } from '../interfaces/ISyncTransport';
+import type {
+    ISyncTransport,
+    SyncDeletedConversation,
+    SyncPullResult,
+    SyncPushResult
+} from '../interfaces/ISyncTransport';
 import { cloneConversationMessage, type Conversation, type IStorageProvider } from '../interfaces/IStorageProvider';
-import { SyncStorageProvider, type SyncStateStore } from './SyncStorageProvider';
+import {
+    SyncStorageProvider,
+    type DeletedConversationStateStore,
+    type SyncStateStore
+} from './SyncStorageProvider';
 
 class MemoryStorageProvider implements IStorageProvider {
     id = 'memory-storage';
@@ -45,24 +54,43 @@ class MemorySyncStateStore implements SyncStateStore {
     }
 }
 
+class MemoryDeletedConversationStateStore implements DeletedConversationStateStore {
+    private readonly deletedConversations = new Map<string, SyncDeletedConversation[]>();
+
+    async getDeletedConversations(syncKey: string): Promise<SyncDeletedConversation[]> {
+        return (this.deletedConversations.get(syncKey) ?? []).map((conversation) => ({ ...conversation }));
+    }
+
+    async setDeletedConversations(syncKey: string, conversations: SyncDeletedConversation[]): Promise<void> {
+        this.deletedConversations.set(syncKey, conversations.map((conversation) => ({ ...conversation })));
+    }
+}
+
 class MockSyncTransport implements ISyncTransport {
     public pushes: Conversation[][] = [];
-    public pushResult: SyncPushResult = { processedIds: [], nextCursor: null };
+    public deletedPushes: SyncDeletedConversation[][] = [];
+    public pushResult: SyncPushResult = { processedIds: [], processedDeletedIds: [], nextCursor: null };
     public pushResults: SyncPushResult[] = [];
-    public pullResult: SyncPullResult = { conversations: [], nextCursor: null };
+    public pullResult: SyncPullResult = { conversations: [], deletedConversations: [], nextCursor: null };
 
     async pull(): Promise<SyncPullResult> {
         return {
             conversations: this.pullResult.conversations.map(cloneConversation),
+            deletedConversations: this.pullResult.deletedConversations.map((conversation) => ({ ...conversation })),
             nextCursor: this.pullResult.nextCursor
         };
     }
 
-    async push(conversations: Conversation[]): Promise<SyncPushResult> {
+    async push(
+        conversations: Conversation[],
+        deletedConversations: SyncDeletedConversation[] = []
+    ): Promise<SyncPushResult> {
         this.pushes.push(conversations.map(cloneConversation));
+        this.deletedPushes.push(deletedConversations.map((conversation) => ({ ...conversation })));
         const nextResult = this.pushResults.shift();
         return {
             processedIds: [...(nextResult?.processedIds ?? this.pushResult.processedIds)],
+            processedDeletedIds: [...(nextResult?.processedDeletedIds ?? this.pushResult.processedDeletedIds ?? [])],
             nextCursor: nextResult?.nextCursor ?? this.pushResult.nextCursor
         };
     }
@@ -106,14 +134,15 @@ function createConversation(
 describe('SyncStorageProvider', () => {
     it('pushes dirty conversations and keeps compare-only conversations local', async () => {
         const transport = new MockSyncTransport();
-        transport.pushResult = { processedIds: ['sync-1'], nextCursor: 11 };
+        transport.pushResult = { processedIds: ['sync-1'], processedDeletedIds: [], nextCursor: 11 };
         const localStore = new MemoryStorageProvider();
         const stateStore = new MemorySyncStateStore();
         const provider = new SyncStorageProvider({
             localStore,
             transport,
             syncKey: 'workspace-a',
-            stateStore
+            stateStore,
+            deletedConversationStore: new MemoryDeletedConversationStateStore()
         });
 
         await provider.saveConversation(createConversation({
@@ -125,6 +154,10 @@ describe('SyncStorageProvider', () => {
                     id: 'message-1',
                     role: 'user',
                     content: 'hello',
+                    createdAt: 1000,
+                    questionId: 'question-1',
+                    starred: true,
+                    deleted: false,
                     attachments: [
                         {
                             id: 'attachment-1',
@@ -140,6 +173,9 @@ describe('SyncStorageProvider', () => {
                     id: 'message-2',
                     role: 'assistant',
                     content: '已处理 [1]',
+                    createdAt: 1001,
+                    questionId: 'question-1',
+                    deleted: false,
                     annotations: [
                         {
                             kind: 'cite',
@@ -180,27 +216,31 @@ describe('SyncStorageProvider', () => {
         await provider.syncNow();
 
         expect(transport.pushes).toHaveLength(1);
+        expect(transport.deletedPushes).toEqual([[]]);
         expect(transport.pushes[0]).toHaveLength(1);
         expect(transport.pushes[0][0].id).toBe('sync-1');
         expect(transport.pushes[0][0].compare).toBeUndefined();
         expect(transport.pushes[0][0].sync?.dirty).toBe(true);
-        expect(transport.pushes[0][0].messages[0].attachments?.[0]?.name).toBe('notes.txt');
-        expect(transport.pushes[0][0].messages[1].annotations?.[0]?.kind).toBe('cite');
+        expect(transport.pushes[0][0].messages[0].questionId).toBe('question-1');
+        expect(transport.pushes[0][0].messages[0].starred).toBe(true);
+        expect(transport.pushes[0][0].messages[1].createdAt).toBe(1001);
 
         const persisted = await provider.getConversation('sync-1');
         expect(persisted?.sync?.dirty).toBe(false);
         expect(persisted?.sync?.syncedAt).toEqual(expect.any(Number));
         expect(persisted?.messages[0].attachments?.[0]?.base64Data).toBe('aGVsbG8=');
         expect(persisted?.messages[1].annotations?.[0]?.kind).toBe('cite');
+
         const compareOnlyConversation = await provider.getConversation('compare-only');
         expect(compareOnlyConversation?.compare?.prompt).toBe('compare');
         expect(compareOnlyConversation?.sync).toBeUndefined();
         expect(await stateStore.getCursor('workspace-a')).toBe(11);
     });
 
-    it('keeps soft-deleted conversations locally until remote acknowledgement', async () => {
+    it('hard-deletes local conversations and clears the delete outbox after remote acknowledgement', async () => {
         const transport = new MockSyncTransport();
-        transport.pushResult = { processedIds: ['sync-2'], nextCursor: 15 };
+        transport.pushResult = { processedIds: [], processedDeletedIds: ['sync-2'], nextCursor: 15 };
+        const deletedConversationStore = new MemoryDeletedConversationStateStore();
         const localStore = new MemoryStorageProvider([
             createConversation({
                 id: 'sync-2',
@@ -216,19 +256,24 @@ describe('SyncStorageProvider', () => {
             localStore,
             transport,
             syncKey: 'workspace-b',
-            stateStore: new MemorySyncStateStore()
+            stateStore: new MemorySyncStateStore(),
+            deletedConversationStore
         });
 
         await provider.deleteConversation('sync-2');
 
-        const deletedConversation = await provider.getConversation('sync-2');
-        expect(deletedConversation?.sync?.deleted).toBe(true);
-        expect(deletedConversation?.sync?.dirty).toBe(true);
+        expect(await provider.getConversation('sync-2')).toBeNull();
+        expect(await deletedConversationStore.getDeletedConversations('workspace-b')).toEqual([
+            expect.objectContaining({ id: 'sync-2', updatedAt: expect.any(Number) })
+        ]);
 
         await provider.syncNow();
-        const syncedConversation = await provider.getConversation('sync-2');
-        expect(syncedConversation?.sync?.deleted).toBe(true);
-        expect(syncedConversation?.sync?.dirty).toBe(false);
+
+        expect(transport.pushes).toEqual([[]]);
+        expect(transport.deletedPushes).toHaveLength(1);
+        expect(transport.deletedPushes[0][0]).toEqual(expect.objectContaining({ id: 'sync-2' }));
+        expect(await deletedConversationStore.getDeletedConversations('workspace-b')).toEqual([]);
+        expect(await provider.getConversation('sync-2')).toBeNull();
     });
 
     it('uses remote last-write-wins data during pull and persists the updated cursor', async () => {
@@ -239,6 +284,25 @@ describe('SyncStorageProvider', () => {
                     id: 'shared-1',
                     updatedAt: 50,
                     title: 'Remote latest',
+                    messages: [
+                        {
+                            id: 'remote-user',
+                            role: 'user',
+                            content: 'remote question',
+                            createdAt: 49,
+                            questionId: 'question-remote',
+                            starred: false,
+                            deleted: true
+                        },
+                        {
+                            id: 'remote-assistant',
+                            role: 'assistant',
+                            content: 'remote answer',
+                            createdAt: 50,
+                            questionId: 'question-remote',
+                            deleted: true
+                        }
+                    ],
                     sync: {
                         deleted: false,
                         dirty: false,
@@ -246,6 +310,7 @@ describe('SyncStorageProvider', () => {
                     }
                 })
             ],
+            deletedConversations: [],
             nextCursor: 50
         };
         const stateStore = new MemorySyncStateStore();
@@ -264,21 +329,87 @@ describe('SyncStorageProvider', () => {
             ]),
             transport,
             syncKey: 'workspace-c',
-            stateStore
+            stateStore,
+            deletedConversationStore: new MemoryDeletedConversationStateStore()
         });
 
         await provider.hydrate();
 
         const mergedConversation = await provider.getConversation('shared-1');
         expect(mergedConversation?.title).toBe('Remote latest');
+        expect(mergedConversation?.messages[0].questionId).toBe('question-remote');
+        expect(mergedConversation?.messages[0].deleted).toBe(true);
+        expect(mergedConversation?.sync?.deleted).toBe(false);
         expect(mergedConversation?.sync?.dirty).toBe(false);
         expect(await stateStore.getCursor('workspace-c')).toBe(50);
+    });
+
+    it('applies remote delete events and removes matching local conversations', async () => {
+        const transport = new MockSyncTransport();
+        transport.pullResult = {
+            conversations: [],
+            deletedConversations: [
+                {
+                    id: 'shared-delete',
+                    updatedAt: 80
+                }
+            ],
+            nextCursor: 80
+        };
+        const provider = new SyncStorageProvider({
+            localStore: new MemoryStorageProvider([
+                createConversation({
+                    id: 'shared-delete',
+                    updatedAt: 70,
+                    title: 'Local draft'
+                })
+            ]),
+            transport,
+            syncKey: 'workspace-delete',
+            stateStore: new MemorySyncStateStore(),
+            deletedConversationStore: new MemoryDeletedConversationStateStore()
+        });
+
+        await provider.hydrate();
+
+        expect(await provider.getConversation('shared-delete')).toBeNull();
+    });
+
+    it('ignores stale remote delete events when the local conversation is newer', async () => {
+        const transport = new MockSyncTransport();
+        transport.pullResult = {
+            conversations: [],
+            deletedConversations: [
+                {
+                    id: 'shared-stale-delete',
+                    updatedAt: 50
+                }
+            ],
+            nextCursor: 50
+        };
+        const provider = new SyncStorageProvider({
+            localStore: new MemoryStorageProvider([
+                createConversation({
+                    id: 'shared-stale-delete',
+                    updatedAt: 60,
+                    title: 'Local latest'
+                })
+            ]),
+            transport,
+            syncKey: 'workspace-stale',
+            stateStore: new MemorySyncStateStore(),
+            deletedConversationStore: new MemoryDeletedConversationStateStore()
+        });
+
+        await provider.hydrate();
+
+        expect((await provider.getConversation('shared-stale-delete'))?.title).toBe('Local latest');
     });
 
     it('hydrates legacy local conversations by marking them dirty and pushing them once per startup', async () => {
         const transport = new MockSyncTransport();
         transport.pushResults = [
-            { processedIds: ['legacy-1'], nextCursor: 7 }
+            { processedIds: ['legacy-1'], processedDeletedIds: [], nextCursor: 7 }
         ];
         const stateStore = new MemorySyncStateStore();
         const provider = new SyncStorageProvider({
@@ -311,12 +442,14 @@ describe('SyncStorageProvider', () => {
             ]),
             transport,
             syncKey: 'workspace-d',
-            stateStore
+            stateStore,
+            deletedConversationStore: new MemoryDeletedConversationStateStore()
         });
 
         await provider.hydrate();
 
         expect(transport.pushes).toHaveLength(1);
+        expect(transport.deletedPushes).toEqual([[]]);
         expect(transport.pushes[0]).toHaveLength(1);
         expect(transport.pushes[0][0].id).toBe('legacy-1');
         expect(transport.pushes[0][0].updatedAt).toBe(123);
@@ -335,8 +468,8 @@ describe('SyncStorageProvider', () => {
     it('continues pushing newly created conversations after startup hydration', async () => {
         const transport = new MockSyncTransport();
         transport.pushResults = [
-            { processedIds: ['legacy-2'], nextCursor: 5 },
-            { processedIds: ['fresh-1'], nextCursor: 6 }
+            { processedIds: ['legacy-2'], processedDeletedIds: [], nextCursor: 5 },
+            { processedIds: ['fresh-1'], processedDeletedIds: [], nextCursor: 6 }
         ];
         const provider = new SyncStorageProvider({
             localStore: new MemoryStorageProvider([
@@ -347,7 +480,8 @@ describe('SyncStorageProvider', () => {
             ]),
             transport,
             syncKey: 'workspace-e',
-            stateStore: new MemorySyncStateStore()
+            stateStore: new MemorySyncStateStore(),
+            deletedConversationStore: new MemoryDeletedConversationStateStore()
         });
 
         await provider.hydrate();

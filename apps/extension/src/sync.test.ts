@@ -3,10 +3,12 @@ import { createPinia, setActivePinia } from 'pinia';
 import { useChatStore } from '@packages/ui';
 import type {
     Conversation,
+    DeletedConversationStateStore,
     IModelProvider,
     IStorageProvider,
     ProviderStreamUpdate,
     SendMessageOptions,
+    SyncDeletedConversation,
     SyncStateStore
 } from '@packages/core/src';
 import { createApp } from '../../server/src/app.js';
@@ -49,6 +51,18 @@ class MemorySyncStateStore implements SyncStateStore {
 
     async setCursor(syncKey: string, cursor: number | null): Promise<void> {
         this.cursors.set(syncKey, cursor);
+    }
+}
+
+class MemoryDeletedConversationStateStore implements DeletedConversationStateStore {
+    private readonly deletedConversations = new Map<string, SyncDeletedConversation[]>();
+
+    async getDeletedConversations(syncKey: string): Promise<SyncDeletedConversation[]> {
+        return (this.deletedConversations.get(syncKey) ?? []).map((conversation) => ({ ...conversation }));
+    }
+
+    async setDeletedConversations(syncKey: string, conversations: SyncDeletedConversation[]): Promise<void> {
+        this.deletedConversations.set(syncKey, conversations.map((conversation) => ({ ...conversation })));
     }
 }
 
@@ -101,7 +115,7 @@ function createConversation(id: string, updatedAt: number, extra: Partial<Conver
 }
 
 describe('extension sync bootstrap', () => {
-    it('syncs imported history through the real server and keeps soft-deleted conversations hidden', async () => {
+    it('syncs imported history through the real server and propagates hard-deleted conversations', async () => {
         const app = createApp({
             config: {
                 port: 8787,
@@ -123,14 +137,16 @@ describe('extension sync bootstrap', () => {
             isDevelopment: true,
             localStore: new MemoryStorageProvider(),
             fetchImpl,
-            stateStore: new MemorySyncStateStore()
+            stateStore: new MemorySyncStateStore(),
+            deletedConversationStore: new MemoryDeletedConversationStateStore()
         });
         const targetProvider = createExtensionSyncStorageProvider({
             env,
             isDevelopment: true,
             localStore: new MemoryStorageProvider(),
             fetchImpl,
-            stateStore: new MemorySyncStateStore()
+            stateStore: new MemorySyncStateStore(),
+            deletedConversationStore: new MemoryDeletedConversationStateStore()
         });
 
         await sourceProvider.saveConversation(createConversation('import-1', 100, {
@@ -140,9 +156,11 @@ describe('extension sync bootstrap', () => {
         await sourceProvider.saveConversation(createConversation('soft-delete-1', 110));
         await sourceProvider.syncNow();
         await sourceProvider.deleteConversation('soft-delete-1');
+        expect(await sourceProvider.getConversation('soft-delete-1')).toBeNull();
         await sourceProvider.syncNow();
 
         await targetProvider.hydrate();
+        expect(await targetProvider.getConversation('soft-delete-1')).toBeNull();
 
         setActivePinia(createPinia());
         const chatStore = useChatStore();
@@ -163,7 +181,8 @@ describe('extension sync bootstrap', () => {
             },
             isDevelopment: false,
             localStore: new MemoryStorageProvider(),
-            stateStore: new MemorySyncStateStore()
+            stateStore: new MemorySyncStateStore(),
+            deletedConversationStore: new MemoryDeletedConversationStateStore()
         })).toThrow('syncKey=0 仅允许在开发环境使用');
     });
 
@@ -212,14 +231,16 @@ describe('extension sync bootstrap', () => {
                 })
             ]),
             fetchImpl,
-            stateStore: new MemorySyncStateStore()
+            stateStore: new MemorySyncStateStore(),
+            deletedConversationStore: new MemoryDeletedConversationStateStore()
         });
         const readerProvider = createExtensionSyncStorageProvider({
             env,
             isDevelopment: true,
             localStore: new MemoryStorageProvider(),
             fetchImpl,
-            stateStore: new MemorySyncStateStore()
+            stateStore: new MemorySyncStateStore(),
+            deletedConversationStore: new MemoryDeletedConversationStateStore()
         });
 
         await startupProvider.hydrate();

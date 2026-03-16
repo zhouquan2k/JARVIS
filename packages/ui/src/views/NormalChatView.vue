@@ -1,46 +1,77 @@
 <template>
   <div class="chat-container" data-testid="normal-chat-view">
-    <div class="chat-messages" ref="messagesRef" data-testid="normal-messages">
-      <div v-if="chatStore.isExternalPreviewLoading" class="loading-banner" data-testid="external-preview-loading">
-        正在加载对话内容...
-      </div>
+    <div class="chat-main">
+      <div class="chat-thread">
+        <div class="chat-messages" ref="messagesRef" data-testid="normal-messages" @scroll="onMessagesScroll">
+          <div v-if="chatStore.isExternalPreviewLoading" class="loading-banner" data-testid="external-preview-loading">
+            正在加载对话内容...
+          </div>
 
-      <div v-if="displayConversation" class="conversation-header">
-        <h2>{{ displayConversation.title || 'Untitled' }}</h2>
-        <span class="source-chip">
-          {{ isPreviewing ? '导入预览' : '会话' }}
-        </span>
-      </div>
+          <div v-if="displayConversation" class="conversation-header">
+            <h2>{{ displayConversation.title || 'Untitled' }}</h2>
+            <span class="source-chip">
+              {{ isPreviewing ? '导入预览' : '会话' }}
+            </span>
+          </div>
 
-      <div v-if="!displayConversation" class="empty-state" data-testid="normal-empty">
-        <h3>从左侧选择一条历史，或者开始一段新聊天。</h3>
-        <p>支持拖拽、文件选择和剪贴板图片粘贴；外部历史会先以只读方式预览，再决定是否导入。</p>
-      </div>
+          <div v-if="!displayConversation" class="empty-state" data-testid="normal-empty">
+            <h3>从左侧选择一条历史，或者开始一段新聊天。</h3>
+            <p>支持拖拽、文件选择和剪贴板图片粘贴；外部历史会先以只读方式预览，再决定是否导入。</p>
+          </div>
 
-      <template v-else>
-        <div
-          v-for="msg in displayConversation.messages"
-          :key="msg.id"
-          :class="['message', msg.role]"
-        >
-          <div v-if="msg.role === 'user'" class="content user-content">{{ msg.content || '已发送附件' }}</div>
-          <MessageAttachmentStrip v-if="msg.attachments?.length" :attachments="msg.attachments" />
-          <MarkdownContent
-            v-if="msg.role === 'assistant'"
-            class="content markdown-body"
-            :source="msg.content"
-            :annotations="msg.annotations"
-          />
+          <template v-else>
+            <TransitionGroup name="thread-message" tag="div" class="message-list">
+              <div
+                v-for="msg in renderedMessages"
+                :key="msg.id"
+                :class="[
+                  'message',
+                  msg.role,
+                  {
+                    'question-root': isQuestionRoot(msg),
+                    'question-active': isActiveQuestion(msg),
+                    'question-starred': isStarredMessage(msg)
+                  }
+                ]"
+                :data-question-id="isQuestionRoot(msg) ? getMessageQuestionKey(msg) : undefined"
+              >
+                <div v-if="msg.role === 'user'" class="content user-content">{{ msg.content || '已发送附件' }}</div>
+                <MessageAttachmentStrip v-if="msg.attachments?.length" :attachments="msg.attachments" />
+                <MarkdownContent
+                  v-if="msg.role === 'assistant'"
+                  class="content markdown-body"
+                  :source="msg.content"
+                  :annotations="msg.annotations"
+                />
+              </div>
+            </TransitionGroup>
+          </template>
+
+          <div v-if="chatStore.isGenerating" class="message assistant">
+            <div class="content typing">typing...</div>
+          </div>
+
+          <div v-if="chatStore.currentError" class="error" data-testid="normal-error">
+            {{ chatStore.currentError }}
+          </div>
         </div>
-      </template>
 
-      <div v-if="chatStore.isGenerating" class="message assistant">
-        <div class="content typing">typing...</div>
+        <button
+          v-if="showQuestionIndexToggle"
+          type="button"
+          class="chat-index-toggle"
+          data-testid="question-panel-open"
+          @click="chatStore.setQuestionIndexPanelOpen(true)"
+        >
+          显示大纲
+        </button>
       </div>
 
-      <div v-if="chatStore.currentError" class="error" data-testid="normal-error">
-        {{ chatStore.currentError }}
-      </div>
+      <QuestionIndexPanel
+        v-if="showQuestionIndexPanel"
+        class="chat-index-panel"
+        data-testid="question-index-panel"
+      />
     </div>
 
     <div
@@ -79,28 +110,33 @@
 
         <div class="input-row">
           <textarea
+            ref="inputRef"
             data-testid="normal-input"
-            v-model="inputPrompt"
+            v-model="draftPrompt"
             @paste="onPaste"
-            @keydown.enter.prevent="send()"
-            placeholder="输入内容，或拖拽 / 粘贴图片到这里"
+            @keydown="onInputKeydown"
+            placeholder="输入内容，按 Enter 换行，Ctrl/Cmd + Enter 发送"
             :disabled="chatStore.isGenerating || !isAuthenticated || chatStore.isCurrentProviderModelsLoading || !chatStore.currentModelId"
           />
-          <button
-            data-testid="normal-send"
-            @click="send()"
-            :disabled="(!inputPrompt.trim() && chatStore.draftAttachments.length === 0) || chatStore.isGenerating || !isAuthenticated || chatStore.isCurrentProviderModelsLoading || !chatStore.currentModelId"
-          >
-            Send
-          </button>
-          <button
-            v-if="chatStore.isGenerating"
-            @click="chatStore.abort()"
-            class="stop-btn"
-            data-testid="normal-stop"
-          >
-            Stop
-          </button>
+          <div class="input-actions">
+            <p class="shortcut-hint">Enter 换行，Ctrl/Cmd + Enter 发送</p>
+            <button
+              v-if="!chatStore.isGenerating"
+              data-testid="normal-send"
+              @click="send()"
+              :disabled="(!draftPrompt.trim() && chatStore.draftAttachments.length === 0) || !isAuthenticated || chatStore.isCurrentProviderModelsLoading || !chatStore.currentModelId"
+            >
+              发送
+            </button>
+            <button
+              v-else
+              @click="chatStore.abortGeneration()"
+              class="stop-btn"
+              data-testid="normal-stop"
+            >
+              停止生成
+            </button>
+          </div>
         </div>
       </template>
 
@@ -133,27 +169,106 @@
 </template>
 
 <script setup lang="ts">
+import type { ConversationMessage } from '@packages/core/src';
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import AttachmentComposer from '../components/AttachmentComposer.vue';
 import MarkdownContent from '../components/MarkdownContent.vue';
 import MessageAttachmentStrip from '../components/MessageAttachmentStrip.vue';
 import ProviderModelSelector from '../components/ProviderModelSelector.vue';
+import QuestionIndexPanel from '../components/QuestionIndexPanel.vue';
 import { useChatStore } from '../store/chat';
+import { isPromptSubmitHotkey } from '../utils/promptHotkeys';
+
+const props = withDefaults(defineProps<{
+  showQuestionIndex?: boolean;
+}>(), {
+  showQuestionIndex: false
+});
 
 const chatStore = useChatStore();
 const isAuthenticated = ref(false);
-const inputPrompt = ref('');
+const inputRef = ref<HTMLTextAreaElement | null>(null);
 const messagesRef = ref<HTMLElement | null>(null);
+let scrollSyncFrame: number | null = null;
 
 const displayConversation = computed(() => chatStore.displayConversation);
 const isPreviewing = computed(() => chatStore.isPreviewing);
+const renderedMessages = computed(() => isPreviewing.value ? displayConversation.value?.messages || [] : chatStore.visibleMessages);
+const draftPrompt = computed({
+  get: () => chatStore.draftPrompt,
+  set: (value: string) => chatStore.setDraftPrompt(value)
+});
+const hasQuestionIndexContent = computed(() => {
+  if (!props.showQuestionIndex || chatStore.workspaceMode !== 'active') {
+    return false;
+  }
+
+  return chatStore.visibleMessages.some((message) => message.role === 'user');
+});
+const showQuestionIndexPanel = computed(() => {
+  return hasQuestionIndexContent.value && chatStore.isQuestionIndexPanelOpen;
+});
+const showQuestionIndexToggle = computed(() => {
+  return hasQuestionIndexContent.value && !chatStore.isQuestionIndexPanelOpen;
+});
+const messageQuestionMeta = computed(() => {
+  const meta = new Map<string, { questionKey: string; starred: boolean; root: boolean }>();
+  if (isPreviewing.value || !chatStore.currentConversation) {
+    return meta;
+  }
+
+  const starredByQuestionKey = new Map<string, boolean>();
+  for (const message of chatStore.currentConversation.messages) {
+    if (message.role !== 'user') {
+      continue;
+    }
+
+    starredByQuestionKey.set(message.questionId || `legacy:${message.id}`, message.starred === true);
+  }
+
+  let pendingLegacyQuestionKey: string | null = null;
+  for (const message of chatStore.currentConversation.messages) {
+    if (message.role === 'user') {
+      const questionKey = message.questionId || `legacy:${message.id}`;
+      const starred = starredByQuestionKey.get(questionKey) === true;
+      meta.set(message.id, {
+        questionKey,
+        starred,
+        root: true
+      });
+      pendingLegacyQuestionKey = message.questionId ? null : questionKey;
+      continue;
+    }
+
+    if (message.questionId) {
+      meta.set(message.id, {
+        questionKey: message.questionId,
+        starred: starredByQuestionKey.get(message.questionId) === true,
+        root: false
+      });
+      pendingLegacyQuestionKey = null;
+      continue;
+    }
+
+    if (pendingLegacyQuestionKey) {
+      meta.set(message.id, {
+        questionKey: pendingLegacyQuestionKey,
+        starred: starredByQuestionKey.get(pendingLegacyQuestionKey) === true,
+        root: false
+      });
+      pendingLegacyQuestionKey = null;
+    }
+  }
+
+  return meta;
+});
 
 onMounted(async () => {
   await chatStore.init();
   isAuthenticated.value = await chatStore.checkAuth();
 });
 
-watch(() => displayConversation.value?.messages, () => {
+watch(() => renderedMessages.value, () => {
   if (isPreviewing.value) {
     return;
   }
@@ -161,6 +276,7 @@ watch(() => displayConversation.value?.messages, () => {
     if (messagesRef.value) {
       messagesRef.value.scrollTop = messagesRef.value.scrollHeight;
     }
+    syncActiveQuestionFromScroll();
   });
 }, { deep: true });
 
@@ -173,6 +289,7 @@ watch(
       }
 
       messagesRef.value.scrollTop = isPreviewing.value ? 0 : messagesRef.value.scrollHeight;
+      syncActiveQuestionFromScroll();
     });
   }
 );
@@ -181,11 +298,34 @@ watch(() => chatStore.currentProviderId, async () => {
   isAuthenticated.value = await chatStore.checkAuth();
 });
 
+watch(() => chatStore.draftFocusRequestKey, () => {
+  nextTick(() => {
+    inputRef.value?.focus();
+    const end = inputRef.value?.value.length || 0;
+    inputRef.value?.setSelectionRange(end, end);
+  });
+});
+
+watch(() => chatStore.pendingScrollQuestionId, (questionId) => {
+  if (!questionId || isPreviewing.value) {
+    return;
+  }
+
+  nextTick(() => {
+    const selectorValue = typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+      ? CSS.escape(questionId)
+      : questionId.replace(/"/gu, '\\"');
+    const target = messagesRef.value?.querySelector<HTMLElement>(`[data-question-id="${selectorValue}"]`);
+    target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    chatStore.setActiveQuestion(questionId);
+    chatStore.requestScrollToQuestion(null);
+  });
+});
+
 async function send(e?: Event) {
   if (e) e.preventDefault();
-  const text = inputPrompt.value.trim();
   if (
-    (!text && chatStore.draftAttachments.length === 0)
+    (!chatStore.draftPrompt.trim() && chatStore.draftAttachments.length === 0)
     || !isAuthenticated.value
     || chatStore.isGenerating
     || isPreviewing.value
@@ -195,8 +335,67 @@ async function send(e?: Event) {
     return;
   }
 
-  inputPrompt.value = '';
-  await chatStore.sendMessage(text);
+  await chatStore.sendDraft();
+}
+
+function getMessageQuestionKey(message: ConversationMessage): string | null {
+  return messageQuestionMeta.value.get(message.id)?.questionKey || null;
+}
+
+function isQuestionRoot(message: ConversationMessage): boolean {
+  return messageQuestionMeta.value.get(message.id)?.root === true;
+}
+
+function isStarredMessage(message: ConversationMessage): boolean {
+  return messageQuestionMeta.value.get(message.id)?.starred === true;
+}
+
+function isActiveQuestion(message: ConversationMessage): boolean {
+  const questionKey = getMessageQuestionKey(message);
+  return !!questionKey && questionKey === chatStore.activeQuestionId;
+}
+
+function syncActiveQuestionFromScroll() {
+  if (isPreviewing.value || !messagesRef.value) {
+    return;
+  }
+
+  const roots = Array.from(messagesRef.value.querySelectorAll<HTMLElement>('[data-question-id]'));
+  if (roots.length === 0) {
+    chatStore.setActiveQuestion(null);
+    return;
+  }
+
+  const containerTop = messagesRef.value.getBoundingClientRect().top;
+  const threshold = containerTop + 96;
+  let activeQuestionId = roots[0].dataset.questionId || null;
+  for (const root of roots) {
+    if (root.getBoundingClientRect().top <= threshold) {
+      activeQuestionId = root.dataset.questionId || activeQuestionId;
+      continue;
+    }
+    break;
+  }
+
+  chatStore.setActiveQuestion(activeQuestionId);
+}
+
+function onMessagesScroll() {
+  if (scrollSyncFrame !== null) {
+    cancelAnimationFrame(scrollSyncFrame);
+  }
+
+  scrollSyncFrame = requestAnimationFrame(() => {
+    scrollSyncFrame = null;
+    syncActiveQuestionFromScroll();
+  });
+}
+
+function onInputKeydown(event: KeyboardEvent) {
+  if (isPromptSubmitHotkey(event)) {
+    event.preventDefault();
+    void send();
+  }
 }
 
 async function onSelectFiles(files: File[]) {
@@ -243,11 +442,60 @@ function onModelChange(modelId: string) {
   background: transparent;
 }
 
+.chat-main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.chat-thread {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
 .chat-messages {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   padding: 28px 24px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.chat-index-panel {
+  flex: 0 0 auto;
+}
+
+.chat-index-toggle {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 3;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 999px;
+  color: #e2e8f0;
+  background: rgba(15, 23, 42, 0.88);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.chat-index-toggle:hover,
+.chat-index-toggle:focus-visible {
+  background: rgba(30, 41, 59, 0.94);
+  border-color: rgba(96, 165, 250, 0.34);
+  transform: translateY(-1px);
+}
+
+.message-list {
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -305,6 +553,8 @@ function onModelChange(modelId: string) {
   flex-direction: column;
   gap: 10px;
   padding: 14px 0;
+  border-radius: 18px;
+  transition: background 180ms ease, box-shadow 180ms ease, transform 180ms ease;
 }
 
 .message.user,
@@ -315,6 +565,19 @@ function onModelChange(modelId: string) {
 .content {
   word-wrap: break-word;
   color: var(--cp-text-primary);
+}
+
+.question-root {
+  scroll-margin-top: 18px;
+}
+
+.question-active {
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.question-starred {
+  box-shadow: inset 0 0 0 1px rgba(250, 204, 21, 0.24);
+  background: linear-gradient(135deg, rgba(250, 204, 21, 0.08), rgba(59, 130, 246, 0.04));
 }
 
 .message.user {
@@ -395,6 +658,21 @@ function onModelChange(modelId: string) {
   gap: 10px;
 }
 
+.input-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.shortcut-hint {
+  margin: 0;
+  max-width: 180px;
+  color: var(--cp-text-faint);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 textarea {
   flex: 1;
   resize: none;
@@ -441,6 +719,23 @@ button[data-testid="normal-send"] {
   color: var(--cp-text-primary);
 }
 
+.thread-message-leave-active {
+  transition: opacity 220ms ease, transform 220ms ease, max-height 220ms ease;
+  overflow: hidden;
+}
+
+.thread-message-leave-from {
+  opacity: 1;
+  transform: scale(1);
+  max-height: 320px;
+}
+
+.thread-message-leave-to {
+  opacity: 0;
+  transform: scale(0.97);
+  max-height: 0;
+}
+
 .preview-actions {
   border: 1px solid var(--cp-border);
   border-radius: 18px;
@@ -484,6 +779,12 @@ button[data-testid="normal-send"] {
 
   .preview-button-row button {
     width: 100%;
+  }
+
+  .input-actions {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
   }
 }
 </style>

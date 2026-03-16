@@ -1,4 +1,4 @@
-import type { IStorageProvider, SyncStateStore } from '@packages/core/src';
+import type { DeletedConversationStateStore, IStorageProvider, SyncStateStore } from '@packages/core/src';
 import {
     createMockSyncTransport,
     FetchSyncTransport,
@@ -39,6 +39,7 @@ export interface CreateExtensionSyncStorageProviderOptions {
     localStore?: IStorageProvider;
     fetchImpl?: typeof fetch;
     stateStore?: SyncStateStore;
+    deletedConversationStore?: DeletedConversationStateStore;
 }
 
 export function createExtensionSyncStorageProvider(options: CreateExtensionSyncStorageProviderOptions = {}) {
@@ -60,6 +61,7 @@ export function createExtensionSyncStorageProvider(options: CreateExtensionSyncS
                 fetchImpl: options.fetchImpl
             }),
         syncKey,
-        stateStore: options.stateStore
+        stateStore: options.stateStore,
+        deletedConversationStore: options.deletedConversationStore
     });
 }

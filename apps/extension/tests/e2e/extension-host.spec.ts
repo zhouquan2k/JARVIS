@@ -54,6 +54,19 @@ async function readMockSyncEvents(page: Page) {
   return page.evaluate(() => JSON.parse(localStorage.getItem('chatprism:mock-sync-events') ?? '[]'));
 }
 
+async function expectHostFontBaseline(page: Page) {
+  const metrics = await page.evaluate(() => {
+    const input = document.querySelector('[data-testid="normal-input"]') as HTMLTextAreaElement | null;
+    return {
+      bodyFontSize: getComputedStyle(document.body).fontSize,
+      inputFontSize: input ? getComputedStyle(input).fontSize : null
+    };
+  });
+
+  expect(metrics.bodyFontSize).toBe('15px');
+  expect(metrics.inputFontSize).toBe('15px');
+}
+
 test('extension host supports external provider switching, Gemini preview/error fallback, and file import', async () => {
   const session = await launchExtensionPage();
   try {
@@ -117,6 +130,18 @@ test('extension host supports external provider switching, Gemini preview/error 
   }
 });
 
+test('extension host applies unified host font baseline', async () => {
+  const session = await launchExtensionPage();
+  try {
+    const { page } = session;
+    await expect(page.getByTestId('conversation-workspace')).toBeVisible();
+    await expect(page.getByTestId('normal-input')).toBeVisible();
+    await expectHostFontBaseline(page);
+  } finally {
+    await session.close();
+  }
+});
+
 test('extension host keeps compare history local-only when sync is enabled', async () => {
   const session = await launchExtensionPage({ routeHash: '#/compare' });
   try {
@@ -168,6 +193,48 @@ test('extension host sends attachments through background proxy and renders stru
     await expect(page.locator('.inline-cite').first()).toContainText('[1]');
     await expect(page.locator('.inline-cite').first()).toHaveAttribute('href', 'https://example.com/mock-source');
     await expect(page.locator('.image-tile').first()).toBeVisible();
+  } finally {
+    await session.close();
+  }
+});
+
+test('extension host e2e covers md pdf and image attachments through background proxy', async () => {
+  const session = await launchExtensionPage();
+  try {
+    const { page } = session;
+    await expect(page.getByTestId('normal-chat-view')).toBeVisible();
+
+    await page.locator('input[type="file"]').setInputFiles([
+      {
+        name: 'research.md',
+        buffer: Buffer.from('# Research\n\nAttachment body')
+      },
+      {
+        name: 'report.pdf',
+        mimeType: 'application/pdf',
+        buffer: Buffer.from('%PDF-1.4 mock pdf')
+      },
+      {
+        name: 'diagram.png',
+        mimeType: 'image/png',
+        buffer: Buffer.from([1, 2, 3, 4])
+      }
+    ]);
+
+    const draftList = page.locator('.draft-list');
+    await expect(draftList).toContainText('research.md');
+    await expect(draftList).toContainText('report.pdf');
+    await expect(draftList).toContainText('diagram.png');
+
+    await page.getByTestId('normal-input').fill('TRIGGER_ATTACHMENT_ECHO');
+    await page.getByTestId('normal-send').click();
+
+    await expect(page.getByTestId('normal-messages')).toContainText('research.md');
+    await expect(page.getByTestId('normal-messages')).toContainText('report.pdf');
+    await expect(page.getByTestId('normal-messages')).toContainText('diagram.png');
+    await expect(page.getByTestId('normal-messages')).toContainText('research.md [text/markdown]');
+    await expect(page.getByTestId('normal-messages')).toContainText('report.pdf [application/pdf]');
+    await expect(page.getByTestId('normal-messages')).toContainText('diagram.png [image/png]');
   } finally {
     await session.close();
   }

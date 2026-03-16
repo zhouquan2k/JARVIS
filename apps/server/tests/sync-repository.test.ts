@@ -38,7 +38,7 @@ function createConversation(
 }
 
 describe('SyncRepository', () => {
-    it('persists aggregates and reads incremental rows by syncKey', () => {
+    it('persists aggregates and deleted events independently by syncKey', () => {
         const database = createDatabase(createConfig());
         const repository = new SyncRepository(database);
 
@@ -53,9 +53,13 @@ describe('SyncRepository', () => {
             });
 
             const cursorA2 = repository.allocateNextCursor('alpha', 200);
-            repository.saveConversation({
+            repository.deleteConversationAggregate('alpha', 'conv-2');
+            repository.saveDeletedConversation({
                 syncKey: 'alpha',
-                conversation: createConversation('conv-2', 200, true),
+                deletedConversation: {
+                    id: 'conv-2',
+                    updatedAt: 200
+                },
                 serverCursor: cursorA2,
                 receivedAt: 200,
                 createdAt: 200
@@ -73,12 +77,19 @@ describe('SyncRepository', () => {
 
         expect(repository.getCurrentCursor('alpha')).toBe(2);
         expect(repository.getCurrentCursor('beta')).toBe(1);
-        expect(repository.getConversation('alpha', 'conv-2')?.conversation.sync?.deleted).toBe(true);
+        expect(repository.getConversation('alpha', 'conv-1')?.conversation.id).toBe('conv-1');
+        expect(repository.getDeletedConversation('alpha', 'conv-2')?.deletedConversation.updatedAt).toBe(200);
 
-        const alphaChanges = repository.listConversationsAfterCursor('alpha', 1);
-        expect(alphaChanges).toHaveLength(1);
-        expect(alphaChanges[0].conversation.id).toBe('conv-2');
-        expect(alphaChanges[0].conversation.sync?.deleted).toBe(true);
+        const alphaConversations = repository.listConversationsAfterCursor('alpha', null);
+        expect(alphaConversations).toHaveLength(1);
+        expect(alphaConversations[0].conversation.id).toBe('conv-1');
+
+        const alphaDeletes = repository.listDeletedConversationsAfterCursor('alpha', 1);
+        expect(alphaDeletes).toHaveLength(1);
+        expect(alphaDeletes[0].deletedConversation).toEqual({
+            id: 'conv-2',
+            updatedAt: 200
+        });
 
         const betaChanges = repository.listConversationsAfterCursor('beta', null);
         expect(betaChanges).toHaveLength(1);
@@ -99,6 +110,10 @@ describe('SyncRepository', () => {
                             id: 'conv-rich-m1',
                             role: 'user',
                             content: 'hello',
+                            createdAt: 100,
+                            questionId: 'question-rich',
+                            starred: true,
+                            deleted: false,
                             attachments: [
                                 {
                                     id: 'file-1',
@@ -114,6 +129,9 @@ describe('SyncRepository', () => {
                             id: 'conv-rich-m2',
                             role: 'assistant',
                             content: 'answer [1]',
+                            createdAt: 101,
+                            questionId: 'question-rich',
+                            deleted: true,
                             annotations: [
                                 {
                                     kind: 'cite',
@@ -151,6 +169,17 @@ describe('SyncRepository', () => {
                 name: 'notes.txt'
             })
         ]);
+        expect(messages[0]).toEqual(expect.objectContaining({
+            createdAt: 100,
+            questionId: 'question-rich',
+            starred: true,
+            deleted: false
+        }));
+        expect(messages[1]).toEqual(expect.objectContaining({
+            createdAt: 101,
+            questionId: 'question-rich',
+            deleted: true
+        }));
         expect(messages[1].annotations).toEqual([
             expect.objectContaining({
                 kind: 'cite',
@@ -160,6 +189,8 @@ describe('SyncRepository', () => {
                 })
             })
         ]);
+        expect(payload.messages[0].questionId).toBe('question-rich');
+        expect(payload.messages[1].deleted).toBe(true);
         expect(payload.messages[1].annotations).toEqual(messages[1].annotations);
     });
 });

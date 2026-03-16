@@ -10,7 +10,8 @@ export default defineConfig({
     resolve: {
         alias: {
             '@packages/core': resolve(__dirname, '../../packages/core'),
-            '@packages/ui': resolve(__dirname, '../../packages/ui')
+            '@packages/ui': resolve(__dirname, '../../packages/ui'),
+            '@vue/test-utils': resolve(__dirname, 'node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs')
         }
     }
 });

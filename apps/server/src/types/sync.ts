@@ -50,12 +50,21 @@ export interface ConversationMessage {
     id: string;
     role: ConversationRole;
     content: string;
+    createdAt?: number;
+    questionId?: string;
+    starred?: boolean;
+    deleted?: boolean;
     attachments?: MessageAttachment[];
     annotations?: MessageAnnotation[];
 }
 
 export interface ConversationSyncState {
     deleted?: boolean;
+}
+
+export interface SyncDeletedConversation {
+    id: string;
+    updatedAt: number;
 }
 
 export interface SyncConversation {
@@ -71,6 +80,7 @@ export interface SyncConversation {
 
 export interface PushRequestBody {
     conversations: SyncConversation[];
+    deletedConversations?: SyncDeletedConversation[];
 }
 
 export interface PullRequestBody {
@@ -84,6 +94,7 @@ export interface SyncPushResponse {
 
 export interface SyncPullResponse {
     conversations: SyncConversation[];
+    deletedConversations: SyncDeletedConversation[];
     nextCursor: number;
 }
 
@@ -142,6 +153,19 @@ function readOptionalNumber(record: JsonRecord, key: string): number | undefined
 
     if (typeof value !== 'number' || !Number.isFinite(value)) {
         throw new Error(`${key} 必须是数字。`);
+    }
+
+    return value;
+}
+
+function readOptionalBoolean(record: JsonRecord, key: string): boolean | undefined {
+    const value = record[key];
+    if (value === undefined || value === null) {
+        return undefined;
+    }
+
+    if (typeof value !== 'boolean') {
+        throw new Error(`${key} 必须是布尔值。`);
     }
 
     return value;
@@ -253,6 +277,10 @@ function normalizeMessage(value: unknown, index: number): ConversationMessage {
         id: readRequiredString(value, 'id', `messages[${index}].id`),
         role,
         content: readRequiredString(value, 'content', `messages[${index}].content`),
+        createdAt: readOptionalNumber(value, 'createdAt'),
+        questionId: readOptionalString(value, 'questionId'),
+        starred: readOptionalBoolean(value, 'starred'),
+        deleted: readOptionalBoolean(value, 'deleted'),
         attachments: Array.isArray(value.attachments)
             ? value.attachments.map((attachment, attachmentIndex) => normalizeAttachment(attachment, attachmentIndex, index))
             : undefined,
@@ -272,6 +300,17 @@ function normalizeSyncState(value: unknown): ConversationSyncState | undefined {
     }
 
     return value.deleted === true ? { deleted: true } : undefined;
+}
+
+function normalizeDeletedConversation(value: unknown, index: number): SyncDeletedConversation {
+    if (!isRecord(value)) {
+        throw new Error(`deletedConversations[${index}] 必须是对象。`);
+    }
+
+    return {
+        id: readRequiredString(value, 'id', `deletedConversations[${index}].id`),
+        updatedAt: readRequiredTimestamp(value, 'updatedAt', `deletedConversations[${index}].updatedAt`)
+    };
 }
 
 export function normalizeConversation(value: unknown): SyncConversation {
@@ -301,7 +340,10 @@ export function normalizePushRequest(value: unknown): PushRequestBody {
     }
 
     return {
-        conversations: value.conversations.map(normalizeConversation)
+        conversations: value.conversations.map(normalizeConversation),
+        deletedConversations: Array.isArray(value.deletedConversations)
+            ? value.deletedConversations.map((conversation, index) => normalizeDeletedConversation(conversation, index))
+            : []
     };
 }
 

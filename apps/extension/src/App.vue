@@ -186,7 +186,6 @@ watchEffect(() => {
   height: 100%;
   min-height: 100%;
   overflow: hidden;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
 :global(#app) {

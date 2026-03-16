@@ -1,10 +1,17 @@
 import type { ProviderModelCatalog } from '../../config';
-import type { MessageAnnotation, MessageAttachment } from './IStorageProvider';
+import type { ConversationRole, MessageAnnotation, MessageAttachment } from './IStorageProvider';
+
+export interface ProviderContextMessage {
+  role: ConversationRole;
+  content: string;
+  attachments?: MessageAttachment[];
+}
 
 export interface SendMessageOptions {
   context?: { parentMessageId?: string, conversationId?: string };
   modelId?: string;
   attachments?: MessageAttachment[];
+  history?: ProviderContextMessage[];
 }
 
 export interface ProviderStreamUpdate {

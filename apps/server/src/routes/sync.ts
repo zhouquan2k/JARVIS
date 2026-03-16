@@ -76,7 +76,7 @@ export function createSyncRouter(options: { service: SyncService; config: Server
         try {
             const syncKey = resolveSyncKey(c.req.header('x-sync-key'), config);
             const body = normalizePushRequest(await readJsonBody(c));
-            return c.json(service.push(syncKey, body.conversations));
+            return c.json(service.push(syncKey, body.conversations, body.deletedConversations ?? []));
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Invalid push request.';
             return c.json({ error: message }, 400);

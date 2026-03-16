@@ -54,6 +54,10 @@ export interface ConversationMessage {
     id: string;
     role: ConversationRole;
     content: string;
+    createdAt?: number;
+    questionId?: string;
+    starred?: boolean;
+    deleted?: boolean;
     attachments?: MessageAttachment[];
     annotations?: MessageAnnotation[];
 }
@@ -241,10 +245,18 @@ export function normalizeConversationMessage(value: unknown, index = 0): Convers
         ? value as Partial<ConversationMessage>
         : {};
 
+    const createdAt = typeof message.createdAt === 'number' && Number.isFinite(message.createdAt)
+        ? message.createdAt
+        : undefined;
+
     return {
         id: typeof message.id === 'string' && message.id ? message.id : `message-${index}`,
         role: message.role === 'assistant' ? 'assistant' : 'user',
         content: typeof message.content === 'string' ? message.content : '',
+        createdAt,
+        questionId: typeof message.questionId === 'string' && message.questionId ? message.questionId : undefined,
+        starred: typeof message.starred === 'boolean' ? message.starred : undefined,
+        deleted: typeof message.deleted === 'boolean' ? message.deleted : undefined,
         attachments: Array.isArray(message.attachments)
             ? message.attachments
                 .map((attachment, attachmentIndex) => normalizeAttachment(attachment, `attachment-${index}-${attachmentIndex}`))

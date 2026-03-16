@@ -1,5 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
+const sendShortcut = process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter';
+
 async function expectViewportBound(page: Page) {
   const metrics = await page.evaluate(() => {
     const appShell = document.querySelector('.app-shell') as HTMLElement | null;
@@ -15,6 +17,19 @@ async function expectViewportBound(page: Page) {
   expect(metrics.scrollHeight).toBeLessThanOrEqual(metrics.viewportHeight + 1);
   expect(metrics.appShellHeight).toBeGreaterThanOrEqual(metrics.viewportHeight - 1);
   expect(metrics.workspaceHeight).toBeGreaterThan(0);
+}
+
+async function expectHostFontBaseline(page: Page) {
+  const metrics = await page.evaluate(() => {
+    const input = document.querySelector('[data-testid="normal-input"]') as HTMLTextAreaElement | null;
+    return {
+      bodyFontSize: getComputedStyle(document.body).fontSize,
+      inputFontSize: input ? getComputedStyle(input).fontSize : null
+    };
+  });
+
+  expect(metrics.bodyFontSize).toBe('15px');
+  expect(metrics.inputFontSize).toBe('15px');
 }
 
 async function readMockSyncEvents(page: Page) {
@@ -92,6 +107,49 @@ test('local history supports switching between conversations from sidebar', asyn
   await expect(page.getByTestId('normal-messages')).toContainText('gemini-api/gemini-2.5-flash => WEB_LOCAL_ALPHA');
 });
 
+test('local history deletes the active conversation with hover-only controls and falls back cleanly', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('chatprism:mock-sync-events', '[]');
+  });
+
+  await page.goto('/#/');
+  await expect(page.getByTestId('normal-chat-view')).toBeVisible();
+
+  await page.getByTestId('normal-input').fill('HISTORY_DELETE_ALPHA');
+  await page.getByTestId('normal-send').click();
+  await expect(page.getByTestId('normal-messages')).toContainText('HISTORY_DELETE_ALPHA');
+
+  await page.getByTestId('sidebar-new-chat').click();
+  await expect(page.getByTestId('normal-messages')).not.toContainText('HISTORY_DELETE_ALPHA');
+  await page.getByTestId('normal-input').fill('HISTORY_DELETE_BETA');
+  await page.getByTestId('normal-send').click();
+  await expect(page.getByTestId('normal-messages')).toContainText('HISTORY_DELETE_BETA');
+
+  const localHistoryItems = page.getByTestId('local-history-item');
+  await expect(localHistoryItems).toHaveCount(2);
+
+  const historyRows = page.locator('.local-history-row');
+  const activeRow = historyRows.first();
+  const inactiveRow = historyRows.nth(1);
+  await expect(inactiveRow.getByTestId('local-history-delete')).toBeHidden();
+  await inactiveRow.hover();
+  await expect(inactiveRow.getByTestId('local-history-delete')).toBeVisible();
+
+  await activeRow.hover();
+  await activeRow.getByTestId('local-history-delete').click();
+  await activeRow.getByTestId('local-history-delete-confirm').click();
+
+  await expect(localHistoryItems).toHaveCount(1);
+  await expect(page.getByTestId('normal-messages')).toContainText('HISTORY_DELETE_ALPHA');
+  await expect(page.getByTestId('normal-messages')).not.toContainText('HISTORY_DELETE_BETA');
+
+  await expect.poll(async () => {
+    const events = await readMockSyncEvents(page);
+    return events.some((event: { type: string; deletedConversations?: Array<unknown> }) =>
+      event.type === 'push' && Array.isArray(event.deletedConversations) && event.deletedConversations.length > 0);
+  }).toBe(true);
+});
+
 test('workspace sidebar persists while switching between normal and compare views', async ({ page }) => {
   await page.goto('/#/');
   await expect(page.getByTestId('workspace-sidebar')).toBeVisible();
@@ -150,6 +208,13 @@ test('normal and compare views stay bounded to the viewport', async ({ page }) =
   await expectViewportBound(page);
 });
 
+test('web host applies unified host font baseline', async ({ page }) => {
+  await page.goto('/#/');
+  await expect(page.getByTestId('conversation-workspace')).toBeVisible();
+  await expect(page.getByTestId('normal-input')).toBeVisible();
+  await expectHostFontBaseline(page);
+});
+
 test('normal chat supports attachment composition and structured annotations', async ({ page }) => {
   await page.goto('/#/');
   await expect(page.getByTestId('normal-chat-view')).toBeVisible();
@@ -169,4 +234,111 @@ test('normal chat supports attachment composition and structured annotations', a
   await expect(page.locator('.inline-cite').first()).toContainText('[1]');
   await expect(page.locator('.inline-cite').first()).toHaveAttribute('href', 'https://example.com/mock-source');
   await expect(page.locator('.image-tile').first()).toBeVisible();
+});
+
+test('normal chat e2e covers md pdf and image attachments', async ({ page }) => {
+  await page.goto('/#/');
+  await expect(page.getByTestId('normal-chat-view')).toBeVisible();
+
+  await page.locator('input[type="file"]').setInputFiles([
+    {
+      name: 'research.md',
+      buffer: Buffer.from('# Research\n\nAttachment body')
+    },
+    {
+      name: 'report.pdf',
+      mimeType: 'application/pdf',
+      buffer: Buffer.from('%PDF-1.4 mock pdf')
+    },
+    {
+      name: 'diagram.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from([1, 2, 3, 4])
+    }
+  ]);
+
+  const draftList = page.locator('.draft-list');
+  await expect(draftList).toContainText('research.md');
+  await expect(draftList).toContainText('report.pdf');
+  await expect(draftList).toContainText('diagram.png');
+
+  await page.getByTestId('normal-input').fill('TRIGGER_ATTACHMENT_ECHO');
+  await page.getByTestId('normal-send').click();
+
+  await expect(page.getByTestId('normal-messages')).toContainText('research.md');
+  await expect(page.getByTestId('normal-messages')).toContainText('report.pdf');
+  await expect(page.getByTestId('normal-messages')).toContainText('diagram.png');
+  await expect(page.getByTestId('normal-messages')).toContainText('research.md [text/markdown]');
+  await expect(page.getByTestId('normal-messages')).toContainText('report.pdf [application/pdf]');
+  await expect(page.getByTestId('normal-messages')).toContainText('diagram.png [image/png]');
+});
+
+test('normal chat uses composition shortcuts and restores draft after stop', async ({ page }) => {
+  await page.goto('/#/');
+  await expect(page.getByTestId('normal-chat-view')).toBeVisible();
+
+  const input = page.getByTestId('normal-input');
+  await input.fill('第一行');
+  await input.press('Enter');
+  await expect(input).toHaveValue('第一行\n');
+  await expect(page.getByTestId('local-history-item')).toHaveCount(0);
+
+  await input.type('第二行');
+  await input.press(sendShortcut);
+  await expect(page.getByTestId('normal-messages')).toContainText('第一行');
+  await expect(page.getByTestId('local-history-item')).toHaveCount(1);
+
+  await input.fill('TRIGGER_SLOW_STREAM abort prompt');
+  await input.press(sendShortcut);
+  await expect(page.getByTestId('normal-stop')).toBeVisible();
+  await page.getByTestId('normal-stop').click();
+
+  await expect(input).toHaveValue('TRIGGER_SLOW_STREAM abort prompt');
+});
+
+test('question index panel supports compact controls, reopen, starring, filtering and soft delete', async ({ page }) => {
+  await page.goto('/#/');
+  await expect(page.getByTestId('normal-chat-view')).toBeVisible();
+
+  const input = page.getByTestId('normal-input');
+  await input.fill('索引问题一\n补充内容');
+  await input.press(sendShortcut);
+  await expect(page.getByTestId('question-index-panel')).toBeVisible();
+
+  await input.fill('索引问题二');
+  await input.press(sendShortcut);
+
+  const questionItems = page.getByTestId('question-item');
+  await expect(questionItems).toHaveCount(2);
+  await expect(questionItems.first()).toContainText('索引问题一');
+  await expect(questionItems.nth(1)).toContainText('索引问题二');
+  await expect(page.getByTestId('question-panel-close')).toBeVisible();
+
+  let firstRow = questionItems.first();
+  await expect(firstRow.getByTestId('question-star')).toBeHidden();
+  await expect(firstRow.getByTestId('question-delete')).toBeHidden();
+  await firstRow.hover();
+  await expect(firstRow.getByTestId('question-star')).toBeVisible();
+  await expect(firstRow.getByTestId('question-delete')).toBeVisible();
+  await firstRow.getByTestId('question-star').click();
+  await expect(page.locator('.question-starred').first()).toBeVisible();
+
+  await page.getByTestId('question-panel-close').click();
+  await expect(page.getByTestId('question-index-panel')).toBeHidden();
+  await expect(page.getByTestId('question-panel-open')).toBeVisible();
+  await page.getByTestId('question-panel-open').click();
+  await expect(page.getByTestId('question-index-panel')).toBeVisible();
+
+  await page.getByTestId('question-filter-starred').click();
+  await expect(questionItems).toHaveCount(1);
+  await expect(questionItems.first()).toContainText('索引问题一');
+
+  firstRow = questionItems.first();
+  await firstRow.hover();
+  await firstRow.getByTestId('question-delete').click();
+  await firstRow.getByTestId('question-delete-confirm').click();
+
+  await expect(page.getByTestId('question-index-empty')).toContainText('当前没有星标问题');
+  await expect(page.locator('.message.user .user-content')).toHaveCount(1);
+  await expect(page.locator('.message.user .user-content').first()).toContainText('索引问题二');
 });

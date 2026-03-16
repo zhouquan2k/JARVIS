@@ -64,19 +64,24 @@
         <textarea
           v-model="inputPrompt"
           data-testid="compare-input"
-          @keydown.enter.prevent="submitCompare"
-          placeholder="输入问题后同时对比两个模型..."
+          @keydown="onInputKeydown"
+          placeholder="输入内容，按 Enter 换行，Ctrl/Cmd + Enter 开始对比"
           :disabled="isBusy || !isSelectionReady"
         />
-        <button
-          data-testid="compare-send"
-          @click="submitCompare"
-          :disabled="!inputPrompt.trim() || isBusy || !isSelectionReady"
-        >
-          开始对比
-        </button>
-        <button v-if="isBusy" class="stop-btn" @click="compareStore.abort()" data-testid="compare-stop">停止</button>
-        <button class="new-btn" @click="startNewChat" :disabled="isBusy" data-testid="compare-new">新建聊天</button>
+        <div class="input-actions">
+          <p class="shortcut-hint">Enter 换行，Ctrl/Cmd + Enter 开始对比</p>
+          <div class="button-row">
+            <button
+              data-testid="compare-send"
+              @click="submitCompare"
+              :disabled="!inputPrompt.trim() || isBusy || !isSelectionReady"
+            >
+              开始对比
+            </button>
+            <button v-if="isBusy" class="stop-btn" @click="compareStore.abort()" data-testid="compare-stop">停止</button>
+            <button class="new-btn" @click="startNewChat" :disabled="isBusy" data-testid="compare-new">新建聊天</button>
+          </div>
+        </div>
       </div>
     </footer>
   </div>
@@ -88,6 +93,7 @@ import AnalysisGrid from '../components/AnalysisGrid.vue';
 import CompareModelSelectors from '../components/CompareModelSelectors.vue';
 import MarkdownContent from '../components/MarkdownContent.vue';
 import { useCompareStore } from '../store/compare';
+import { isPromptSubmitHotkey } from '../utils/promptHotkeys';
 
 const compareStore = useCompareStore();
 const inputPrompt = ref('');
@@ -114,6 +120,15 @@ async function submitCompare() {
   if (!prompt || isBusy.value || !isSelectionReady.value) return;
   await compareStore.executeCompare(prompt);
   inputPrompt.value = '';
+}
+
+function onInputKeydown(event: KeyboardEvent) {
+  if (!isPromptSubmitHotkey(event)) {
+    return;
+  }
+
+  event.preventDefault();
+  void submitCompare();
 }
 
 async function onModelAProviderChange(providerId: string) {
@@ -282,6 +297,26 @@ pre {
   min-width: 0;
 }
 
+.input-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.shortcut-hint {
+  margin: 0;
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.button-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 textarea {
   flex: 1;
   min-height: 56px;
@@ -329,6 +364,14 @@ textarea:focus {
 
   .input-row {
     flex-direction: column;
+  }
+
+  .input-actions {
+    align-items: stretch;
+  }
+
+  .button-row {
+    justify-content: flex-start;
   }
 }
 </style>

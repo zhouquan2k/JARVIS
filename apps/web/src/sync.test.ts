@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import type { Conversation, IStorageProvider, SyncStateStore } from '@packages/core/src';
+import type {
+    Conversation,
+    DeletedConversationStateStore,
+    IStorageProvider,
+    SyncDeletedConversation,
+    SyncStateStore
+} from '@packages/core/src';
 import { createApp } from '../../server/src/app.js';
 import { createWebSyncStorageProvider } from './sync';
 
@@ -40,6 +46,18 @@ class MemorySyncStateStore implements SyncStateStore {
 
     async setCursor(syncKey: string, cursor: number | null): Promise<void> {
         this.cursors.set(syncKey, cursor);
+    }
+}
+
+class MemoryDeletedConversationStateStore implements DeletedConversationStateStore {
+    private readonly deletedConversations = new Map<string, SyncDeletedConversation[]>();
+
+    async getDeletedConversations(syncKey: string): Promise<SyncDeletedConversation[]> {
+        return (this.deletedConversations.get(syncKey) ?? []).map((conversation) => ({ ...conversation }));
+    }
+
+    async setDeletedConversations(syncKey: string, conversations: SyncDeletedConversation[]): Promise<void> {
+        this.deletedConversations.set(syncKey, conversations.map((conversation) => ({ ...conversation })));
     }
 }
 
@@ -93,14 +111,16 @@ describe('web sync bootstrap', () => {
             isDevelopment: true,
             localStore: new MemoryStorageProvider(),
             fetchImpl,
-            stateStore: new MemorySyncStateStore()
+            stateStore: new MemorySyncStateStore(),
+            deletedConversationStore: new MemoryDeletedConversationStateStore()
         });
         const targetProvider = createWebSyncStorageProvider({
             env,
             isDevelopment: true,
             localStore: new MemoryStorageProvider(),
             fetchImpl,
-            stateStore: new MemorySyncStateStore()
+            stateStore: new MemorySyncStateStore(),
+            deletedConversationStore: new MemoryDeletedConversationStateStore()
         });
 
         await sourceProvider.saveConversation(createConversation('normal-1', 100));
@@ -144,7 +164,8 @@ describe('web sync bootstrap', () => {
             },
             isDevelopment: false,
             localStore: new MemoryStorageProvider(),
-            stateStore: new MemorySyncStateStore()
+            stateStore: new MemorySyncStateStore(),
+            deletedConversationStore: new MemoryDeletedConversationStateStore()
         })).toThrow('syncKey=0 仅允许在开发环境使用');
     });
 
@@ -190,14 +211,16 @@ describe('web sync bootstrap', () => {
                 })
             ]),
             fetchImpl,
-            stateStore: new MemorySyncStateStore()
+            stateStore: new MemorySyncStateStore(),
+            deletedConversationStore: new MemoryDeletedConversationStateStore()
         });
         const remoteReader = createWebSyncStorageProvider({
             env,
             isDevelopment: true,
             localStore: new MemoryStorageProvider(),
             fetchImpl,
-            stateStore: new MemorySyncStateStore()
+            stateStore: new MemorySyncStateStore(),
+            deletedConversationStore: new MemoryDeletedConversationStateStore()
         });
 
         await startupProvider.hydrate();
@@ -207,5 +230,50 @@ describe('web sync bootstrap', () => {
         expect(conversations.map((item) => item.id)).toEqual(['legacy-1']);
         expect(conversations[0].sync?.dirty).toBe(false);
         expect(conversations[0].updatedAt).toBe(300);
+    });
+
+    it('propagates hard-deleted conversations through the real server', async () => {
+        const app = createApp({
+            config: {
+                port: 8787,
+                dbPath: ':memory:',
+                isDevelopment: true,
+                corsAllowlist: []
+            }
+        });
+        const fetchImpl = createFetchImpl(app);
+        const env = {
+            VITE_E2E: '1',
+            VITE_USE_MOCK_SYNC: '0',
+            VITE_SYNC_KEY: 'web-delete',
+            VITE_SYNC_BASE_URL: 'http://sync.test/api/sync'
+        };
+
+        const sourceProvider = createWebSyncStorageProvider({
+            env,
+            isDevelopment: true,
+            localStore: new MemoryStorageProvider(),
+            fetchImpl,
+            stateStore: new MemorySyncStateStore(),
+            deletedConversationStore: new MemoryDeletedConversationStateStore()
+        });
+        const targetProvider = createWebSyncStorageProvider({
+            env,
+            isDevelopment: true,
+            localStore: new MemoryStorageProvider(),
+            fetchImpl,
+            stateStore: new MemorySyncStateStore(),
+            deletedConversationStore: new MemoryDeletedConversationStateStore()
+        });
+
+        await sourceProvider.saveConversation(createConversation('delete-1', 150));
+        await sourceProvider.syncNow();
+        await sourceProvider.deleteConversation('delete-1');
+        expect(await sourceProvider.getConversation('delete-1')).toBeNull();
+        await sourceProvider.syncNow();
+
+        await targetProvider.hydrate();
+        expect(await targetProvider.getConversation('delete-1')).toBeNull();
+        expect((await targetProvider.getAllConversations()).map((item) => item.id)).toEqual([]);
     });
 });

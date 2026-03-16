@@ -125,6 +125,7 @@ describe('sync api', () => {
         expect(pushResponse.status).toBe(200);
         await expect(pushResponse.json()).resolves.toEqual({
             processedIds: ['conv-1'],
+            processedDeletedIds: [],
             nextCursor: 1
         });
 
@@ -166,6 +167,7 @@ describe('sync api', () => {
                     ]
                 }
             ],
+            deletedConversations: [],
             nextCursor: 1
         });
 
@@ -180,6 +182,7 @@ describe('sync api', () => {
         expect(incrementalPull.status).toBe(200);
         await expect(incrementalPull.json()).resolves.toEqual({
             conversations: [],
+            deletedConversations: [],
             nextCursor: 1
         });
     });
@@ -291,7 +294,68 @@ describe('sync api', () => {
                     ]
                 }
             ],
+            deletedConversations: [],
             nextCursor: 1
+        });
+    });
+
+    it('propagates dedicated deleted conversation events through push and pull', async () => {
+        const app = createApp({ config: createConfig({ isDevelopment: true }) });
+
+        const createResponse = await app.request('/api/sync/push', {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                'x-sync-key': 'workspace-delete'
+            },
+            body: JSON.stringify({
+                conversations: [createConversationPayload('conv-delete', 100)]
+            })
+        });
+        expect(createResponse.status).toBe(200);
+
+        const deleteResponse = await app.request('/api/sync/push', {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                'x-sync-key': 'workspace-delete'
+            },
+            body: JSON.stringify({
+                conversations: [],
+                deletedConversations: [
+                    {
+                        id: 'conv-delete',
+                        updatedAt: 110
+                    }
+                ]
+            })
+        });
+        expect(deleteResponse.status).toBe(200);
+        await expect(deleteResponse.json()).resolves.toEqual({
+            processedIds: [],
+            processedDeletedIds: ['conv-delete'],
+            nextCursor: 2
+        });
+
+        const pullResponse = await app.request('/api/sync/pull', {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                'x-sync-key': 'workspace-delete'
+            },
+            body: JSON.stringify({ cursor: null })
+        });
+
+        expect(pullResponse.status).toBe(200);
+        await expect(pullResponse.json()).resolves.toEqual({
+            conversations: [],
+            deletedConversations: [
+                {
+                    id: 'conv-delete',
+                    updatedAt: 110
+                }
+            ],
+            nextCursor: 2
         });
     });
 });

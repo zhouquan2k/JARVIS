@@ -1,4 +1,9 @@
-import type { ISyncTransport, SyncPullResult, SyncPushResult } from '../interfaces/ISyncTransport';
+import type {
+    ISyncTransport,
+    SyncDeletedConversation,
+    SyncPullResult,
+    SyncPushResult
+} from '../interfaces/ISyncTransport';
 import { cloneConversation, type Conversation } from '../interfaces/IStorageProvider';
 
 export const MOCK_SYNC_EVENTS_STORAGE_KEY = 'chatprism:mock-sync-events';
@@ -9,6 +14,7 @@ export interface MockSyncEvent {
     cursor?: number | null;
     nextCursor?: number | null;
     conversations?: Conversation[];
+    deletedConversations?: SyncDeletedConversation[];
 }
 
 export interface MockSyncTransportOptions {
@@ -53,31 +59,40 @@ export function createMockSyncTransport(
                 type: 'pull',
                 syncKey,
                 cursor,
-                nextCursor: cursor
+                nextCursor: cursor,
+                deletedConversations: []
             });
             writeEvents(storage, nextEvents);
             return {
                 conversations: [],
+                deletedConversations: [],
                 nextCursor: cursor
             };
         },
 
-        async push(conversations: Conversation[]): Promise<SyncPushResult> {
-            const nextCursor = conversations.reduce<number | null>(
-                (maxCursor, conversation) => Math.max(maxCursor ?? conversation.updatedAt, conversation.updatedAt),
-                null
-            );
+        async push(
+            conversations: Conversation[],
+            deletedConversations: SyncDeletedConversation[] = []
+        ): Promise<SyncPushResult> {
+            const nextCursor = [...conversations.map((conversation) => conversation.updatedAt), ...deletedConversations.map((event) => event.updatedAt)]
+                .reduce<number | null>(
+                    (maxCursor, updatedAt) => Math.max(maxCursor ?? updatedAt, updatedAt),
+                    null
+                );
+            const clonedDeletedConversations = deletedConversations.map((event) => ({ ...event }));
             const clonedConversations = conversations.map(cloneConversation);
             const nextEvents = readEvents(storage);
             nextEvents.push({
                 type: 'push',
                 syncKey,
                 conversations: clonedConversations,
+                deletedConversations: clonedDeletedConversations,
                 nextCursor
             });
             writeEvents(storage, nextEvents);
             return {
                 processedIds: clonedConversations.map((conversation) => conversation.id),
+                processedDeletedIds: clonedDeletedConversations.map((event) => event.id),
                 nextCursor
             };
         }

@@ -1,4 +1,9 @@
-import type { ISyncTransport, SyncPullResult, SyncPushResult } from '../interfaces/ISyncTransport';
+import type {
+    ISyncTransport,
+    SyncDeletedConversation,
+    SyncPullResult,
+    SyncPushResult
+} from '../interfaces/ISyncTransport';
 import type { Conversation } from '../interfaces/IStorageProvider';
 
 export interface FetchSyncTransportOptions {
@@ -25,8 +30,11 @@ export class FetchSyncTransport implements ISyncTransport {
         return this.post<SyncPullResult>('/pull', { cursor });
     }
 
-    async push(conversations: Conversation[]): Promise<SyncPushResult> {
-        return this.post<SyncPushResult>('/push', { conversations });
+    async push(
+        conversations: Conversation[],
+        deletedConversations: SyncDeletedConversation[] = []
+    ): Promise<SyncPushResult> {
+        return this.post<SyncPushResult>('/push', { conversations, deletedConversations });
     }
 
     private async post<T>(path: string, body: unknown): Promise<T> {

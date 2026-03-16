@@ -49,6 +49,10 @@ describe('IndexedDBStorageProvider', () => {
                     id: 'm1',
                     role: 'user',
                     content: 'hello',
+                    createdAt: 111,
+                    questionId: 'question-1',
+                    starred: true,
+                    deleted: false,
                     attachments: [
                         {
                             id: 'a1',
@@ -65,6 +69,9 @@ describe('IndexedDBStorageProvider', () => {
                     id: 'm2',
                     role: 'assistant',
                     content: '引用内容 [1]',
+                    createdAt: 112,
+                    questionId: 'question-1',
+                    deleted: false,
                     annotations: [
                         {
                             kind: 'cite',
@@ -111,5 +118,55 @@ describe('IndexedDBStorageProvider', () => {
 
         const allConversations = await provider.getAllConversations();
         expect(allConversations).toEqual([conversation]);
+    });
+
+    it('keeps question metadata optional for legacy stored messages', async () => {
+        const provider = new IndexedDBStorageProvider();
+        const legacyConversation: Conversation = {
+            id: 'legacy-conversation',
+            title: 'Legacy conversation',
+            origin: 'local',
+            messages: [
+                {
+                    id: 'legacy-m1',
+                    role: 'user',
+                    content: 'legacy question'
+                },
+                {
+                    id: 'legacy-m2',
+                    role: 'assistant',
+                    content: 'legacy answer'
+                }
+            ],
+            updatedAt: 456
+        };
+
+        await provider.saveConversation(legacyConversation);
+
+        const storedConversation = await provider.getConversation('legacy-conversation');
+        expect(storedConversation?.messages).toEqual([
+            {
+                id: 'legacy-m1',
+                role: 'user',
+                content: 'legacy question',
+                createdAt: undefined,
+                questionId: undefined,
+                starred: undefined,
+                deleted: undefined,
+                attachments: undefined,
+                annotations: undefined
+            },
+            {
+                id: 'legacy-m2',
+                role: 'assistant',
+                content: 'legacy answer',
+                createdAt: undefined,
+                questionId: undefined,
+                starred: undefined,
+                deleted: undefined,
+                attachments: undefined,
+                annotations: undefined
+            }
+        ]);
     });
 });

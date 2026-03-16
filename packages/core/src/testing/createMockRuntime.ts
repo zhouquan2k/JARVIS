@@ -1,7 +1,7 @@
 import { APP_CONFIG, type ModelConfig, type ProviderConfig, type ProviderModelCatalog, type RuntimeMode } from '../../config';
 import type { AnalysisResult } from '../analysis/types';
 import type { IModelProvider, ProviderSendResult, ProviderStreamUpdate, SendMessageOptions } from '../interfaces/IModelProvider';
-import type { MessageAnnotation } from '../interfaces/IStorageProvider';
+import type { MessageAnnotation, MessageAttachment } from '../interfaces/IStorageProvider';
 import type { ProviderRuntime } from '../runtime/types';
 
 export interface CreateMockRuntimeOptions {
@@ -114,6 +114,21 @@ function buildStructuredMockResponse(providerId: string, modelId?: string): { te
     };
 }
 
+function buildAttachmentEchoText(
+    providerId: string,
+    modelId: string | undefined,
+    attachments: MessageAttachment[]
+): string {
+    const lines = attachments.map((attachment, index) => {
+        return `${index + 1}. ${attachment.name} [${attachment.mimeType}]`;
+    });
+
+    return [
+        `${providerId}/${modelId || 'default'} 附件回显`,
+        ...lines
+    ].join('\n');
+}
+
 class MockStreamingProvider implements IModelProvider {
     public id: string;
     private aborted = false;
@@ -159,9 +174,12 @@ class MockStreamingProvider implements IModelProvider {
         const structuredResponse = prompt.includes('TRIGGER_ANNOTATED_NATIVE')
             ? buildStructuredMockResponse(this.id, options.modelId)
             : null;
+        const attachmentEchoText = prompt.includes('TRIGGER_ATTACHMENT_ECHO')
+            ? buildAttachmentEchoText(this.id, options.modelId, options.attachments || [])
+            : null;
         const finalText = isAnalysisPrompt
             ? this.buildAnalysisText(userPrompt, outputA, outputB)
-            : structuredResponse?.text || this.buildNativeText(prompt, options.modelId);
+            : structuredResponse?.text || attachmentEchoText || this.buildNativeText(prompt, options.modelId);
 
         const charDelay = prompt.includes(this.options.slowStreamTrigger)
             ? this.options.slowCharDelayMs

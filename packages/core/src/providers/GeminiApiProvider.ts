@@ -1,6 +1,12 @@
 import { APP_CONFIG, type ProviderModelCatalog } from '../../config';
 import type { MessageAttachment } from '../interfaces/IStorageProvider';
-import { IModelProvider, type ProviderSendResult, type ProviderStreamUpdate, type SendMessageOptions } from '../interfaces/IModelProvider';
+import {
+    IModelProvider,
+    type ProviderContextMessage,
+    type ProviderSendResult,
+    type ProviderStreamUpdate,
+    type SendMessageOptions
+} from '../interfaces/IModelProvider';
 
 type GeminiModelListItem = {
     name?: string;
@@ -62,10 +68,63 @@ function stripDataUriPrefix(data: string | undefined): string | undefined {
     return data.replace(/^data:[^;]+;base64,/, '');
 }
 
+function getAttachmentExtension(name: string): string {
+    if (!name.includes('.')) {
+        return '';
+    }
+
+    return name.split('.').pop()?.toLowerCase() || '';
+}
+
+function isGeminiTextAttachment(attachment: MessageAttachment): boolean {
+    const mimeType = attachment.mimeType.toLowerCase();
+    if (mimeType.startsWith('text/')) {
+        return true;
+    }
+
+    if ([
+        'application/json',
+        'application/xml',
+        'application/yaml'
+    ].includes(mimeType)) {
+        return true;
+    }
+
+    if (mimeType !== 'application/octet-stream') {
+        return false;
+    }
+
+    return [
+        'txt',
+        'md',
+        'markdown',
+        'csv',
+        'json',
+        'xml',
+        'html',
+        'htm',
+        'yml',
+        'yaml'
+    ].includes(getAttachmentExtension(attachment.name));
+}
+
+function resolveGeminiInlineMimeType(attachment: MessageAttachment): string {
+    const mimeType = attachment.mimeType.toLowerCase();
+    if (mimeType.startsWith('image/') || mimeType === 'application/pdf') {
+        return attachment.mimeType;
+    }
+
+    if (isGeminiTextAttachment(attachment)) {
+        return 'text/plain';
+    }
+
+    return attachment.mimeType;
+}
+
 function buildGeminiPartFromAttachment(attachment: MessageAttachment) {
     return {
         inlineData: {
-            mimeType: attachment.mimeType,
+            mimeType: resolveGeminiInlineMimeType(attachment),
             data: stripDataUriPrefix(attachment.base64Data) || ''
         }
     };
@@ -84,6 +143,25 @@ function buildGeminiParts(prompt: string, attachments: MessageAttachment[]) {
         });
 
     return parts.length > 0 ? parts : [{ text: '' }];
+}
+
+function mapConversationRoleToGeminiRole(role: ProviderContextMessage['role']): 'user' | 'model' {
+    return role === 'assistant' ? 'model' : 'user';
+}
+
+function buildGeminiContents(prompt: string, options: SendMessageOptions) {
+    const history = (options.history || []).map((message) => ({
+        role: mapConversationRoleToGeminiRole(message.role),
+        parts: buildGeminiParts(message.content, message.attachments || [])
+    }));
+
+    return [
+        ...history,
+        {
+            role: 'user' as const,
+            parts: buildGeminiParts(prompt, options.attachments || [])
+        }
+    ];
 }
 
 export class GeminiApiProvider implements IModelProvider {
@@ -188,7 +266,7 @@ export class GeminiApiProvider implements IModelProvider {
         this.abortController = new AbortController();
 
         const payload = {
-            contents: [{ parts: buildGeminiParts(prompt, options.attachments || []) }]
+            contents: buildGeminiContents(prompt, options)
         };
 
         const response = await fetch(url, {

@@ -91,16 +91,51 @@
       </p>
 
       <div v-if="historySource === 'local'" class="history-list">
-        <button
+        <div
           v-for="item in localItems"
           :key="item.id"
-          class="history-item"
-          :class="{ active: activeLocalId === item.id }"
-          data-testid="local-history-item"
-          @click="$emit('select-local', item.id)"
+          class="history-row local-history-row"
+          :class="{ active: activeLocalId === item.id, confirming: pendingDeleteId === item.id }"
         >
-          <span class="title">{{ item.title || 'Untitled' }}</span>
-        </button>
+          <button
+            class="history-item local-history-button"
+            :class="{ active: activeLocalId === item.id }"
+            data-testid="local-history-item"
+            @click="handleSelectLocal(item.id)"
+          >
+            <span class="title">{{ item.title || 'Untitled' }}</span>
+          </button>
+          <div class="history-actions">
+            <template v-if="pendingDeleteId === item.id">
+              <button
+                type="button"
+                class="history-action danger"
+                data-testid="local-history-delete-confirm"
+                @click.stop="confirmDeleteLocal(item.id)"
+              >
+                确认
+              </button>
+              <button
+                type="button"
+                class="history-action"
+                data-testid="local-history-delete-cancel"
+                @click.stop="pendingDeleteId = null"
+              >
+                取消
+              </button>
+            </template>
+            <button
+              v-else
+              type="button"
+              class="history-action danger"
+              data-testid="local-history-delete"
+              aria-label="删除会话"
+              @click.stop="pendingDeleteId = item.id"
+            >
+              x
+            </button>
+          </div>
+        </div>
         <p v-if="localItems.length === 0" class="empty-text">暂无本地历史</p>
       </div>
 
@@ -192,6 +227,7 @@ const emit = defineEmits<{
   (event: 'switch-source', value: WorkspaceHistorySource): void;
   (event: 'select-external-provider', id: ExternalHistoryProviderId): void;
   (event: 'select-local', id: string): void;
+  (event: 'delete-local', id: string): void;
   (event: 'select-external', id: string): void;
   (event: 'new-chat'): void;
   (event: 'new-compare'): void;
@@ -199,6 +235,7 @@ const emit = defineEmits<{
 
 const menuOpen = ref(false);
 const menuHostRef = ref<HTMLElement | null>(null);
+const pendingDeleteId = ref<string | null>(null);
 
 function emitNewChat() {
   menuOpen.value = false;
@@ -208,6 +245,16 @@ function emitNewChat() {
 function emitNewCompare() {
   menuOpen.value = false;
   emit('new-compare');
+}
+
+function handleSelectLocal(id: string) {
+  pendingDeleteId.value = null;
+  emit('select-local', id);
+}
+
+function confirmDeleteLocal(id: string) {
+  pendingDeleteId.value = null;
+  emit('delete-local', id);
 }
 
 function handleWindowClick(event: MouseEvent) {
@@ -513,6 +560,10 @@ onUnmounted(() => {
   gap: 2px;
 }
 
+.history-row {
+  position: relative;
+}
+
 .history-item {
   position: relative;
   display: block;
@@ -541,9 +592,66 @@ onUnmounted(() => {
   box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.28);
 }
 
+.history-actions {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(7, 10, 18, 0) 0%, rgba(7, 10, 18, 0.92) 24%, rgba(7, 10, 18, 0.98) 100%);
+  transform: translateY(-50%);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.16s ease, visibility 0.16s ease, transform 0.16s ease;
+}
+
+.local-history-row:hover .history-actions,
+.local-history-row:focus-within .history-actions,
+.local-history-row.confirming .history-actions {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(-50%) translateX(0);
+}
+
+.history-action {
+  min-height: 26px;
+  min-width: 26px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.92);
+  color: var(--cp-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.14);
+  transition: color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+}
+
+.history-action:hover,
+.history-action:focus-visible {
+  color: var(--cp-text-primary);
+  background: rgba(30, 41, 59, 0.96);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.28);
+}
+
+.history-action.danger {
+  color: #fca5a5;
+  box-shadow: inset 0 0 0 1px rgba(248, 113, 113, 0.18);
+}
+
+.history-action.danger:hover,
+.history-action.danger:focus-visible {
+  color: #ffe4e6;
+  background: rgba(127, 29, 29, 0.92);
+  box-shadow: inset 0 0 0 1px rgba(248, 113, 113, 0.34);
+}
+
 .title {
   display: block;
-  padding-right: 88px;
   font-size: 13px;
   font-weight: 500;
   line-height: 1.35;

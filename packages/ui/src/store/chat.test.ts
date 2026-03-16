@@ -59,6 +59,34 @@ class MockModelProvider implements IModelProvider {
     abort(): void {}
 }
 
+class AbortableMockModelProvider extends MockModelProvider {
+    aborted = false;
+    private rejectPending: ((reason?: unknown) => void) | null = null;
+
+    override async sendMessage(
+        prompt: string,
+        options = {},
+        onUpdate: (update: { text: string }) => void
+    ): Promise<{ text: string; conversationId: string; messageId: string }> {
+        this.optionsUsed.push(options as Record<string, unknown>);
+        onUpdate({ text: `reply:${prompt}` });
+
+        await new Promise<never>((_, reject) => {
+            this.rejectPending = reject;
+        });
+
+        throw new Error('unreachable');
+    }
+
+    override abort(): void {
+        this.aborted = true;
+        const error = new Error('Aborted');
+        error.name = 'AbortError';
+        this.rejectPending?.(error);
+        this.rejectPending = null;
+    }
+}
+
 class MockStorageProvider implements IStorageProvider {
     id = 'mock-storage';
 
@@ -329,16 +357,80 @@ describe('useChatStore workspace history flow', () => {
         expect(store.currentConversation?.messages[0]).toMatchObject({
             role: 'user',
             content: '请分析',
+            questionId: expect.any(String),
+            createdAt: expect.any(Number),
             attachments: [
                 expect.objectContaining({
                     name: 'diagram.png'
                 })
             ]
         });
+        expect(store.currentConversation?.messages[1]).toMatchObject({
+            role: 'assistant',
+            questionId: store.currentConversation?.messages[0]?.questionId,
+            createdAt: expect.any(Number)
+        });
+        expect(store.questionIndexItems).toEqual([
+            expect.objectContaining({
+                questionId: store.currentConversation?.messages[0]?.questionId,
+                title: '请分析',
+                starred: false
+            })
+        ]);
         expect(store.currentConversation?.messages[1]?.annotations).toEqual([
             expect.objectContaining({
                 kind: 'cite'
             })
+        ]);
+    });
+
+    it('infers markdown mime type when the browser does not provide one', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+
+        const file = {
+            name: 'research.md',
+            type: '',
+            size: 4,
+            async arrayBuffer() {
+                return new Uint8Array([35, 32, 84, 49]).buffer;
+            }
+        } as File;
+
+        await store.queueAttachments([file]);
+
+        expect(store.draftAttachments).toHaveLength(1);
+        expect(store.draftAttachments[0]).toMatchObject({
+            name: 'research.md',
+            mimeType: 'text/markdown',
+            type: 'file'
+        });
+    });
+
+    it('passes prior visible messages as provider history for follow-up turns', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+
+        await store.sendMessage('第一问');
+        await store.sendMessage('第二问');
+
+        expect(provider.optionsUsed[1]?.history).toEqual([
+            {
+                role: 'user',
+                content: '第一问',
+                attachments: undefined
+            },
+            {
+                role: 'assistant',
+                content: 'reply:第一问',
+                attachments: undefined
+            }
         ]);
     });
 
@@ -409,5 +501,176 @@ describe('useChatStore workspace history flow', () => {
 
         expect(store.isExternalHistoryLoading).toBe(false);
         expect(store.externalHistoryItems).toHaveLength(1);
+    });
+
+    it('toggles question stars and filters starred question index items', async () => {
+        const storage = new MockStorageProvider([
+            {
+                id: 'conversation-1',
+                title: 'Question index',
+                origin: 'local',
+                updatedAt: 10,
+                messages: [
+                    {
+                        id: 'user-1',
+                        role: 'user',
+                        content: '第一条问题\n第二行',
+                        questionId: 'question-1',
+                        createdAt: 1
+                    },
+                    {
+                        id: 'assistant-1',
+                        role: 'assistant',
+                        content: '第一条回答',
+                        questionId: 'question-1',
+                        createdAt: 2
+                    },
+                    {
+                        id: 'user-2',
+                        role: 'user',
+                        content: '第二条问题',
+                        questionId: 'question-2',
+                        createdAt: 3
+                    }
+                ]
+            }
+        ]);
+        const store = useChatStore();
+        store.setProviders(new MockModelProvider(), storage);
+
+        await store.init();
+        await store.selectLocalConversation('conversation-1');
+
+        expect(store.questionIndexItems.map((item) => item.title)).toEqual(['第一条问题', '第二条问题']);
+
+        await store.toggleQuestionStar('question-1');
+        expect(store.currentConversation?.messages[0]?.starred).toBe(true);
+
+        store.setQuestionIndexFilter('starred');
+        expect(store.questionIndexItems).toEqual([
+            expect.objectContaining({
+                questionId: 'question-1',
+                starred: true
+            })
+        ]);
+    });
+
+    it('soft deletes legacy question pairs with fallback matching', async () => {
+        const storage = new MockStorageProvider([
+            {
+                id: 'conversation-legacy',
+                title: 'Legacy',
+                origin: 'local',
+                updatedAt: 10,
+                messages: [
+                    { id: 'legacy-user', role: 'user', content: '旧问题' },
+                    { id: 'legacy-assistant', role: 'assistant', content: '旧回答' },
+                    { id: 'fresh-user', role: 'user', content: '新问题', questionId: 'question-2' },
+                    { id: 'fresh-assistant', role: 'assistant', content: '新回答', questionId: 'question-2' }
+                ]
+            }
+        ]);
+        const store = useChatStore();
+        store.setProviders(new MockModelProvider(), storage);
+
+        await store.init();
+        await store.selectLocalConversation('conversation-legacy');
+
+        const legacyQuestionId = store.questionIndexItems[0]?.questionId;
+        expect(legacyQuestionId).toBe('legacy:legacy-user');
+
+        store.setActiveQuestion(legacyQuestionId);
+        store.requestScrollToQuestion(legacyQuestionId);
+        await store.softDeleteQuestionPair(legacyQuestionId);
+
+        expect(store.currentConversation?.messages[0]?.deleted).toBe(true);
+        expect(store.currentConversation?.messages[1]?.deleted).toBe(true);
+        expect(store.currentConversation?.messages[2]?.deleted).toBeUndefined();
+        expect(store.visibleMessages.map((message) => message.id)).toEqual(['fresh-user', 'fresh-assistant']);
+        expect(store.activeQuestionId).toBeNull();
+        expect(store.pendingScrollQuestionId).toBeNull();
+    });
+
+    it('restores the submitted draft when aborting generation', async () => {
+        const provider = new AbortableMockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+        await store.startNewConversation();
+
+        store.setDraftPrompt('需要修改的提问');
+        const pending = store.sendDraft();
+
+        expect(store.isGenerating).toBe(true);
+        store.abortGeneration();
+
+        expect(provider.aborted).toBe(true);
+        expect(store.draftPrompt).toBe('需要修改的提问');
+        expect(store.draftFocusRequestKey).toBe(1);
+        expect(store.isGenerating).toBe(false);
+
+        await pending;
+
+        expect(store.currentError).toBeNull();
+        expect(store.lastSubmittedPrompt).toBeNull();
+        expect(store.currentConversation?.messages[0]).toMatchObject({
+            role: 'user',
+            content: '需要修改的提问'
+        });
+        expect((await storage.getAllConversations())).toHaveLength(1);
+    });
+
+    it('falls back to the next local conversation after deleting the active history item', async () => {
+        const storage = new MockStorageProvider([
+            {
+                id: 'conversation-newer',
+                title: '更新会话',
+                origin: 'local',
+                updatedAt: 20,
+                messages: [{ id: 'newer-user', role: 'user', content: '更新问题' }]
+            },
+            {
+                id: 'conversation-older',
+                title: '旧会话',
+                origin: 'local',
+                updatedAt: 10,
+                messages: [{ id: 'older-user', role: 'user', content: '旧问题' }]
+            }
+        ]);
+        const store = useChatStore();
+        store.setProviders(new MockModelProvider(), storage);
+
+        await store.init();
+        await store.selectLocalConversation('conversation-newer');
+        await store.deleteLocalConversation('conversation-newer');
+
+        expect(store.currentConversation?.id).toBe('conversation-older');
+        expect(store.conversations.map((conversation) => conversation.id)).toEqual(['conversation-older']);
+        expect(await storage.getConversation('conversation-newer')).toBeNull();
+    });
+
+    it('starts a new empty conversation when deleting the last local history item', async () => {
+        const storage = new MockStorageProvider([
+            {
+                id: 'conversation-only',
+                title: '唯一会话',
+                origin: 'local',
+                updatedAt: 10,
+                messages: [{ id: 'only-user', role: 'user', content: '唯一问题' }]
+            }
+        ]);
+        const store = useChatStore();
+        store.setProviders(new MockModelProvider(), storage);
+
+        await store.init();
+        await store.selectLocalConversation('conversation-only');
+        await store.deleteLocalConversation('conversation-only');
+
+        expect(store.currentConversation?.title).toBe('New Chat');
+        expect(store.currentConversation?.messages).toEqual([]);
+        expect(store.historySource).toBe('local');
+        expect(await storage.getConversation('conversation-only')).toBeNull();
+        expect(store.conversations).toHaveLength(0);
     });
 });
