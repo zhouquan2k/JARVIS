@@ -31,7 +31,13 @@ function toMockModelId(providerId: string, preferredDefaultModel: string): strin
 }
 
 function ensurePreferredDefaultModel(provider: ProviderConfig): ModelConfig[] {
-    const models = provider.models.map((model) => ({ ...model }));
+    const models = provider.models.map((model) => ({
+        ...model,
+        options: model.options?.map((option) => ({
+            ...option,
+            conflictsWith: option.conflictsWith ? [...option.conflictsWith] : undefined
+        }))
+    }));
     const preferredDefaultModel = provider.preferredDefaultModel?.trim();
     if (!preferredDefaultModel) {
         return models;
@@ -151,7 +157,13 @@ class MockStreamingProvider implements IModelProvider {
 
     async getAvailableModels(): Promise<ProviderModelCatalog> {
         return {
-            models: this.modelCatalog.models.map((model) => ({ ...model })),
+            models: this.modelCatalog.models.map((model) => ({
+                ...model,
+                options: model.options?.map((option) => ({
+                    ...option,
+                    conflictsWith: option.conflictsWith ? [...option.conflictsWith] : undefined
+                }))
+            })),
             defaultModel: this.modelCatalog.defaultModel
         };
     }

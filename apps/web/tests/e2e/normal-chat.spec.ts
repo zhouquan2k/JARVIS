@@ -60,6 +60,37 @@ test('normal chat can send message and recover local history after reload', asyn
   await expect(page.getByTestId('local-history-item').first()).toContainText('Playwright normal flow message');
 });
 
+test('normal chat model options render switch persist and recover with the conversation', async ({ page }) => {
+  await page.goto('/#/');
+  await expect(page.getByTestId('normal-chat-view')).toBeVisible();
+  await expect(page.getByTestId('model-option-toggle-group')).toBeVisible();
+
+  const deepResearchToggle = page.getByTestId('model-option-deep_research');
+  await deepResearchToggle.click();
+  await expect(deepResearchToggle).toHaveClass(/active/);
+
+  await page.getByTestId('normal-model').selectOption({ label: 'Gemini Pro Latest' });
+  await expect(page.getByTestId('model-option-toggle-group')).toBeHidden();
+
+  await page.getByTestId('normal-model').selectOption({ label: 'Gemini 2.5 Flash' });
+  await expect(page.getByTestId('model-option-toggle-group')).toBeVisible();
+  await expect(deepResearchToggle).not.toHaveClass(/active/);
+
+  await deepResearchToggle.click();
+  await expect(deepResearchToggle).toHaveClass(/active/);
+
+  await page.getByTestId('normal-input').fill('MODEL_OPTION_RECOVERY');
+  await page.getByTestId('normal-send').click();
+  await expect(page.getByTestId('normal-messages')).toContainText('MODEL_OPTION_RECOVERY');
+  await expect(page.getByTestId('local-history-item')).toHaveCount(1);
+
+  await page.reload();
+  await expect(page.getByTestId('conversation-workspace')).toBeVisible();
+  await page.getByTestId('local-history-item').first().click();
+  await expect(page.getByTestId('model-option-toggle-group')).toBeVisible();
+  await expect(page.getByTestId('model-option-deep_research')).toHaveClass(/active/);
+});
+
 test('web host initializes sync storage with configured syncKey', async ({ page }) => {
   await page.addInitScript((syncKey: string) => {
     localStorage.setItem('chatprism:sync-key', syncKey);
@@ -118,6 +149,7 @@ test('local history deletes the active conversation with hover-only controls and
   await page.getByTestId('normal-input').fill('HISTORY_DELETE_ALPHA');
   await page.getByTestId('normal-send').click();
   await expect(page.getByTestId('normal-messages')).toContainText('HISTORY_DELETE_ALPHA');
+  await expect(page.getByTestId('local-history-item')).toHaveCount(1);
 
   await page.getByTestId('sidebar-new-chat').click();
   await expect(page.getByTestId('normal-messages')).not.toContainText('HISTORY_DELETE_ALPHA');

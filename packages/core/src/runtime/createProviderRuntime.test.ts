@@ -163,9 +163,21 @@ describe('createProviderRuntime', () => {
 
         await expect(runtime.getProviderModels('gemini-api')).resolves.toEqual({
             models: [
-                { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
-                { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' },
-                { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' }
+                {
+                    id: 'gemini-2.5-flash',
+                    name: 'Gemini 2.5 Flash',
+                    options: [expect.objectContaining({ key: 'deep_research', type: 'boolean' })]
+                },
+                {
+                    id: 'gemini-2.0-flash',
+                    name: 'Gemini 2.0 Flash',
+                    options: [expect.objectContaining({ key: 'deep_research', type: 'boolean' })]
+                },
+                {
+                    id: 'gemini-2.5-pro',
+                    name: 'Gemini 2.5 Pro',
+                    options: [expect.objectContaining({ key: 'deep_research', type: 'boolean' })]
+                }
             ],
             defaultModel: 'gemini-2.5-flash'
         });

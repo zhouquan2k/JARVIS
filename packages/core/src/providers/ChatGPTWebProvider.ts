@@ -120,6 +120,31 @@ function getStaticChatGPTModelCatalog(): ProviderModelCatalog {
     };
 }
 
+function cloneModelConfig(model: ModelConfig): ModelConfig {
+    return {
+        ...model,
+        options: model.options?.map((option) => ({
+            ...option,
+            conflictsWith: option.conflictsWith ? [...option.conflictsWith] : undefined
+        }))
+    };
+}
+
+function getChatGPTModelOptions() {
+    const provider = APP_CONFIG.providers.find((item) => item.id === 'chatgpt-web');
+    return provider?.models[0]?.options?.map((option) => ({
+        ...option,
+        conflictsWith: option.conflictsWith ? [...option.conflictsWith] : undefined
+    }));
+}
+
+function attachChatGPTModelOptions(model: ModelConfig): ModelConfig {
+    return {
+        ...cloneModelConfig(model),
+        options: getChatGPTModelOptions()
+    };
+}
+
 function normalizeTimestamp(value: number | string | null | undefined): number {
     if (typeof value === 'string') {
         const parsed = Number(value);
@@ -579,6 +604,28 @@ function buildChatGPTRequestContent(prompt: string, attachments: MessageAttachme
     };
 }
 
+function buildChatGPTModePayload(modelOptions: Record<string, boolean> | undefined): Partial<Record<string, unknown>> {
+    if (modelOptions?.deep_research === true) {
+        return {
+            conversation_mode: { kind: 'research' },
+            client_contextual_info: {
+                is_deep_research: true
+            }
+        };
+    }
+
+    if (modelOptions?.web_search === true) {
+        return {
+            conversation_mode: { kind: 'search' },
+            client_contextual_info: {
+                use_search: true
+            }
+        };
+    }
+
+    return {};
+}
+
 function toRenderableRole(role?: string | null): 'user' | 'assistant' | null {
     return role === 'user' || role === 'assistant' ? role : null;
 }
@@ -760,7 +807,7 @@ export class ChatGPTWebProvider implements IModelProvider, IHistoryProvider {
         }
 
         return {
-            models,
+            models: models.map(attachChatGPTModelOptions),
             defaultModel: resolveDefaultModel(models, fallbackCatalog.defaultModel)
         };
     }
@@ -912,6 +959,7 @@ export class ChatGPTWebProvider implements IModelProvider, IHistoryProvider {
             model: options.modelId || 'auto',
             timezone_offset_min: new Date().getTimezoneOffset(),
             history_and_training_disabled: false,
+            ...buildChatGPTModePayload(options.modelOptions)
         };
 
         if (context.conversationId) {

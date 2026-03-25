@@ -4,6 +4,29 @@ import type { Conversation, ConversationHistorySummary, IHistoryProvider, IModel
 import type { ProviderConfig } from '@packages/core/config';
 import { useChatStore } from './chat';
 
+const chatgptOptionDefinitions = [
+    {
+        key: 'web_search',
+        label: '联网搜索',
+        type: 'boolean' as const,
+        conflictsWith: ['deep_research']
+    },
+    {
+        key: 'deep_research',
+        label: 'Deep Research',
+        type: 'boolean' as const,
+        conflictsWith: ['web_search']
+    }
+];
+
+const geminiOptionDefinitions = [
+    {
+        key: 'deep_research',
+        label: 'Deep Research',
+        type: 'boolean' as const
+    }
+];
+
 class MockModelProvider implements IModelProvider {
     id = 'mock-provider';
     optionsUsed: Array<Record<string, unknown>> = [];
@@ -320,6 +343,68 @@ describe('useChatStore workspace history flow', () => {
         expect(store.currentModelId).toBe('other-dynamic');
     });
 
+    it('restores conversation model selection and normalizes conflicting options', async () => {
+        const storage = new MockStorageProvider([
+            {
+                id: 'conversation-1',
+                title: 'Model selection',
+                origin: 'local',
+                updatedAt: 10,
+                modelSelection: {
+                    providerId: 'mock-provider',
+                    modelId: 'dynamic-model',
+                    modelOptions: {
+                        web_search: true
+                    }
+                },
+                messages: [
+                    { id: 'user-1', role: 'user', content: 'hello' }
+                ]
+            }
+        ]);
+        const store = useChatStore();
+        store.setProviders(new MockModelProvider(), storage);
+        store.setProviderModelsResolver(async (providerId: string) => {
+            if (providerId === 'mock-provider') {
+                return {
+                    models: [
+                        { id: 'dynamic-model', name: 'Dynamic Model', options: chatgptOptionDefinitions },
+                        { id: 'research-only', name: 'Research Only', options: geminiOptionDefinitions }
+                    ],
+                    defaultModel: 'dynamic-model'
+                };
+            }
+
+            return {
+                models: [{ id: 'other-dynamic', name: 'Other Dynamic' }],
+                defaultModel: 'other-dynamic'
+            };
+        });
+
+        await store.initializeProviderCatalog(providerCatalog);
+        await store.selectLocalConversation('conversation-1');
+
+        expect(store.currentProviderId).toBe('mock-provider');
+        expect(store.currentModelId).toBe('dynamic-model');
+        expect(store.currentModelOptions).toEqual({ web_search: true });
+
+        store.setCurrentModelOption('deep_research', true);
+        expect(store.currentModelOptions).toEqual({ deep_research: true });
+        expect(store.currentConversation?.modelSelection).toEqual({
+            providerId: 'mock-provider',
+            modelId: 'dynamic-model',
+            modelOptions: { deep_research: true }
+        });
+
+        store.setCurrentModel('research-only');
+        expect(store.currentModelOptions).toEqual({ deep_research: true });
+        expect(store.currentConversation?.modelSelection).toEqual({
+            providerId: 'mock-provider',
+            modelId: 'research-only',
+            modelOptions: { deep_research: true }
+        });
+    });
+
     it('queues attachments, sends them with the prompt, and persists assistant annotations', async () => {
         const provider = new MockModelProvider();
         const storage = new MockStorageProvider([]);
@@ -432,6 +517,37 @@ describe('useChatStore workspace history flow', () => {
                 attachments: undefined
             }
         ]);
+    });
+
+    it('passes normalized model options through the send pipeline and persists them on new conversations', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        store.setProviderModelsResolver(async () => ({
+            models: [
+                { id: 'dynamic-model', name: 'Dynamic Model', options: chatgptOptionDefinitions }
+            ],
+            defaultModel: 'dynamic-model'
+        }));
+
+        await store.initializeProviderCatalog(providerCatalog);
+        await store.startNewConversation();
+
+        store.setCurrentModelOption('web_search', true);
+        await store.sendMessage('测试 option 透传');
+
+        expect(provider.optionsUsed[0]?.modelOptions).toEqual({ web_search: true });
+        expect(store.currentConversation?.modelSelection).toEqual({
+            providerId: 'mock-provider',
+            modelId: 'dynamic-model',
+            modelOptions: { web_search: true }
+        });
+        expect((await storage.getAllConversations())[0]?.modelSelection).toEqual({
+            providerId: 'mock-provider',
+            modelId: 'dynamic-model',
+            modelOptions: { web_search: true }
+        });
     });
 
     it('imports external files and preserves origin metadata', async () => {

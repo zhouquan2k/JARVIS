@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import {
     cloneConversation,
     type Conversation,
+    type ConversationModelSelection,
     type ConversationMessage,
     type ConversationHistorySummary,
     cloneConversationMessage,
@@ -13,7 +14,7 @@ import {
     type IStorageProvider,
     type MessageAttachment
 } from '@packages/core/src';
-import type { ProviderConfig, ProviderModelCatalog } from '@packages/core/config';
+import type { ModelConfig, ModelOptionDefinition, ProviderConfig, ProviderModelCatalog } from '@packages/core/config';
 import { markRaw, toRaw } from 'vue';
 
 export type WorkspaceHistorySource = 'local' | 'external';
@@ -60,6 +61,7 @@ export interface ChatState {
     currentError: string | null;
     currentProviderId: string;
     currentModelId: string;
+    currentModelOptions: Record<string, boolean>;
     questionIndexFilter: QuestionIndexFilter;
     isQuestionIndexPanelOpen: boolean;
     activeQuestionId: string | null;
@@ -117,10 +119,32 @@ async function fileToAttachment(file: File): Promise<MessageAttachment> {
     };
 }
 
+function cloneModelOptionDefinitions(options?: ModelOptionDefinition[]): ModelOptionDefinition[] | undefined {
+    return options?.map((option) => ({
+        ...option,
+        conflictsWith: option.conflictsWith ? [...option.conflictsWith] : undefined
+    }));
+}
+
+function cloneModelConfig(model: ModelConfig): ModelConfig {
+    return {
+        ...model,
+        options: cloneModelOptionDefinitions(model.options)
+    };
+}
+
+function cloneModelOptions(value: Record<string, boolean> = {}): Record<string, boolean> {
+    return Object.fromEntries(
+        Object.entries(value).filter((entry): entry is [string, boolean] => {
+            return typeof entry[0] === 'string' && entry[0].length > 0 && entry[1] === true;
+        })
+    );
+}
+
 function cloneProviderConfig(provider: ProviderConfig): ProviderConfig {
     return {
         ...provider,
-        models: provider.models.map((model) => ({ ...model }))
+        models: provider.models.map(cloneModelConfig)
     };
 }
 
@@ -150,6 +174,102 @@ function resolveProviderLabel(providerId: ExternalHistoryProviderId): string {
 
 function normalizeStoredConversation(conversation: Conversation): Conversation {
     return cloneConversation(conversation);
+}
+
+function resolveModelConfig(provider: ProviderConfig | undefined, modelId: string): ModelConfig | undefined {
+    if (!provider || !modelId) {
+        return undefined;
+    }
+
+    return provider.models.find((model) => model.id === modelId);
+}
+
+function modelOptionsConflict(
+    definition: ModelOptionDefinition,
+    otherKey: string,
+    definitionsByKey: Map<string, ModelOptionDefinition>
+): boolean {
+    if (definition.conflictsWith?.includes(otherKey)) {
+        return true;
+    }
+
+    return definitionsByKey.get(otherKey)?.conflictsWith?.includes(definition.key) === true;
+}
+
+function normalizeModelOptions(
+    model: ModelConfig | undefined,
+    source: Record<string, boolean> = {},
+    prioritizedChange?: { key: string; enabled: boolean }
+): Record<string, boolean> {
+    const definitions = model?.options || [];
+    if (definitions.length === 0) {
+        return {};
+    }
+
+    const definitionsByKey = new Map(definitions.map((definition) => [definition.key, definition]));
+    const enabledOrder: string[] = [];
+
+    definitions
+        .filter((definition) => definition.defaultValue === true)
+        .forEach((definition) => enabledOrder.push(definition.key));
+
+    Object.entries(source).forEach(([key, enabled]) => {
+        if (enabled !== true || !definitionsByKey.has(key) || enabledOrder.includes(key)) {
+            return;
+        }
+
+        enabledOrder.push(key);
+    });
+
+    if (prioritizedChange?.enabled && definitionsByKey.has(prioritizedChange.key)) {
+        const existingIndex = enabledOrder.indexOf(prioritizedChange.key);
+        if (existingIndex >= 0) {
+            enabledOrder.splice(existingIndex, 1);
+        }
+        enabledOrder.push(prioritizedChange.key);
+    }
+
+    if (prioritizedChange && !prioritizedChange.enabled) {
+        const existingIndex = enabledOrder.indexOf(prioritizedChange.key);
+        if (existingIndex >= 0) {
+            enabledOrder.splice(existingIndex, 1);
+        }
+    }
+
+    const normalized = new Set<string>();
+
+    enabledOrder.forEach((key) => {
+        const definition = definitionsByKey.get(key);
+        if (!definition) {
+            return;
+        }
+
+        Array.from(normalized).forEach((activeKey) => {
+            if (modelOptionsConflict(definition, activeKey, definitionsByKey)) {
+                normalized.delete(activeKey);
+            }
+        });
+
+        normalized.add(key);
+    });
+
+    return Object.fromEntries(Array.from(normalized).map((key) => [key, true]));
+}
+
+function buildConversationModelSelection(
+    providerId: string,
+    modelId: string,
+    modelOptions: Record<string, boolean>
+): ConversationModelSelection | undefined {
+    if (!providerId || !modelId) {
+        return undefined;
+    }
+
+    return {
+        providerId,
+        modelId,
+        modelOptions: cloneModelOptions(modelOptions)
+    };
 }
 
 function getQuestionKey(message: ConversationMessage): string {
@@ -301,6 +421,7 @@ export const useChatStore = defineStore('chat', {
         currentError: null,
         currentProviderId: '',
         currentModelId: '',
+        currentModelOptions: {},
         questionIndexFilter: 'all',
         isQuestionIndexPanelOpen: true,
         activeQuestionId: null,
@@ -351,6 +472,21 @@ export const useChatStore = defineStore('chat', {
             return state.workspaceMode === 'preview'
                 ? conversation.messages.map(cloneConversationMessage)
                 : buildVisibleMessages(conversation.messages).map(cloneConversationMessage);
+        },
+
+        currentProviderConfig(state): ProviderConfig | null {
+            return state.availableProviders.find((item) => item.id === state.currentProviderId) || null;
+        },
+
+        currentModelConfig(state): ModelConfig | null {
+            return resolveModelConfig(
+                state.availableProviders.find((item) => item.id === state.currentProviderId),
+                state.currentModelId
+            ) || null;
+        },
+
+        currentModelOptionDefinitions(): ModelOptionDefinition[] {
+            return cloneModelOptionDefinitions(this.currentModelConfig?.options) || [];
         }
     },
 
@@ -365,6 +501,61 @@ export const useChatStore = defineStore('chat', {
 
         resolveProviderConfig(providerId: string): ProviderConfig | undefined {
             return this.availableProviders.find((item) => item.id === providerId);
+        },
+
+        resolveModelConfig(providerId: string, modelId: string): ModelConfig | undefined {
+            return resolveModelConfig(this.resolveProviderConfig(providerId), modelId);
+        },
+
+        buildCurrentConversationModelSelection(): ConversationModelSelection | undefined {
+            return buildConversationModelSelection(this.currentProviderId, this.currentModelId, this.currentModelOptions);
+        },
+
+        syncCurrentConversationModelSelection() {
+            if (!this.currentConversation || this.workspaceMode !== 'active' || this.currentConversation.compare) {
+                return;
+            }
+
+            this.currentConversation.modelSelection = this.buildCurrentConversationModelSelection();
+        },
+
+        applyCurrentModelState(modelId: string, sourceOptions: Record<string, boolean> = {}) {
+            this.currentModelId = modelId;
+            this.currentModelOptions = normalizeModelOptions(
+                this.resolveModelConfig(this.currentProviderId, modelId),
+                sourceOptions
+            );
+            this.syncCurrentConversationModelSelection();
+        },
+
+        async applyConversationModelSelection(conversation: Conversation | null) {
+            if (!conversation || this.workspaceMode !== 'active') {
+                return;
+            }
+
+            const modelSelection = conversation.modelSelection;
+            if (modelSelection?.providerId) {
+                await this.setCurrentModelProvider(modelSelection.providerId, modelSelection.modelId);
+                this.currentModelOptions = normalizeModelOptions(
+                    this.currentModelConfig || undefined,
+                    modelSelection.modelOptions
+                );
+                this.syncCurrentConversationModelSelection();
+                return;
+            }
+
+            if (!this.currentProviderId && this.availableProviders[0]?.id) {
+                await this.setCurrentModelProvider(this.availableProviders[0].id);
+                return;
+            }
+
+            if (this.currentProviderId && !this.currentModelId) {
+                await this.setCurrentModelProvider(this.currentProviderId);
+                return;
+            }
+
+            this.currentModelOptions = normalizeModelOptions(this.currentModelConfig || undefined, this.currentModelOptions);
+            this.syncCurrentConversationModelSelection();
         },
 
         resolveHistoryProviderEntry(providerId = this.activeExternalProviderId): ExternalHistoryProviderEntry | null {
@@ -436,6 +627,7 @@ export const useChatStore = defineStore('chat', {
             if (nextCatalog.length === 0) {
                 this.currentProviderId = '';
                 this.currentModelId = '';
+                this.currentModelOptions = {};
                 return;
             }
 
@@ -444,6 +636,7 @@ export const useChatStore = defineStore('chat', {
             }
 
             this.currentModelId = '';
+            this.currentModelOptions = {};
         },
 
         setAvailableProviders(providers: ProviderConfig[]) {
@@ -476,16 +669,27 @@ export const useChatStore = defineStore('chat', {
 
                 return {
                     ...provider,
-                    models: catalog.models.map((model) => ({ ...model })),
+                    models: catalog.models.map(cloneModelConfig),
                     defaultModel: catalog.defaultModel
                 };
             });
 
             if (this.currentProviderId === providerId) {
                 const provider = this.resolveProviderConfig(providerId);
+                const selectionBackfill = this.currentConversation?.modelSelection?.providerId === providerId
+                    ? this.currentConversation.modelSelection.modelOptions
+                    : this.currentModelOptions;
                 if (provider && !provider.models.some((model) => model.id === this.currentModelId)) {
-                    this.currentModelId = provider.defaultModel;
+                    const nextSourceOptions = this.currentConversation?.modelSelection?.providerId === providerId
+                        && this.currentConversation.modelSelection.modelId === provider.defaultModel
+                        ? this.currentConversation.modelSelection.modelOptions
+                        : selectionBackfill;
+                    this.applyCurrentModelState(provider.defaultModel, nextSourceOptions);
+                    return;
                 }
+
+                this.currentModelOptions = normalizeModelOptions(this.currentModelConfig || undefined, selectionBackfill);
+                this.syncCurrentConversationModelSelection();
             }
         },
 
@@ -501,7 +705,7 @@ export const useChatStore = defineStore('chat', {
                 const catalog = this.providerModelsResolver
                     ? await this.providerModelsResolver(providerId)
                     : {
-                        models: baseProvider.models.map((model) => ({ ...model })),
+                        models: baseProvider.models.map(cloneModelConfig),
                         defaultModel: baseProvider.defaultModel
                     };
 
@@ -515,7 +719,7 @@ export const useChatStore = defineStore('chat', {
                 }
 
                 this.applyProviderModelCatalog(providerId, {
-                    models: baseProvider.models.map((model) => ({ ...model })),
+                    models: baseProvider.models.map(cloneModelConfig),
                     defaultModel: baseProvider.defaultModel
                 });
                 this.setProviderModelState(providerId, { loading: false, loaded: true });
@@ -549,8 +753,14 @@ export const useChatStore = defineStore('chat', {
                 return;
             }
 
+            const providerConfig = this.resolveProviderConfig(providerId) || this.providerCatalog.find((item) => item.id === providerId);
+            if (!providerConfig) {
+                return;
+            }
+
             this.currentProviderId = providerId;
             this.currentModelId = '';
+            this.currentModelOptions = {};
             this.currentError = null;
 
             const provider = await this.ensureProviderModelsLoaded(providerId);
@@ -558,9 +768,15 @@ export const useChatStore = defineStore('chat', {
                 return;
             }
 
-            this.currentModelId = modelId && provider.models.some((item) => item.id === modelId)
+            const nextModelId = modelId && provider.models.some((item) => item.id === modelId)
                 ? modelId
                 : provider.defaultModel;
+            const sourceOptions = this.currentConversation?.modelSelection?.providerId === providerId
+                && this.currentConversation.modelSelection.modelId === nextModelId
+                ? this.currentConversation.modelSelection.modelOptions
+                : this.currentModelOptions;
+
+            this.applyCurrentModelState(nextModelId, sourceOptions);
         },
 
         setCurrentModel(modelId: string) {
@@ -569,7 +785,17 @@ export const useChatStore = defineStore('chat', {
                 return;
             }
 
-            this.currentModelId = modelId;
+            this.applyCurrentModelState(modelId, this.currentModelOptions);
+        },
+
+        setCurrentModelOption(key: string, enabled: boolean) {
+            const model = this.currentModelConfig || undefined;
+            if (!model?.options?.some((option) => option.key === key)) {
+                return;
+            }
+
+            this.currentModelOptions = normalizeModelOptions(model, this.currentModelOptions, { key, enabled });
+            this.syncCurrentConversationModelSelection();
         },
 
         setDraftPrompt(prompt: string) {
@@ -642,6 +868,7 @@ export const useChatStore = defineStore('chat', {
             this.isQuestionIndexPanelOpen = true;
             this.activeQuestionId = null;
             this.pendingScrollQuestionId = null;
+            await this.applyConversationModelSelection(this.currentConversation);
         },
 
         async deleteLocalConversation(id: string) {
@@ -673,7 +900,8 @@ export const useChatStore = defineStore('chat', {
                 title: 'New Chat',
                 origin: 'local',
                 messages: [],
-                updatedAt: Date.now()
+                updatedAt: Date.now(),
+                modelSelection: this.buildCurrentConversationModelSelection()
             };
             this.workspaceMode = 'active';
             this.historySource = 'local';
@@ -682,6 +910,7 @@ export const useChatStore = defineStore('chat', {
             this.isQuestionIndexPanelOpen = true;
             this.activeQuestionId = null;
             this.pendingScrollQuestionId = null;
+            this.syncCurrentConversationModelSelection();
         },
 
         setSidebarCollapsed(collapsed: boolean) {
@@ -810,6 +1039,7 @@ export const useChatStore = defineStore('chat', {
                 this.previewConversation = null;
                 this.currentError = null;
                 this.isQuestionIndexPanelOpen = true;
+                await this.applyConversationModelSelection(this.currentConversation);
             } catch (error) {
                 this.currentError = error instanceof Error ? error.message : '外部文件导入失败。';
                 throw error;
@@ -837,6 +1067,7 @@ export const useChatStore = defineStore('chat', {
             this.previewConversation = null;
             this.currentError = null;
             this.isQuestionIndexPanelOpen = true;
+            await this.applyConversationModelSelection(this.currentConversation);
         },
 
         async persistCurrentConversation() {
@@ -845,6 +1076,7 @@ export const useChatStore = defineStore('chat', {
             }
 
             this.currentConversation.updatedAt = Date.now();
+            this.syncCurrentConversationModelSelection();
             await this.storageProvider.saveConversation(toRaw(this.currentConversation));
             await this.loadLocalConversations();
             if (this.resolveHistoryProvider() && this.externalHistoryItems.length > 0) {
@@ -948,6 +1180,8 @@ export const useChatStore = defineStore('chat', {
 
                 this.currentConversation!.origin = this.currentConversation!.origin || 'local';
                 const backendId = this.currentConversation!.backendId;
+                const modelOptions = cloneModelOptions(this.currentModelOptions);
+                this.syncCurrentConversationModelSelection();
 
                 const result = await provider.sendMessage(
                     trimmedPrompt,
@@ -955,7 +1189,8 @@ export const useChatStore = defineStore('chat', {
                         context: { conversationId: backendId },
                         modelId: this.currentModelId,
                         attachments: pendingAttachments,
-                        history
+                        history,
+                        modelOptions
                     },
                     (update) => {
                         const lastMsg = this.currentConversation!.messages[this.currentConversation!.messages.length - 1];

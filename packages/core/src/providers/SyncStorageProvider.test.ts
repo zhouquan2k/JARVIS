@@ -100,6 +100,13 @@ function cloneConversation(conversation: Conversation): Conversation {
     return {
         ...conversation,
         sync: conversation.sync ? { ...conversation.sync } : undefined,
+        modelSelection: conversation.modelSelection
+            ? {
+                providerId: conversation.modelSelection.providerId,
+                modelId: conversation.modelSelection.modelId,
+                modelOptions: { ...conversation.modelSelection.modelOptions }
+            }
+            : undefined,
         compare: conversation.compare
             ? {
                 ...conversation.compare,
@@ -122,6 +129,13 @@ function createConversation(
         backendId: overrides.backendId,
         externalId: overrides.externalId,
         sync: overrides.sync ? { ...overrides.sync } : undefined,
+        modelSelection: overrides.modelSelection
+            ? {
+                providerId: overrides.modelSelection.providerId,
+                modelId: overrides.modelSelection.modelId,
+                modelOptions: { ...overrides.modelSelection.modelOptions }
+            }
+            : undefined,
         compare: overrides.compare
             ? {
                 ...overrides.compare,
@@ -132,6 +146,49 @@ function createConversation(
 }
 
 describe('SyncStorageProvider', () => {
+    it('preserves conversation model selection across save load and sync push', async () => {
+        const transport = new MockSyncTransport();
+        transport.pushResult = { processedIds: ['sync-1'], processedDeletedIds: [], nextCursor: 2 };
+        const localStore = new MemoryStorageProvider();
+        const provider = new SyncStorageProvider({
+            localStore,
+            transport,
+            syncKey: 'workspace-a',
+            stateStore: new MemorySyncStateStore(),
+            deletedConversationStore: new MemoryDeletedConversationStateStore()
+        });
+
+        await provider.saveConversation(createConversation({
+            id: 'sync-1',
+            updatedAt: 100,
+            modelSelection: {
+                providerId: 'chatgpt-web',
+                modelId: 'gpt-4o',
+                modelOptions: {
+                    web_search: true
+                }
+            }
+        }));
+
+        expect((await provider.getConversation('sync-1'))?.modelSelection).toEqual({
+            providerId: 'chatgpt-web',
+            modelId: 'gpt-4o',
+            modelOptions: {
+                web_search: true
+            }
+        });
+
+        await provider.syncNow();
+
+        expect(transport.pushes[0]?.[0]?.modelSelection).toEqual({
+            providerId: 'chatgpt-web',
+            modelId: 'gpt-4o',
+            modelOptions: {
+                web_search: true
+            }
+        });
+    });
+
     it('pushes dirty conversations and keeps compare-only conversations local', async () => {
         const transport = new MockSyncTransport();
         transport.pushResult = { processedIds: ['sync-1'], processedDeletedIds: [], nextCursor: 11 };

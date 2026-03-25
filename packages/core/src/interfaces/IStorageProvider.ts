@@ -68,6 +68,12 @@ export interface ConversationSyncState {
     syncedAt?: number | null;
 }
 
+export interface ConversationModelSelection {
+    providerId: string;
+    modelId: string;
+    modelOptions: Record<string, boolean>;
+}
+
 export interface Conversation {
     id: string; // Our internal UUID
     backendId?: string; // Real remote provider conversation ID
@@ -77,6 +83,7 @@ export interface Conversation {
     messages: ConversationMessage[];
     updatedAt: number;
     sync?: ConversationSyncState;
+    modelSelection?: ConversationModelSelection;
     compare?: {
         prompt: string;
         modelAProviderId: string;
@@ -274,6 +281,13 @@ export function cloneConversation(conversation: Conversation): Conversation {
     return {
         ...conversation,
         sync: conversation.sync ? { ...conversation.sync } : undefined,
+        modelSelection: conversation.modelSelection
+            ? {
+                providerId: conversation.modelSelection.providerId,
+                modelId: conversation.modelSelection.modelId,
+                modelOptions: { ...conversation.modelSelection.modelOptions }
+            }
+            : undefined,
         compare: conversation.compare
             ? {
                 ...conversation.compare,
@@ -285,10 +299,29 @@ export function cloneConversation(conversation: Conversation): Conversation {
 }
 
 export function normalizeConversation(conversation: Conversation): Conversation {
+    const modelSelection = conversation.modelSelection && typeof conversation.modelSelection === 'object'
+        ? conversation.modelSelection
+        : undefined;
+
     return {
         ...conversation,
         origin: conversation.origin ?? 'local',
         sync: conversation.sync ? { ...conversation.sync } : undefined,
+        modelSelection: modelSelection
+            && typeof modelSelection.providerId === 'string'
+            && typeof modelSelection.modelId === 'string'
+            ? {
+                providerId: modelSelection.providerId,
+                modelId: modelSelection.modelId,
+                modelOptions: modelSelection.modelOptions && typeof modelSelection.modelOptions === 'object'
+                    ? Object.fromEntries(
+                        Object.entries(modelSelection.modelOptions).filter((entry): entry is [string, boolean] => {
+                            return typeof entry[0] === 'string' && typeof entry[1] === 'boolean';
+                        })
+                    )
+                    : {}
+            }
+            : undefined,
         compare: conversation.compare
             ? {
                 ...conversation.compare,

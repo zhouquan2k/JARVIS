@@ -1,4 +1,4 @@
-import { APP_CONFIG, type ProviderModelCatalog } from '../../config';
+import { APP_CONFIG, type ModelConfig, type ProviderModelCatalog } from '../../config';
 import type { MessageAttachment } from '../interfaces/IStorageProvider';
 import {
     IModelProvider,
@@ -29,6 +29,31 @@ function getGeminiModelCatalog(): ProviderModelCatalog {
     return {
         models: provider.models.map((model) => ({ ...model })),
         defaultModel: provider.defaultModel
+    };
+}
+
+function cloneModelConfig(model: ModelConfig): ModelConfig {
+    return {
+        ...model,
+        options: model.options?.map((option) => ({
+            ...option,
+            conflictsWith: option.conflictsWith ? [...option.conflictsWith] : undefined
+        }))
+    };
+}
+
+function getGeminiModelOptions() {
+    const provider = APP_CONFIG.providers.find((item) => item.id === 'gemini-api');
+    return provider?.models[0]?.options?.map((option) => ({
+        ...option,
+        conflictsWith: option.conflictsWith ? [...option.conflictsWith] : undefined
+    }));
+}
+
+function attachGeminiModelOptions(model: ModelConfig): ModelConfig {
+    return {
+        ...cloneModelConfig(model),
+        options: getGeminiModelOptions()
     };
 }
 
@@ -238,7 +263,7 @@ export class GeminiApiProvider implements IModelProvider {
             }
 
             return {
-                models: resolvedModels,
+                models: resolvedModels.map(attachGeminiModelOptions),
                 defaultModel: normalizeGeminiFallbackDefault(resolvedModels, fallbackCatalog.defaultModel)
             };
         } catch {
@@ -265,9 +290,13 @@ export class GeminiApiProvider implements IModelProvider {
 
         this.abortController = new AbortController();
 
-        const payload = {
+        const payload: Record<string, unknown> = {
             contents: buildGeminiContents(prompt, options)
         };
+
+        if (options.modelOptions?.deep_research === true) {
+            payload.tools = [{ googleSearch: {} }];
+        }
 
         const response = await fetch(url, {
             method: 'POST',

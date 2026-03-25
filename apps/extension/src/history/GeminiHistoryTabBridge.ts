@@ -18,11 +18,14 @@ function normalizeTabUrl(baseUrl: string, externalId?: string): string {
     return externalId ? `${baseUrl}/${externalId}` : baseUrl;
 }
 
+function isMissingReceiverError(error: unknown): boolean {
+    return error instanceof Error && /Receiving end does not exist/i.test(error.message);
+}
+
 export class GeminiHistoryTabBridge {
     private tabId: number | null = null;
     private readonly pageOrigin: string;
     private readonly pageUrl: string;
-    private hasTriedManualInjection = false;
 
     constructor(options: { env?: AppEnv } = {}) {
         const runtimeConfig = resolveGeminiHistoryRuntimeConfig({ env: options.env });
@@ -77,11 +80,16 @@ export class GeminiHistoryTabBridge {
         }
 
         this.tabId = tab.id;
-        if (externalId && (!tab.url || !tab.url.startsWith(targetUrl))) {
+        if (!tab.url || !tab.url.startsWith(targetUrl)) {
             await chrome.tabs.update(tab.id, {
                 url: targetUrl,
                 active: false
             });
+            await this.waitForTabComplete(tab.id);
+            return tab.id;
+        }
+
+        if (tab.status !== 'complete') {
             await this.waitForTabComplete(tab.id);
         }
 
@@ -121,12 +129,18 @@ export class GeminiHistoryTabBridge {
             return;
         }
 
-        if (currentUrl.startsWith(this.pageOrigin)) {
+        if (/accounts\.google\.com|ServiceLogin/i.test(currentUrl)) {
+            throw new ExternalHistoryError('AUTH_REQUIRED', 'Gemini 标签页跳转到了登录页，请先完成登录后再重试。', {
+                providerId: 'gemini-web'
+            });
+        }
+
+        if (currentUrl.startsWith(this.pageUrl)) {
             return;
         }
 
-        if (/accounts\.google\.com|ServiceLogin/i.test(currentUrl)) {
-            throw new ExternalHistoryError('AUTH_REQUIRED', 'Gemini 标签页跳转到了登录页，请先完成登录后再重试。', {
+        if (currentUrl.startsWith(this.pageOrigin)) {
+            throw new ExternalHistoryError('TAB_UNAVAILABLE', `Gemini 标签页当前不在可抓取的对话页面：${currentUrl}`, {
                 providerId: 'gemini-web'
             });
         }
@@ -137,15 +151,19 @@ export class GeminiHistoryTabBridge {
     }
 
     private async ensureContentScriptInjected(tabId: number): Promise<void> {
-        if (typeof chrome.scripting?.executeScript !== 'function' || this.hasTriedManualInjection) {
+        if (typeof chrome.scripting?.executeScript !== 'function') {
             return;
         }
 
-        this.hasTriedManualInjection = true;
-        await chrome.scripting.executeScript({
-            target: { tabId },
-            files: ['content-scripts/gemini-history.js']
-        });
+        try {
+            await chrome.scripting.executeScript({
+                target: { tabId },
+                files: ['content-scripts/gemini-history.js']
+            });
+        } catch {
+            return;
+        }
+
         await sleep(300);
     }
 
@@ -170,19 +188,26 @@ export class GeminiHistoryTabBridge {
     }
 
     private async waitForContentScriptReady(tabId: number): Promise<void> {
-        for (let attempt = 0; attempt < 12; attempt += 1) {
+        for (let attempt = 0; attempt < 20; attempt += 1) {
             try {
                 const response = await chrome.tabs.sendMessage(tabId, {
                     action: 'PING'
                 });
                 const result = assertGeminiContentResponse<{ ready: true }>(response as GeminiContentResponse);
                 if (result.ready) {
-                    this.hasTriedManualInjection = false;
                     return;
                 }
-            } catch {
+            } catch (error) {
                 await this.inspectTabContext(tabId);
-                await this.ensureContentScriptInjected(tabId);
+
+                const tab = await chrome.tabs.get(tabId);
+                if (tab.status !== 'complete') {
+                    await this.waitForTabComplete(tabId);
+                }
+
+                if (isMissingReceiverError(error)) {
+                    await this.ensureContentScriptInjected(tabId);
+                }
             }
 
             await sleep(500);

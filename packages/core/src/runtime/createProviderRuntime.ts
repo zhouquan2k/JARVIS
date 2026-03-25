@@ -1,4 +1,4 @@
-import { APP_CONFIG, type ProviderConfig, type ProviderModelCatalog } from '../../config';
+import { APP_CONFIG, type ModelConfig, type ProviderConfig, type ProviderModelCatalog } from '../../config';
 import { IModelProvider } from '../interfaces/IModelProvider';
 import { ChatGPTWebProvider } from '../providers/ChatGPTWebProvider';
 import { GeminiApiProvider } from '../providers/GeminiApiProvider';
@@ -44,8 +44,33 @@ function getStaticProviderCatalog(providerId: string, availableProviders: Provid
     }
 
     return {
-        models: providerConfig.models.map((model) => ({ ...model })),
+        models: providerConfig.models.map(cloneModelConfig),
         defaultModel: providerConfig.defaultModel
+    };
+}
+
+function cloneModelConfig(model: ModelConfig): ModelConfig {
+    return {
+        ...model,
+        options: model.options?.map((option) => ({
+            ...option,
+            conflictsWith: option.conflictsWith ? [...option.conflictsWith] : undefined
+        }))
+    };
+}
+
+function mergeModelOptions(model: ModelConfig, providerConfig: ProviderConfig): ModelConfig {
+    const staticModel = providerConfig.models.find((item) => item.id === model.id);
+    if (!staticModel?.options?.length) {
+        return cloneModelConfig(model);
+    }
+
+    return {
+        ...cloneModelConfig(model),
+        options: staticModel.options.map((option) => ({
+            ...option,
+            conflictsWith: option.conflictsWith ? [...option.conflictsWith] : undefined
+        }))
     };
 }
 
@@ -58,8 +83,9 @@ function validateProviderCatalog(providerId: string, catalog: ProviderModelCatal
         throw new Error(`Provider '${providerId}' returned an invalid defaultModel '${catalog.defaultModel}'`);
     }
 
+    const providerConfig = APP_CONFIG.providers.find((provider) => provider.id === providerId);
     return {
-        models: catalog.models.map((model) => ({ ...model })),
+        models: catalog.models.map((model) => providerConfig ? mergeModelOptions(model, providerConfig) : cloneModelConfig(model)),
         defaultModel: catalog.defaultModel
     };
 }
@@ -91,7 +117,7 @@ function applyConfiguredDefaultModel(
     }
 
     return {
-        models: catalog.models.map((model) => ({ ...model })),
+        models: catalog.models.map(cloneModelConfig),
         defaultModel: matchedModel.id
     };
 }

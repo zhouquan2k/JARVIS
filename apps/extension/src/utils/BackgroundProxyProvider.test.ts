@@ -116,6 +116,9 @@ describe('BackgroundProxyProvider', () => {
             '分析附件',
             {
                 modelId: 'gpt-4o',
+                modelOptions: {
+                    web_search: true
+                },
                 attachments: [
                     {
                         id: 'attachment-1',
@@ -140,6 +143,9 @@ describe('BackgroundProxyProvider', () => {
             channelId: 'test-channel',
             options: expect.objectContaining({
                 modelId: 'gpt-4o',
+                modelOptions: {
+                    web_search: true
+                },
                 attachments: [
                     expect.objectContaining({
                         id: 'attachment-1',

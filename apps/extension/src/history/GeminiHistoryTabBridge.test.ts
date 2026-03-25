@@ -167,7 +167,55 @@ describe('GeminiHistoryTabBridge', () => {
 
         expect(result).toHaveLength(1);
         expect(chromeStub.tabs.sendMessage).toHaveBeenCalledTimes(4);
-        expect(chromeStub.scripting.executeScript).toHaveBeenCalledTimes(1);
+        expect(chromeStub.scripting.executeScript).toHaveBeenCalledTimes(2);
+    });
+
+    it('waits for an already open Gemini tab to finish loading before pinging the content script', async () => {
+        const chromeStub = createChromeStub();
+        chromeStub.tabs.query = vi.fn().mockResolvedValue([
+            {
+                id: 21,
+                url: 'https://gemini.google.com/app',
+                status: 'loading',
+                active: true
+            }
+        ]);
+        chromeStub.tabs.get = vi.fn()
+            .mockResolvedValueOnce({
+                id: 21,
+                url: 'https://gemini.google.com/app',
+                status: 'loading',
+                active: true
+            })
+            .mockResolvedValueOnce({
+                id: 21,
+                url: 'https://gemini.google.com/app',
+                status: 'complete',
+                active: true
+            });
+        chromeStub.tabs.sendMessage = vi.fn()
+            .mockResolvedValueOnce({ ok: true, data: { ready: true } })
+            .mockResolvedValueOnce({
+                ok: true,
+                data: [
+                    {
+                        id: 'gemini-1',
+                        title: 'Gemini',
+                        updatedAt: 1
+                    }
+                ]
+            });
+        chromeStub.tabs.onUpdated.addListener = vi.fn((listener: (tabId: number, info: chrome.tabs.TabChangeInfo) => void) => {
+            listener(21, { status: 'complete' });
+        });
+        vi.stubGlobal('chrome', chromeStub);
+
+        const bridge = new GeminiHistoryTabBridge();
+        const result = await bridge.getHistoryList(CONFIG);
+
+        expect(result).toHaveLength(1);
+        expect(chromeStub.tabs.onUpdated.addListener).toHaveBeenCalledTimes(1);
+        expect(chromeStub.tabs.sendMessage).toHaveBeenCalledTimes(2);
     });
 
     it('surfaces auth-required when the tab is redirected to Google login', async () => {

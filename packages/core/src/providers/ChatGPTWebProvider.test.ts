@@ -339,8 +339,22 @@ describe('normalizeChatGPTConversationDetail', () => {
 
         await expect(provider.getAvailableModels()).resolves.toEqual({
             models: [
-                { id: 'gpt-4o', name: 'GPT-4o' },
-                { id: 'gpt-4.1-mini', name: 'GPT-4.1 Mini' }
+                {
+                    id: 'gpt-4o',
+                    name: 'GPT-4o',
+                    options: [
+                        expect.objectContaining({ key: 'web_search', type: 'boolean' }),
+                        expect.objectContaining({ key: 'deep_research', type: 'boolean' })
+                    ]
+                },
+                {
+                    id: 'gpt-4.1-mini',
+                    name: 'GPT-4.1 Mini',
+                    options: [
+                        expect.objectContaining({ key: 'web_search', type: 'boolean' }),
+                        expect.objectContaining({ key: 'deep_research', type: 'boolean' })
+                    ]
+                }
             ],
             defaultModel: 'gpt-4o'
         });
@@ -364,8 +378,22 @@ describe('normalizeChatGPTConversationDetail', () => {
 
         await expect(provider.getAvailableModels()).resolves.toEqual({
             models: [
-                { id: 'auto', name: 'Auto (默认)' },
-                { id: 'gpt-4o', name: 'GPT-4o' }
+                {
+                    id: 'auto',
+                    name: 'Auto (默认)',
+                    options: [
+                        expect.objectContaining({ key: 'web_search', type: 'boolean' }),
+                        expect.objectContaining({ key: 'deep_research', type: 'boolean' })
+                    ]
+                },
+                {
+                    id: 'gpt-4o',
+                    name: 'GPT-4o',
+                    options: [
+                        expect.objectContaining({ key: 'web_search', type: 'boolean' }),
+                        expect.objectContaining({ key: 'deep_research', type: 'boolean' })
+                    ]
+                }
             ],
             defaultModel: 'auto'
         });
@@ -425,6 +453,7 @@ describe('normalizeChatGPTConversationDetail', () => {
             '看看附件',
             {
                 modelId: 'gpt-4o',
+                modelOptions: { web_search: true },
                 attachments: [
                     {
                         id: 'attachment-1',
@@ -443,6 +472,8 @@ describe('normalizeChatGPTConversationDetail', () => {
         expect(fetchMock).toHaveBeenCalledTimes(2);
         const requestBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
         expect(requestBody.model).toBe('gpt-4o');
+        expect(requestBody.conversation_mode).toEqual({ kind: 'search' });
+        expect(requestBody.client_contextual_info).toEqual({ use_search: true });
         expect(requestBody.messages[0]?.content?.content_type).toBe('multimodal_text');
         expect(requestBody.messages[0]?.content?.parts[1]).toMatchObject({
             id: 'attachment-1',
@@ -468,6 +499,45 @@ describe('normalizeChatGPTConversationDetail', () => {
                 })
             })
         ]);
+
+        vi.unstubAllGlobals();
+    });
+
+    it('translates deep research option into chatgpt request mode', async () => {
+        const provider = new ChatGPTWebProvider();
+        (provider as { accessToken: string }).accessToken = 'token';
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ token: 'requirements-token' })
+            })
+            .mockResolvedValueOnce(
+                createSseResponse([
+                    {
+                        conversation_id: 'conversation-123',
+                        message: {
+                            id: 'message-123',
+                            content: {
+                                parts: ['研究结果']
+                            }
+                        }
+                    }
+                ])
+            );
+        vi.stubGlobal('fetch', fetchMock);
+
+        await provider.sendMessage(
+            '做研究',
+            {
+                modelId: 'gpt-4o',
+                modelOptions: { deep_research: true }
+            },
+            () => undefined
+        );
+
+        const requestBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+        expect(requestBody.conversation_mode).toEqual({ kind: 'research' });
+        expect(requestBody.client_contextual_info).toEqual({ is_deep_research: true });
 
         vi.unstubAllGlobals();
     });

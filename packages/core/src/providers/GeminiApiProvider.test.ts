@@ -48,8 +48,16 @@ describe('GeminiApiProvider', () => {
         const provider = new GeminiApiProvider({ apiKey: 'test-key' });
         await expect(provider.getAvailableModels()).resolves.toEqual({
             models: [
-                { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
-                { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' }
+                {
+                    id: 'gemini-2.5-flash',
+                    name: 'Gemini 2.5 Flash',
+                    options: [expect.objectContaining({ key: 'deep_research', type: 'boolean' })]
+                },
+                {
+                    id: 'gemini-2.5-pro',
+                    name: 'Gemini 2.5 Pro',
+                    options: [expect.objectContaining({ key: 'deep_research', type: 'boolean' })]
+                }
             ],
             defaultModel: 'gemini-2.5-flash'
         });
@@ -70,9 +78,21 @@ describe('GeminiApiProvider', () => {
         const provider = new GeminiApiProvider({ apiKey: 'test-key' });
         await expect(provider.getAvailableModels()).resolves.toEqual({
             models: [
-                { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
-                { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' },
-                { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' }
+                {
+                    id: 'gemini-2.5-flash',
+                    name: 'Gemini 2.5 Flash',
+                    options: [expect.objectContaining({ key: 'deep_research', type: 'boolean' })]
+                },
+                {
+                    id: 'gemini-2.0-flash',
+                    name: 'Gemini 2.0 Flash',
+                    options: [expect.objectContaining({ key: 'deep_research', type: 'boolean' })]
+                },
+                {
+                    id: 'gemini-2.5-pro',
+                    name: 'Gemini 2.5 Pro',
+                    options: [expect.objectContaining({ key: 'deep_research', type: 'boolean' })]
+                }
             ],
             defaultModel: 'gemini-2.5-flash'
         });
@@ -234,6 +254,38 @@ describe('GeminiApiProvider', () => {
                 parts: [{ text: '第二问' }]
             }
         ]);
+
+        vi.unstubAllGlobals();
+    });
+
+    it('adds research tools when deep research is enabled', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(
+            createGeminiSseResponse([
+                {
+                    candidates: [
+                        {
+                            content: {
+                                parts: [{ text: '研究结果' }]
+                            }
+                        }
+                    ]
+                }
+            ])
+        );
+        vi.stubGlobal('fetch', fetchMock);
+
+        const provider = new GeminiApiProvider({ apiKey: 'test-key' });
+        await provider.sendMessage(
+            '做研究',
+            {
+                modelId: 'gemini-2.5-flash',
+                modelOptions: { deep_research: true }
+            },
+            () => undefined
+        );
+
+        const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+        expect(requestBody.tools).toEqual([{ googleSearch: {} }]);
 
         vi.unstubAllGlobals();
     });

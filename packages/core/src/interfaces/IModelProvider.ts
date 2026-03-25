@@ -12,6 +12,7 @@ export interface SendMessageOptions {
   modelId?: string;
   attachments?: MessageAttachment[];
   history?: ProviderContextMessage[];
+  modelOptions?: Record<string, boolean>;
 }
 
 export interface ProviderStreamUpdate {

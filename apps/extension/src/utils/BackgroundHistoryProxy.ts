@@ -3,6 +3,8 @@ import type { Conversation, ConversationHistorySummary, IHistoryProvider } from 
 import type { GetHistoryDetailRequest, GetHistoryListRequest, ProxyRequest, ProxyResponse } from './proxyProtocol';
 
 type PendingRequest = {
+    message: ProxyRequest;
+    retried: boolean;
     resolve: (value: any) => void;
     reject: (reason: Error) => void;
 };
@@ -29,9 +31,27 @@ export class BackgroundHistoryProxy implements IHistoryProvider {
 
     private handleDisconnect = () => {
         this.port = null;
-        const error = new Error('Background history proxy connection disconnected');
-        this.pending.forEach((request) => request.reject(error));
-        this.pending.clear();
+        const requestsToRetry = Array.from(this.pending.entries())
+            .filter(([, request]) => !request.retried);
+
+        if (requestsToRetry.length === 0) {
+            const error = new Error('Background history proxy connection disconnected');
+            this.pending.forEach((request) => request.reject(error));
+            this.pending.clear();
+            return;
+        }
+
+        const port = this.ensureConnection();
+        for (const [requestId, request] of requestsToRetry) {
+            request.retried = true;
+
+            try {
+                port.postMessage(request.message);
+            } catch {
+                this.pending.delete(requestId);
+                request.reject(new Error('Background history proxy connection disconnected'));
+            }
+        }
     };
 
     private handleMessage = (msg: ProxyResponse) => {
@@ -61,8 +81,19 @@ export class BackgroundHistoryProxy implements IHistoryProvider {
     private createTrackedRequest<T>(message: ProxyRequest): Promise<T> {
         return new Promise((resolve, reject) => {
             const port = this.ensureConnection();
-            this.pending.set(message.requestId, { resolve, reject });
-            port.postMessage(message);
+            this.pending.set(message.requestId, {
+                message,
+                retried: false,
+                resolve,
+                reject
+            });
+
+            try {
+                port.postMessage(message);
+            } catch (error) {
+                this.pending.delete(message.requestId);
+                reject(error instanceof Error ? error : new Error(String(error)));
+            }
         });
     }
 

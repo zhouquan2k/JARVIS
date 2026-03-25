@@ -74,6 +74,7 @@ export default defineBackground(() => {
             const activeRequests = new Map<string, { provider: IModelProvider; channelId: string }>();
             const ownedRequestIds = new Set<string>();
             let runtimePromise: Promise<ProviderRuntime> | null = null;
+            let portDisconnected = false;
 
             const getRuntime = async (): Promise<ProviderRuntime> => {
                 if (!runtimePromise) {
@@ -86,17 +87,41 @@ export default defineBackground(() => {
                 return runtimePromise;
             };
 
-            const postResponse = (message: ProxyResponse) => {
-                port.postMessage(message);
+            const postResponse = (message: ProxyResponse): boolean => {
+                if (portDisconnected) {
+                    return false;
+                }
+
+                try {
+                    port.postMessage(message);
+                    return true;
+                } catch (error) {
+                    portDisconnected = true;
+                    console.error('Failed to post ai-provider-proxy response', {
+                        type: message.type,
+                        requestId: message.requestId,
+                        channelId: message.channelId,
+                        error
+                    });
+                    return false;
+                }
             };
 
             const postError = (requestId: string, channelId: string, error: unknown) => {
-                postResponse({
+                const delivered = postResponse({
                     type: 'ERROR',
                     requestId,
                     channelId,
                     error: error instanceof Error ? error.message : String(error)
                 });
+
+                if (!delivered) {
+                    console.error('Failed to deliver ai-provider-proxy error response', {
+                        requestId,
+                        channelId,
+                        error
+                    });
+                }
             };
 
             const resolveProvider = async (providerId: string): Promise<IModelProvider> => {
@@ -335,6 +360,7 @@ export default defineBackground(() => {
             });
 
             port.onDisconnect.addListener(() => {
+                portDisconnected = true;
                 for (const requestId of Array.from(ownedRequestIds)) {
                     const active = activeRequests.get(requestId);
                     if (!active) {

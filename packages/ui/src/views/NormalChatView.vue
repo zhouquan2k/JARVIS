@@ -84,7 +84,7 @@
           <div class="selector-row">
             <AttachmentComposer
               :attachments="chatStore.draftAttachments"
-              :disabled="chatStore.isGenerating || !isAuthenticated || chatStore.isCurrentProviderModelsLoading || !chatStore.currentModelId"
+              :disabled="isInputDisabled"
               :error="chatStore.attachmentError"
               @select-files="onSelectFiles"
               @remove="chatStore.removeDraftAttachment"
@@ -95,8 +95,17 @@
               :current-provider-id="chatStore.currentProviderId"
               :current-model-id="chatStore.currentModelId"
               :models-loading="chatStore.isCurrentProviderModelsLoading"
+              :disabled="isInputDisabled"
               @provider-change="onProviderChange"
               @model-change="onModelChange"
+            />
+
+            <ModelOptionToggleGroup
+              v-if="modelOptionDefinitions.length > 0"
+              :options="modelOptionDefinitions"
+              :value="chatStore.currentModelOptions"
+              :disabled="isInputDisabled"
+              @change="onModelOptionChange"
             />
           </div>
 
@@ -116,7 +125,7 @@
             @paste="onPaste"
             @keydown="onInputKeydown"
             placeholder="输入内容，按 Enter 换行，Ctrl/Cmd + Enter 发送"
-            :disabled="chatStore.isGenerating || !isAuthenticated || chatStore.isCurrentProviderModelsLoading || !chatStore.currentModelId"
+            :disabled="isInputDisabled"
           />
           <div class="input-actions">
             <p class="shortcut-hint">Enter 换行，Ctrl/Cmd + Enter 发送</p>
@@ -124,7 +133,7 @@
               v-if="!chatStore.isGenerating"
               data-testid="normal-send"
               @click="send()"
-              :disabled="(!draftPrompt.trim() && chatStore.draftAttachments.length === 0) || !isAuthenticated || chatStore.isCurrentProviderModelsLoading || !chatStore.currentModelId"
+              :disabled="(!draftPrompt.trim() && chatStore.draftAttachments.length === 0) || isInputDisabled"
             >
               发送
             </button>
@@ -174,6 +183,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import AttachmentComposer from '../components/AttachmentComposer.vue';
 import MarkdownContent from '../components/MarkdownContent.vue';
 import MessageAttachmentStrip from '../components/MessageAttachmentStrip.vue';
+import ModelOptionToggleGroup from '../components/ModelOptionToggleGroup.vue';
 import ProviderModelSelector from '../components/ProviderModelSelector.vue';
 import QuestionIndexPanel from '../components/QuestionIndexPanel.vue';
 import { useChatStore } from '../store/chat';
@@ -194,6 +204,7 @@ let scrollSyncFrame: number | null = null;
 const displayConversation = computed(() => chatStore.displayConversation);
 const isPreviewing = computed(() => chatStore.isPreviewing);
 const renderedMessages = computed(() => isPreviewing.value ? displayConversation.value?.messages || [] : chatStore.visibleMessages);
+const modelOptionDefinitions = computed(() => chatStore.currentModelOptionDefinitions);
 const draftPrompt = computed({
   get: () => chatStore.draftPrompt,
   set: (value: string) => chatStore.setDraftPrompt(value)
@@ -210,6 +221,9 @@ const showQuestionIndexPanel = computed(() => {
 });
 const showQuestionIndexToggle = computed(() => {
   return hasQuestionIndexContent.value && !chatStore.isQuestionIndexPanelOpen;
+});
+const isInputDisabled = computed(() => {
+  return chatStore.isGenerating || !isAuthenticated.value || chatStore.isCurrentProviderModelsLoading || !chatStore.currentModelId;
 });
 const messageQuestionMeta = computed(() => {
   const meta = new Map<string, { questionKey: string; starred: boolean; root: boolean }>();
@@ -428,6 +442,10 @@ async function onProviderChange(providerId: string) {
 function onModelChange(modelId: string) {
   chatStore.setCurrentModel(modelId);
 }
+
+function onModelOptionChange(payload: { key: string; enabled: boolean }) {
+  chatStore.setCurrentModelOption(payload.key, payload.enabled);
+}
 </script>
 
 <style scoped>
@@ -461,10 +479,32 @@ function onModelChange(modelId: string) {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 28px 24px 12px;
   display: flex;
   flex-direction: column;
   gap: 16px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
+}
+
+.chat-messages::-webkit-scrollbar {
+  width: 10px;
+}
+
+.chat-messages::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-messages::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  background: rgba(148, 163, 184, 0.4);
+}
+
+.chat-messages::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.62);
 }
 
 .chat-index-panel {

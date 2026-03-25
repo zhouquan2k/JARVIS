@@ -1,8 +1,18 @@
 export type RuntimeMode = 'extension' | 'web';
 
+export interface ModelOptionDefinition {
+    key: string;
+    label: string;
+    type: 'boolean';
+    description?: string;
+    conflictsWith?: string[];
+    defaultValue?: boolean;
+}
+
 export interface ModelConfig {
     id: string;
     name: string;
+    options?: ModelOptionDefinition[];
 }
 
 export interface ProviderModelCatalog {
@@ -91,8 +101,50 @@ export const APP_CONFIG: { providers: ProviderConfig[]; analyzer: AnalyzerConfig
             id: 'chatgpt-web',
             name: 'ChatGPT (Web)',
             models: [
-                { id: 'auto', name: 'Auto (默认)' },
-                { id: 'gpt-4o', name: 'GPT-4o' }
+                {
+                    id: 'auto',
+                    name: 'Auto (默认)',
+                    options: [
+                        {
+                            key: 'web_search',
+                            label: '联网搜索',
+                            type: 'boolean',
+                            description: '允许模型通过网页搜索补充实时信息。',
+                            conflictsWith: ['deep_research'],
+                            defaultValue: false
+                        },
+                        {
+                            key: 'deep_research',
+                            label: 'Deep Research',
+                            type: 'boolean',
+                            description: '切换到更重的研究型请求路径。',
+                            conflictsWith: ['web_search'],
+                            defaultValue: false
+                        }
+                    ]
+                },
+                {
+                    id: 'gpt-4o',
+                    name: 'GPT-4o',
+                    options: [
+                        {
+                            key: 'web_search',
+                            label: '联网搜索',
+                            type: 'boolean',
+                            description: '允许模型通过网页搜索补充实时信息。',
+                            conflictsWith: ['deep_research'],
+                            defaultValue: false
+                        },
+                        {
+                            key: 'deep_research',
+                            label: 'Deep Research',
+                            type: 'boolean',
+                            description: '切换到更重的研究型请求路径。',
+                            conflictsWith: ['web_search'],
+                            defaultValue: false
+                        }
+                    ]
+                }
             ],
             defaultModel: 'auto',
             preferredDefaultModel: 'gpt5.4thinking',
@@ -102,9 +154,45 @@ export const APP_CONFIG: { providers: ProviderConfig[]; analyzer: AnalyzerConfig
             id: 'gemini-api',
             name: 'Gemini (API)',
             models: [
-                { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
-                { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' },
-                { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' }
+                {
+                    id: 'gemini-2.5-flash',
+                    name: 'Gemini 2.5 Flash',
+                    options: [
+                        {
+                            key: 'deep_research',
+                            label: 'Deep Research',
+                            type: 'boolean',
+                            description: '切换到 Gemini 的研究型请求路径。',
+                            defaultValue: false
+                        }
+                    ]
+                },
+                {
+                    id: 'gemini-2.0-flash',
+                    name: 'Gemini 2.0 Flash',
+                    options: [
+                        {
+                            key: 'deep_research',
+                            label: 'Deep Research',
+                            type: 'boolean',
+                            description: '切换到 Gemini 的研究型请求路径。',
+                            defaultValue: false
+                        }
+                    ]
+                },
+                {
+                    id: 'gemini-2.5-pro',
+                    name: 'Gemini 2.5 Pro',
+                    options: [
+                        {
+                            key: 'deep_research',
+                            label: 'Deep Research',
+                            type: 'boolean',
+                            description: '切换到 Gemini 的研究型请求路径。',
+                            defaultValue: false
+                        }
+                    ]
+                }
             ],
             defaultModel: 'gemini-2.5-flash',
             preferredDefaultModel: 'Gemini Pro Latest',

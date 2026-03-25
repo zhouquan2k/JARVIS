@@ -2,7 +2,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
-import { mount } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
 import type { Conversation } from '@packages/core/src';
 import NormalChatView from './NormalChatView.vue';
 import { useChatStore } from '../store/chat';
@@ -29,6 +29,16 @@ function mountView() {
                 },
                 ProviderModelSelector: {
                     template: '<div data-testid="provider-selector-stub" />'
+                },
+                ModelOptionToggleGroup: {
+                    props: ['options', 'value', 'disabled'],
+                    template: `
+                      <div
+                        data-testid="model-option-toggle-group"
+                        :data-options="options?.length ?? 0"
+                        :data-disabled="disabled === true"
+                      />
+                    `
                 },
                 MessageAttachmentStrip: {
                     template: '<div data-testid="attachment-strip-stub" />'
@@ -132,5 +142,95 @@ describe('NormalChatView', () => {
 
         expect(wrapper.find('[data-testid="question-index-panel"]').exists()).toBe(false);
         expect(wrapper.find('[data-testid="question-panel-open"]').exists()).toBe(false);
+    });
+
+    it('renders model option controls when the current model exposes options', async () => {
+        const store = useChatStore();
+        store.availableProviders = [
+            {
+                id: 'mock-provider',
+                name: 'Mock Provider',
+                defaultModel: 'dynamic-model',
+                supportedRuntimeModes: ['web'],
+                models: [
+                    {
+                        id: 'dynamic-model',
+                        name: 'Dynamic Model',
+                        options: [
+                            {
+                                key: 'web_search',
+                                label: '联网搜索',
+                                type: 'boolean'
+                            }
+                        ]
+                    }
+                ]
+            }
+        ];
+        store.currentProviderId = 'mock-provider';
+        store.currentModelId = 'dynamic-model';
+        store.currentModelOptions = { web_search: true };
+        store.providerModelStates = {
+            'mock-provider': {
+                loading: false,
+                loaded: true
+            }
+        };
+        store.workspaceMode = 'active';
+        store.currentConversation = createConversation([]);
+        store.init = vi.fn().mockResolvedValue(undefined);
+        store.checkAuth = vi.fn().mockResolvedValue(true);
+
+        const wrapper = mountView();
+        await flushPromises();
+        await wrapper.vm.$nextTick();
+
+        expect(wrapper.get('[data-testid="model-option-toggle-group"]').attributes('data-options')).toBe('1');
+        expect(wrapper.get('[data-testid="model-option-toggle-group"]').attributes('data-disabled')).toBe('false');
+        expect(wrapper.find('.selector-row [data-testid="model-option-toggle-group"]').exists()).toBe(true);
+    });
+
+    it('disables model option controls when chat input is unavailable', async () => {
+        const store = useChatStore();
+        store.availableProviders = [
+            {
+                id: 'mock-provider',
+                name: 'Mock Provider',
+                defaultModel: 'dynamic-model',
+                supportedRuntimeModes: ['web'],
+                models: [
+                    {
+                        id: 'dynamic-model',
+                        name: 'Dynamic Model',
+                        options: [
+                            {
+                                key: 'deep_research',
+                                label: 'Deep Research',
+                                type: 'boolean'
+                            }
+                        ]
+                    }
+                ]
+            }
+        ];
+        store.currentProviderId = 'mock-provider';
+        store.currentModelId = 'dynamic-model';
+        store.providerModelStates = {
+            'mock-provider': {
+                loading: false,
+                loaded: true
+            }
+        };
+        store.workspaceMode = 'active';
+        store.currentConversation = createConversation([]);
+        store.isGenerating = true;
+        store.init = vi.fn().mockResolvedValue(undefined);
+        store.checkAuth = vi.fn().mockResolvedValue(true);
+
+        const wrapper = mountView();
+        await flushPromises();
+        await wrapper.vm.$nextTick();
+
+        expect(wrapper.get('[data-testid="model-option-toggle-group"]').attributes('data-disabled')).toBe('true');
     });
 });
