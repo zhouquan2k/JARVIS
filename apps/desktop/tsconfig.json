@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "jsx": "preserve",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "paths": {
+      "@packages/core": ["../../packages/core"],
+      "@packages/core/*": ["../../packages/core/*"],
+      "@packages/ui": ["../../packages/ui"],
+      "@packages/ui/*": ["../../packages/ui/*"]
+    },
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.vue", "shared/**/*.ts", "vite.config.ts", "playwright.config.ts"]
+}

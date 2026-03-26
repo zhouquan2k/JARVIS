@@ -2,20 +2,30 @@
     "name": "chatprism-workspace",
     "private": true,
     "scripts": {
-    "dev:server": "pnpm --filter server dev",
-    "build:server": "pnpm --filter server build",
-    "test:server": "pnpm --filter server test",
-    "test:core": "pnpm --filter @packages/core test",
-    "test:ui": "pnpm --filter @packages/ui test",
-    "test:e2e:web": "pnpm --filter web test:e2e"
-  },
+        "dev:server": "pnpm --filter server dev",
+        "dev:desktop:renderer": "pnpm --filter desktop dev:renderer",
+        "dev:desktop:host": "pnpm --filter desktop dev:host",
+        "build:server": "pnpm --filter server build",
+        "build:desktop": "pnpm --filter desktop build",
+        "test:server": "pnpm --filter server test",
+        "test:core": "pnpm --filter @packages/core test",
+        "test:ui": "pnpm --filter @packages/ui test",
+        "test:desktop": "pnpm --filter desktop test",
+        "test:e2e:web": "pnpm --filter web test:e2e",
+        "test:e2e:desktop": "pnpm --filter desktop test:e2e"
+    },
     "engines": {
         "node": ">=18"
     },
     "packageManager": "pnpm@10.15.1",
     "pnpm": {
         "onlyBuiltDependencies": [
-            "better-sqlite3"
+            "better-sqlite3",
+            "electron"
+        ],
+        "ignoredBuiltDependencies": [
+            "esbuild",
+            "spawn-sync"
         ]
     }
 }

@@ -17,10 +17,11 @@ function createConversation(messages: Conversation['messages']): Conversation {
     };
 }
 
-function mountView() {
+function mountView(props: Record<string, unknown> = {}) {
     return mount(NormalChatView, {
         props: {
-            showQuestionIndex: true
+            showQuestionIndex: true,
+            ...props
         },
         global: {
             stubs: {
@@ -232,5 +233,27 @@ describe('NormalChatView', () => {
         await wrapper.vm.$nextTick();
 
         expect(wrapper.get('[data-testid="model-option-toggle-group"]').attributes('data-disabled')).toBe('true');
+    });
+
+    it('renders a custom auth recovery action when the host provides one', async () => {
+        const store = useChatStore();
+        store.currentConversation = createConversation([]);
+        store.workspaceMode = 'active';
+        store.currentModelId = 'gpt-4o';
+        store.init = vi.fn().mockResolvedValue(undefined);
+        store.checkAuth = vi.fn().mockResolvedValue(true);
+
+        const wrapper = mountView({
+            authStatusOverride: false,
+            authUnavailableMessage: '当前桌面宿主的 ChatGPT 登录态不可用，请先登录后再继续。',
+            authRecoveryActionLabel: '登录 ChatGPT'
+        });
+        await flushPromises();
+
+        expect(wrapper.get('[data-testid="normal-auth-warning"]').text()).toContain('当前桌面宿主的 ChatGPT 登录态不可用');
+        expect(wrapper.get('[data-testid="normal-auth-recovery"]').text()).toContain('登录 ChatGPT');
+
+        await wrapper.get('[data-testid="normal-auth-recovery"]').trigger('click');
+        expect(wrapper.emitted('request-auth-recovery')).toHaveLength(1);
     });
 });

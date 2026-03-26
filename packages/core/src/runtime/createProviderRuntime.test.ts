@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createProviderRuntime } from './createProviderRuntime';
 import type { IModelProvider, ProviderStreamUpdate, SendMessageOptions } from '../interfaces/IModelProvider';
 
@@ -54,6 +54,13 @@ describe('createProviderRuntime', () => {
         expect(providers.every((provider) => provider.supportedRuntimeModes.includes('web'))).toBe(true);
     });
 
+    it('filters providers by desktop runtimeMode', () => {
+        const runtime = createProviderRuntime({ runtimeMode: 'desktop' });
+        const providers = runtime.getProviderCatalog();
+        expect(providers.length).toBeGreaterThan(0);
+        expect(providers.every((provider) => provider.supportedRuntimeModes.includes('desktop'))).toBe(true);
+    });
+
     it('returns model provider instances with IModelProvider contract', () => {
         const runtime = createProviderRuntime({ runtimeMode: 'extension' });
         const provider = runtime.getProvider('gemini-api');
@@ -107,6 +114,37 @@ describe('createProviderRuntime', () => {
 
         const provider = runtime.getProvider('gemini-api');
         expect(provider.id).toBe('custom-gemini');
+    });
+
+    it('passes resolved provider options into default factories', async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ accessToken: 'token-from-host' })
+        });
+        const cookieStore = {
+            get: vi.fn().mockResolvedValue({ value: 'device-from-host' })
+        };
+
+        const runtime = createProviderRuntime({
+            runtimeMode: 'desktop',
+            providerOptionsResolver(providerId) {
+                if (providerId !== 'chatgpt-web') {
+                    return undefined;
+                }
+
+                return {
+                    requestClient: { fetch: fetchMock },
+                    cookieStore,
+                    userAgent: 'Desktop Runtime UA'
+                };
+            }
+        });
+
+        await expect(runtime.getProvider('chatgpt-web').checkAuth()).resolves.toBe(true);
+        expect(fetchMock).toHaveBeenCalledWith('https://chatgpt.com/api/auth/session', {
+            credentials: 'include'
+        });
+        expect(cookieStore.get).not.toHaveBeenCalled();
     });
 
     it('returns provider-driven model catalogs', async () => {
@@ -223,7 +261,7 @@ describe('createProviderRuntime', () => {
         });
     });
 
-    it('throws when configured preferred default model does not exist in the dynamic catalog', async () => {
+    it('falls back to the provider catalog default when configured preferred default model does not exist in the dynamic catalog', async () => {
         const runtime = createProviderRuntime({
             runtimeMode: 'extension',
             providerFactory(providerId) {
@@ -251,8 +289,9 @@ describe('createProviderRuntime', () => {
             }
         });
 
-        await expect(runtime.getProviderModels('chatgpt-web')).rejects.toThrow(
-            "Configured default model 'gpt5.4thinking' was not found"
-        );
+        await expect(runtime.getProviderModels('chatgpt-web')).resolves.toEqual({
+            models: [{ id: 'gpt-5.3', name: 'GPT-5.3' }],
+            defaultModel: 'gpt-5.3'
+        });
     });
 });

@@ -737,6 +737,14 @@ export const useChatStore = defineStore('chat', {
             return this.loadProviderModels(providerId);
         },
 
+        async reloadProviderModels(providerId: string): Promise<ProviderConfig | null> {
+            if (!providerId) {
+                return null;
+            }
+
+            return this.loadProviderModels(providerId);
+        },
+
         async init() {
             if (this.currentProviderId) {
                 await this.ensureProviderModelsLoaded(this.currentProviderId);

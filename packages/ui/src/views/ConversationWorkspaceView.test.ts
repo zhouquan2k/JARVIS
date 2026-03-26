@@ -48,8 +48,14 @@ describe('ConversationWorkspaceView', () => {
                         template: '<div data-testid="sidebar-stub" />'
                     },
                     NormalChatView: {
-                        props: ['showQuestionIndex'],
-                        template: '<div data-testid="thread-stub" :data-show-question-index="String(showQuestionIndex)" />'
+                        props: [
+                            'showQuestionIndex',
+                            'authStatusOverride',
+                            'authUnavailableMessage',
+                            'authRecoveryActionLabel',
+                            'authRecoveryActionDisabled'
+                        ],
+                        template: '<div data-testid="thread-stub" :data-show-question-index="String(showQuestionIndex)" :data-auth-status="String(authStatusOverride)" />'
                     },
                     CompareChatView: {
                         template: '<div data-testid="compare-stub" />'
@@ -106,7 +112,13 @@ describe('ConversationWorkspaceView', () => {
                         template: '<button data-testid="sidebar-delete-stub" @click="$emit(\'delete-local\', \'conversation-1\')" />'
                     },
                     NormalChatView: {
-                        props: ['showQuestionIndex'],
+                        props: [
+                            'showQuestionIndex',
+                            'authStatusOverride',
+                            'authUnavailableMessage',
+                            'authRecoveryActionLabel',
+                            'authRecoveryActionDisabled'
+                        ],
                         template: '<div data-testid="thread-stub" :data-show-question-index="String(showQuestionIndex)" />'
                     },
                     CompareChatView: {

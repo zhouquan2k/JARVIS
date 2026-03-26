@@ -25,7 +25,16 @@
 
     <div class="workspace-main" :class="{ 'compare-mode': isCompareMode }">
       <CompareChatView v-if="isCompareMode" />
-      <NormalChatView v-else class="workspace-thread" :show-question-index="true" />
+      <NormalChatView
+        v-else
+        class="workspace-thread"
+        :show-question-index="true"
+        :auth-status-override="authStatusOverride"
+        :auth-unavailable-message="authUnavailableMessage"
+        :auth-recovery-action-label="authRecoveryActionLabel"
+        :auth-recovery-action-disabled="authRecoveryActionDisabled"
+        @request-auth-recovery="emit('request-auth-recovery')"
+      />
     </div>
   </section>
 </template>
@@ -41,11 +50,16 @@ import type { ExternalHistoryProviderId } from '@packages/core/src';
 const props = defineProps<{
   isCompareMode: boolean;
   showHistorySourceSwitch?: boolean;
+  authStatusOverride?: boolean | null;
+  authUnavailableMessage?: string;
+  authRecoveryActionLabel?: string;
+  authRecoveryActionDisabled?: boolean;
 }>();
 
 const emit = defineEmits<{
   (event: 'request-normal-mode'): void;
   (event: 'request-compare-mode'): void;
+  (event: 'request-auth-recovery'): void;
 }>();
 
 const chatStore = useChatStore();

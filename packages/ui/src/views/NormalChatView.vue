@@ -112,8 +112,18 @@
           <div v-if="chatStore.isCurrentProviderModelsLoading" class="auth-warning">
             正在加载当前 Provider 的模型目录
           </div>
-          <div v-else-if="!isAuthenticated" class="auth-warning">
-            当前 Provider 鉴权不可用
+          <div v-else-if="!effectiveIsAuthenticated" class="auth-warning" data-testid="normal-auth-warning">
+            <span>{{ authUnavailableText }}</span>
+            <button
+              v-if="authRecoveryActionLabel"
+              type="button"
+              class="auth-recovery-btn"
+              data-testid="normal-auth-recovery"
+              :disabled="authRecoveryActionDisabled"
+              @click="emit('request-auth-recovery')"
+            >
+              {{ authRecoveryActionLabel }}
+            </button>
           </div>
         </div>
 
@@ -191,9 +201,20 @@ import { isPromptSubmitHotkey } from '../utils/promptHotkeys';
 
 const props = withDefaults(defineProps<{
   showQuestionIndex?: boolean;
+  authStatusOverride?: boolean | null;
+  authUnavailableMessage?: string;
+  authRecoveryActionLabel?: string;
+  authRecoveryActionDisabled?: boolean;
 }>(), {
-  showQuestionIndex: false
+  showQuestionIndex: false,
+  authStatusOverride: null,
+  authUnavailableMessage: '当前 Provider 鉴权不可用',
+  authRecoveryActionLabel: '',
+  authRecoveryActionDisabled: false
 });
+const emit = defineEmits<{
+  (event: 'request-auth-recovery'): void;
+}>();
 
 const chatStore = useChatStore();
 const isAuthenticated = ref(false);
@@ -222,8 +243,10 @@ const showQuestionIndexPanel = computed(() => {
 const showQuestionIndexToggle = computed(() => {
   return hasQuestionIndexContent.value && !chatStore.isQuestionIndexPanelOpen;
 });
+const effectiveIsAuthenticated = computed(() => props.authStatusOverride ?? isAuthenticated.value);
+const authUnavailableText = computed(() => props.authUnavailableMessage || '当前 Provider 鉴权不可用');
 const isInputDisabled = computed(() => {
-  return chatStore.isGenerating || !isAuthenticated.value || chatStore.isCurrentProviderModelsLoading || !chatStore.currentModelId;
+  return chatStore.isGenerating || !effectiveIsAuthenticated.value || chatStore.isCurrentProviderModelsLoading || !chatStore.currentModelId;
 });
 const messageQuestionMeta = computed(() => {
   const meta = new Map<string, { questionKey: string; starred: boolean; root: boolean }>();
@@ -340,7 +363,7 @@ async function send(e?: Event) {
   if (e) e.preventDefault();
   if (
     (!chatStore.draftPrompt.trim() && chatStore.draftAttachments.length === 0)
-    || !isAuthenticated.value
+    || !effectiveIsAuthenticated.value
     || chatStore.isGenerating
     || isPreviewing.value
     || chatStore.isCurrentProviderModelsLoading
@@ -684,12 +707,34 @@ function onModelOptionChange(payload: { key: string; enabled: boolean }) {
 
 .auth-warning {
   align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
   padding: 6px 10px;
   border-radius: 999px;
   background: rgba(250, 204, 21, 0.12);
   color: #fcd34d;
   font-size: 12px;
   line-height: 1.3;
+}
+
+.auth-recovery-btn {
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(252, 211, 77, 0.28);
+  background: rgba(250, 204, 21, 0.18);
+  color: #fef3c7;
+}
+
+.auth-recovery-btn:not(:disabled) {
+  box-shadow: inset 0 0 0 1px rgba(252, 211, 77, 0.16);
+}
+
+.auth-recovery-btn:not(:disabled):hover,
+.auth-recovery-btn:not(:disabled):focus-visible {
+  background: rgba(250, 204, 21, 0.28);
+  border-color: rgba(252, 211, 77, 0.42);
 }
 
 .input-row,

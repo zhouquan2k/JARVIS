@@ -1,22 +1,16 @@
 import { APP_CONFIG, type ModelConfig, type ProviderConfig, type ProviderModelCatalog } from '../../config';
 import { IModelProvider } from '../interfaces/IModelProvider';
 import { ChatGPTWebProvider } from '../providers/ChatGPTWebProvider';
+import type { ChatGPTWebProviderOptions } from '../providers/providerHostTypes';
 import { GeminiApiProvider } from '../providers/GeminiApiProvider';
 import { ProviderRuntime, ProviderRuntimeOptions, RuntimeProviderFactory } from './types';
 
 type ProviderFactory = (options: ProviderRuntimeOptions) => IModelProvider;
 
-class ConfiguredDefaultModelNotFoundError extends Error {
-    public readonly code = 'CONFIGURED_DEFAULT_MODEL_NOT_FOUND';
-
-    constructor(providerId: string, configuredDefaultModel: string) {
-        super(`Configured default model '${configuredDefaultModel}' was not found in available models for provider '${providerId}'`);
-        this.name = 'ConfiguredDefaultModelNotFoundError';
-    }
-}
-
 const DEFAULT_FACTORIES: Record<string, ProviderFactory> = {
-    'chatgpt-web': () => new ChatGPTWebProvider(),
+    'chatgpt-web': (options) => new ChatGPTWebProvider(
+        options.providerOptionsResolver?.('chatgpt-web', options) as ChatGPTWebProviderOptions | undefined
+    ),
     'gemini-api': (options) => new GeminiApiProvider({ apiKey: options.credentials?.geminiApiKey })
 };
 
@@ -113,7 +107,13 @@ function applyConfiguredDefaultModel(
     });
 
     if (!matchedModel) {
-        throw new ConfiguredDefaultModelNotFoundError(providerId, configuredDefaultModel);
+        console.warn(
+            `Configured default model '${configuredDefaultModel}' was not found in available models for provider '${providerId}', falling back to provider catalog default '${catalog.defaultModel}'.`
+        );
+        return {
+            models: catalog.models.map(cloneModelConfig),
+            defaultModel: catalog.defaultModel
+        };
     }
 
     return {
@@ -171,9 +171,6 @@ export function createProviderRuntime(options: ProviderRuntimeOptions): Provider
                     modelCatalogCache.set(providerId, validatedCatalog);
                     return validatedCatalog;
                 } catch (error) {
-                    if (error instanceof ConfiguredDefaultModelNotFoundError) {
-                        throw error;
-                    }
                     modelCatalogCache.set(providerId, fallbackCatalog);
                     return fallbackCatalog;
                 } finally {

@@ -4,6 +4,7 @@ import type { ConversationHistorySummary, ExternalHistoryProviderId, IHistoryPro
 import type { Conversation, ConversationMessage, MessageAnnotation, MessageAttachment } from '../interfaces/IStorageProvider';
 import { IModelProvider, type ProviderSendResult, type ProviderStreamUpdate, type SendMessageOptions } from '../interfaces/IModelProvider';
 import { sha3_512 } from 'js-sha3';
+import type { ChatGPTWebProviderOptions, ProviderCookieStore, ProviderRequestClient } from './providerHostTypes';
 
 // UUID v4 generator helper
 function generateUUID() {
@@ -107,6 +108,27 @@ type ChatGPTConversationDetail = {
 const CHATGPT_HISTORY_ORIGIN: ExternalHistoryProviderId = 'chatgpt-web';
 const PRIVATE_CITE_PATTERN = /cite(?:([^]+))?/g;
 const PRIVATE_IMAGE_GROUP_PATTERN = /image_group(?:([^]+))??/g;
+const DEFAULT_CHATGPT_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
+
+function createDefaultRequestClient(): ProviderRequestClient {
+    return {
+        fetch(input: string, init?: RequestInit) {
+            return fetch(input, init);
+        }
+    };
+}
+
+function createDefaultCookieStore(): ProviderCookieStore | undefined {
+    if (typeof chrome === 'undefined' || !chrome.cookies) {
+        return undefined;
+    }
+
+    return {
+        get(options) {
+            return chrome.cookies.get(options);
+        }
+    };
+}
 
 function getStaticChatGPTModelCatalog(): ProviderModelCatalog {
     const provider = APP_CONFIG.providers.find((item) => item.id === 'chatgpt-web');
@@ -778,10 +800,19 @@ export class ChatGPTWebProvider implements IModelProvider, IHistoryProvider {
     public id = 'chatgpt-web';
     private accessToken: string | null = null;
     private abortController: AbortController | null = null;
+    private readonly requestClient: ProviderRequestClient;
+    private readonly cookieStore?: ProviderCookieStore;
+    private readonly userAgent: string;
+
+    constructor(options: ChatGPTWebProviderOptions = {}) {
+        this.requestClient = options.requestClient ?? createDefaultRequestClient();
+        this.cookieStore = options.cookieStore ?? createDefaultCookieStore();
+        this.userAgent = options.userAgent ?? DEFAULT_CHATGPT_USER_AGENT;
+    }
 
     async checkAuth(): Promise<boolean> {
         try {
-            const resp = await fetch('https://chatgpt.com/api/auth/session', {
+            const resp = await this.requestClient.fetch('https://chatgpt.com/api/auth/session', {
                 credentials: 'include'
             });
             if (!resp.ok) return false;
@@ -832,9 +863,8 @@ export class ChatGPTWebProvider implements IModelProvider, IHistoryProvider {
 
     private async getOaiDeviceId(): Promise<string> {
         try {
-            // If in an extension background, we can try to extract from cookies
-            if (typeof chrome !== 'undefined' && chrome.cookies) {
-                const cookie = await chrome.cookies.get({ url: 'https://chatgpt.com', name: 'oai-did' });
+            if (this.cookieStore) {
+                const cookie = await this.cookieStore.get({ url: 'https://chatgpt.com', name: 'oai-did' });
                 if (cookie && cookie.value) return cookie.value;
             }
         } catch (e) {
@@ -862,7 +892,7 @@ export class ChatGPTWebProvider implements IModelProvider, IHistoryProvider {
             ...(init.headers as Record<string, string> | undefined)
         };
 
-        const response = await fetch(input, {
+        const response = await this.requestClient.fetch(input, {
             ...init,
             credentials: 'include',
             headers
@@ -902,7 +932,7 @@ export class ChatGPTWebProvider implements IModelProvider, IHistoryProvider {
         try {
             await this.ensureAccessToken();
             const deviceId = await this.getOaiDeviceId();
-            const resp = await fetch('https://chatgpt.com/backend-api/sentinel/chat-requirements', {
+            const resp = await this.requestClient.fetch('https://chatgpt.com/backend-api/sentinel/chat-requirements', {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${this.accessToken}`,
@@ -936,7 +966,7 @@ export class ChatGPTWebProvider implements IModelProvider, IHistoryProvider {
             proofToken = generateProofToken(
                 requirements.proofofwork.seed,
                 requirements.proofofwork.difficulty,
-                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+                this.userAgent
             );
         }
 
@@ -983,7 +1013,7 @@ export class ChatGPTWebProvider implements IModelProvider, IHistoryProvider {
 
         this.abortController = new AbortController();
 
-        const response = await fetch('https://chatgpt.com/backend-api/conversation', {
+        const response = await this.requestClient.fetch('https://chatgpt.com/backend-api/conversation', {
             method: 'POST',
             headers,
             body: JSON.stringify(payload),
