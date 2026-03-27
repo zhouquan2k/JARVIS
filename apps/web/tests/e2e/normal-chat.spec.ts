@@ -37,7 +37,7 @@ async function readMockSyncEvents(page: Page) {
 }
 
 test('normal chat can send message and recover local history after reload', async ({ page }) => {
-  await page.goto('/#/');
+  await page.goto('/#/chat');
   await expect(page.getByTestId('conversation-workspace')).toBeVisible();
   await expect(page.getByTestId('normal-chat-view')).toBeVisible();
   await expect(page.getByTestId('normal-model')).toHaveValue('gemini-2.5-flash');
@@ -61,7 +61,7 @@ test('normal chat can send message and recover local history after reload', asyn
 });
 
 test('normal chat model options render switch persist and recover with the conversation', async ({ page }) => {
-  await page.goto('/#/');
+  await page.goto('/#/chat');
   await expect(page.getByTestId('normal-chat-view')).toBeVisible();
   await expect(page.getByTestId('model-option-toggle-group')).toBeVisible();
 
@@ -97,7 +97,7 @@ test('web host initializes sync storage with configured syncKey', async ({ page 
     localStorage.setItem('chatprism:mock-sync-events', '[]');
   }, 'web-sync-e2e');
 
-  await page.goto('/#/');
+  await page.goto('/#/chat');
   await expect(page.getByTestId('normal-chat-view')).toBeVisible();
 
   await page.getByTestId('normal-input').fill('WEB_SYNC_READY');
@@ -117,7 +117,7 @@ test('web host initializes sync storage with configured syncKey', async ({ page 
 });
 
 test('local history supports switching between conversations from sidebar', async ({ page }) => {
-  await page.goto('/#/');
+  await page.goto('/#/chat');
   await expect(page.getByTestId('normal-chat-view')).toBeVisible();
   await expect(page.getByTestId('normal-model')).toHaveValue('gemini-2.5-flash');
 
@@ -143,7 +143,7 @@ test('local history deletes the active conversation with hover-only controls and
     localStorage.setItem('chatprism:mock-sync-events', '[]');
   });
 
-  await page.goto('/#/');
+  await page.goto('/#/chat');
   await expect(page.getByTestId('normal-chat-view')).toBeVisible();
 
   await page.getByTestId('normal-input').fill('HISTORY_DELETE_ALPHA');
@@ -183,7 +183,7 @@ test('local history deletes the active conversation with hover-only controls and
 });
 
 test('workspace sidebar persists while switching between normal and compare views', async ({ page }) => {
-  await page.goto('/#/');
+  await page.goto('/#/chat');
   await expect(page.getByTestId('workspace-sidebar')).toBeVisible();
   await expect(page.getByTestId('normal-chat-view')).toBeVisible();
   await expect(page.getByTestId('normal-model')).toHaveValue('gemini-2.5-flash');
@@ -201,7 +201,7 @@ test('workspace sidebar persists while switching between normal and compare view
 });
 
 test('normal chat renders markdown from assistant output', async ({ page }) => {
-  await page.goto('/#/');
+  await page.goto('/#/chat');
   await expect(page.getByTestId('normal-chat-view')).toBeVisible();
   await expect(page.getByTestId('normal-model')).toHaveValue('gemini-2.5-flash');
 
@@ -214,7 +214,7 @@ test('normal chat renders markdown from assistant output', async ({ page }) => {
 });
 
 test('provider selectors use runtime model catalogs instead of static defaults', async ({ page }) => {
-  await page.goto('/#/');
+  await page.goto('/#/chat');
   await expect(page.getByTestId('normal-provider')).toHaveValue('gemini-api');
   await expect(page.getByTestId('normal-provider').locator('option:checked')).toHaveText('Gemini (API) (Mock)');
   await expect(page.getByTestId('normal-model')).toHaveValue('gemini-2.5-flash');
@@ -229,7 +229,7 @@ test('provider selectors use runtime model catalogs instead of static defaults',
 });
 
 test('normal and compare views stay bounded to the viewport', async ({ page }) => {
-  await page.goto('/#/');
+  await page.goto('/#/chat');
   await expect(page.getByTestId('conversation-workspace')).toBeVisible();
   await expect(page.getByTestId('normal-chat-view')).toBeVisible();
   await expectViewportBound(page);
@@ -241,14 +241,14 @@ test('normal and compare views stay bounded to the viewport', async ({ page }) =
 });
 
 test('web host applies unified host font baseline', async ({ page }) => {
-  await page.goto('/#/');
+  await page.goto('/#/chat');
   await expect(page.getByTestId('conversation-workspace')).toBeVisible();
   await expect(page.getByTestId('normal-input')).toBeVisible();
   await expectHostFontBaseline(page);
 });
 
 test('normal chat supports attachment composition and structured annotations', async ({ page }) => {
-  await page.goto('/#/');
+  await page.goto('/#/chat');
   await expect(page.getByTestId('normal-chat-view')).toBeVisible();
 
   await page.locator('input[type="file"]').setInputFiles({
@@ -269,7 +269,7 @@ test('normal chat supports attachment composition and structured annotations', a
 });
 
 test('normal chat e2e covers md pdf and image attachments', async ({ page }) => {
-  await page.goto('/#/');
+  await page.goto('/#/chat');
   await expect(page.getByTestId('normal-chat-view')).toBeVisible();
 
   await page.locator('input[type="file"]').setInputFiles([
@@ -306,7 +306,7 @@ test('normal chat e2e covers md pdf and image attachments', async ({ page }) => 
 });
 
 test('normal chat uses composition shortcuts and restores draft after stop', async ({ page }) => {
-  await page.goto('/#/');
+  await page.goto('/#/chat');
   await expect(page.getByTestId('normal-chat-view')).toBeVisible();
 
   const input = page.getByTestId('normal-input');
@@ -329,7 +329,7 @@ test('normal chat uses composition shortcuts and restores draft after stop', asy
 });
 
 test('question index panel supports compact controls, reopen, starring, filtering and soft delete', async ({ page }) => {
-  await page.goto('/#/');
+  await page.goto('/#/chat');
   await expect(page.getByTestId('normal-chat-view')).toBeVisible();
 
   const input = page.getByTestId('normal-input');

@@ -20,7 +20,7 @@ const mockCreateDesktopSyncStorageProvider = vi.fn(() => ({
     hydrate: vi.fn().mockResolvedValue(undefined)
 }));
 const mockNavigateTo = vi.fn();
-const mockCurrentRoute = ref({ path: '/' });
+const mockCurrentRoute = ref({ path: '/chat' });
 
 const chatStore = reactive({
     currentProviderId: 'chatgpt-web',
@@ -46,8 +46,17 @@ const compareStore = reactive({
 });
 
 vi.mock('@packages/ui', () => ({
+    PRIMARY_WORKSPACE_ROUTES: [
+        { path: '/', name: 'knowledge-workspace', label: '知识工作区' },
+        { path: '/chat', name: 'normal-chat', label: '普通聊天' }
+    ],
     AppTopBar: {
-        template: '<div data-testid="topbar-stub" />'
+        template: `
+          <div data-testid="topbar-stub">
+            <button data-testid="topbar-knowledge" @click="$emit('navigate-workspace', '/')">知识</button>
+            <button data-testid="topbar-chat" @click="$emit('navigate-workspace', '/chat')">聊天</button>
+          </div>
+        `
     },
     ConversationWorkspaceView: {
         props: [
@@ -68,6 +77,10 @@ vi.mock('@packages/ui', () => ({
             @click="$emit('request-auth-recovery')"
           />
         `
+    },
+    KnowledgeWorkspaceView: {
+        props: ['contextProvider'],
+        template: '<div data-testid="knowledge-workspace-stub" />'
     },
     openConversationImportDialog: mockOpenConversationImportDialog,
     useChatStore: () => chatStore,
@@ -157,5 +170,27 @@ describe('Desktop App auth recovery', () => {
         expect(chatStore.checkAuth).toHaveBeenCalledTimes(2);
         expect(chatStore.reloadProviderModels).toHaveBeenCalledWith('chatgpt-web');
         expect(wrapper.get('[data-testid="workspace-stub"]').attributes('data-auth-status')).toBe('true');
+    });
+
+    it('mounts the knowledge workspace route without touching the chat workspace', async () => {
+        mockCurrentRoute.value = { path: '/' };
+        const { default: App } = await import('./App.vue');
+        const wrapper = mount(App);
+        await flushPromises();
+
+        expect(wrapper.find('[data-testid="workspace-stub"]').exists()).toBe(false);
+        expect(wrapper.get('[data-testid="knowledge-workspace-stub"]').exists()).toBe(true);
+
+        mockCurrentRoute.value = { path: '/chat' };
+    });
+
+    it('routes top-bar workspace navigation through the host router', async () => {
+        mockCurrentRoute.value = { path: '/chat' };
+        const { default: App } = await import('./App.vue');
+        const wrapper = mount(App);
+        await flushPromises();
+
+        await wrapper.get('[data-testid="topbar-knowledge"]').trigger('click');
+        expect(mockNavigateTo).toHaveBeenCalledWith('/');
     });
 });

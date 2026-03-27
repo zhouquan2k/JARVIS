@@ -12,6 +12,7 @@ import {
 import { createAuthWindowManager } from './authWindow';
 import { registerProviderLoginIpc } from './authIpc';
 import { createControlledPageManager } from './controlledPageManager';
+import { registerContextIpc } from './contextIpc';
 import { createDesktopHostRuntime, createProviderHost } from './providerHost';
 import { getProviderSession } from './sessionManager';
 
@@ -24,6 +25,7 @@ const controlledPageManager = createControlledPageManager();
 const authWindowManager = createAuthWindowManager();
 const useMockRuntime = process.env.VITE_E2E === '1';
 let disposeProviderLoginIpc: (() => void) | null = null;
+let disposeContextIpc: (() => void) | null = null;
 
 function createMockDesktopRuntime() {
     return createMockRuntime({
@@ -131,6 +133,9 @@ function wireIpc() {
     disposeProviderLoginIpc = registerProviderLoginIpc({
         authWindowManager
     });
+    disposeContextIpc = registerContextIpc({
+        workspaceRoot: process.env.CHATPRISM_KNOWLEDGE_ROOT
+    });
 }
 
 app.whenReady().then(async () => {
@@ -152,6 +157,8 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
     controlledPageManager.dispose();
+    disposeContextIpc?.();
+    disposeContextIpc = null;
     disposeProviderLoginIpc?.();
     disposeProviderLoginIpc = null;
     authWindowManager.dispose();

@@ -1,27 +1,29 @@
-import type { Component } from 'vue';
-import CompareChatView from './views/CompareChatView.vue';
-import NormalChatView from './views/NormalChatView.vue';
-
-export type ChatRoutePath = '/' | '/compare';
+export type ChatRoutePath = '/' | '/knowledge' | '/chat' | '/compare';
 
 export interface ChatRoute {
   path: ChatRoutePath;
-  name: 'normal-chat' | 'compare-chat';
-  component: Component;
+  name: 'normal-chat' | 'knowledge-workspace' | 'compare-chat';
   label: string;
 }
 
 export const CHAT_ROUTES: ChatRoute[] = [
   {
     path: '/',
+    name: 'knowledge-workspace',
+    label: '知识工作区'
+  },
+  {
+    path: '/chat',
     name: 'normal-chat',
-    component: NormalChatView,
     label: '普通聊天'
   },
   {
     path: '/compare',
     name: 'compare-chat',
-    component: CompareChatView,
     label: '对比聊天'
   }
 ];
+
+export const PRIMARY_WORKSPACE_ROUTES: ChatRoute[] = CHAT_ROUTES.filter((route) => {
+  return route.path === '/' || route.path === '/chat';
+});

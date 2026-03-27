@@ -1,11 +1,22 @@
 <template>
   <div class="app-shell">
-    <AppTopBar :is-compare-mode="isCompareMode" :compare-stage="compareStore.stage" />
+    <AppTopBar
+      :is-compare-mode="isCompareMode"
+      :compare-stage="compareStore.stage"
+      :active-workspace-path="activeWorkspacePath"
+      :workspace-options="PRIMARY_WORKSPACE_ROUTES"
+      @navigate-workspace="onNavigateWorkspace"
+    />
     <main class="view-host">
+      <KnowledgeWorkspaceView
+        v-if="isKnowledgeMode"
+        :context-provider="contextProvider"
+      />
       <ConversationWorkspaceView
+        v-else
         :is-compare-mode="isCompareMode"
         :show-history-source-switch="false"
-        @request-normal-mode="navigateTo('/')"
+        @request-normal-mode="navigateTo('/chat')"
         @request-compare-mode="openCompareMode"
       />
     </main>
@@ -17,11 +28,15 @@ import { computed, onMounted } from 'vue';
 import {
   AppTopBar,
   ConversationWorkspaceView,
+  KnowledgeWorkspaceView,
+  PRIMARY_WORKSPACE_ROUTES,
   openConversationImportDialog,
+  type ChatRoutePath,
   useChatStore,
   useCompareStore
 } from '@packages/ui';
 import { currentRoute, navigateTo } from './router';
+import { createWebContextProvider } from './context/createWebContextProvider';
 import { createWebHistoryProviders, providerRuntime } from './providerRuntime';
 import { createWebSyncStorageProvider } from './sync';
 
@@ -29,10 +44,19 @@ const chatStore = useChatStore();
 const compareStore = useCompareStore();
 const historyProviders = createWebHistoryProviders();
 const isCompareMode = computed(() => currentRoute.value.path === '/compare');
+const isKnowledgeMode = computed(() => currentRoute.value.path === '/');
+const activeWorkspacePath = computed<ChatRoutePath>(() => currentRoute.value.path === '/compare' ? '/chat' : currentRoute.value.path);
+const contextProvider = createWebContextProvider({
+  env: import.meta.env as Record<string, string | undefined>
+});
 
 function openCompareMode() {
   compareStore.startNewCompare();
   navigateTo('/compare');
+}
+
+function onNavigateWorkspace(path: ChatRoutePath) {
+  navigateTo(path);
 }
 
 onMounted(() => {

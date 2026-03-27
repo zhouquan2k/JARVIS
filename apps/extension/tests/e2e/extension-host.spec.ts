@@ -15,7 +15,7 @@ async function launchExtensionPage(
   page: Page;
   close: () => Promise<void>;
 }> {
-  const routeHash = options.routeHash ?? '#/';
+  const routeHash = options.routeHash ?? '#/chat';
   const syncKey = options.syncKey === undefined ? 'extension-e2e' : options.syncKey;
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'chatprism-ext-e2e-'));
   const context = await chromium.launchPersistentContext(userDataDir, {
@@ -137,6 +137,37 @@ test('extension host applies unified host font baseline', async () => {
     await expect(page.getByTestId('conversation-workspace')).toBeVisible();
     await expect(page.getByTestId('normal-input')).toBeVisible();
     await expectHostFontBaseline(page);
+  } finally {
+    await session.close();
+  }
+});
+
+test('extension host exposes the knowledge workspace route with editable markdown documents and top-level workspace switching', async () => {
+  const session = await launchExtensionPage({ routeHash: '#/' });
+  try {
+    const { page } = session;
+    await expect(page.getByTestId('knowledge-workspace')).toBeVisible();
+    await expect(page.getByTestId('knowledge-file-tree')).toBeVisible();
+    await expect(page.getByTestId('knowledge-assistant-pane')).toBeVisible();
+    await expect(page.getByTestId('normal-chat-view')).toBeVisible();
+
+    const editor = page.getByTestId('knowledge-editor-input');
+    await expect(editor).toBeVisible();
+    await expect(editor).toContainText('扩展宿主');
+
+    await page.getByTestId('knowledge-node-file').first().click();
+    await editor.fill('Playwright extension knowledge');
+    await page.getByTestId('knowledge-save').click();
+    await expect.poll(async () => {
+      return page.evaluate(() => localStorage.getItem('chatprism:extension-knowledge-workspace') ?? '');
+    }).toContain('Playwright extension knowledge');
+
+    await page.getByTestId('topbar-workspace-normal-chat').click();
+    await expect(page.getByTestId('conversation-workspace')).toBeVisible();
+    await expect(page.getByTestId('normal-chat-view')).toBeVisible();
+
+    await page.getByTestId('topbar-workspace-knowledge-workspace').click();
+    await expect(page.getByTestId('knowledge-workspace')).toBeVisible();
   } finally {
     await session.close();
   }

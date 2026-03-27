@@ -138,20 +138,35 @@
             :disabled="isInputDisabled"
           />
           <div class="input-actions">
-            <p class="shortcut-hint">Enter 换行，Ctrl/Cmd + Enter 发送</p>
             <button
               v-if="!chatStore.isGenerating"
               data-testid="normal-send"
+              title="Enter 换行，Ctrl/Cmd + Enter 发送"
+              aria-label="发送"
               @click="send()"
               :disabled="(!draftPrompt.trim() && chatStore.draftAttachments.length === 0) || isInputDisabled"
             >
-              发送
+              <svg
+                class="send-icon"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path
+                  d="M12 5L12 16M12 5L7.5 9.5M12 5L16.5 9.5"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2.2"
+                />
+              </svg>
             </button>
             <button
               v-else
               @click="chatStore.abortGeneration()"
               class="stop-btn"
               data-testid="normal-stop"
+              title="停止当前生成"
             >
               停止生成
             </button>
@@ -747,15 +762,7 @@ function onModelOptionChange(payload: { key: string; enabled: boolean }) {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  align-items: stretch;
-}
-
-.shortcut-hint {
-  margin: 0;
-  max-width: 180px;
-  color: var(--cp-text-faint);
-  font-size: 12px;
-  line-height: 1.5;
+  align-items: flex-end;
 }
 
 textarea {
@@ -792,11 +799,49 @@ button:disabled {
 
 .input-row button {
   min-height: 50px;
+  width: auto;
+  min-width: 0;
 }
 
 button[data-testid="normal-send"] {
-  background: var(--cp-accent);
-  color: white;
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+  border-radius: 14px;
+  border: 1px solid rgba(96, 165, 250, 0.22);
+  background: linear-gradient(180deg, #2d5ea8 0%, #234d8f 100%);
+  color: #f8fbff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 10px 20px rgba(35, 77, 143, 0.28);
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease;
+}
+
+button[data-testid="normal-send"]:not(:disabled):hover,
+button[data-testid="normal-send"]:not(:disabled):focus-visible {
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 14px 24px rgba(35, 77, 143, 0.32);
+  background: linear-gradient(180deg, #3569b8 0%, #28569c 100%);
+}
+
+button[data-testid="normal-send"]:disabled {
+  border-color: rgba(148, 163, 184, 0.16);
+  background: rgba(71, 85, 105, 0.34);
+  color: rgba(226, 232, 240, 0.7);
+  box-shadow: none;
+}
+
+.send-icon {
+  width: 17px;
+  height: 17px;
+  display: block;
 }
 
 .stop-btn {
@@ -868,7 +913,7 @@ button[data-testid="normal-send"] {
 
   .input-actions {
     flex-direction: row;
-    justify-content: space-between;
+    justify-content: flex-end;
     align-items: center;
   }
 }

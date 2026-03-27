@@ -1,15 +1,26 @@
 <template>
   <div class="app-shell">
-    <AppTopBar :is-compare-mode="isCompareMode" :compare-stage="compareStore.stage" />
+    <AppTopBar
+      :is-compare-mode="isCompareMode"
+      :compare-stage="compareStore.stage"
+      :active-workspace-path="activeWorkspacePath"
+      :workspace-options="PRIMARY_WORKSPACE_ROUTES"
+      @navigate-workspace="onNavigateWorkspace"
+    />
     <main class="view-host">
+      <KnowledgeWorkspaceView
+        v-if="isKnowledgeMode"
+        :context-provider="contextProvider"
+      />
       <ConversationWorkspaceView
+        v-else
         :is-compare-mode="isCompareMode"
         :show-history-source-switch="true"
         :auth-status-override="chatgptAuthStatusOverride"
         :auth-unavailable-message="chatgptAuthMessage"
         :auth-recovery-action-label="chatgptAuthRecoveryLabel"
         :auth-recovery-action-disabled="isOpeningChatGPTLogin"
-        @request-normal-mode="navigateTo('/')"
+        @request-normal-mode="navigateTo('/chat')"
         @request-compare-mode="openCompareMode"
         @request-auth-recovery="requestChatGPTLogin"
       />
@@ -22,11 +33,15 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import {
   AppTopBar,
   ConversationWorkspaceView,
+  KnowledgeWorkspaceView,
+  PRIMARY_WORKSPACE_ROUTES,
   openConversationImportDialog,
+  type ChatRoutePath,
   useChatStore,
   useCompareStore
 } from '@packages/ui';
 import { currentRoute, navigateTo } from './router';
+import { createDesktopContextProvider } from './context/createDesktopContextProvider';
 import { createDesktopHistoryProviders, providerRuntime } from './providerRuntime';
 import { createDesktopSyncStorageProvider } from './sync';
 
@@ -34,6 +49,9 @@ const chatStore = useChatStore();
 const compareStore = useCompareStore();
 const historyProviders = createDesktopHistoryProviders();
 const isCompareMode = computed(() => currentRoute.value.path === '/compare');
+const isKnowledgeMode = computed(() => currentRoute.value.path === '/');
+const activeWorkspacePath = computed<ChatRoutePath>(() => currentRoute.value.path === '/compare' ? '/chat' : currentRoute.value.path);
+const contextProvider = createDesktopContextProvider();
 const chatgptAuthStatus = ref<boolean | null>(null);
 const isOpeningChatGPTLogin = ref(false);
 const chatgptLoginLaunchAcknowledged = ref(false);
@@ -73,6 +91,10 @@ const chatgptAuthRecoveryLabel = computed(() => {
 function openCompareMode() {
   compareStore.startNewCompare();
   navigateTo('/compare');
+}
+
+function onNavigateWorkspace(path: ChatRoutePath) {
+  navigateTo(path);
 }
 
 async function refreshChatGPTAuthStatus(): Promise<boolean | null> {

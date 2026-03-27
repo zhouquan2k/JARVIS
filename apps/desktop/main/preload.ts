@@ -1,5 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import {
+    DESKTOP_CONTEXT_CREATE_NODE_CHANNEL,
+    DESKTOP_CONTEXT_INITIALIZE_CHANNEL,
+    DESKTOP_CONTEXT_LIST_TREE_CHANNEL,
+    DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL,
+    DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL
+} from '../shared/contextBridge';
+import {
     DESKTOP_PROVIDER_LOGIN_CLOSED_CHANNEL,
     DESKTOP_PROVIDER_LOGIN_OPEN_CHANNEL,
     DESKTOP_PROVIDER_LOGIN_OPENED_CHANNEL,
@@ -13,6 +20,21 @@ import {
 } from '../shared/proxyProtocol';
 
 contextBridge.exposeInMainWorld('chatprismDesktop', {
+    initializeContextAccess() {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_INITIALIZE_CHANNEL);
+    },
+    listContextTree(parentPath?: string) {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_LIST_TREE_CHANNEL, parentPath);
+    },
+    readContextDocument(path: string) {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL, path);
+    },
+    writeContextDocument(path: string, content: string) {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL, path, content);
+    },
+    createContextNode(input: { parentPath?: string; name: string; kind: 'file' | 'directory' }) {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_CREATE_NODE_CHANNEL, input);
+    },
     sendProxyRequest(request: ProxyRequest) {
         ipcRenderer.send(DESKTOP_PROXY_REQUEST_CHANNEL, request);
     },

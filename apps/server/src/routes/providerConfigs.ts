@@ -1,5 +1,5 @@
 import { Hono, type Context } from 'hono';
-import geminiHistoryConfig from '../provider-configs/gemini-history.json';
+import geminiHistoryConfig from '../provider-configs/gemini-history.json' with { type: 'json' };
 
 const PROVIDER_CONFIG_CACHE_CONTROL = 'public, max-age=300, stale-while-revalidate=600';
 const PROVIDER_CONFIG_ALLOW_METHODS = 'GET, OPTIONS';

@@ -341,3 +341,5 @@ export interface IStorageProvider {
     getAllConversations(): Promise<Conversation[]>;
     deleteConversation(id: string): Promise<void>;
 }
+
+export type { IConversationStorageProvider } from './IConversationStorageProvider';

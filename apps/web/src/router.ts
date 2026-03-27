@@ -3,7 +3,16 @@ import { CHAT_ROUTES, type ChatRoutePath } from '@packages/ui';
 
 function normalizeHash(hash: string): ChatRoutePath {
   const normalized = hash.replace(/^#/, '') || '/';
-  return normalized === '/compare' ? '/compare' : '/';
+  if (normalized === '/compare') {
+    return '/compare';
+  }
+  if (normalized === '/chat') {
+    return '/chat';
+  }
+  if (normalized === '/knowledge') {
+    return '/';
+  }
+  return '/';
 }
 
 function syncHash(path: ChatRoutePath) {

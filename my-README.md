@@ -4,6 +4,7 @@
 pnpm --filter web dev
 
 - server端开发服务器
+CHATPRISM_KNOWLEDGE_ROOT=/Users/quanzhou/Workspace/AllAgents \
 pnpm run dev:server
 
 - chrome extension build
@@ -13,6 +14,7 @@ pnpm --filter extension build
 - desktop
 pnpm dev:desktop:renderer
 
+CHATPRISM_KNOWLEDGE_ROOT=/Users/quanzhou/Workspace/AllAgents \
 CHATPRISM_LLM_API_KEY=AIzaSyDLs2UnDyhMfvOqsk5EwwGZXL4fo4EIBYU \
 CHATPRISM_SYNC_KEY=dev-local \
 CHATPRISM_SYNC_BASE_URL=http://127.0.0.1:8787/api/sync \

@@ -7,8 +7,8 @@
     "test": "../../apps/web/node_modules/.bin/vitest run --config vitest.config.ts"
   },
   "peerDependencies": {
-    "vue": "^3.0.0",
-    "pinia": "^2.0.0 || ^3.0.0"
+    "pinia": "^2.0.0 || ^3.0.0",
+    "vue": "^3.0.0"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.4",
@@ -16,5 +16,9 @@
     "happy-dom": "^20.0.10",
     "typescript": "^5.0.0",
     "vitest": "^2.1.8"
+  },
+  "dependencies": {
+    "@milkdown/crepe": "7.19.2",
+    "@milkdown/kit": "7.19.2"
   }
 }
