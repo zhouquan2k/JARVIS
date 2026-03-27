@@ -343,6 +343,48 @@ describe('useChatStore workspace history flow', () => {
         expect(store.currentModelId).toBe('other-dynamic');
     });
 
+    it('can force reload a provider-driven model catalog after auth state changes', async () => {
+        const store = useChatStore();
+        let reloadCount = 0;
+        store.setProviders(new MockModelProvider(), new MockStorageProvider([]));
+        store.setProviderModelsResolver(async (providerId: string) => {
+            if (providerId !== 'mock-provider') {
+                return {
+                    models: [{ id: 'other-dynamic', name: 'Other Dynamic' }],
+                    defaultModel: 'other-dynamic'
+                };
+            }
+
+            reloadCount += 1;
+            if (reloadCount === 1) {
+                return {
+                    models: [{ id: 'fallback-model', name: 'Fallback Model' }],
+                    defaultModel: 'fallback-model'
+                };
+            }
+
+            return {
+                models: [
+                    { id: 'fallback-model', name: 'Fallback Model' },
+                    { id: 'gpt-5', name: 'GPT-5' }
+                ],
+                defaultModel: 'gpt-5'
+            };
+        });
+
+        await store.initializeProviderCatalog(providerCatalog);
+        expect(store.resolveProviderConfig('mock-provider')?.models.map((model) => model.id)).toEqual(['fallback-model']);
+        expect(store.currentModelId).toBe('fallback-model');
+
+        await store.reloadProviderModels('mock-provider');
+
+        expect(store.resolveProviderConfig('mock-provider')?.models.map((model) => model.id)).toEqual([
+            'fallback-model',
+            'gpt-5'
+        ]);
+        expect(store.currentModelId).toBe('gpt-5');
+    });
+
     it('restores conversation model selection and normalizes conflicting options', async () => {
         const storage = new MockStorageProvider([
             {

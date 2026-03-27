@@ -9,6 +9,7 @@ export interface CreateMockRuntimeOptions {
     slowStreamTrigger?: string;
     defaultCharDelayMs?: number;
     slowCharDelayMs?: number;
+    providerAuthOverrides?: Partial<Record<string, boolean>>;
 }
 
 function buildMockProviders(runtimeMode: RuntimeMode): ProviderConfig[] {
@@ -143,6 +144,7 @@ class MockStreamingProvider implements IModelProvider {
         providerId: string,
         private readonly modelCatalog: ProviderModelCatalog,
         private readonly options: {
+            isAuthenticated: boolean;
             defaultCharDelayMs: number;
             slowStreamTrigger: string;
             slowCharDelayMs: number;
@@ -152,7 +154,7 @@ class MockStreamingProvider implements IModelProvider {
     }
 
     async checkAuth(): Promise<boolean> {
-        return true;
+        return this.options.isAuthenticated;
     }
 
     async getAvailableModels(): Promise<ProviderModelCatalog> {
@@ -324,6 +326,7 @@ export function createMockRuntime(options: CreateMockRuntimeOptions): ProviderRu
                     models: providerConfig.models.map((model) => ({ ...model })),
                     defaultModel: providerConfig.defaultModel
                 }, {
+                    isAuthenticated: options.providerAuthOverrides?.[providerId] ?? true,
                     defaultCharDelayMs,
                     slowStreamTrigger,
                     slowCharDelayMs
@@ -339,6 +342,7 @@ export function createMockRuntime(options: CreateMockRuntimeOptions): ProviderRu
                 models: providerConfig.models.map((model) => ({ ...model })),
                 defaultModel: providerConfig.defaultModel
             }, {
+                isAuthenticated: options.providerAuthOverrides?.[providerId] ?? true,
                 defaultCharDelayMs,
                 slowStreamTrigger,
                 slowCharDelayMs

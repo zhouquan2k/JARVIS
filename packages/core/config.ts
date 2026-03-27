@@ -1,4 +1,4 @@
-export type RuntimeMode = 'extension' | 'web';
+export type RuntimeMode = 'extension' | 'web' | 'desktop';
 
 export interface ModelOptionDefinition {
     key: string;
@@ -148,7 +148,7 @@ export const APP_CONFIG: { providers: ProviderConfig[]; analyzer: AnalyzerConfig
             ],
             defaultModel: 'auto',
             preferredDefaultModel: 'gpt5.4thinking',
-            supportedRuntimeModes: ['extension']
+            supportedRuntimeModes: ['extension', 'desktop']
         },
         {
             id: 'gemini-api',
@@ -196,7 +196,7 @@ export const APP_CONFIG: { providers: ProviderConfig[]; analyzer: AnalyzerConfig
             ],
             defaultModel: 'gemini-2.5-flash',
             preferredDefaultModel: 'Gemini Pro Latest',
-            supportedRuntimeModes: ['extension', 'web']
+            supportedRuntimeModes: ['extension', 'web', 'desktop']
         }
     ],
     analyzer: {

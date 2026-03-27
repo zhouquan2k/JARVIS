@@ -3,11 +3,13 @@ import type { IModelProvider } from '../interfaces/IModelProvider';
 
 export type RuntimeCredentials = Record<string, string | undefined>;
 export type RuntimeProviderFactory = (providerId: string, options: ProviderRuntimeOptions) => IModelProvider | undefined;
+export type RuntimeProviderOptionsResolver = (providerId: string, options: ProviderRuntimeOptions) => unknown;
 
 export interface ProviderRuntimeOptions {
     runtimeMode: RuntimeMode;
     credentials?: RuntimeCredentials;
     providerFactory?: RuntimeProviderFactory;
+    providerOptionsResolver?: RuntimeProviderOptionsResolver;
 }
 
 export interface ProviderRuntime {

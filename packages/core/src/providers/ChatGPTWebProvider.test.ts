@@ -603,4 +603,52 @@ describe('normalizeChatGPTConversationDetail', () => {
 
         vi.unstubAllGlobals();
     });
+
+    it('prefers injected request client and cookie store in host environments', async () => {
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ accessToken: 'desktop-token' })
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ token: 'requirements-token' })
+            })
+            .mockResolvedValueOnce(
+                createSseResponse([
+                    {
+                        conversation_id: 'desktop-conversation',
+                        message: {
+                            id: 'desktop-message',
+                            content: {
+                                parts: ['桌面端结果']
+                            }
+                        }
+                    }
+                ])
+            );
+        const cookieStore = {
+            get: vi.fn().mockResolvedValue({ value: 'desktop-device-id' })
+        };
+        const provider = new ChatGPTWebProvider({
+            requestClient: { fetch: fetchMock },
+            cookieStore,
+            userAgent: 'Desktop UA'
+        });
+
+        await expect(provider.checkAuth()).resolves.toBe(true);
+        await expect(provider.sendMessage('桌面端请求', { modelId: 'gpt-4o' }, () => undefined)).resolves.toMatchObject({
+            text: '桌面端结果',
+            conversationId: 'desktop-conversation',
+            messageId: 'desktop-message'
+        });
+
+        expect(cookieStore.get).toHaveBeenCalledWith({ url: 'https://chatgpt.com', name: 'oai-did' });
+        expect(fetchMock.mock.calls[1]?.[1]?.headers).toMatchObject({
+            'OAI-Device-Id': 'desktop-device-id'
+        });
+        expect(fetchMock.mock.calls[2]?.[1]?.headers).toMatchObject({
+            'OAI-Device-Id': 'desktop-device-id'
+        });
+    });
 });

@@ -5,6 +5,7 @@ export * from './interfaces/IStorageProvider';
 export * from './interfaces/ISyncTransport';
 export * from './interfaces/ProviderRemoteConfig';
 export * from './providers/ChatGPTWebProvider';
+export * from './providers/providerHostTypes';
 export * from './providers/FetchSyncTransport';
 export * from './providers/GeminiApiProvider';
 export * from './providers/IndexedDBStorageProvider';

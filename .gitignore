@@ -10,3 +10,4 @@ apps/web/dist
 apps/web/test-results
 apps/extension/playwright-report
 apps/extension/test-results
+apps/desktop/dist
