@@ -173,6 +173,31 @@ test('extension host exposes the knowledge workspace route with editable markdow
   }
 });
 
+test('extension knowledge workspace switches scoped agents and surfaces invalid agent configs', async () => {
+  const session = await launchExtensionPage({ routeHash: '#/' });
+  try {
+    const { page } = session;
+    await expect(page.getByTestId('knowledge-workspace')).toBeVisible();
+    await expect(page.getByTestId('knowledge-agent-name')).toContainText('Workspace Agent（/）');
+    await expect(page.getByTestId('knowledge-agent-model')).toContainText('gemini-api / gemini-2.5-flash');
+
+    await page.locator('[data-path="/archive"]').click();
+    await expect(page.getByTestId('knowledge-agent-name')).toContainText('Archive Agent（/archive）');
+    await expect(page.getByTestId('knowledge-agent-model')).toContainText('gemini-api / gemini-2.5-pro');
+
+    await page.locator('[data-path="/archive/snippet.md"]').click();
+
+    await page.locator('[data-path="/broken"]').click();
+    await expect(page.getByTestId('knowledge-agent-error')).toContainText('Failed to parse /broken/.agent.json');
+    await expect(page.getByTestId('knowledge-editor')).toBeVisible();
+    await expect(page.getByTestId('normal-chat-view')).toBeVisible();
+
+    await page.locator('[data-path="/broken/trouble.md"]').click();
+  } finally {
+    await session.close();
+  }
+});
+
 test('extension host keeps compare history local-only when sync is enabled', async () => {
   const session = await launchExtensionPage({ routeHash: '#/compare' });
   try {

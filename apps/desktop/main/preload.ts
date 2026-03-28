@@ -4,6 +4,7 @@ import {
     DESKTOP_CONTEXT_INITIALIZE_CHANNEL,
     DESKTOP_CONTEXT_LIST_TREE_CHANNEL,
     DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL,
+    DESKTOP_CONTEXT_RESOLVE_AGENT_CHANNEL,
     DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL
 } from '../shared/contextBridge';
 import {
@@ -34,6 +35,9 @@ contextBridge.exposeInMainWorld('chatprismDesktop', {
     },
     createContextNode(input: { parentPath?: string; name: string; kind: 'file' | 'directory' }) {
         return ipcRenderer.invoke(DESKTOP_CONTEXT_CREATE_NODE_CHANNEL, input);
+    },
+    resolveScopedAgentConfig(targetPath: string) {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_RESOLVE_AGENT_CHANNEL, targetPath);
     },
     sendProxyRequest(request: ProxyRequest) {
         ipcRenderer.send(DESKTOP_PROXY_REQUEST_CHANNEL, request);

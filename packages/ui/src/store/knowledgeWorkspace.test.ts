@@ -24,6 +24,7 @@ describe('useKnowledgeWorkspaceStore', () => {
 
         expect(store.nodes).toHaveLength(2);
         expect(store.activePath).toBe('/notes/day-1.md');
+        expect(store.selectedNodePath).toBe('/notes/day-1.md');
         expect(store.draftContent).toBe('# Day 1');
         expect(store.expandedPaths).toEqual([]);
     });
@@ -88,5 +89,94 @@ describe('useKnowledgeWorkspaceStore', () => {
             '/visible/note.md'
         ]);
         expect(store.activePath).toBe('/visible/note.md');
+    });
+
+    it('refreshes the active agent when switching across scoped files', async () => {
+        const store = useKnowledgeWorkspaceStore();
+        store.setContextProvider(createMockContextProvider({
+            nodes: [
+                { path: '/workspace', name: 'workspace', kind: 'directory' },
+                { path: '/workspace/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/workspace' },
+                { path: '/workspace/guide.md', name: 'guide.md', kind: 'file', parentPath: '/workspace' },
+                { path: '/workspace/archive', name: 'archive', kind: 'directory', parentPath: '/workspace' },
+                { path: '/workspace/archive/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/workspace/archive' },
+                { path: '/workspace/archive/snippet.md', name: 'snippet.md', kind: 'file', parentPath: '/workspace/archive' }
+            ],
+            documents: {
+                '/workspace/.agent.json': JSON.stringify({
+                    name: 'Workspace Agent',
+                    instructions: 'Handle general notes.'
+                }),
+                '/workspace/guide.md': '# Guide',
+                '/workspace/archive/.agent.json': JSON.stringify({
+                    name: 'Archive Agent',
+                    instructions: 'Handle archived notes.'
+                }),
+                '/workspace/archive/snippet.md': '# Snippet'
+            }
+        }));
+
+        await store.hydrateWorkspace();
+        expect(store.activeAgent?.name).toBe('Workspace Agent');
+        expect(store.activeAgent?.scopePath).toBe('/workspace');
+
+        await store.openNode('/workspace/archive');
+        expect(store.selectedNodePath).toBe('/workspace/archive');
+        expect(store.activePath).toBe('/workspace/guide.md');
+        expect(store.activeAgent?.name).toBe('Archive Agent');
+        expect(store.activeAgent?.scopePath).toBe('/workspace/archive');
+
+        await store.openNode('/workspace/archive/snippet.md');
+        expect(store.activeAgent?.name).toBe('Archive Agent');
+        expect(store.activeAgent?.scopePath).toBe('/workspace/archive');
+        expect(store.agentResolutionError).toBeNull();
+    });
+
+    it('falls back to the default agent when no scoped config exists', async () => {
+        const store = useKnowledgeWorkspaceStore();
+        store.setContextProvider(createMockContextProvider({
+            nodes: [
+                { path: '/notes', name: 'notes', kind: 'directory' },
+                { path: '/notes/day-1.md', name: 'day-1.md', kind: 'file', parentPath: '/notes' }
+            ],
+            documents: {
+                '/notes/day-1.md': '# Day 1'
+            }
+        }));
+
+        await store.hydrateWorkspace();
+
+        expect(store.activeAgent?.name).toBe('Default Knowledge Agent');
+        expect(store.activeAgent?.scopePath).toBe('/');
+        expect(store.agentResolutionError).toBeNull();
+    });
+
+    it('surfaces agent resolution errors without blocking document editing', async () => {
+        const store = useKnowledgeWorkspaceStore();
+        store.setContextProvider(createMockContextProvider({
+            nodes: [
+                { path: '/broken', name: 'broken', kind: 'directory' },
+                { path: '/broken/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/broken' },
+                { path: '/broken/note.md', name: 'note.md', kind: 'file', parentPath: '/broken' }
+            ],
+            documents: {
+                '/broken/.agent.json': '{ invalid json }',
+                '/broken/note.md': '# Broken Note'
+            }
+        }));
+
+        await store.hydrateWorkspace();
+
+        expect(store.activePath).toBe('/broken/note.md');
+        expect(store.selectedNodePath).toBe('/broken/note.md');
+        expect(store.draftContent).toBe('# Broken Note');
+        expect(store.activeAgent).toBeNull();
+        expect(store.agentResolutionError).toContain('Failed to parse /broken/.agent.json');
+
+        store.updateActiveDocument('# Fixed Content');
+        await store.flushActiveDocument();
+
+        const document = await store.contextProvider!.readDocument('/broken/note.md');
+        expect(document.content).toBe('# Fixed Content');
     });
 });

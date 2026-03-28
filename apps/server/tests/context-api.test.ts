@@ -105,6 +105,19 @@ describe('context api', () => {
             })
         });
         await expect(readFile(path.join(rootPath, 'notes', 'draft.md'), 'utf8')).resolves.toBe('');
+
+        const resolveAgentResponse = await app.request('/api/context/resolve-scoped-agent-config', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ path: '/notes/today.md' })
+        });
+        expect(resolveAgentResponse.status).toBe(200);
+        await expect(resolveAgentResponse.json()).resolves.toMatchObject({
+            agent: expect.objectContaining({
+                name: 'Default Knowledge Agent',
+                scopePath: '/'
+            })
+        });
     });
 
     it('rejects out-of-root traversal and supports context route cors', async () => {
@@ -153,6 +166,12 @@ describe('context api', () => {
                 path: `/${input.name}`,
                 name: input.name,
                 kind: input.kind
+            })),
+            resolveScopedAgentConfig: vi.fn(async (targetPath: string) => ({
+                name: 'Injected Agent',
+                scopePath: targetPath,
+                sourcePaths: [],
+                effectiveInstructions: 'Injected.'
             }))
         };
 
@@ -174,4 +193,3 @@ describe('context api', () => {
         expect(provider.listTree).toHaveBeenCalledWith(undefined);
     });
 });
-

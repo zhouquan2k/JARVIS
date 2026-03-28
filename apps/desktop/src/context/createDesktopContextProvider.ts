@@ -29,6 +29,13 @@ export function createDesktopContextProvider() {
             }
 
             return window.chatprismDesktop.createContextNode(input);
+        },
+        async resolveScopedAgentConfig(targetPath: string) {
+            if (!window.chatprismDesktop) {
+                throw new Error('Desktop context bridge is unavailable');
+            }
+
+            return window.chatprismDesktop.resolveScopedAgentConfig(targetPath);
         }
     };
 }

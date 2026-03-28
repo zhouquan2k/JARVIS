@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import {
+    buildAgentPromptEnvelope,
     cloneConversation,
     type Conversation,
     type ConversationModelSelection,
@@ -12,7 +13,8 @@ import {
     type IHistoryProvider,
     type IModelProvider,
     type IStorageProvider,
-    type MessageAttachment
+    type MessageAttachment,
+    type ResolvedAgentConfig
 } from '@packages/core/src';
 import type { ModelConfig, ModelOptionDefinition, ProviderConfig, ProviderModelCatalog } from '@packages/core/config';
 import { markRaw, toRaw } from 'vue';
@@ -71,6 +73,7 @@ export interface ChatState {
     draftFocusRequestKey: number;
     draftAttachments: MessageAttachment[];
     attachmentError: string | null;
+    activeAgentContext: ResolvedAgentConfig | null;
 }
 
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
@@ -156,6 +159,15 @@ function cloneHistoryProviderEntry(entry: ExternalHistoryProviderEntry): Externa
     return {
         ...entry,
         provider: entry.provider ? markRaw(entry.provider) : undefined
+    };
+}
+
+function cloneResolvedAgentConfig(agent: ResolvedAgentConfig): ResolvedAgentConfig {
+    return {
+        ...agent,
+        sourcePaths: [...agent.sourcePaths],
+        tools: agent.tools?.map((tool) => ({ ...tool })),
+        skills: agent.skills?.map((skill) => ({ ...skill }))
     };
 }
 
@@ -430,7 +442,8 @@ export const useChatStore = defineStore('chat', {
         lastSubmittedPrompt: null,
         draftFocusRequestKey: 0,
         draftAttachments: [],
-        attachmentError: null
+        attachmentError: null,
+        activeAgentContext: null
     }),
 
     getters: {
@@ -742,7 +755,20 @@ export const useChatStore = defineStore('chat', {
                 return null;
             }
 
-            return this.loadProviderModels(providerId);
+            const provider = await this.loadProviderModels(providerId);
+            if (!provider) {
+                return null;
+            }
+
+            if (this.currentProviderId === providerId && provider.defaultModel) {
+                const sourceOptions = this.currentConversation?.modelSelection?.providerId === providerId
+                    && this.currentConversation.modelSelection.modelId === provider.defaultModel
+                    ? this.currentConversation.modelSelection.modelOptions
+                    : this.currentModelOptions;
+                this.applyCurrentModelState(provider.defaultModel, sourceOptions);
+            }
+
+            return provider;
         },
 
         async init() {
@@ -808,6 +834,59 @@ export const useChatStore = defineStore('chat', {
 
         setDraftPrompt(prompt: string) {
             this.draftPrompt = prompt;
+        },
+
+        setActiveAgentContext(agent: ResolvedAgentConfig | null) {
+            this.activeAgentContext = agent ? cloneResolvedAgentConfig(agent) : null;
+        },
+
+        async resolveSendTarget() {
+            const requestedProviderId = this.activeAgentContext?.modelProviderName?.trim() || this.currentProviderId;
+            if (!requestedProviderId) {
+                throw new Error('No active model provider selected.');
+            }
+
+            const providerConfig = await this.ensureProviderModelsLoaded(requestedProviderId);
+            if (!providerConfig) {
+                throw new Error(`Provider '${requestedProviderId}' is unavailable.`);
+            }
+
+            const requestedModelId = this.activeAgentContext?.modelName?.trim();
+            let resolvedModelId = providerConfig.defaultModel;
+            if (requestedModelId) {
+                if (!providerConfig.models.some((model) => model.id === requestedModelId)) {
+                    throw new Error(`Agent model '${requestedModelId}' is unavailable for provider '${requestedProviderId}'.`);
+                }
+                resolvedModelId = requestedModelId;
+            } else if (
+                requestedProviderId === this.currentProviderId
+                && this.currentModelId
+                && providerConfig.models.some((model) => model.id === this.currentModelId)
+            ) {
+                resolvedModelId = this.currentModelId;
+            }
+
+            const sourceOptions = requestedProviderId === this.currentProviderId && resolvedModelId === this.currentModelId
+                ? this.currentModelOptions
+                : this.currentConversation?.modelSelection?.providerId === requestedProviderId
+                    && this.currentConversation.modelSelection.modelId === resolvedModelId
+                    ? this.currentConversation.modelSelection.modelOptions
+                    : {};
+
+            const provider = this.resolveModelProvider(requestedProviderId);
+            if (!provider) {
+                throw new Error(`Provider '${requestedProviderId}' is not initialized.`);
+            }
+
+            return {
+                provider,
+                providerId: requestedProviderId,
+                modelId: resolvedModelId,
+                modelOptions: normalizeModelOptions(
+                    resolveModelConfig(providerConfig, resolvedModelId),
+                    sourceOptions
+                )
+            };
         },
 
         setQuestionIndexFilter(filter: QuestionIndexFilter) {
@@ -1181,24 +1260,31 @@ export const useChatStore = defineStore('chat', {
             this.draftAttachments = [];
 
             try {
-                const provider = this.resolveModelProvider();
-                if (!provider || !this.storageProvider) {
+                const sendTarget = await this.resolveSendTarget();
+                if (!this.storageProvider) {
                     throw new Error('Providers not initialized');
+                }
+                if (this.isAbortRequested) {
+                    const abortError = new Error('Aborted');
+                    abortError.name = 'AbortError';
+                    throw abortError;
                 }
 
                 this.currentConversation!.origin = this.currentConversation!.origin || 'local';
                 const backendId = this.currentConversation!.backendId;
-                const modelOptions = cloneModelOptions(this.currentModelOptions);
                 this.syncCurrentConversationModelSelection();
+                const promptToSend = this.activeAgentContext
+                    ? buildAgentPromptEnvelope(this.activeAgentContext, trimmedPrompt)
+                    : trimmedPrompt;
 
-                const result = await provider.sendMessage(
-                    trimmedPrompt,
+                const result = await sendTarget.provider.sendMessage(
+                    promptToSend,
                     {
                         context: { conversationId: backendId },
-                        modelId: this.currentModelId,
+                        modelId: sendTarget.modelId,
                         attachments: pendingAttachments,
                         history,
-                        modelOptions
+                        modelOptions: cloneModelOptions(sendTarget.modelOptions)
                     },
                     (update) => {
                         const lastMsg = this.currentConversation!.messages[this.currentConversation!.messages.length - 1];
@@ -1306,7 +1392,7 @@ export const useChatStore = defineStore('chat', {
         },
 
         abortGeneration() {
-            const provider = this.resolveModelProvider();
+            const provider = this.resolveModelProvider(this.activeAgentContext?.modelProviderName?.trim() || this.currentProviderId);
             if (provider) {
                 provider.abort();
             }

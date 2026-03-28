@@ -50,7 +50,6 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (event: 'toggle', path: string): void;
   (event: 'open', path: string): void;
   (event: 'create', input: { parentPath?: string; name: string; kind: 'file' | 'directory' }): void;
 }>();
@@ -97,11 +96,6 @@ const visibleNodes = computed(() => {
 });
 
 function onNodeClick(node: ContextNode) {
-  if (node.kind === 'directory') {
-    emit('toggle', node.path);
-    return;
-  }
-
   emit('open', node.path);
 }
 

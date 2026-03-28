@@ -1,11 +1,18 @@
 import { defineStore } from 'pinia';
 import { markRaw } from 'vue';
-import type { ContextDocument, ContextNode, CreateContextNodeInput, IContextProvider } from '@packages/core/src';
+import {
+    type ContextDocument,
+    type ContextNode,
+    type CreateContextNodeInput,
+    type IContextProvider,
+    type ResolvedAgentConfig
+} from '@packages/core/src';
 
 export interface KnowledgeWorkspaceState {
     contextProvider: IContextProvider | null;
     nodes: ContextNode[];
     expandedPaths: string[];
+    selectedNodePath: string | null;
     activePath: string | null;
     activeDocument: ContextDocument | null;
     draftContent: string;
@@ -13,12 +20,14 @@ export interface KnowledgeWorkspaceState {
     panelSizes: [number, number, number];
     isHydrating: boolean;
     isSaving: boolean;
+    isResolvingAgent: boolean;
     accessInitialized: boolean;
     currentError: string | null;
+    activeAgent: ResolvedAgentConfig | null;
+    agentResolutionError: string | null;
 }
 
 const AUTO_SAVE_DELAY_MS = 400;
-
 function isVisibleNode(node: ContextNode): boolean {
     return !node.name.startsWith('.');
 }
@@ -49,6 +58,7 @@ export const useKnowledgeWorkspaceStore = defineStore('knowledge-workspace', {
         contextProvider: null,
         nodes: [],
         expandedPaths: [],
+        selectedNodePath: null,
         activePath: null,
         activeDocument: null,
         draftContent: '',
@@ -56,12 +66,16 @@ export const useKnowledgeWorkspaceStore = defineStore('knowledge-workspace', {
         panelSizes: [22, 48, 30],
         isHydrating: false,
         isSaving: false,
+        isResolvingAgent: false,
         accessInitialized: false,
-        currentError: null
+        currentError: null,
+        activeAgent: null,
+        agentResolutionError: null
     }),
     getters: {
         activeNode(state): ContextNode | null {
-            return state.activePath ? state.nodes.find((node) => node.path === state.activePath) ?? null : null;
+            const targetPath = state.selectedNodePath ?? state.activePath;
+            return targetPath ? state.nodes.find((node) => node.path === targetPath) ?? null : null;
         }
     },
     actions: {
@@ -69,12 +83,16 @@ export const useKnowledgeWorkspaceStore = defineStore('knowledge-workspace', {
             this.contextProvider = provider ? markRaw(provider) : null;
             this.nodes = [];
             this.expandedPaths = [];
+            this.selectedNodePath = null;
             this.activePath = null;
             this.activeDocument = null;
             this.draftContent = '';
             this.dirtyPaths = {};
             this.accessInitialized = false;
             this.currentError = null;
+            this.activeAgent = null;
+            this.agentResolutionError = null;
+            this.isResolvingAgent = false;
             clearAutoSaveTimer(this);
         },
 
@@ -95,6 +113,8 @@ export const useKnowledgeWorkspaceStore = defineStore('knowledge-workspace', {
                     const firstFile = this.nodes.find((node) => node.kind === 'file');
                     if (firstFile) {
                         await this.openNode(firstFile.path);
+                    } else {
+                        await this.resolveActiveAgent('/');
                     }
                 }
             } catch (error) {
@@ -124,12 +144,15 @@ export const useKnowledgeWorkspaceStore = defineStore('knowledge-workspace', {
             }
 
             if (node.kind === 'directory') {
+                this.selectedNodePath = path;
                 this.toggleExpanded(path);
+                await this.resolveActiveAgent(path);
                 return;
             }
 
             await this.flushActiveDocument();
             const document = await this.contextProvider.readDocument(path);
+            this.selectedNodePath = path;
             this.activePath = path;
             this.activeDocument = document;
             this.draftContent = document.content;
@@ -137,6 +160,7 @@ export const useKnowledgeWorkspaceStore = defineStore('knowledge-workspace', {
                 ...this.dirtyPaths,
                 [path]: false
             };
+            await this.resolveActiveAgent(path);
         },
 
         updateActiveDocument(content: string) {
@@ -176,6 +200,27 @@ export const useKnowledgeWorkspaceStore = defineStore('knowledge-workspace', {
                 };
             } finally {
                 this.isSaving = false;
+            }
+        },
+
+        async resolveActiveAgent(path: string) {
+            if (!this.contextProvider) {
+                this.activeAgent = null;
+                this.agentResolutionError = null;
+                this.isResolvingAgent = false;
+                return;
+            }
+
+            this.isResolvingAgent = true;
+            this.agentResolutionError = null;
+
+            try {
+                this.activeAgent = await this.contextProvider.resolveScopedAgentConfig(path);
+            } catch (error) {
+                this.activeAgent = null;
+                this.agentResolutionError = error instanceof Error ? error.message : String(error);
+            } finally {
+                this.isResolvingAgent = false;
             }
         },
 

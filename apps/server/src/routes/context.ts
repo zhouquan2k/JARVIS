@@ -158,6 +158,15 @@ export function createContextRouter(options: { service: HttpContextService; conf
         }
     });
 
+    app.post('/resolve-scoped-agent-config', async (c) => {
+        try {
+            const body = normalizeObjectBody(await readJsonBody(c));
+            return c.json({ agent: await service.resolveScopedAgentConfig(normalizeRequiredPath(body)) });
+        } catch (error) {
+            const message = error instanceof Error ? error.message : '解析作用域 Agent 失败。';
+            return c.json({ error: message }, 400);
+        }
+    });
+
     return app;
 }
-

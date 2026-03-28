@@ -79,4 +79,39 @@ describe('StorageBackedContextProvider', () => {
         const childNodes = await provider.listTree('/notes');
         expect(childNodes.map((node) => node.path)).toEqual(['/notes/today.md']);
     });
+
+    it('resolves scoped agent configs through the provider contract', async () => {
+        const provider = new StorageBackedContextProvider({
+            id: 'agent-context',
+            async readSnapshot() {
+                return {
+                    nodes: [
+                        { path: '/docs', name: 'docs', kind: 'directory' as const },
+                        { path: '/docs/.agent.json', name: '.agent.json', kind: 'file' as const, parentPath: '/docs' },
+                        { path: '/docs/guide.md', name: 'guide.md', kind: 'file' as const, parentPath: '/docs' }
+                    ],
+                    documents: {
+                        '/docs/.agent.json': JSON.stringify({
+                            name: 'Docs Agent',
+                            modelProviderName: 'gemini-api',
+                            modelName: 'gemini-2.5-pro',
+                            instructions: 'Stay inside docs scope.'
+                        }),
+                        '/docs/guide.md': '# Guide'
+                    }
+                };
+            },
+            async writeSnapshot() {
+                return undefined;
+            }
+        });
+
+        await provider.initializeAccess();
+        await expect(provider.resolveScopedAgentConfig('/docs/guide.md')).resolves.toMatchObject({
+            name: 'Docs Agent',
+            modelProviderName: 'gemini-api',
+            modelName: 'gemini-2.5-pro',
+            scopePath: '/docs'
+        });
+    });
 });

@@ -2,7 +2,8 @@ import type {
     ContextDocument,
     ContextNode,
     ContextProvider,
-    CreateContextNodeInput
+    CreateContextNodeInput,
+    ResolvedAgentConfig
 } from '../types/context.js';
 
 function notImplemented(): never {
@@ -31,5 +32,8 @@ export class DatabaseContextProvider implements ContextProvider {
     async createNode(_input: CreateContextNodeInput): Promise<ContextNode> {
         notImplemented();
     }
-}
 
+    async resolveScopedAgentConfig(_targetPath: string): Promise<ResolvedAgentConfig> {
+        notImplemented();
+    }
+}

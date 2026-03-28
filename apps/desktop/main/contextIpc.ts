@@ -2,11 +2,13 @@ import { ipcMain } from 'electron';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import path from 'node:path';
+import { DEFAULT_SCOPED_AGENT_CONFIG, resolveScopedAgentConfig, type IContextProvider, type ResolvedAgentConfig } from '@packages/core/src';
 import {
     DESKTOP_CONTEXT_CREATE_NODE_CHANNEL,
     DESKTOP_CONTEXT_INITIALIZE_CHANNEL,
     DESKTOP_CONTEXT_LIST_TREE_CHANNEL,
     DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL,
+    DESKTOP_CONTEXT_RESOLVE_AGENT_CHANNEL,
     DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL
 } from '../shared/contextBridge';
 
@@ -127,55 +129,81 @@ export function registerContextIpc(options: RegisterContextIpcOptions = {}) {
         };
     })();
 
+    const provider: IContextProvider = {
+        id: 'desktop-context',
+        async initializeAccess() {
+            await getWorkspaceRoot();
+        },
+        async listTree(parentPath?: string) {
+            return listTree(await getWorkspaceRoot(), parentPath);
+        },
+        async readDocument(targetPath: string) {
+            const actualPath = toActualPath(await getWorkspaceRoot(), targetPath);
+            const content = await readFile(actualPath, 'utf8');
+            const entryStat = await stat(actualPath);
+            return {
+                path: normalizeVirtualPath(targetPath) ?? '/',
+                content,
+                updatedAt: entryStat.mtimeMs
+            };
+        },
+        async writeDocument(targetPath: string, content: string) {
+            const actualPath = toActualPath(await getWorkspaceRoot(), targetPath);
+            await mkdir(dirname(actualPath), { recursive: true });
+            await writeFile(actualPath, content, 'utf8');
+        },
+        async createNode(input: { parentPath?: string; name: string; kind: ContextNodeKind }) {
+            assertValidNodeName(input.name);
+            const parentPath = normalizeVirtualPath(input.parentPath);
+            const targetVirtualPath = parentPath ? `${parentPath}/${input.name}` : `/${input.name}`;
+            const actualPath = toActualPath(await getWorkspaceRoot(), targetVirtualPath);
+
+            if (input.kind === 'directory') {
+                await mkdir(actualPath, { recursive: true });
+            } else {
+                await mkdir(dirname(actualPath), { recursive: true });
+                await writeFile(actualPath, '', 'utf8');
+            }
+
+            const entryStat = await stat(actualPath);
+            return {
+                path: targetVirtualPath,
+                name: input.name,
+                kind: input.kind,
+                parentPath,
+                updatedAt: entryStat.mtimeMs,
+                hasChildren: input.kind === 'directory'
+            };
+        },
+        async resolveScopedAgentConfig(targetPath: string): Promise<ResolvedAgentConfig> {
+            return resolveScopedAgentConfig(provider, targetPath, DEFAULT_SCOPED_AGENT_CONFIG);
+        }
+    };
+
     ipc.handle(DESKTOP_CONTEXT_INITIALIZE_CHANNEL, async () => {
-        await getWorkspaceRoot();
+        await provider.initializeAccess();
     });
     ipc.handle(DESKTOP_CONTEXT_LIST_TREE_CHANNEL, async (_event, parentPath?: string) => {
-        return listTree(await getWorkspaceRoot(), parentPath);
+        return provider.listTree(parentPath);
     });
     ipc.handle(DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL, async (_event, targetPath: string) => {
-        const actualPath = toActualPath(await getWorkspaceRoot(), targetPath);
-        const content = await readFile(actualPath, 'utf8');
-        const entryStat = await stat(actualPath);
-        return {
-            path: normalizeVirtualPath(targetPath),
-            content,
-            updatedAt: entryStat.mtimeMs
-        };
+        return provider.readDocument(targetPath);
     });
     ipc.handle(DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL, async (_event, targetPath: string, content: string) => {
-        const actualPath = toActualPath(await getWorkspaceRoot(), targetPath);
-        await mkdir(dirname(actualPath), { recursive: true });
-        await writeFile(actualPath, content, 'utf8');
+        await provider.writeDocument(targetPath, content);
     });
     ipc.handle(DESKTOP_CONTEXT_CREATE_NODE_CHANNEL, async (_event, input: { parentPath?: string; name: string; kind: ContextNodeKind }) => {
-        assertValidNodeName(input.name);
-        const parentPath = normalizeVirtualPath(input.parentPath);
-        const targetVirtualPath = parentPath ? `${parentPath}/${input.name}` : `/${input.name}`;
-        const actualPath = toActualPath(await getWorkspaceRoot(), targetVirtualPath);
-
-        if (input.kind === 'directory') {
-            await mkdir(actualPath, { recursive: true });
-        } else {
-            await mkdir(dirname(actualPath), { recursive: true });
-            await writeFile(actualPath, '', 'utf8');
-        }
-
-        const entryStat = await stat(actualPath);
-        return {
-            path: targetVirtualPath,
-            name: input.name,
-            kind: input.kind,
-            parentPath,
-            updatedAt: entryStat.mtimeMs,
-            hasChildren: input.kind === 'directory'
-        };
+        return provider.createNode(input);
+    });
+    ipc.handle(DESKTOP_CONTEXT_RESOLVE_AGENT_CHANNEL, async (_event, targetPath: string) => {
+        return provider.resolveScopedAgentConfig(targetPath);
     });
 
     return () => {
         ipc.removeHandler(DESKTOP_CONTEXT_INITIALIZE_CHANNEL);
         ipc.removeHandler(DESKTOP_CONTEXT_LIST_TREE_CHANNEL);
         ipc.removeHandler(DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL);
+        ipc.removeHandler(DESKTOP_CONTEXT_RESOLVE_AGENT_CHANNEL);
         ipc.removeHandler(DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL);
         ipc.removeHandler(DESKTOP_CONTEXT_CREATE_NODE_CHANNEL);
     };

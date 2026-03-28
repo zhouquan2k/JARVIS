@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
-import type { Conversation, ConversationHistorySummary, IHistoryProvider, IModelProvider, IStorageProvider } from '@packages/core/src';
+import type { Conversation, ConversationHistorySummary, IHistoryProvider, IModelProvider, IStorageProvider, ResolvedAgentConfig } from '@packages/core/src';
 import type { ProviderConfig } from '@packages/core/config';
 import { useChatStore } from './chat';
 
@@ -29,6 +29,7 @@ const geminiOptionDefinitions = [
 
 class MockModelProvider implements IModelProvider {
     id = 'mock-provider';
+    promptsUsed: string[] = [];
     optionsUsed: Array<Record<string, unknown>> = [];
 
     async getAvailableModels() {
@@ -47,6 +48,7 @@ class MockModelProvider implements IModelProvider {
         _options = {},
         onUpdate: (update: { text: string }) => void
     ): Promise<{ text: string; conversationId: string; messageId: string }> {
+        this.promptsUsed.push(prompt);
         this.optionsUsed.push(_options as Record<string, unknown>);
         const text = `reply:${prompt}`;
         onUpdate({
@@ -91,6 +93,7 @@ class AbortableMockModelProvider extends MockModelProvider {
         options = {},
         onUpdate: (update: { text: string }) => void
     ): Promise<{ text: string; conversationId: string; messageId: string }> {
+        this.promptsUsed.push(prompt);
         this.optionsUsed.push(options as Record<string, unknown>);
         onUpdate({ text: `reply:${prompt}` });
 
@@ -202,6 +205,19 @@ describe('useChatStore workspace history flow', () => {
     beforeEach(() => {
         setActivePinia(createPinia());
     });
+
+    const scopedAgent: ResolvedAgentConfig = {
+        name: 'Docs Agent',
+        description: 'Documentation specialist',
+        instructions: 'Use documentation context only.',
+        effectiveInstructions: 'Use documentation context only.',
+        modelProviderName: 'gemini-api',
+        modelName: 'gemini-2.5-pro',
+        scopePath: '/docs',
+        sourcePaths: ['/docs/.agent.json'],
+        tools: [{ id: 'read_document', description: 'Read docs' }],
+        skills: [{ id: 'summarize', description: 'Summarize docs' }]
+    };
 
     it('marks imported external history items from local metadata', async () => {
         const storage = new MockStorageProvider([
@@ -589,6 +605,80 @@ describe('useChatStore workspace history flow', () => {
             providerId: 'mock-provider',
             modelId: 'dynamic-model',
             modelOptions: { web_search: true }
+        });
+    });
+
+    it('injects the scoped agent prompt envelope only when an active agent context is present', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+
+        store.setActiveAgentContext({
+            ...scopedAgent,
+            modelProviderName: undefined,
+            modelName: undefined
+        });
+        await store.sendMessage('请分析当前文档');
+
+        expect(provider.promptsUsed[0]).toContain('[[Scoped Agent Context]]');
+        expect(provider.promptsUsed[0]).toContain('Name: Docs Agent');
+        expect(provider.promptsUsed[0]).toContain('Scope Path: /docs');
+        expect(provider.promptsUsed[0]).toContain('Model Provider: inherit-current-selection');
+        expect(provider.promptsUsed[0]).toContain('Model Name: inherit-current-selection');
+        expect(provider.promptsUsed[0]).toContain('[[User Prompt]]\n请分析当前文档');
+        expect(store.currentConversation?.messages[0]?.content).toBe('请分析当前文档');
+
+        store.setActiveAgentContext(null);
+        await store.sendMessage('第二条消息');
+
+        expect(provider.promptsUsed[1]).toBe('第二条消息');
+    });
+
+    it('prioritizes the agent-specified provider and model during send', async () => {
+        const defaultProvider = new MockModelProvider();
+        const agentProvider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+
+        store.setProviders(defaultProvider, storage);
+        store.setModelProviderResolver((providerId: string) => {
+            if (providerId === 'other-provider') {
+                agentProvider.id = providerId;
+                return agentProvider;
+            }
+
+            defaultProvider.id = providerId;
+            return defaultProvider;
+        });
+        store.setProviderModelsResolver(async (providerId: string) => {
+            if (providerId === 'other-provider') {
+                return {
+                    models: [{ id: 'other-dynamic', name: 'Other Dynamic' }],
+                    defaultModel: 'other-dynamic'
+                };
+            }
+
+            return {
+                models: [{ id: 'dynamic-model', name: 'Dynamic Model', options: chatgptOptionDefinitions }],
+                defaultModel: 'dynamic-model'
+            };
+        });
+
+        await store.initializeProviderCatalog(providerCatalog);
+        store.setActiveAgentContext({
+            ...scopedAgent,
+            modelProviderName: 'other-provider',
+            modelName: 'other-dynamic'
+        });
+        await store.sendMessage('用 Agent 指定模型发送');
+
+        expect(defaultProvider.promptsUsed).toHaveLength(0);
+        expect(agentProvider.promptsUsed[0]).toContain('Name: Docs Agent');
+        expect(agentProvider.optionsUsed[0]).toMatchObject({
+            modelId: 'other-dynamic',
+            modelOptions: {}
         });
     });
 

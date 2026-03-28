@@ -14,6 +14,12 @@ function createProvider(): ContextProvider {
             name: input.name,
             kind: input.kind,
             parentPath: input.parentPath
+        })),
+        resolveScopedAgentConfig: vi.fn(async (targetPath: string) => ({
+            name: 'Default Knowledge Agent',
+            scopePath: '/',
+            sourcePaths: [],
+            effectiveInstructions: 'Help with the workspace.'
         }))
     };
 }
@@ -40,6 +46,10 @@ describe('http context service', () => {
             name: 'draft.md',
             kind: 'file'
         });
+        await expect(service.resolveScopedAgentConfig('/notes/draft.md')).resolves.toMatchObject({
+            name: 'Default Knowledge Agent',
+            scopePath: '/'
+        });
 
         expect(provider.initializeAccess).toHaveBeenCalledTimes(1);
         expect(provider.listTree).toHaveBeenCalledWith('/notes');
@@ -50,6 +60,6 @@ describe('http context service', () => {
             name: 'draft.md',
             kind: 'file'
         });
+        expect(provider.resolveScopedAgentConfig).toHaveBeenCalledWith('/notes/draft.md');
     });
 });
-

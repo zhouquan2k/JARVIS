@@ -1,3 +1,5 @@
+import { DEFAULT_SCOPED_AGENT_CONFIG, resolveScopedAgentConfig } from '../agents/resolveScopedAgentConfig';
+import type { ResolvedAgentConfig } from '../interfaces/IAgentConfig';
 import type { ContextDocument, ContextNode, CreateContextNodeInput, IContextProvider } from '../interfaces/IContextProvider';
 
 interface StoredContextNode {
@@ -181,6 +183,10 @@ export class StorageBackedContextProvider implements IContextProvider {
             ...node,
             hasChildren: false
         };
+    }
+
+    async resolveScopedAgentConfig(targetPath: string): Promise<ResolvedAgentConfig> {
+        return resolveScopedAgentConfig(this, targetPath, DEFAULT_SCOPED_AGENT_CONFIG);
     }
 
     private async requireSnapshot(): Promise<StoredWorkspaceSnapshot> {

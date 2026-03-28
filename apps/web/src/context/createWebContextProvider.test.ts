@@ -55,6 +55,19 @@ describe('createWebContextProvider', () => {
           node: { path: '/notes/draft.md', name: 'draft.md', kind: 'file', parentPath: '/notes' }
         }), { status: 200 });
       }
+      if (url.endsWith('/resolve-scoped-agent-config')) {
+        expect(body).toEqual({ path: '/notes/today.md' });
+        return new Response(JSON.stringify({
+          agent: {
+            name: 'Notes Agent',
+            scopePath: '/notes',
+            sourcePaths: ['/notes/.agent.json'],
+            effectiveInstructions: 'Focus on notes.',
+            modelProviderName: 'gemini-api',
+            modelName: 'gemini-2.5-flash'
+          }
+        }), { status: 200 });
+      }
 
       return new Response(JSON.stringify({ error: 'not found' }), { status: 404 });
     });
@@ -83,8 +96,16 @@ describe('createWebContextProvider', () => {
       kind: 'file',
       parentPath: '/notes'
     });
+    await expect(provider.resolveScopedAgentConfig('/notes/today.md')).resolves.toEqual({
+      name: 'Notes Agent',
+      scopePath: '/notes',
+      sourcePaths: ['/notes/.agent.json'],
+      effectiveInstructions: 'Focus on notes.',
+      modelProviderName: 'gemini-api',
+      modelName: 'gemini-2.5-flash'
+    });
 
-    expect(fetchImpl).toHaveBeenCalledTimes(5);
+    expect(fetchImpl).toHaveBeenCalledTimes(6);
   });
 
   it('surfaces server-side context errors', async () => {
@@ -140,6 +161,43 @@ describe('createWebContextProvider', () => {
     })).resolves.toMatchObject({
       path: '/notes/draft.md',
       kind: 'file'
+    });
+    await expect(provider.resolveScopedAgentConfig('/notes/today.md')).resolves.toMatchObject({
+      scopePath: '/',
+      name: 'Default Knowledge Agent'
+    });
+  });
+
+  it('returns root scope for the default agent through the real server context route', async () => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-web-context-default-root-'));
+    tempRoots.push(rootPath);
+    await mkdir(path.join(rootPath, 'My-Life'));
+    await writeFile(path.join(rootPath, 'My-Life', 'today.md'), '# Today\n');
+
+    const serverApp = createApp({
+      config: {
+        port: 8787,
+        dbPath: ':memory:',
+        isDevelopment: true,
+        corsAllowlist: [],
+        knowledgeRoot: rootPath,
+        contextBackend: 'local-file'
+      }
+    });
+
+    const provider = createWebContextProvider({
+      baseUrl: 'http://context.test/api/context',
+      fetchImpl: async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input));
+        return serverApp.request(url.pathname, init);
+      }
+    });
+
+    await expect(provider.initializeAccess()).resolves.toBeUndefined();
+    await expect(provider.resolveScopedAgentConfig('/My-Life/today.md')).resolves.toMatchObject({
+      name: 'Default Knowledge Agent',
+      scopePath: '/',
+      sourcePaths: []
     });
   });
 });

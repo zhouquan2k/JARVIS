@@ -8,9 +8,8 @@
       <KnowledgeFileTree
         :nodes="knowledgeStore.nodes"
         :expanded-paths="knowledgeStore.expandedPaths"
-        :active-path="knowledgeStore.activePath"
+        :active-path="knowledgeStore.selectedNodePath"
         :current-error="knowledgeStore.currentError"
-        @toggle="knowledgeStore.toggleExpanded"
         @open="knowledgeStore.openNode"
         @create="knowledgeStore.createNode"
       />
@@ -32,7 +31,11 @@
         @pointerdown="startResize(1, $event)"
       />
       <slot name="assistant-pane">
-        <KnowledgeAssistantPane />
+        <KnowledgeAssistantPane
+          :active-agent="knowledgeStore.activeAgent"
+          :agent-resolution-error="knowledgeStore.agentResolutionError"
+          :is-resolving-agent="knowledgeStore.isResolvingAgent"
+        />
       </slot>
     </div>
   </section>

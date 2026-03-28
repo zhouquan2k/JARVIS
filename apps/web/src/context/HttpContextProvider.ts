@@ -1,4 +1,5 @@
 import type {
+  ResolvedAgentConfig,
   ContextDocument,
   ContextNode,
   CreateContextNodeInput,
@@ -60,6 +61,11 @@ export class HttpContextProvider implements IContextProvider {
   async createNode(input: CreateContextNodeInput): Promise<ContextNode> {
     const response = await this.post('/create-node', input);
     return (response as { node: ContextNode }).node;
+  }
+
+  async resolveScopedAgentConfig(targetPath: string): Promise<ResolvedAgentConfig> {
+    const response = await this.post('/resolve-scoped-agent-config', { path: targetPath });
+    return (response as { agent: ResolvedAgentConfig }).agent;
   }
 
   private async post(path: string, body: Record<string, unknown>): Promise<unknown> {

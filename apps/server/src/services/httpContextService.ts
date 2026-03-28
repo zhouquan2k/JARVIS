@@ -2,7 +2,8 @@ import type {
     ContextDocument,
     ContextNode,
     ContextProvider,
-    CreateContextNodeInput
+    CreateContextNodeInput,
+    ResolvedAgentConfig
 } from '../types/context.js';
 
 export class HttpContextService {
@@ -27,5 +28,8 @@ export class HttpContextService {
     async createNode(input: CreateContextNodeInput): Promise<ContextNode> {
         return this.provider.createNode(input);
     }
-}
 
+    async resolveScopedAgentConfig(targetPath: string): Promise<ResolvedAgentConfig> {
+        return this.provider.resolveScopedAgentConfig(targetPath);
+    }
+}

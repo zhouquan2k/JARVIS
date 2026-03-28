@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import type { ContextDocument, ContextNode, CreateContextNodeInput } from '@packages/core/src';
+import type { ContextDocument, ContextNode, CreateContextNodeInput, ResolvedAgentConfig } from '@packages/core/src';
 import type { ProxyRequest, ProxyResponse } from '../shared/proxyProtocol';
 
 declare module '*.vue' {
@@ -18,6 +18,7 @@ declare global {
             readContextDocument(path: string): Promise<ContextDocument>;
             writeContextDocument(path: string, content: string): Promise<void>;
             createContextNode(input: CreateContextNodeInput): Promise<ContextNode>;
+            resolveScopedAgentConfig(targetPath: string): Promise<ResolvedAgentConfig>;
             sendProxyRequest(request: ProxyRequest): void;
             onProxyResponse(listener: (response: ProxyResponse) => void): () => void;
             openProviderLoginWindow(providerId: string): Promise<void>;

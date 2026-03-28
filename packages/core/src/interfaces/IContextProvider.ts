@@ -1,3 +1,5 @@
+import type { ResolvedAgentConfig } from './IAgentConfig';
+
 export interface ContextNode {
     path: string;
     name: string;
@@ -27,4 +29,5 @@ export interface IContextProvider {
     readDocument(path: string): Promise<ContextDocument>;
     writeDocument(path: string, content: string): Promise<void>;
     createNode(input: CreateContextNodeInput): Promise<ContextNode>;
+    resolveScopedAgentConfig(targetPath: string): Promise<ResolvedAgentConfig>;
 }
