@@ -42,7 +42,7 @@ import {
 } from '@packages/ui';
 import { currentRoute, navigateTo } from './router';
 import { createDesktopContextProvider } from './context/createDesktopContextProvider';
-import { createDesktopHistoryProviders, providerRuntime } from './providerRuntime';
+import { agentRuntime, createDesktopHistoryProviders, providerRuntime } from './providerRuntime';
 import { createDesktopSyncStorageProvider } from './sync';
 
 const chatStore = useChatStore();
@@ -154,6 +154,7 @@ onMounted(() => {
         return;
       }
 
+      chatStore.setAgentRuntime(agentRuntime);
       const storageProvider = createDesktopSyncStorageProvider({
         storage: typeof localStorage !== 'undefined' ? localStorage : undefined,
         env: import.meta.env as Record<string, string | undefined>,

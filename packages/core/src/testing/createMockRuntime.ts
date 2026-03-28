@@ -1,5 +1,10 @@
 import { APP_CONFIG, type ModelConfig, type ProviderConfig, type ProviderModelCatalog, type RuntimeMode } from '../../config';
 import type { AnalysisResult } from '../analysis/types';
+import type {
+    AgentCapabilities,
+    AgentRunRequest,
+    IAgentCapableProvider
+} from '../interfaces/IAgentCapableProvider';
 import type { IModelProvider, ProviderSendResult, ProviderStreamUpdate, SendMessageOptions } from '../interfaces/IModelProvider';
 import type { MessageAnnotation, MessageAttachment } from '../interfaces/IStorageProvider';
 import type { ProviderRuntime } from '../runtime/types';
@@ -136,7 +141,7 @@ function buildAttachmentEchoText(
     ].join('\n');
 }
 
-class MockStreamingProvider implements IModelProvider {
+class MockStreamingProvider implements IAgentCapableProvider {
     public id: string;
     private aborted = false;
 
@@ -218,6 +223,56 @@ class MockStreamingProvider implements IModelProvider {
             conversationId: options.context?.conversationId || crypto.randomUUID(),
             messageId: crypto.randomUUID(),
             annotations: structuredResponse?.annotations
+        };
+    }
+
+    getAgentCapabilities(): AgentCapabilities {
+        return {
+            nativeAgent: this.id === 'gemini-api',
+            toolLoop: 'application-managed'
+        };
+    }
+
+    async runAgent(
+        request: AgentRunRequest,
+        onUpdate: (update: ProviderStreamUpdate) => void
+    ): Promise<ProviderSendResult> {
+        this.aborted = false;
+
+        if (request.toolExchanges?.length) {
+            const toolSummary = request.toolExchanges
+                .map((exchange) => `${exchange.call.name}:${exchange.result.result}`)
+                .join('\n');
+            const finalText = `${this.id}/${request.modelId || request.agent.modelName || 'default'} agent(${request.agent.name}) => ${request.prompt}\n${toolSummary}`;
+            onUpdate({ text: finalText });
+            return {
+                text: finalText,
+                conversationId: request.context?.conversationId || crypto.randomUUID(),
+                messageId: crypto.randomUUID()
+            };
+        }
+
+        if (request.prompt.includes('TRIGGER_AGENT_TOOL_LOOP') && request.agent.tools?.[0]?.id) {
+            return {
+                text: '',
+                conversationId: request.context?.conversationId || crypto.randomUUID(),
+                messageId: crypto.randomUUID(),
+                toolCalls: [
+                    {
+                        id: 'mock-tool-call-1',
+                        name: request.agent.tools[0].id,
+                        arguments: { scopePath: request.agent.scopePath }
+                    }
+                ]
+            };
+        }
+
+        const finalText = `${this.id}/${request.modelId || request.agent.modelName || 'default'} agent(${request.agent.name}) => ${request.prompt}`;
+        onUpdate({ text: finalText });
+        return {
+            text: finalText,
+            conversationId: request.context?.conversationId || crypto.randomUUID(),
+            messageId: crypto.randomUUID()
         };
     }
 

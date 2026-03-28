@@ -1,0 +1,245 @@
+# Gemini API Agent 下一步实现方案
+
+## 实现范围
+
+下一步只实现 Gemini API Agent 的最小闭环，范围控制如下：
+
+- 保持现有 `IModelProvider` 基础接口不变
+- 新增 Agent 扩展接口，用于表达 provider 是否支持原生 Agent 能力
+- 由 `GeminiApiProvider` 作为首个支持 Agent 的 provider
+- 在现有 provider runtime 之上增加一层 Agent 调度层
+- 将现有的 `AgentConfig` 传递给当前 `AgentRuntime`，再由 `AgentRuntime` 传递给 `AgentProvider`
+- `AgentRuntime` 第一阶段继续复用现有流式文本更新契约
+- Gemini 原生 Agent 请求第一阶段优先复用现有 `streamGenerateContent` 路径，并由应用侧维护 tool loop
+- UI 为控制范围，下一步先复用 `NormalChatView`
+- 本阶段不新建 Agent 专用工作区组件
+- 本阶段不引入完整的文件搜索结果面板、diff 面板、确认应用面板
+- 本阶段目标是先让 Gemini Agent 在现有聊天链路中可运行、可展示、可回退
+
+---
+
+## Provider 设计方案
+
+### 基础接口
+继续保留 `IModelProvider` 作为普通聊天能力接口，职责不变：
+
+- 获取模型列表
+- 鉴权检查
+- 普通消息发送
+- 中止生成
+
+### Agent 扩展接口
+新增 `IAgentCapableProvider extends IModelProvider`，用于表达某个 provider 具备原生 Agent 执行能力。
+
+### Gemini 的实现方式
+`GeminiApiProvider` 作为首个实现 `IAgentCapableProvider` 的 provider。
+
+这意味着：
+
+- Gemini 仍然是普通模型 provider
+- Gemini 同时额外具备 Agent 执行能力
+- 其他 provider 不需要在本阶段同步升级
+
+### 本阶段 Provider 目标
+本阶段 Provider 层只完成以下事项：
+
+- 定义 Agent 扩展接口
+- 让 `GeminiApiProvider` 支持 Agent 扩展能力
+- 保证普通聊天链路继续可用
+- 保证其他 provider 不受影响
+
+---
+
+## Runtime 设计方案
+
+### 现有 Runtime
+当前仓库中已经存在 provider runtime：
+
+- `ProviderRuntime`
+- `createProviderRuntime()`
+
+其职责是：
+
+- 根据运行环境筛选可用 provider
+- 创建 provider 实例
+- 缓存 provider
+- 获取 provider 的模型目录
+
+相关位置：
+
+- `packages/core/src/runtime/types.ts`
+- `packages/core/src/runtime/createProviderRuntime.ts`
+
+Web、Extension、Desktop 当前都已经基于这套 runtime 创建各自的 provider 运行环境。
+
+### 下一步新增的 Runtime 层
+下一步不直接修改 `IModelProvider` 来承载 Agent 编排逻辑，而是在现有 `ProviderRuntime` 之上新增一层 Agent 调度层。
+
+建议新增一层独立对象，例如：
+
+- `AgentRuntime`
+
+### Agent Runtime 的职责
+这一层负责：
+
+- 接收当前活动的 `AgentConfig`
+- 获取当前要使用的 provider
+- 判断该 provider 是否支持 `IAgentCapableProvider`
+- 支持时走原生 Agent 执行链路
+- 不支持时回退到普通 `sendMessage` 链路
+- 将当前 `AgentConfig` 继续传递给目标 `AgentProvider`
+- 第一阶段继续对上层暴露现有流式文本更新契约，而不是新增 Agent 事件流协议
+- 对上层 UI 暴露统一的 Agent 执行入口与状态
+
+### AgentConfig 传递链路
+本阶段直接复用现有 Agent 配置体系。
+
+运行时传递的是当前系统已经解析出的 `AgentConfig`，不新增第二套并行的 Agent 配置模型。
+
+本阶段固定的数据流为：
+
+- UI / Store 持有当前生效的 `AgentConfig`
+- UI / Store 将当前 `AgentConfig` 传递给 `AgentRuntime`
+- `AgentRuntime` 根据当前配置选择目标 provider / model
+- `AgentRuntime` 将 `AgentConfig` 与请求上下文一起传递给目标 `AgentProvider`
+- `AgentProvider` 基于该 `AgentConfig` 执行原生 Agent 请求
+
+### Gemini Agent 请求形态
+本阶段 Gemini 原生 Agent 请求优先复用现有 `streamGenerateContent` 路径，而不直接切换到 Live API 或新的实时 session 形态。
+
+本阶段采用的方式是：
+
+- `GeminiApiProvider.runAgent()` 继续基于现有内容生成 API
+- 请求中携带 Gemini 的 tools / function calling 配置
+- `AgentRuntime` 在应用侧维护 Gemini function calling / tool loop
+- 流式输出继续映射到现有文本快照更新契约
+
+本阶段不做的事情包括：
+
+- 不引入基于 WebSocket 的 Live API 会话管理
+- 不新增独立的实时 Agent 事件流协议
+- 不把多步工具执行状态直接暴露成新的 UI 渲染协议
+
+### 分层结果
+本阶段运行时分层如下：
+
+- `ProviderRuntime`
+  负责 provider 的装配、发现、创建、缓存、模型目录读取
+- `AgentRuntime` 或等价调度层
+  负责 `AgentConfig` 接入、Agent 路由、能力检测、执行入口与 fallback
+
+---
+
+## 为什么 Agent 不直接进入 `IModelProvider` 核心签名
+
+本方案中，Agent 能力不直接塞进 `IModelProvider` 的核心签名，而是放在 runtime orchestration 层组织。
+
+### 原因 1：`IModelProvider` 表达的是基础模型调用能力
+`IModelProvider` 当前承载的是单次模型调用能力，包括：
+
+- prompt 输入
+- 模型选择
+- 流式输出
+- 中止控制
+
+它适合作为基础接入层接口，不适合承载完整 Agent 工作流。
+
+### 原因 2：Agent 执行本质上是运行时编排
+Agent 的执行不是一次普通消息发送，而是一段任务执行过程。它通常涉及：
+
+- 任务目标
+- 多步执行
+- 工具调用
+- 工具结果回填
+- 中间状态更新
+- 回退策略
+
+这些内容属于运行时调度，不属于基础 provider 接口。
+
+### 原因 3：避免所有 provider 被迫同步升级
+如果直接扩展 `IModelProvider` 的核心签名，那么所有现有 provider 都必须同步适配 Agent 参数和 Agent 行为。
+
+这会扩大本阶段改动面，并影响：
+
+- ChatGPT Web Provider
+- Desktop Proxy Provider
+- Extension Proxy Provider
+- 对应的 mock、测试和桥接层
+
+本阶段只需要 Gemini 支持 Agent，因此不应推动所有 provider 一起升级。
+
+### 原因 4：便于 capability 检测与 fallback
+Agent 支持是 provider 的可选能力，而不是所有 provider 的基础能力。
+
+因此更合适的组织方式是：
+
+- provider 声明自己是否支持 Agent
+- runtime 做能力检测
+- 支持则走 Agent 路径
+- 不支持则走普通聊天路径
+
+### 原因 5：便于后续扩展
+将 Agent 编排逻辑独立在 runtime 层后，后续增加以下能力时不需要重新设计基础 provider 接口：
+
+- 多步 Agent 执行
+- 工具调用轨迹
+- 文件修改确认
+- 执行状态事件
+- 更复杂的 fallback 策略
+
+---
+
+## UI 设计方案
+
+### 本阶段 UI 方案
+下一步先复用 `NormalChatView`。
+
+### 本阶段 UI 范围
+本阶段只要求：
+
+- 在现有聊天界面中发起 Gemini Agent 请求
+- 在现有聊天界面中展示 Gemini Agent 返回内容
+- 保持现有输入、消息展示和会话链路可用
+
+### 本阶段不做的内容
+本阶段不新增以下 UI 结构：
+
+- Agent 专用聊天视图
+- 文件搜索结果面板
+- 文件修改 diff 面板
+- 变更确认与应用面板
+- 完整工具执行轨迹工作区
+
+### UI 结果
+本阶段 UI 方案可以概括为：
+
+- 使用现有 `NormalChatView` 作为输入与消息展示界面
+- 在其外围接入 Agent 上下文与 Agent 运行链路
+- 不在本阶段引入新的复杂 Agent 工作区组件
+
+---
+
+## 本阶段整体结构
+
+### Provider 层
+- 保留 `IModelProvider`
+- 新增 `IAgentCapableProvider`
+- `GeminiApiProvider` 实现 Agent 扩展能力
+
+### Runtime 层
+- 保留现有 `ProviderRuntime`
+- 在其之上新增 `AgentRuntime` 或等价调度层
+- 由 Agent 调度层负责接收当前 `AgentConfig`
+- 由 Agent 调度层负责能力检测、执行路由、配置透传和 fallback
+- 第一阶段继续复用现有流式文本更新契约
+
+### UI 层
+- 下一步先复用 `NormalChatView`
+- 不新建 Agent 专用工作区
+- 先打通 Gemini Agent 最小可运行闭环
+
+---
+
+## 一句话总结
+
+下一步的实现方案是：在不改动 `IModelProvider` 基础契约的前提下，让 `GeminiApiProvider` 成为首个支持 Agent 的 provider，并在现有 `ProviderRuntime` 之上新增一层 `AgentRuntime`，由它统一接收当前 `AgentConfig`、完成能力检测与执行路由，再将配置传递给目标 `AgentProvider`；第一阶段继续复用现有流式文本更新契约，并优先沿用 `streamGenerateContent` 路径，由应用侧维护 Gemini tool loop，同时 UI 先复用 `NormalChatView` 以控制实现范围。

@@ -1,6 +1,19 @@
 import { describe, expect, it, vi } from 'vitest';
 import { GeminiApiProvider } from './GeminiApiProvider';
 
+const scopedAgent = {
+    name: 'Docs Agent',
+    description: 'Documentation specialist',
+    instructions: 'Use documentation context only.',
+    effectiveInstructions: 'Use documentation context only.',
+    modelProviderName: 'gemini-api',
+    modelName: 'gemini-2.5-pro',
+    scopePath: '/docs',
+    sourcePaths: ['/docs/.agent.json'],
+    tools: [{ id: 'read_document', description: 'Read docs' }],
+    skills: [{ id: 'summarize', description: 'Summarize docs' }]
+};
+
 function createGeminiSseResponse(events: unknown[]) {
     const encoder = new TextEncoder();
     const chunks = events.map((event) => encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
@@ -286,6 +299,206 @@ describe('GeminiApiProvider', () => {
 
         const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
         expect(requestBody.tools).toEqual([{ googleSearch: {} }]);
+
+        vi.unstubAllGlobals();
+    });
+
+    it('declares native agent capability for AgentRuntime', () => {
+        const provider = new GeminiApiProvider({ apiKey: 'test-key' });
+        expect(provider.getAgentCapabilities()).toEqual({
+            nativeAgent: true,
+            toolLoop: 'application-managed'
+        });
+    });
+
+    it('builds native agent requests with system instructions and function declarations', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(
+            createGeminiSseResponse([
+                {
+                    candidates: [
+                        {
+                            content: {
+                                parts: [{ text: 'Agent 已响应' }]
+                            }
+                        }
+                    ]
+                }
+            ])
+        );
+        vi.stubGlobal('fetch', fetchMock);
+
+        const provider = new GeminiApiProvider({ apiKey: 'test-key' });
+        await provider.runAgent(
+            {
+                prompt: '请分析当前文档',
+                agent: scopedAgent,
+                modelOptions: { deep_research: true },
+                toolExchanges: [
+                    {
+                        modelTurn: {
+                            role: 'model',
+                            parts: [
+                                {
+                                    text: '前置思考',
+                                    thoughtSignature: 'sig-1'
+                                },
+                                {
+                                    functionCall: {
+                                        id: 'call-1',
+                                        name: 'read_document',
+                                        args: { path: '/docs/guide.md' }
+                                    }
+                                }
+                            ]
+                        },
+                        call: {
+                            id: 'call-1',
+                            name: 'read_document',
+                            arguments: { path: '/docs/guide.md' }
+                        },
+                        result: {
+                            toolCallId: 'call-1',
+                            name: 'read_document',
+                            result: '文档内容',
+                            isError: false
+                        }
+                    }
+                ]
+            },
+            () => undefined
+        );
+
+        const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+        expect(requestBody.systemInstruction.parts[0].text).toBe('Use documentation context only.');
+        expect(requestBody.contents.at(-2)).toEqual({
+            role: 'model',
+            parts: [
+                {
+                    text: '前置思考',
+                    thoughtSignature: 'sig-1'
+                },
+                {
+                    functionCall: {
+                        id: 'call-1',
+                        name: 'read_document',
+                        args: { path: '/docs/guide.md' }
+                    }
+                }
+            ]
+        });
+        expect(requestBody.contents.at(-1)).toEqual({
+            role: 'user',
+            parts: [
+                {
+                    functionResponse: {
+                        id: 'call-1',
+                        name: 'read_document',
+                        response: {
+                            result: '文档内容',
+                            isError: false
+                        }
+                    }
+                }
+            ]
+        });
+        expect(requestBody.tools).toEqual([
+            { googleSearch: {} },
+            {
+                functionDeclarations: [
+                    {
+                        name: 'read_document',
+                        description: 'Read docs',
+                        parameters: {
+                            type: 'OBJECT',
+                            properties: {}
+                        }
+                    }
+                ]
+            }
+        ]);
+        expect(requestBody.toolConfig).toEqual({
+            functionCallingConfig: {
+                mode: 'AUTO'
+            }
+        });
+
+        vi.unstubAllGlobals();
+    });
+
+    it('returns tool calls from the native agent SSE stream while preserving text updates', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(
+            createGeminiSseResponse([
+                {
+                    candidates: [
+                        {
+                            content: {
+                                parts: [
+                                    {
+                                        text: '前置思考',
+                                        thoughtSignature: 'sig-1'
+                                    },
+                                    {
+                                        functionCall: {
+                                            name: 'read_document',
+                                            args: { path: '/docs/guide.md' },
+                                            id: 'call-1'
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    candidates: [
+                        {
+                            content: {
+                                parts: [{ text: '最终答案' }]
+                            }
+                        }
+                    ]
+                }
+            ])
+        );
+        vi.stubGlobal('fetch', fetchMock);
+
+        const provider = new GeminiApiProvider({ apiKey: 'test-key' });
+        const updates: Array<{ text: string; toolCalls?: unknown[] }> = [];
+        const result = await provider.runAgent(
+            {
+                prompt: '请分析当前文档',
+                agent: scopedAgent
+            },
+            (update) => updates.push(update)
+        );
+
+        expect(updates[0]).toEqual({
+            text: '前置思考',
+            toolCalls: [
+                {
+                    id: 'call-1',
+                    name: 'read_document',
+                    arguments: { path: '/docs/guide.md' }
+                }
+            ]
+        });
+        expect(updates[1]).toEqual({ text: '前置思考最终答案', toolCalls: undefined });
+        expect(result.toolCalls).toEqual([
+            {
+                id: 'call-1',
+                name: 'read_document',
+                arguments: { path: '/docs/guide.md' }
+            }
+        ]);
+        expect(result.modelTurn).toEqual({
+            role: 'model',
+            parts: [
+                {
+                    text: '最终答案'
+                }
+            ]
+        });
+        expect(result.text).toBe('前置思考最终答案');
 
         vi.unstubAllGlobals();
     });

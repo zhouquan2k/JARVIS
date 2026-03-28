@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import type { Conversation, ConversationHistorySummary, IHistoryProvider, IModelProvider, IStorageProvider, ResolvedAgentConfig } from '@packages/core/src';
 import type { ProviderConfig } from '@packages/core/config';
@@ -636,6 +636,67 @@ describe('useChatStore workspace history flow', () => {
         expect(provider.promptsUsed[1]).toBe('第二条消息');
     });
 
+    it('passes the current agent context into AgentRuntime when available', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        const run = vi.fn(async (_request: Record<string, unknown>, onUpdate: (update: { text: string }) => void) => {
+            onUpdate({ text: 'agent-runtime:done' });
+            return {
+                text: 'agent-runtime:done',
+                conversationId: 'runtime-conversation',
+                messageId: 'runtime-message'
+            };
+        });
+        store.setProviders(provider, storage);
+        store.setAgentRuntime({
+            run,
+            abort: vi.fn()
+        });
+        store.setModelProviderResolver((providerId: string) => {
+            provider.id = providerId;
+            return provider;
+        });
+        store.setProviderModelsResolver(async (providerId: string) => {
+            if (providerId === 'other-provider') {
+                return {
+                    models: [{ id: 'other-dynamic', name: 'Other Dynamic' }],
+                    defaultModel: 'other-dynamic'
+                };
+            }
+
+            return {
+                models: [{ id: 'dynamic-model', name: 'Dynamic Model', options: chatgptOptionDefinitions }],
+                defaultModel: 'dynamic-model'
+            };
+        });
+
+        await store.initializeProviderCatalog(providerCatalog);
+        store.setActiveAgentContext({
+            ...scopedAgent,
+            modelProviderName: 'other-provider',
+            modelName: 'other-dynamic'
+        });
+
+        await store.sendMessage('让 runtime 发送');
+
+        expect(provider.promptsUsed).toHaveLength(0);
+        expect(run).toHaveBeenCalledTimes(1);
+        expect(run.mock.calls[0]?.[0]).toMatchObject({
+            prompt: '让 runtime 发送',
+            agent: expect.objectContaining({
+                name: 'Docs Agent',
+                modelProviderName: 'other-provider',
+                modelName: 'other-dynamic'
+            }),
+            providerId: 'other-provider',
+            modelId: 'other-dynamic',
+            modelOptions: {}
+        });
+        expect(store.currentConversation?.messages[1]?.content).toBe('agent-runtime:done');
+        expect(store.currentConversation?.backendId).toBe('runtime-conversation');
+    });
+
     it('prioritizes the agent-specified provider and model during send', async () => {
         const defaultProvider = new MockModelProvider();
         const agentProvider = new MockModelProvider();
@@ -867,6 +928,40 @@ describe('useChatStore workspace history flow', () => {
             content: '需要修改的提问'
         });
         expect((await storage.getAllConversations())).toHaveLength(1);
+    });
+
+    it('delegates aborts to AgentRuntime when the runtime is active', async () => {
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        const abort = vi.fn();
+        let rejectPending: ((reason?: unknown) => void) | null = null;
+
+        store.setProviders(new MockModelProvider(), storage);
+        store.setAgentRuntime({
+            run: vi.fn(async (_request, onUpdate) => {
+                onUpdate({ text: 'runtime-streaming' });
+                await new Promise<never>((_, reject) => {
+                    rejectPending = reject;
+                });
+                throw new Error('unreachable');
+            }),
+            abort
+        });
+        await store.initializeProviderCatalog(providerCatalog);
+        await store.startNewConversation();
+
+        store.setDraftPrompt('runtime abort');
+        const pending = store.sendDraft();
+
+        store.abortGeneration();
+        const abortError = new Error('Aborted');
+        abortError.name = 'AbortError';
+        rejectPending?.(abortError);
+        await pending;
+
+        expect(abort).toHaveBeenCalledTimes(1);
+        expect(store.draftPrompt).toBe('runtime abort');
+        expect(store.currentError).toBeNull();
     });
 
     it('falls back to the next local conversation after deleting the active history item', async () => {

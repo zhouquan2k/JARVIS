@@ -6,6 +6,10 @@ import { reactive, ref } from 'vue';
 
 const mockOpenConversationImportDialog = vi.fn();
 const mockSetRuntime = vi.fn().mockResolvedValue(undefined);
+const mockAgentRuntime = {
+    run: vi.fn(),
+    abort: vi.fn()
+};
 const mockProviderRuntime = {
     getProviderCatalog: vi.fn(() => [
         { id: 'chatgpt-web', name: 'ChatGPT (Web)' }
@@ -27,6 +31,7 @@ const chatStore = reactive({
     currentModelId: 'gpt-4o',
     currentError: null as string | null,
     setProviderCatalog: vi.fn(),
+    setAgentRuntime: vi.fn(),
     setModelProviderResolver: vi.fn(),
     setProviderModelsResolver: vi.fn(),
     setProviders: vi.fn(),
@@ -89,7 +94,8 @@ vi.mock('@packages/ui', () => ({
 
 vi.mock('./providerRuntime', () => ({
     createDesktopHistoryProviders: vi.fn(() => []),
-    providerRuntime: mockProviderRuntime
+    providerRuntime: mockProviderRuntime,
+    agentRuntime: mockAgentRuntime
 }));
 
 vi.mock('./sync', () => ({

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import {
     buildAgentPromptEnvelope,
+    type AgentRuntime,
     cloneConversation,
     type Conversation,
     type ConversationModelSelection,
@@ -38,6 +39,7 @@ export interface QuestionIndexItem {
 }
 
 export interface ChatState {
+    agentRuntime: AgentRuntime | null;
     modelProvider: IModelProvider | null;
     modelProviderResolver: ((providerId: string) => IModelProvider) | null;
     providerModelsResolver: ((providerId: string) => Promise<ProviderModelCatalog>) | null;
@@ -408,6 +410,7 @@ function formatHistoryError(error: unknown): string {
 
 export const useChatStore = defineStore('chat', {
     state: (): ChatState => ({
+        agentRuntime: null,
         modelProvider: null,
         modelProviderResolver: null,
         providerModelsResolver: null,
@@ -621,6 +624,10 @@ export const useChatStore = defineStore('chat', {
 
         setExternalFileImportHandler(handler: ExternalFileImportHandler | null) {
             this.externalFileImportHandler = handler ? markRaw(handler) : null;
+        },
+
+        setAgentRuntime(agentRuntime: AgentRuntime | null) {
+            this.agentRuntime = agentRuntime ? markRaw(agentRuntime) : null;
         },
 
         setModelProviderResolver(resolver: (providerId: string) => IModelProvider) {
@@ -1273,27 +1280,41 @@ export const useChatStore = defineStore('chat', {
                 this.currentConversation!.origin = this.currentConversation!.origin || 'local';
                 const backendId = this.currentConversation!.backendId;
                 this.syncCurrentConversationModelSelection();
-                const promptToSend = this.activeAgentContext
-                    ? buildAgentPromptEnvelope(this.activeAgentContext, trimmedPrompt)
-                    : trimmedPrompt;
-
-                const result = await sendTarget.provider.sendMessage(
-                    promptToSend,
-                    {
-                        context: { conversationId: backendId },
-                        modelId: sendTarget.modelId,
-                        attachments: pendingAttachments,
-                        history,
-                        modelOptions: cloneModelOptions(sendTarget.modelOptions)
-                    },
-                    (update) => {
-                        const lastMsg = this.currentConversation!.messages[this.currentConversation!.messages.length - 1];
-                        if (lastMsg.role === 'assistant') {
-                            lastMsg.content = update.text;
-                            lastMsg.annotations = update.annotations;
-                        }
+                const onUpdate = (update: { text: string, annotations?: ConversationMessage['annotations'] }) => {
+                    const lastMsg = this.currentConversation!.messages[this.currentConversation!.messages.length - 1];
+                    if (lastMsg.role === 'assistant') {
+                        lastMsg.content = update.text;
+                        lastMsg.annotations = update.annotations;
                     }
-                );
+                };
+
+                const result = this.agentRuntime
+                    ? await this.agentRuntime.run(
+                        {
+                            prompt: trimmedPrompt,
+                            agent: this.activeAgentContext,
+                            providerId: sendTarget.providerId,
+                            modelId: sendTarget.modelId,
+                            attachments: pendingAttachments,
+                            history,
+                            modelOptions: cloneModelOptions(sendTarget.modelOptions),
+                            context: { conversationId: backendId }
+                        },
+                        onUpdate
+                    )
+                    : await sendTarget.provider.sendMessage(
+                        this.activeAgentContext
+                            ? buildAgentPromptEnvelope(this.activeAgentContext, trimmedPrompt)
+                            : trimmedPrompt,
+                        {
+                            context: { conversationId: backendId },
+                            modelId: sendTarget.modelId,
+                            attachments: pendingAttachments,
+                            history,
+                            modelOptions: cloneModelOptions(sendTarget.modelOptions)
+                        },
+                        onUpdate
+                    );
 
                 this.currentConversation!.backendId = result.conversationId;
                 const lastMsg = this.currentConversation!.messages[this.currentConversation!.messages.length - 1];
@@ -1392,9 +1413,13 @@ export const useChatStore = defineStore('chat', {
         },
 
         abortGeneration() {
-            const provider = this.resolveModelProvider(this.activeAgentContext?.modelProviderName?.trim() || this.currentProviderId);
-            if (provider) {
-                provider.abort();
+            if (this.agentRuntime) {
+                this.agentRuntime.abort();
+            } else {
+                const provider = this.resolveModelProvider(this.activeAgentContext?.modelProviderName?.trim() || this.currentProviderId);
+                if (provider) {
+                    provider.abort();
+                }
             }
             this.isAbortRequested = true;
             this.isGenerating = false;

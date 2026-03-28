@@ -1,5 +1,6 @@
 export * from '../config';
 export * from './interfaces/IModelProvider';
+export * from './interfaces/IAgentCapableProvider';
 export * from './interfaces/IHistoryProvider';
 export * from './interfaces/IConversationStorageProvider';
 export * from './interfaces/IStorageProvider';
@@ -17,6 +18,7 @@ export * from './providers/IndexedDBStorageProvider';
 export * from './providers/StorageBackedContextProvider';
 export * from './providers/SyncStorageProvider';
 export * from './runtime/types';
+export * from './runtime/createAgentRuntime';
 export * from './runtime/createProviderRuntime';
 export * from './analysis/types';
 export * from './analysis/ComparisonAnalyzer';

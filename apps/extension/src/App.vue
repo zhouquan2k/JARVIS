@@ -38,7 +38,7 @@ import {
 import { type SyncStorageProvider } from '@packages/core/src';
 import { currentRoute, navigateTo } from './router';
 import { createExtensionContextProvider } from './context/createExtensionContextProvider';
-import { createExtensionHistoryProviders, providerRuntime } from './providerRuntime';
+import { agentRuntime, createExtensionHistoryProviders, providerRuntime } from './providerRuntime';
 import { loadLatestCompareConversation, saveCompareConversation } from './persistence/saveCompareConversation';
 import { createExtensionSyncStorageProvider } from './sync';
 
@@ -86,6 +86,7 @@ onMounted(() => {
         return;
       }
 
+      chatStore.setAgentRuntime(agentRuntime);
       storageProvider = createExtensionSyncStorageProvider({
         storage: typeof localStorage !== 'undefined' ? localStorage : undefined,
         env: import.meta.env as Record<string, string | undefined>,

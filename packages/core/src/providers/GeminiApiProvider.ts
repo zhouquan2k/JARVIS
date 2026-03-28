@@ -1,4 +1,13 @@
 import { APP_CONFIG, type ModelConfig, type ProviderModelCatalog } from '../../config';
+import type {
+    AgentCapabilities,
+    AgentModelTurn,
+    AgentRunRequest,
+    AgentResponsePart,
+    AgentToolCall,
+    IAgentCapableProvider
+} from '../interfaces/IAgentCapableProvider';
+import type { AgentToolBinding } from '../interfaces/IAgentConfig';
 import type { MessageAttachment } from '../interfaces/IStorageProvider';
 import {
     IModelProvider,
@@ -18,6 +27,40 @@ type GeminiModelListItem = {
 type GeminiModelListResponse = {
     models?: GeminiModelListItem[];
     nextPageToken?: string;
+};
+
+type GeminiRequestPart = {
+    text?: string;
+    thoughtSignature?: string;
+    inlineData?: {
+        mimeType: string;
+        data: string;
+    };
+    functionCall?: {
+        id?: string;
+        name: string;
+        args: Record<string, unknown> | string;
+    };
+    functionResponse?: {
+        id?: string;
+        name: string;
+        response: Record<string, unknown>;
+    };
+};
+
+type GeminiRequestContent = {
+    role: 'user' | 'model';
+    parts: GeminiRequestPart[];
+};
+
+type GeminiResponsePart = {
+    text?: string;
+    thoughtSignature?: string;
+    functionCall?: {
+        name?: string;
+        args?: Record<string, unknown> | string;
+        id?: string;
+    };
 };
 
 function getGeminiModelCatalog(): ProviderModelCatalog {
@@ -152,11 +195,11 @@ function buildGeminiPartFromAttachment(attachment: MessageAttachment) {
             mimeType: resolveGeminiInlineMimeType(attachment),
             data: stripDataUriPrefix(attachment.base64Data) || ''
         }
-    };
+    } satisfies GeminiRequestPart;
 }
 
 function buildGeminiParts(prompt: string, attachments: MessageAttachment[]) {
-    const parts: Array<{ text: string } | ReturnType<typeof buildGeminiPartFromAttachment>> = [];
+    const parts: GeminiRequestPart[] = [];
     if (prompt) {
         parts.push({ text: prompt });
     }
@@ -175,7 +218,7 @@ function mapConversationRoleToGeminiRole(role: ProviderContextMessage['role']): 
 }
 
 function buildGeminiContents(prompt: string, options: SendMessageOptions) {
-    const history = (options.history || []).map((message) => ({
+    const history: GeminiRequestContent[] = (options.history || []).map((message) => ({
         role: mapConversationRoleToGeminiRole(message.role),
         parts: buildGeminiParts(message.content, message.attachments || [])
     }));
@@ -189,7 +232,175 @@ function buildGeminiContents(prompt: string, options: SendMessageOptions) {
     ];
 }
 
-export class GeminiApiProvider implements IModelProvider {
+function buildGeminiFunctionDeclarations(tools?: AgentToolBinding[]) {
+    if (!tools?.length) {
+        return [];
+    }
+
+    return tools.map((tool) => ({
+        name: tool.id,
+        description: tool.description || `${tool.id} tool`,
+        parameters: {
+            type: 'OBJECT',
+            properties: {}
+        }
+    }));
+}
+
+function buildGeminiAgentContents(request: AgentRunRequest) {
+    const contents = buildGeminiContents(request.prompt, {
+        history: request.history,
+        attachments: request.attachments
+    });
+
+    request.toolExchanges?.forEach((exchange) => {
+        contents.push({
+            role: 'model' as const,
+            parts: exchange.modelTurn.parts.map((part) => ({
+                text: part.text,
+                thoughtSignature: part.thoughtSignature,
+                functionCall: part.functionCall
+                    ? {
+                        id: part.functionCall.id,
+                        name: part.functionCall.name,
+                        args: part.functionCall.args
+                    }
+                    : undefined
+            }))
+        });
+        contents.push({
+            role: 'user' as const,
+            parts: [
+                {
+                    functionResponse: {
+                        id: exchange.call.id,
+                        name: exchange.result.name,
+                        response: {
+                            result: exchange.result.result,
+                            isError: exchange.result.isError === true
+                        }
+                    }
+                }
+            ]
+        });
+    });
+
+    return contents;
+}
+
+function buildGeminiSystemInstruction(request: AgentRunRequest): string {
+    return request.agent.effectiveInstructions;
+}
+
+function buildGeminiRequestTools(input: { modelOptions?: Record<string, boolean>, tools?: AgentToolBinding[] }) {
+    const declaredTools: Array<Record<string, unknown>> = [];
+
+    if (input.modelOptions?.deep_research === true) {
+        declaredTools.push({ googleSearch: {} });
+    }
+
+    const functionDeclarations = buildGeminiFunctionDeclarations(input.tools);
+    if (functionDeclarations.length > 0) {
+        declaredTools.push({ functionDeclarations });
+    }
+
+    return declaredTools;
+}
+
+async function parseGeminiSse(
+    response: Response,
+    onUpdate: (update: ProviderStreamUpdate) => void
+): Promise<Pick<ProviderSendResult, 'text' | 'toolCalls'> & { modelTurn?: AgentModelTurn }> {
+    const reader = response.body?.getReader();
+    if (!reader) {
+        throw new Error('No response body stream available');
+    }
+
+    const decoder = new TextDecoder('utf-8');
+    let fullText = '';
+    let buffer = '';
+    let latestToolCalls: AgentToolCall[] | undefined;
+    let latestModelTurn: AgentModelTurn | undefined;
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split(/\r?\n\r?\n/);
+        buffer = parts.pop() || '';
+
+        for (const part of parts) {
+            if (part.trim() === '' || !part.startsWith('data: ')) {
+                continue;
+            }
+
+            const dataStr = part.substring(6).trim();
+
+            try {
+                const data = JSON.parse(dataStr);
+                const contentParts = data?.candidates?.[0]?.content?.parts as GeminiResponsePart[] | undefined;
+                if (!contentParts?.length) {
+                    continue;
+                }
+
+                latestModelTurn = {
+                    role: 'model',
+                    parts: contentParts.map((contentPart) => ({
+                        text: contentPart.text,
+                        thoughtSignature: contentPart.thoughtSignature,
+                        functionCall: contentPart.functionCall?.name
+                            ? {
+                                id: contentPart.functionCall.id,
+                                name: contentPart.functionCall.name,
+                                args: contentPart.functionCall.args || {}
+                            }
+                            : undefined
+                    } satisfies AgentResponsePart))
+                };
+
+                const toolCalls: AgentToolCall[] = [];
+                let hasTextDelta = false;
+
+                contentParts.forEach((contentPart, index) => {
+                    if (contentPart.text) {
+                        fullText += contentPart.text;
+                        hasTextDelta = true;
+                    }
+
+                    if (contentPart.functionCall?.name) {
+                        toolCalls.push({
+                            id: contentPart.functionCall.id || `${contentPart.functionCall.name}-${index}-${toolCalls.length}`,
+                            name: contentPart.functionCall.name,
+                            arguments: contentPart.functionCall.args || {}
+                        });
+                    }
+                });
+
+                if (toolCalls.length > 0) {
+                    latestToolCalls = toolCalls;
+                }
+
+                if (hasTextDelta || toolCalls.length > 0) {
+                    onUpdate({
+                        text: fullText,
+                        toolCalls: toolCalls.length > 0 ? toolCalls : undefined
+                    });
+                }
+            } catch (error) {
+                console.warn('Error parsing SSE data line', dataStr, error);
+            }
+        }
+    }
+
+    return {
+        text: fullText,
+        toolCalls: latestToolCalls,
+        modelTurn: latestModelTurn
+    };
+}
+
+export class GeminiApiProvider implements IAgentCapableProvider {
     public id = 'gemini-api';
     private abortController: AbortController | null = null;
     private apiKey?: string;
@@ -294,8 +505,11 @@ export class GeminiApiProvider implements IModelProvider {
             contents: buildGeminiContents(prompt, options)
         };
 
-        if (options.modelOptions?.deep_research === true) {
-            payload.tools = [{ googleSearch: {} }];
+        const requestTools = buildGeminiRequestTools({
+            modelOptions: options.modelOptions
+        });
+        if (requestTools.length > 0) {
+            payload.tools = requestTools;
         }
 
         const response = await fetch(url, {
@@ -312,56 +526,90 @@ export class GeminiApiProvider implements IModelProvider {
             throw new Error(`Gemini API request failed: ${response.status} ${response.statusText} - ${err}`);
         }
 
-        const reader = response.body?.getReader();
-        if (!reader) throw new Error('No response body stream available');
-
-        const decoder = new TextDecoder('utf-8');
-        let fullText = '';
-        let buffer = '';
-
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-
-            // Note: Google's SSE format for Gemini separated chunks.
-            const parts = buffer.split(/\r?\n\r?\n/);
-            buffer = parts.pop() || '';
-
-            for (const part of parts) {
-                if (part.trim() === '') continue;
-                if (!part.startsWith('data: ')) continue;
-
-                const dataStr = part.substring(6).trim();
-
-                try {
-                    const data = JSON.parse(dataStr);
-                    const contents = data?.candidates?.[0]?.content?.parts;
-                    if (contents && contents.length > 0) {
-                        const chunkText = contents[0].text;
-                        if (chunkText) {
-                            fullText += chunkText;
-                            onUpdate({ text: fullText });
-                        }
-                    }
-                } catch (e) {
-                    // Ignore parse errors on incomplete chunks or specific markers
-                    console.warn('Error parsing SSE data line', dataStr, e);
-                }
-            }
-        }
+        const streamResult = await parseGeminiSse(response, onUpdate);
 
         this.abortController = null;
 
-        // Use provided ids or generate simple ones since Gemini API doesn't return them by default 
         const conversationId = options.context?.conversationId || crypto.randomUUID();
         const messageId = crypto.randomUUID();
 
         return {
-            text: fullText,
+            text: streamResult.text,
             conversationId,
-            messageId
+            messageId,
+            toolCalls: streamResult.toolCalls
+        };
+    }
+
+    getAgentCapabilities(): AgentCapabilities {
+        return {
+            nativeAgent: true,
+            toolLoop: 'application-managed'
+        };
+    }
+
+    async runAgent(
+        request: AgentRunRequest,
+        onUpdate: (update: ProviderStreamUpdate) => void
+    ): Promise<ProviderSendResult> {
+        const apiKey = this.resolveApiKey();
+        if (!apiKey) {
+            throw new Error('No Gemini API Key found in environment variables');
+        }
+
+        const modelId = request.modelId || request.agent.modelName?.trim() || 'gemini-2.5-flash';
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:streamGenerateContent?alt=sse&key=${apiKey}`;
+
+        this.abortController = new AbortController();
+
+        const payload: Record<string, unknown> = {
+            systemInstruction: {
+                parts: [{ text: buildGeminiSystemInstruction(request) }]
+            },
+            contents: buildGeminiAgentContents(request)
+        };
+
+        const requestTools = buildGeminiRequestTools({
+            modelOptions: request.modelOptions,
+            tools: request.agent.tools
+        });
+        if (requestTools.length > 0) {
+            payload.tools = requestTools;
+        }
+
+        const functionDeclarations = buildGeminiFunctionDeclarations(request.agent.tools);
+        if (functionDeclarations.length > 0) {
+            payload.toolConfig = {
+                functionCallingConfig: {
+                    mode: 'AUTO'
+                }
+            };
+        }
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+            signal: this.abortController.signal
+        });
+
+        if (!response.ok) {
+            const err = await response.text();
+            throw new Error(`Gemini API request failed: ${response.status} ${response.statusText} - ${err}`);
+        }
+
+        const streamResult = await parseGeminiSse(response, onUpdate);
+
+        this.abortController = null;
+
+        return {
+            text: streamResult.text,
+            conversationId: request.context?.conversationId || crypto.randomUUID(),
+            messageId: crypto.randomUUID(),
+            toolCalls: streamResult.toolCalls,
+            modelTurn: streamResult.modelTurn
         };
     }
 

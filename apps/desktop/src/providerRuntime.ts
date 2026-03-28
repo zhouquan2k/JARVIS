@@ -1,4 +1,5 @@
 import {
+    createAgentRuntime,
     createProviderRuntime,
     type ExternalHistoryProviderEntry,
     type ExternalHistoryProviderId,
@@ -27,6 +28,10 @@ const useMockRuntime = import.meta.env.VITE_DESKTOP_USE_MOCK_RUNTIME === '1';
 export const providerRuntime = useMockRuntime
     ? createMockRuntime()
     : createDesktopProxyRuntime();
+
+export const agentRuntime = createAgentRuntime({
+    providerRuntime
+});
 
 export function createDesktopHistoryProvider(
     providerId: Exclude<ExternalHistoryProviderId, 'external-file'> = 'chatgpt-web'

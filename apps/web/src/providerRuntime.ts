@@ -1,4 +1,5 @@
 import {
+  createAgentRuntime,
   createProviderRuntime,
   type ExternalHistoryProviderEntry,
   type ExternalHistoryProviderId,
@@ -17,6 +18,10 @@ export const providerRuntime = useMockRuntime
         geminiApiKey: import.meta.env.VITE_LLM_API_KEY
       }
     });
+
+export const agentRuntime = createAgentRuntime({
+  providerRuntime
+});
 
 export function createWebHistoryProvider(providerId: Exclude<ExternalHistoryProviderId, 'external-file'> = 'chatgpt-web'): IHistoryProvider {
   if (useMockRuntime) {

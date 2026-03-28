@@ -1,4 +1,5 @@
 import {
+    createAgentRuntime,
     createProviderRuntime,
     type ExternalHistoryProviderEntry,
     type ExternalHistoryProviderId,
@@ -25,6 +26,10 @@ export function createExtensionProxyRuntime(): ProviderRuntime {
 const useMockRuntime = import.meta.env.WXT_E2E === '1';
 
 export const providerRuntime = createExtensionProxyRuntime();
+
+export const agentRuntime = createAgentRuntime({
+    providerRuntime
+});
 
 export function createExtensionHistoryProvider(providerId: Exclude<ExternalHistoryProviderId, 'external-file'> = 'chatgpt-web'): IHistoryProvider {
     if (useMockRuntime) {

@@ -1,4 +1,5 @@
 import type { ProviderModelCatalog } from '../../config';
+import type { AgentModelTurn, AgentToolCall } from './IAgentCapableProvider';
 import type { ConversationRole, MessageAnnotation, MessageAttachment } from './IStorageProvider';
 
 export interface ProviderContextMessage {
@@ -18,6 +19,7 @@ export interface SendMessageOptions {
 export interface ProviderStreamUpdate {
   text: string;
   annotations?: MessageAnnotation[];
+  toolCalls?: AgentToolCall[];
 }
 
 export interface ProviderSendResult {
@@ -25,6 +27,8 @@ export interface ProviderSendResult {
   conversationId: string;
   messageId: string;
   annotations?: MessageAnnotation[];
+  toolCalls?: AgentToolCall[];
+  modelTurn?: AgentModelTurn;
 }
 
 export interface IModelProvider {

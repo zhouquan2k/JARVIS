@@ -37,7 +37,7 @@ import {
 } from '@packages/ui';
 import { currentRoute, navigateTo } from './router';
 import { createWebContextProvider } from './context/createWebContextProvider';
-import { createWebHistoryProviders, providerRuntime } from './providerRuntime';
+import { agentRuntime, createWebHistoryProviders, providerRuntime } from './providerRuntime';
 import { createWebSyncStorageProvider } from './sync';
 
 const chatStore = useChatStore();
@@ -70,6 +70,7 @@ onMounted(() => {
         return;
       }
 
+      chatStore.setAgentRuntime(agentRuntime);
       const syncStorageProvider = createWebSyncStorageProvider({
         storage: typeof localStorage !== 'undefined' ? localStorage : undefined,
         env: import.meta.env as Record<string, string | undefined>,
