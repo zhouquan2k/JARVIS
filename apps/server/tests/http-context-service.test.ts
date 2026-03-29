@@ -15,6 +15,7 @@ function createProvider(): ContextProvider {
             kind: input.kind,
             parentPath: input.parentPath
         })),
+        searchInScope: vi.fn(async () => [{ path: '/welcome.md', line: 1, column: 3, preview: '# hello' }]),
         resolveScopedAgentConfig: vi.fn(async (targetPath: string) => ({
             name: 'Default Knowledge Agent',
             scopePath: '/',
@@ -46,6 +47,13 @@ describe('http context service', () => {
             name: 'draft.md',
             kind: 'file'
         });
+        await expect(service.searchInScope({
+            query: 'hello',
+            scopePath: '/',
+            maxResults: 5
+        })).resolves.toEqual([
+            { path: '/welcome.md', line: 1, column: 3, preview: '# hello' }
+        ]);
         await expect(service.resolveScopedAgentConfig('/notes/draft.md')).resolves.toMatchObject({
             name: 'Default Knowledge Agent',
             scopePath: '/'
@@ -59,6 +67,11 @@ describe('http context service', () => {
             parentPath: '/notes',
             name: 'draft.md',
             kind: 'file'
+        });
+        expect(provider.searchInScope).toHaveBeenCalledWith({
+            query: 'hello',
+            scopePath: '/',
+            maxResults: 5
         });
         expect(provider.resolveScopedAgentConfig).toHaveBeenCalledWith('/notes/draft.md');
     });

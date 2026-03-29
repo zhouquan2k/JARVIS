@@ -167,6 +167,7 @@ describe('context api', () => {
                 name: input.name,
                 kind: input.kind
             })),
+            searchInScope: vi.fn(async () => []),
             resolveScopedAgentConfig: vi.fn(async (targetPath: string) => ({
                 name: 'Injected Agent',
                 scopePath: targetPath,

@@ -608,7 +608,7 @@ describe('useChatStore workspace history flow', () => {
         });
     });
 
-    it('injects the scoped agent prompt envelope only when an active agent context is present', async () => {
+    it('injects only the active file context when an active agent context is present', async () => {
         const provider = new MockModelProvider();
         const storage = new MockStorageProvider([]);
         const store = useChatStore();
@@ -620,14 +620,21 @@ describe('useChatStore workspace history flow', () => {
             modelProviderName: undefined,
             modelName: undefined
         });
+        store.setWorkspaceContext({
+            activePath: '/docs/guide.md',
+            activeDocument: {
+                path: '/docs/guide.md',
+                content: '# Guide'
+            },
+            contextProvider: null
+        });
         await store.sendMessage('请分析当前文档');
 
-        expect(provider.promptsUsed[0]).toContain('[[Scoped Agent Context]]');
-        expect(provider.promptsUsed[0]).toContain('Name: Docs Agent');
-        expect(provider.promptsUsed[0]).toContain('Scope Path: /docs');
-        expect(provider.promptsUsed[0]).toContain('Model Provider: inherit-current-selection');
-        expect(provider.promptsUsed[0]).toContain('Model Name: inherit-current-selection');
+        expect(provider.promptsUsed[0]).toContain('[[Active File Context]]');
+        expect(provider.promptsUsed[0]).toContain('Path: /docs/guide.md');
+        expect(provider.promptsUsed[0]).toContain('# Guide');
         expect(provider.promptsUsed[0]).toContain('[[User Prompt]]\n请分析当前文档');
+        expect(provider.promptsUsed[0]).not.toContain('Allowed Tools:');
         expect(store.currentConversation?.messages[0]?.content).toBe('请分析当前文档');
 
         store.setActiveAgentContext(null);
@@ -677,6 +684,24 @@ describe('useChatStore workspace history flow', () => {
             modelProviderName: 'other-provider',
             modelName: 'other-dynamic'
         });
+        store.setWorkspaceContext({
+            activePath: '/docs/guide.md',
+            activeDocument: {
+                path: '/docs/guide.md',
+                content: '# Guide'
+            },
+            contextProvider: {
+                id: 'workspace-context',
+                initializeAccess: vi.fn(async () => undefined),
+                listTree: vi.fn(async () => []),
+                readDocument: vi.fn(async (path: string) => ({ path, content: '# Guide' })),
+                writeDocument: vi.fn(async () => undefined),
+                createNode: vi.fn(async () => ({ path: '/docs/draft.md', name: 'draft.md', kind: 'file' as const })),
+                searchInScope: vi.fn(async () => []),
+                resolveScopedAgentConfig: vi.fn(async () => scopedAgent)
+            },
+            onFileChanged: vi.fn(async () => undefined)
+        });
 
         await store.sendMessage('让 runtime 发送');
 
@@ -689,6 +714,15 @@ describe('useChatStore workspace history flow', () => {
                 modelProviderName: 'other-provider',
                 modelName: 'other-dynamic'
             }),
+            workspace: {
+                activePath: '/docs/guide.md',
+                activeDocument: {
+                    path: '/docs/guide.md',
+                    content: '# Guide'
+                },
+                contextProvider: expect.objectContaining({ id: 'workspace-context' }),
+                onFileChanged: expect.any(Function)
+            },
             providerId: 'other-provider',
             modelId: 'other-dynamic',
             modelOptions: {}
@@ -736,7 +770,7 @@ describe('useChatStore workspace history flow', () => {
         await store.sendMessage('用 Agent 指定模型发送');
 
         expect(defaultProvider.promptsUsed).toHaveLength(0);
-        expect(agentProvider.promptsUsed[0]).toContain('Name: Docs Agent');
+        expect(agentProvider.promptsUsed[0]).toBe('用 Agent 指定模型发送');
         expect(agentProvider.optionsUsed[0]).toMatchObject({
             modelId: 'other-dynamic',
             modelOptions: {}

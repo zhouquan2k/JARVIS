@@ -7,19 +7,7 @@
             正在加载对话内容...
           </div>
 
-          <div v-if="displayConversation" class="conversation-header">
-            <h2>{{ displayConversation.title || 'Untitled' }}</h2>
-            <span class="source-chip">
-              {{ isPreviewing ? '导入预览' : '会话' }}
-            </span>
-          </div>
-
-          <div v-if="!displayConversation" class="empty-state" data-testid="normal-empty">
-            <h3>从左侧选择一条历史，或者开始一段新聊天。</h3>
-            <p>支持拖拽、文件选择和剪贴板图片粘贴；外部历史会先以只读方式预览，再决定是否导入。</p>
-          </div>
-
-          <template v-else>
+          <template v-if="displayConversation">
             <TransitionGroup name="thread-message" tag="div" class="message-list">
               <div
                 v-for="msg in renderedMessages"
@@ -81,7 +69,11 @@
     >
       <template v-if="!isPreviewing">
         <div class="toolbar-stack">
-          <div class="selector-row">
+          <div
+            v-if="!isTopToolbarCollapsed"
+            class="selector-row"
+            data-testid="selector-row"
+          >
             <AttachmentComposer
               :attachments="chatStore.draftAttachments"
               :disabled="isInputDisabled"
@@ -132,12 +124,38 @@
             ref="inputRef"
             data-testid="normal-input"
             v-model="draftPrompt"
+            @input="syncInputHeight"
             @paste="onPaste"
             @keydown="onInputKeydown"
             placeholder="输入内容，按 Enter 换行，Ctrl/Cmd + Enter 发送"
             :disabled="isInputDisabled"
           />
           <div class="input-actions">
+            <div v-if="!chatStore.isGenerating" class="secondary-actions" data-testid="secondary-actions">
+              <button
+                v-if="isAgentMode"
+                type="button"
+                class="toolbar-collapse-toggle"
+                :aria-expanded="String(!isTopToolbarCollapsed)"
+                :aria-label="isTopToolbarCollapsed ? '展开顶部工具栏' : '折叠顶部工具栏'"
+                :title="isTopToolbarCollapsed ? '展开选项' : '折叠选项'"
+                data-testid="toolbar-collapse-toggle"
+                @click="toggleTopToolbarCollapsed"
+              >
+                <PanelTopOpen class="action-icon" :size="16" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                class="secondary-action-btn"
+                data-testid="normal-new-chat"
+                title="新建聊天"
+                aria-label="新建聊天"
+                :disabled="isInputDisabled"
+                @click="startNewChat"
+              >
+                <SquarePen class="action-icon" :size="16" aria-hidden="true" />
+              </button>
+            </div>
             <button
               v-if="!chatStore.isGenerating"
               data-testid="normal-send"
@@ -146,20 +164,7 @@
               @click="send()"
               :disabled="(!draftPrompt.trim() && chatStore.draftAttachments.length === 0) || isInputDisabled"
             >
-              <svg
-                class="send-icon"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              >
-                <path
-                  d="M12 5L12 16M12 5L7.5 9.5M12 5L16.5 9.5"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2.2"
-                />
-              </svg>
+              <ArrowUp class="send-icon" :size="17" aria-hidden="true" />
             </button>
             <button
               v-else
@@ -204,7 +209,8 @@
 
 <script setup lang="ts">
 import type { ConversationMessage } from '@packages/core/src';
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, ref, watch, type PropType } from 'vue';
+import { ArrowUp, PanelTopOpen, SquarePen } from 'lucide-vue-next';
 import AttachmentComposer from '../components/AttachmentComposer.vue';
 import MarkdownContent from '../components/MarkdownContent.vue';
 import MessageAttachmentStrip from '../components/MessageAttachmentStrip.vue';
@@ -214,18 +220,27 @@ import QuestionIndexPanel from '../components/QuestionIndexPanel.vue';
 import { useChatStore } from '../store/chat';
 import { isPromptSubmitHotkey } from '../utils/promptHotkeys';
 
-const props = withDefaults(defineProps<{
-  showQuestionIndex?: boolean;
-  authStatusOverride?: boolean | null;
-  authUnavailableMessage?: string;
-  authRecoveryActionLabel?: string;
-  authRecoveryActionDisabled?: boolean;
-}>(), {
-  showQuestionIndex: false,
-  authStatusOverride: null,
-  authUnavailableMessage: '当前 Provider 鉴权不可用',
-  authRecoveryActionLabel: '',
-  authRecoveryActionDisabled: false
+const props = defineProps({
+  showQuestionIndex: {
+    type: Boolean,
+    default: false
+  },
+  authStatusOverride: {
+    type: null as unknown as PropType<boolean | null>,
+    default: null
+  },
+  authUnavailableMessage: {
+    type: String,
+    default: '当前 Provider 鉴权不可用'
+  },
+  authRecoveryActionLabel: {
+    type: String,
+    default: ''
+  },
+  authRecoveryActionDisabled: {
+    type: Boolean,
+    default: false
+  }
 });
 const emit = defineEmits<{
   (event: 'request-auth-recovery'): void;
@@ -235,12 +250,18 @@ const chatStore = useChatStore();
 const isAuthenticated = ref(false);
 const inputRef = ref<HTMLTextAreaElement | null>(null);
 const messagesRef = ref<HTMLElement | null>(null);
+const isTopToolbarCollapsed = ref(false);
 let scrollSyncFrame: number | null = null;
+
+async function refreshAuthStatus() {
+  isAuthenticated.value = await chatStore.checkAuth();
+}
 
 const displayConversation = computed(() => chatStore.displayConversation);
 const isPreviewing = computed(() => chatStore.isPreviewing);
 const renderedMessages = computed(() => isPreviewing.value ? displayConversation.value?.messages || [] : chatStore.visibleMessages);
 const modelOptionDefinitions = computed(() => chatStore.currentModelOptionDefinitions);
+const isAgentMode = computed(() => chatStore.activeAgentContext !== null);
 const draftPrompt = computed({
   get: () => chatStore.draftPrompt,
   set: (value: string) => chatStore.setDraftPrompt(value)
@@ -258,7 +279,26 @@ const showQuestionIndexPanel = computed(() => {
 const showQuestionIndexToggle = computed(() => {
   return hasQuestionIndexContent.value && !chatStore.isQuestionIndexPanelOpen;
 });
-const effectiveIsAuthenticated = computed(() => props.authStatusOverride ?? isAuthenticated.value);
+const hasExplicitAuthOverride = computed(() => {
+  if (props.authStatusOverride === true) {
+    return true;
+  }
+
+  if (props.authStatusOverride !== false) {
+    return false;
+  }
+
+  return props.authUnavailableMessage !== '当前 Provider 鉴权不可用'
+    || props.authRecoveryActionLabel.length > 0
+    || props.authRecoveryActionDisabled;
+});
+const effectiveIsAuthenticated = computed(() => {
+  if (!hasExplicitAuthOverride.value || props.authStatusOverride === null) {
+    return isAuthenticated.value;
+  }
+
+  return props.authStatusOverride;
+});
 const authUnavailableText = computed(() => props.authUnavailableMessage || '当前 Provider 鉴权不可用');
 const isInputDisabled = computed(() => {
   return chatStore.isGenerating || !effectiveIsAuthenticated.value || chatStore.isCurrentProviderModelsLoading || !chatStore.currentModelId;
@@ -316,8 +356,10 @@ const messageQuestionMeta = computed(() => {
 });
 
 onMounted(async () => {
-  await chatStore.init();
-  isAuthenticated.value = await chatStore.checkAuth();
+  await refreshAuthStatus();
+  nextTick(() => {
+    syncInputHeight();
+  });
 });
 
 watch(() => renderedMessages.value, () => {
@@ -346,15 +388,38 @@ watch(
   }
 );
 
-watch(() => chatStore.currentProviderId, async () => {
-  isAuthenticated.value = await chatStore.checkAuth();
-});
+watch(
+  () => [
+    chatStore.currentProviderId,
+    chatStore.currentModelId,
+    chatStore.isCurrentProviderModelsLoading
+  ] as const,
+  async ([providerId, modelId, isLoading]) => {
+    if (!providerId || !modelId || isLoading) {
+      return;
+    }
+
+    await refreshAuthStatus();
+  },
+  { immediate: true }
+);
+
+watch(isAgentMode, (value) => {
+  isTopToolbarCollapsed.value = value;
+}, { immediate: true });
 
 watch(() => chatStore.draftFocusRequestKey, () => {
   nextTick(() => {
+    syncInputHeight();
     inputRef.value?.focus();
     const end = inputRef.value?.value.length || 0;
     inputRef.value?.setSelectionRange(end, end);
+  });
+});
+
+watch(() => draftPrompt.value, () => {
+  nextTick(() => {
+    syncInputHeight();
   });
 });
 
@@ -443,6 +508,16 @@ function onMessagesScroll() {
   });
 }
 
+function syncInputHeight() {
+  const input = inputRef.value;
+  if (!input) {
+    return;
+  }
+
+  input.style.height = '50px';
+  input.style.height = `${Math.min(input.scrollHeight, 240)}px`;
+}
+
 function onInputKeydown(event: KeyboardEvent) {
   if (isPromptSubmitHotkey(event)) {
     event.preventDefault();
@@ -483,6 +558,14 @@ function onModelChange(modelId: string) {
 
 function onModelOptionChange(payload: { key: string; enabled: boolean }) {
   chatStore.setCurrentModelOption(payload.key, payload.enabled);
+}
+
+function toggleTopToolbarCollapsed() {
+  isTopToolbarCollapsed.value = !isTopToolbarCollapsed.value;
+}
+
+async function startNewChat() {
+  await chatStore.startNewConversation();
 }
 </script>
 
@@ -588,41 +671,9 @@ function onModelOptionChange(payload: { key: string; enabled: boolean }) {
   font-size: 13px;
 }
 
-.conversation-header {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: center;
-  padding: 8px 4px 2px;
-}
-
-.conversation-header h2,
-.preview-actions h3,
-.empty-state h3 {
+.preview-actions h3 {
   margin: 0;
   color: var(--cp-text-primary);
-}
-
-.source-chip {
-  flex-shrink: 0;
-  padding: 4px 9px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--cp-text-muted);
-  font-size: 11px;
-}
-
-.empty-state {
-  border: 1px solid var(--cp-border);
-  border-radius: 20px;
-  padding: 24px;
-  color: var(--cp-text-muted);
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.empty-state p {
-  margin-bottom: 0;
-  line-height: 1.6;
 }
 
 .message {
@@ -650,12 +701,12 @@ function onModelOptionChange(payload: { key: string; enabled: boolean }) {
 }
 
 .question-active {
-  background: rgba(59, 130, 246, 0.08);
+  background: transparent;
 }
 
 .question-starred {
-  box-shadow: inset 0 0 0 1px rgba(250, 204, 21, 0.24);
-  background: linear-gradient(135deg, rgba(250, 204, 21, 0.08), rgba(59, 130, 246, 0.04));
+  box-shadow: none;
+  background: transparent;
 }
 
 .message.user {
@@ -668,6 +719,13 @@ function onModelOptionChange(payload: { key: string; enabled: boolean }) {
 
 .message.assistant :deep(.markdown-wrapper) {
   width: 100%;
+}
+
+.message.assistant :deep(.markdown-content) {
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
 }
 
 .user-content {
@@ -698,18 +756,37 @@ function onModelOptionChange(payload: { key: string; enabled: boolean }) {
 
 .chat-inputarea {
   border-top: 1px solid var(--cp-border);
-  padding: 18px 20px 24px;
+  padding: 15px 10px 15px;
   background: rgba(7, 10, 18, 0.86);
   backdrop-filter: blur(18px);
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  /* gap: 14px; */
 }
 
 .toolbar-stack {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.toolbar-collapse-toggle {
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: rgba(148, 163, 184, 0.92);
+  font-size: 12px;
+  line-height: 1.2;
+  text-decoration: none;
+}
+
+.toolbar-collapse-toggle:not(:disabled):hover,
+.toolbar-collapse-toggle:not(:disabled):focus-visible {
+  background: transparent;
+  color: rgba(226, 232, 240, 0.96);
+  text-decoration: underline;
 }
 
 .selector-row {
@@ -761,14 +838,28 @@ function onModelOptionChange(payload: { key: string; enabled: boolean }) {
 .input-actions {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  /* gap: 8px; */
   align-items: flex-end;
+  justify-content: space-between;
+  align-self: stretch;
+  margin-top: -20px;
+}
+
+.secondary-actions {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
 }
 
 textarea {
   flex: 1;
+  box-sizing: border-box;
   resize: none;
-  min-height: 96px;
+  min-height: 50px;
+  max-height: 240px;
+  overflow-y: auto;
   padding: 15px 18px;
   border-radius: 20px;
   border: 1px solid var(--cp-border);
@@ -838,9 +929,41 @@ button[data-testid="normal-send"]:disabled {
   box-shadow: none;
 }
 
+.secondary-action-btn,
+.toolbar-collapse-toggle {
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  border-radius: 0;
+  border: none;
+  background: transparent;
+  color: rgba(226, 232, 240, 0.82);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.secondary-action-btn:not(:disabled):hover,
+.secondary-action-btn:not(:disabled):focus-visible,
+.toolbar-collapse-toggle:not(:disabled):hover,
+.toolbar-collapse-toggle:not(:disabled):focus-visible {
+  background: transparent;
+  color: #f8fafc;
+  text-decoration: none;
+}
+
 .send-icon {
   width: 17px;
   height: 17px;
+  display: block;
+  stroke-width: 2.4;
+}
+
+.action-icon {
+  width: 16px;
+  height: 16px;
   display: block;
 }
 

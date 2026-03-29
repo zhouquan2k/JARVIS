@@ -2,12 +2,21 @@ import { ipcMain } from 'electron';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import path from 'node:path';
-import { DEFAULT_SCOPED_AGENT_CONFIG, resolveScopedAgentConfig, type IContextProvider, type ResolvedAgentConfig } from '@packages/core/src';
+import {
+    DEFAULT_SCOPED_AGENT_CONFIG,
+    normalizeScopePath,
+    resolveScopedAgentConfig,
+    type ContextSearchRequest,
+    type IContextProvider,
+    type ResolvedAgentConfig,
+    searchInScopedFiles
+} from '@packages/core/src';
 import {
     DESKTOP_CONTEXT_CREATE_NODE_CHANNEL,
     DESKTOP_CONTEXT_INITIALIZE_CHANNEL,
     DESKTOP_CONTEXT_LIST_TREE_CHANNEL,
     DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL,
+    DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL,
     DESKTOP_CONTEXT_RESOLVE_AGENT_CHANNEL,
     DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL
 } from '../shared/contextBridge';
@@ -175,6 +184,42 @@ export function registerContextIpc(options: RegisterContextIpcOptions = {}) {
                 hasChildren: input.kind === 'directory'
             };
         },
+        async searchInScope(request: ContextSearchRequest) {
+            const workspaceRoot = await getWorkspaceRoot();
+            const scopePath = normalizeVirtualPath(request.scopePath);
+            const walk = async (
+                directoryPath: string,
+                currentVirtualPath?: string
+            ): Promise<Array<{ path: string; readContent: () => Promise<string> }>> => {
+                const files: Array<{ path: string; readContent: () => Promise<string> }> = [];
+                const entries = await readdir(directoryPath, { withFileTypes: true });
+                for (const entry of entries) {
+                    const entryVirtualPath = currentVirtualPath ? `${currentVirtualPath}/${entry.name}` : `/${entry.name}`;
+                    const entryRealPath = join(directoryPath, entry.name);
+                    if (entry.isDirectory()) {
+                        files.push(...await walk(entryRealPath, entryVirtualPath));
+                        continue;
+                    }
+
+                    files.push({
+                        path: entryVirtualPath,
+                        readContent: async () => readFile(entryRealPath, 'utf8')
+                    });
+                }
+                return files;
+            };
+
+            const files = await walk(
+                toActualPath(workspaceRoot, scopePath),
+                normalizeScopePath(scopePath ?? '/')
+            );
+            return searchInScopedFiles({
+                query: request.query,
+                scopePath,
+                maxResults: request.maxResults,
+                files
+            });
+        },
         async resolveScopedAgentConfig(targetPath: string): Promise<ResolvedAgentConfig> {
             return resolveScopedAgentConfig(provider, targetPath, DEFAULT_SCOPED_AGENT_CONFIG);
         }
@@ -195,6 +240,9 @@ export function registerContextIpc(options: RegisterContextIpcOptions = {}) {
     ipc.handle(DESKTOP_CONTEXT_CREATE_NODE_CHANNEL, async (_event, input: { parentPath?: string; name: string; kind: ContextNodeKind }) => {
         return provider.createNode(input);
     });
+    ipc.handle(DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL, async (_event, request: ContextSearchRequest) => {
+        return provider.searchInScope(request);
+    });
     ipc.handle(DESKTOP_CONTEXT_RESOLVE_AGENT_CHANNEL, async (_event, targetPath: string) => {
         return provider.resolveScopedAgentConfig(targetPath);
     });
@@ -203,6 +251,7 @@ export function registerContextIpc(options: RegisterContextIpcOptions = {}) {
         ipc.removeHandler(DESKTOP_CONTEXT_INITIALIZE_CHANNEL);
         ipc.removeHandler(DESKTOP_CONTEXT_LIST_TREE_CHANNEL);
         ipc.removeHandler(DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL);
+        ipc.removeHandler(DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL);
         ipc.removeHandler(DESKTOP_CONTEXT_RESOLVE_AGENT_CHANNEL);
         ipc.removeHandler(DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL);
         ipc.removeHandler(DESKTOP_CONTEXT_CREATE_NODE_CHANNEL);

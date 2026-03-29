@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import {
-    buildAgentPromptEnvelope,
+    augmentPromptWithAgentContext,
     type AgentRuntime,
     cloneConversation,
     type Conversation,
@@ -11,6 +11,8 @@ import {
     ExternalHistoryError,
     type ExternalHistoryProviderEntry,
     type ExternalHistoryProviderId,
+    type ContextDocument,
+    type IContextProvider,
     type IHistoryProvider,
     type IModelProvider,
     type IStorageProvider,
@@ -76,6 +78,10 @@ export interface ChatState {
     draftAttachments: MessageAttachment[];
     attachmentError: string | null;
     activeAgentContext: ResolvedAgentConfig | null;
+    activeWorkspacePath: string | null;
+    activeWorkspaceDocument: Pick<ContextDocument, 'path' | 'content'> | null;
+    activeWorkspaceContextProvider: IContextProvider | null;
+    onWorkspaceFileChanged: ((change: { path: string; beforeContent: string; afterContent: string }) => Promise<void> | void) | null;
 }
 
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
@@ -170,6 +176,19 @@ function cloneResolvedAgentConfig(agent: ResolvedAgentConfig): ResolvedAgentConf
         sourcePaths: [...agent.sourcePaths],
         tools: agent.tools?.map((tool) => ({ ...tool })),
         skills: agent.skills?.map((skill) => ({ ...skill }))
+    };
+}
+
+function cloneActiveWorkspaceDocument(
+    document: Pick<ContextDocument, 'path' | 'content'> | null | undefined
+): Pick<ContextDocument, 'path' | 'content'> | null {
+    if (!document) {
+        return null;
+    }
+
+    return {
+        path: document.path,
+        content: document.content
     };
 }
 
@@ -446,7 +465,11 @@ export const useChatStore = defineStore('chat', {
         draftFocusRequestKey: 0,
         draftAttachments: [],
         attachmentError: null,
-        activeAgentContext: null
+        activeAgentContext: null,
+        activeWorkspacePath: null,
+        activeWorkspaceDocument: null,
+        activeWorkspaceContextProvider: null,
+        onWorkspaceFileChanged: null
     }),
 
     getters: {
@@ -845,6 +868,18 @@ export const useChatStore = defineStore('chat', {
 
         setActiveAgentContext(agent: ResolvedAgentConfig | null) {
             this.activeAgentContext = agent ? cloneResolvedAgentConfig(agent) : null;
+        },
+
+        setWorkspaceContext(input: {
+            activePath: string | null;
+            activeDocument?: Pick<ContextDocument, 'path' | 'content'> | null;
+            contextProvider: IContextProvider | null;
+            onFileChanged?: ((change: { path: string; beforeContent: string; afterContent: string }) => Promise<void> | void) | null;
+        }) {
+            this.activeWorkspacePath = input.activePath;
+            this.activeWorkspaceDocument = cloneActiveWorkspaceDocument(input.activeDocument);
+            this.activeWorkspaceContextProvider = input.contextProvider ? markRaw(input.contextProvider) : null;
+            this.onWorkspaceFileChanged = input.onFileChanged ? markRaw(input.onFileChanged) : null;
         },
 
         async resolveSendTarget() {
@@ -1293,6 +1328,12 @@ export const useChatStore = defineStore('chat', {
                         {
                             prompt: trimmedPrompt,
                             agent: this.activeAgentContext,
+                            workspace: {
+                                activePath: this.activeWorkspacePath,
+                                activeDocument: this.activeWorkspaceDocument,
+                                contextProvider: this.activeWorkspaceContextProvider,
+                                onFileChanged: this.onWorkspaceFileChanged ?? undefined
+                            },
                             providerId: sendTarget.providerId,
                             modelId: sendTarget.modelId,
                             attachments: pendingAttachments,
@@ -1304,7 +1345,9 @@ export const useChatStore = defineStore('chat', {
                     )
                     : await sendTarget.provider.sendMessage(
                         this.activeAgentContext
-                            ? buildAgentPromptEnvelope(this.activeAgentContext, trimmedPrompt)
+                            ? augmentPromptWithAgentContext(trimmedPrompt, {
+                                activeDocument: this.activeWorkspaceDocument
+                            })
                             : trimmedPrompt,
                         {
                             context: { conversationId: backendId },

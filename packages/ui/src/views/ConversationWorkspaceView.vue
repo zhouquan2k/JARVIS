@@ -40,6 +40,7 @@
 </template>
 
 <script setup lang="ts">
+import { type PropType } from 'vue';
 import '../theme/chatgpt-dark.css';
 import CompareChatView from './CompareChatView.vue';
 import ConversationSidebar from '../components/ConversationSidebar.vue';
@@ -47,14 +48,32 @@ import NormalChatView from './NormalChatView.vue';
 import { useChatStore } from '../store/chat';
 import type { ExternalHistoryProviderId } from '@packages/core/src';
 
-const props = defineProps<{
-  isCompareMode: boolean;
-  showHistorySourceSwitch?: boolean;
-  authStatusOverride?: boolean | null;
-  authUnavailableMessage?: string;
-  authRecoveryActionLabel?: string;
-  authRecoveryActionDisabled?: boolean;
-}>();
+const props = defineProps({
+  isCompareMode: {
+    type: Boolean,
+    required: true
+  },
+  showHistorySourceSwitch: {
+    type: Boolean,
+    default: false
+  },
+  authStatusOverride: {
+    type: null as unknown as PropType<boolean | null>,
+    default: null
+  },
+  authUnavailableMessage: {
+    type: String,
+    default: undefined
+  },
+  authRecoveryActionLabel: {
+    type: String,
+    default: undefined
+  },
+  authRecoveryActionDisabled: {
+    type: Boolean,
+    default: false
+  }
+});
 
 const emit = defineEmits<{
   (event: 'request-normal-mode'): void;

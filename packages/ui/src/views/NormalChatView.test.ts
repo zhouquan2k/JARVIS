@@ -89,6 +89,7 @@ describe('NormalChatView', () => {
 
         expect(wrapper.find('[data-testid="question-index-panel"]').exists()).toBe(true);
         expect(wrapper.find('[data-testid="question-panel-open"]').exists()).toBe(false);
+        expect(wrapper.find('.conversation-header').exists()).toBe(false);
         expect(wrapper.find('.chat-container > .chat-main').exists()).toBe(true);
         expect(wrapper.find('.chat-container > .chat-inputarea').exists()).toBe(true);
         expect(wrapper.find('.chat-main .chat-inputarea').exists()).toBe(false);
@@ -98,6 +99,22 @@ describe('NormalChatView', () => {
 
         expect(wrapper.find('[data-testid="question-index-panel"]').exists()).toBe(false);
         expect(wrapper.get('[data-testid="question-panel-open"]').text()).toContain('显示大纲');
+    });
+
+    it('does not render the empty placeholder container when there is no conversation', async () => {
+        const store = useChatStore();
+        store.workspaceMode = 'active';
+        store.currentConversation = null;
+        store.previewConversation = null;
+        store.init = vi.fn().mockResolvedValue(undefined);
+        store.checkAuth = vi.fn().mockResolvedValue(true);
+
+        const wrapper = mountView();
+        await flushPromises();
+
+        expect(wrapper.find('[data-testid="normal-empty"]').exists()).toBe(false);
+        expect(wrapper.text()).not.toContain('从左侧选择一条历史');
+        expect(wrapper.text()).not.toContain('支持拖拽、文件选择和剪贴板图片粘贴');
     });
 
     it('hides question index affordances while previewing', async () => {
@@ -191,6 +208,86 @@ describe('NormalChatView', () => {
         expect(wrapper.find('.selector-row [data-testid="model-option-toggle-group"]').exists()).toBe(true);
     });
 
+    it('collapses the top selector row by default in agent mode', async () => {
+        const store = useChatStore();
+        store.workspaceMode = 'active';
+        store.currentConversation = createConversation([]);
+        store.activeAgentContext = {
+            name: 'Docs Agent',
+            effectiveInstructions: 'Use docs context',
+            scopePath: '/docs',
+            sourcePaths: ['/docs/.agent.json']
+        };
+        store.init = vi.fn().mockResolvedValue(undefined);
+        store.checkAuth = vi.fn().mockResolvedValue(true);
+
+        const wrapper = mountView();
+        await flushPromises();
+
+        expect(wrapper.find('.secondary-actions [data-testid="toolbar-collapse-toggle"]').exists()).toBe(true);
+        expect(wrapper.find('.input-actions [data-testid="toolbar-collapse-toggle"]').exists()).toBe(true);
+        expect(wrapper.find('[data-testid="selector-row"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid="provider-selector-stub"]').exists()).toBe(false);
+    });
+
+    it('keeps the top selector row expanded by default outside agent mode', async () => {
+        const store = useChatStore();
+        store.workspaceMode = 'active';
+        store.currentConversation = createConversation([]);
+        store.init = vi.fn().mockResolvedValue(undefined);
+        store.checkAuth = vi.fn().mockResolvedValue(true);
+
+        const wrapper = mountView();
+        await flushPromises();
+
+        expect(wrapper.find('[data-testid="toolbar-collapse-toggle"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid="selector-row"]').exists()).toBe(true);
+        expect(wrapper.find('[data-testid="provider-selector-stub"]').exists()).toBe(true);
+    });
+
+    it('toggles the top selector row in agent mode', async () => {
+        const store = useChatStore();
+        store.workspaceMode = 'active';
+        store.currentConversation = createConversation([]);
+        store.activeAgentContext = {
+            name: 'Docs Agent',
+            effectiveInstructions: 'Use docs context',
+            scopePath: '/docs',
+            sourcePaths: ['/docs/.agent.json']
+        };
+        store.init = vi.fn().mockResolvedValue(undefined);
+        store.checkAuth = vi.fn().mockResolvedValue(true);
+
+        const wrapper = mountView();
+        await flushPromises();
+
+        await wrapper.get('[data-testid="toolbar-collapse-toggle"]').trigger('click');
+        expect(wrapper.find('.secondary-actions [data-testid="toolbar-collapse-toggle"]').exists()).toBe(true);
+        expect(wrapper.find('[data-testid="selector-row"]').exists()).toBe(true);
+        expect(wrapper.find('[data-testid="provider-selector-stub"]').exists()).toBe(true);
+
+        await wrapper.get('[data-testid="toolbar-collapse-toggle"]').trigger('click');
+        expect(wrapper.find('.secondary-actions [data-testid="toolbar-collapse-toggle"]').exists()).toBe(true);
+        expect(wrapper.find('[data-testid="selector-row"]').exists()).toBe(false);
+    });
+
+    it('renders a new chat action below the send button and calls the existing store entry', async () => {
+        const store = useChatStore();
+        store.workspaceMode = 'active';
+        store.currentConversation = createConversation([]);
+        store.currentModelId = 'gpt-4o';
+        store.startNewConversation = vi.fn().mockResolvedValue(undefined);
+        store.init = vi.fn().mockResolvedValue(undefined);
+        store.checkAuth = vi.fn().mockResolvedValue(true);
+
+        const wrapper = mountView();
+        await flushPromises();
+
+        expect(wrapper.find('.secondary-actions [data-testid="normal-new-chat"]').exists()).toBe(true);
+        await wrapper.get('[data-testid="normal-new-chat"]').trigger('click');
+        expect(store.startNewConversation).toHaveBeenCalledTimes(1);
+    });
+
     it('disables model option controls when chat input is unavailable', async () => {
         const store = useChatStore();
         store.availableProviders = [
@@ -255,5 +352,41 @@ describe('NormalChatView', () => {
 
         await wrapper.get('[data-testid="normal-auth-recovery"]').trigger('click');
         expect(wrapper.emitted('request-auth-recovery')).toHaveLength(1);
+    });
+
+    it('does not coerce an absent auth override into unauthenticated state', async () => {
+        const store = useChatStore();
+        store.currentConversation = createConversation([]);
+        store.workspaceMode = 'active';
+        store.currentProviderId = 'mock-provider';
+        store.currentModelId = 'mock-model';
+        store.availableProviders = [
+            {
+                id: 'mock-provider',
+                name: 'Mock Provider',
+                defaultModel: 'mock-model',
+                supportedRuntimeModes: ['web'],
+                models: [
+                    {
+                        id: 'mock-model',
+                        name: 'Mock Model'
+                    }
+                ]
+            }
+        ];
+        store.providerModelStates = {
+            'mock-provider': {
+                loading: false,
+                loaded: true
+            }
+        };
+        store.init = vi.fn().mockResolvedValue(undefined);
+        store.checkAuth = vi.fn().mockResolvedValue(true);
+
+        const wrapper = mountView();
+        await flushPromises();
+
+        expect(wrapper.find('[data-testid="normal-auth-warning"]').exists()).toBe(false);
+        expect((wrapper.get('[data-testid="normal-input"]').element as HTMLTextAreaElement).disabled).toBe(false);
     });
 });

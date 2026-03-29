@@ -12,7 +12,7 @@ export default defineConfig({
     ['html', { outputFolder: 'playwright-report', open: 'never' }]
   ],
   use: {
-    baseURL: 'http://127.0.0.1:4173',
+    baseURL: 'http://127.0.0.1:34173',
     trace: 'retain-on-failure'
   },
   projects: [
@@ -22,8 +22,8 @@ export default defineConfig({
     }
   ],
   webServer: {
-    command: 'VITE_E2E=1 pnpm dev --host 127.0.0.1 --port 4173',
-    port: 4173,
-    reuseExistingServer: !process.env.CI
+    command: 'VITE_E2E=1 pnpm dev --host 127.0.0.1 --port 34173 --strictPort',
+    port: 34173,
+    reuseExistingServer: false
   }
 });

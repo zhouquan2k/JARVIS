@@ -7,6 +7,7 @@ import {
     DESKTOP_CONTEXT_INITIALIZE_CHANNEL,
     DESKTOP_CONTEXT_LIST_TREE_CHANNEL,
     DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL,
+    DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL,
     DESKTOP_CONTEXT_RESOLVE_AGENT_CHANNEL,
     DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL
 } from '../shared/contextBridge';
@@ -59,6 +60,7 @@ describe('contextIpc', () => {
         const initializeHandler = getHandler(ipc, DESKTOP_CONTEXT_INITIALIZE_CHANNEL);
         const listTreeHandler = getHandler(ipc, DESKTOP_CONTEXT_LIST_TREE_CHANNEL);
         const readDocumentHandler = getHandler(ipc, DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL);
+        const searchInScopeHandler = getHandler(ipc, DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL);
         const resolveAgentHandler = getHandler(ipc, DESKTOP_CONTEXT_RESOLVE_AGENT_CHANNEL);
         const writeDocumentHandler = getHandler(ipc, DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL);
 
@@ -71,6 +73,14 @@ describe('contextIpc', () => {
 
         const document = await readDocumentHandler?.({}, '/notes/today.md') as { content: string };
         expect(document.content).toContain('# Today');
+
+        const matches = await searchInScopeHandler?.({}, {
+            query: 'Today',
+            scopePath: '/notes'
+        }) as Array<{ path: string; line: number; column: number }>;
+        expect(matches).toEqual([
+            expect.objectContaining({ path: '/notes/today.md', line: 1, column: 3 })
+        ]);
 
         const resolvedAgent = await resolveAgentHandler?.({}, '/notes/today.md') as { scopePath: string; name: string };
         expect(resolvedAgent).toMatchObject({
@@ -86,6 +96,7 @@ describe('contextIpc', () => {
         expect(ipc.removeHandler).toHaveBeenCalledWith(DESKTOP_CONTEXT_INITIALIZE_CHANNEL);
         expect(ipc.removeHandler).toHaveBeenCalledWith(DESKTOP_CONTEXT_LIST_TREE_CHANNEL);
         expect(ipc.removeHandler).toHaveBeenCalledWith(DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL);
+        expect(ipc.removeHandler).toHaveBeenCalledWith(DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL);
         expect(ipc.removeHandler).toHaveBeenCalledWith(DESKTOP_CONTEXT_RESOLVE_AGENT_CHANNEL);
         expect(ipc.removeHandler).toHaveBeenCalledWith(DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL);
         expect(ipc.removeHandler).toHaveBeenCalledWith(DESKTOP_CONTEXT_CREATE_NODE_CHANNEL);

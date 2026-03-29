@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildAgentPromptEnvelope } from '../agents/buildAgentPromptEnvelope';
+import { augmentPromptWithAgentContext } from '../agents/augmentPromptWithAgentContext';
+import { createMockContextProvider } from '../testing/createMockContextProvider';
 import type {
     AgentCapabilities,
     AgentRunRequest,
@@ -18,7 +19,7 @@ const scopedAgent = {
     modelName: 'gemini-2.5-pro',
     scopePath: '/docs',
     sourcePaths: ['/docs/.agent.json'],
-    tools: [{ id: 'read_document', description: 'Read docs' }]
+    tools: [{ id: 'read_file', description: 'Read docs' }]
 };
 
 class BasicProvider implements IModelProvider {
@@ -70,19 +71,19 @@ class AgentProvider extends BasicProvider implements IAgentCapableProvider {
                             text: 'native:intro',
                             thoughtSignature: 'sig-1'
                         },
-                        {
-                            functionCall: {
-                                id: 'call-1',
-                                name: 'read_document',
-                                args: { path: '/docs/guide.md' }
-                            }
-                        }
+                                {
+                                    functionCall: {
+                                        id: 'call-1',
+                                        name: 'read_file',
+                                        args: { path: '/docs/guide.md' }
+                                    }
+                                }
                     ]
                 },
                 toolCalls: [
                     {
                         id: 'call-1',
-                        name: 'read_document',
+                        name: 'read_file',
                         arguments: { path: '/docs/guide.md' }
                     }
                 ]
@@ -100,14 +101,94 @@ class AgentProvider extends BasicProvider implements IAgentCapableProvider {
                 {
                     functionCall: {
                         id: 'call-1',
-                        name: 'read_document',
+                        name: 'read_file',
                         args: { path: '/docs/guide.md' }
                     }
                 }
             ]
         });
-        expect(request.toolExchanges?.[0]?.call.name).toBe('read_document');
-        expect(request.toolExchanges?.[0]?.result.isError).toBe(true);
+        expect(request.tools).toEqual([
+            {
+                id: 'read_file',
+                description: 'Read docs',
+                inputSchema: {
+                    type: 'OBJECT',
+                    properties: {
+                        path: { type: 'STRING', description: 'Absolute file path inside the workspace scope.' }
+                    },
+                    required: ['path']
+                }
+            }
+        ]);
+        expect(request.toolExchanges?.[0]?.call.name).toBe('read_file');
+        expect(request.toolExchanges?.[0]?.result.isError).toBeUndefined();
+        expect(JSON.parse(request.toolExchanges?.[0]?.result.result || '{}')).toEqual({
+            path: '/docs/guide.md',
+            content: '# Guide'
+        });
+        onUpdate({ text: 'native:done' });
+        return {
+            text: 'native:done',
+            conversationId: 'conversation-id',
+            messageId: 'message-id'
+        };
+    });
+
+    getAgentCapabilities(): AgentCapabilities {
+        return {
+            nativeAgent: true,
+            toolLoop: 'application-managed'
+        };
+    }
+}
+
+class MultiToolAgentProvider extends BasicProvider implements IAgentCapableProvider {
+    private iteration = 0;
+    public runAgent = vi.fn(async (
+        request: AgentRunRequest,
+        onUpdate: (update: ProviderStreamUpdate) => void
+    ): Promise<ProviderSendResult> => {
+        this.iteration += 1;
+        if (this.iteration === 1) {
+            onUpdate({ text: 'native:planning' });
+            return {
+                text: 'native:planning',
+                conversationId: 'conversation-id',
+                messageId: 'message-id',
+                modelTurn: {
+                    role: 'model',
+                    parts: [
+                        {
+                            functionCall: {
+                                id: 'call-1',
+                                name: 'read_file',
+                                args: { path: '/docs/guide.md' }
+                            }
+                        },
+                        {
+                            functionCall: {
+                                id: 'call-2',
+                                name: 'read_current_file',
+                                args: {}
+                            }
+                        }
+                    ]
+                },
+                toolCalls: [
+                    {
+                        id: 'call-1',
+                        name: 'read_file',
+                        arguments: { path: '/docs/guide.md' }
+                    },
+                    {
+                        id: 'call-2',
+                        name: 'read_current_file',
+                        arguments: {}
+                    }
+                ]
+            };
+        }
+
         onUpdate({ text: 'native:done' });
         return {
             text: 'native:done',
@@ -143,11 +224,26 @@ describe('createAgentRuntime', () => {
             providerRuntime: createRuntime(provider)
         });
         const updates: string[] = [];
+        const contextProvider = createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/docs/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/docs' },
+                { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' }
+            ],
+            documents: {
+                '/docs/.agent.json': JSON.stringify({ name: 'Docs Agent' }),
+                '/docs/guide.md': '# Guide'
+            }
+        });
 
         const result = await runtime.run(
             {
                 prompt: '请总结文档',
                 agent: scopedAgent,
+                workspace: {
+                    activePath: '/docs/guide.md',
+                    contextProvider
+                },
                 providerId: 'gemini-api',
                 modelId: 'gemini-2.5-pro'
             },
@@ -158,9 +254,9 @@ describe('createAgentRuntime', () => {
         expect(provider.sendMessage).not.toHaveBeenCalled();
         expect(result.text).toContain('native:intro');
         expect(result.text).toContain('Function Call Request');
-        expect(result.text).toContain('"name": "read_document"');
+        expect(result.text).toContain('"name": "read_file"');
         expect(result.text).toContain('Function Call Response');
-        expect(result.text).toContain("Tool 'read_document' declared by agent 'Docs Agent' is not implemented in phase one.");
+        expect(result.text).toContain('\\"content\\":\\"# Guide\\"');
         expect(result.text).toContain('native:done');
         expect(updates).toHaveLength(3);
         expect(updates[0]).toBe('native:intro');
@@ -179,6 +275,14 @@ describe('createAgentRuntime', () => {
             {
                 prompt: '请总结文档',
                 agent: scopedAgent,
+                workspace: {
+                    activePath: '/docs/guide.md',
+                    activeDocument: {
+                        path: '/docs/guide.md',
+                        content: '# Guide'
+                    },
+                    contextProvider: null
+                },
                 providerId: 'chatgpt-web',
                 modelId: 'gpt-4o'
             },
@@ -186,7 +290,12 @@ describe('createAgentRuntime', () => {
         );
 
         expect(provider.sendMessage).toHaveBeenCalledTimes(1);
-        expect(provider.sendMessage.mock.calls[0]?.[0]).toBe(buildAgentPromptEnvelope(scopedAgent, '请总结文档'));
+        expect(provider.sendMessage.mock.calls[0]?.[0]).toBe(augmentPromptWithAgentContext('请总结文档', {
+            activeDocument: {
+                path: '/docs/guide.md',
+                content: '# Guide'
+            }
+        }));
         expect(result.text).toContain('fallback:');
     });
 
@@ -213,5 +322,84 @@ describe('createAgentRuntime', () => {
             conversationId: 'conversation-id',
             messageId: 'message-id'
         });
+    });
+
+    it('renders a grouped tool round summary when a single turn emits multiple function calls', async () => {
+        const provider = new MultiToolAgentProvider();
+        const runtime = createAgentRuntime({
+            providerRuntime: createRuntime(provider)
+        });
+        const contextProvider = createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/docs/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/docs' },
+                { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' }
+            ],
+            documents: {
+                '/docs/.agent.json': JSON.stringify({ name: 'Docs Agent' }),
+                '/docs/guide.md': '# Guide'
+            }
+        });
+
+        const result = await runtime.run(
+            {
+                prompt: '请同时读取文件',
+                agent: {
+                    ...scopedAgent,
+                    tools: [
+                        { id: 'read_file', description: 'Read docs' },
+                        { id: 'read_current_file', description: 'Read active file' }
+                    ]
+                },
+                workspace: {
+                    activePath: '/docs/guide.md',
+                    activeDocument: {
+                        path: '/docs/guide.md',
+                        content: '# Guide'
+                    },
+                    contextProvider
+                },
+                providerId: 'gemini-api',
+                modelId: 'gemini-2.5-pro'
+            },
+            () => undefined
+        );
+
+        expect(result.text).toContain('### 本轮工具调用（2 个函数调用）');
+        expect(result.text).toContain('#### 调用 1: `read_file`');
+        expect(result.text).toContain('#### 调用 2: `read_current_file`');
+    });
+
+    it('passes the active file context into native agent requests', async () => {
+        const provider = new AgentProvider();
+        const runtime = createAgentRuntime({
+            providerRuntime: createRuntime(provider)
+        });
+
+        await runtime.run(
+            {
+                prompt: '请总结文档',
+                agent: scopedAgent,
+                workspace: {
+                    activePath: '/docs/guide.md',
+                    activeDocument: {
+                        path: '/docs/guide.md',
+                        content: '# Guide'
+                    },
+                    contextProvider: createMockContextProvider({
+                        nodes: [{ path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' }],
+                        documents: { '/docs/guide.md': '# Guide' }
+                    })
+                },
+                providerId: 'gemini-api',
+                modelId: 'gemini-2.5-pro'
+            },
+            () => undefined
+        );
+
+        expect(provider.runAgent.mock.calls[0]?.[0]?.prompt).toContain('[[Active File Context]]');
+        expect(provider.runAgent.mock.calls[0]?.[0]?.prompt).toContain('Path: /docs/guide.md');
+        expect(provider.runAgent.mock.calls[0]?.[0]?.prompt).toContain('# Guide');
+        expect(provider.runAgent.mock.calls[0]?.[0]?.prompt).not.toContain('Allowed Tools:');
     });
 });

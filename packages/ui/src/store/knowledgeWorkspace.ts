@@ -7,6 +7,7 @@ import {
     type IContextProvider,
     type ResolvedAgentConfig
 } from '@packages/core/src';
+import { buildLineDiffEntries, FileChangeService, type FileChangeRecord, type LineDiffEntry } from '../services/FileChangeService';
 
 export interface KnowledgeWorkspaceState {
     contextProvider: IContextProvider | null;
@@ -25,6 +26,11 @@ export interface KnowledgeWorkspaceState {
     currentError: string | null;
     activeAgent: ResolvedAgentConfig | null;
     agentResolutionError: string | null;
+    fileChangeService: FileChangeService;
+    latestFileChange: FileChangeRecord | null;
+    activeDiffEntries: LineDiffEntry[];
+    canUndoActiveFile: boolean;
+    canRedoActiveFile: boolean;
 }
 
 const AUTO_SAVE_DELAY_MS = 400;
@@ -47,7 +53,7 @@ function normalizeSizes(sizes: [number, number, number]): [number, number, numbe
     const bounded = sizes.map((size) => Math.max(15, Math.min(70, Number.isFinite(size) ? size : 0))) as [number, number, number];
     const total = bounded[0] + bounded[1] + bounded[2];
     if (total <= 0) {
-        return [22, 48, 30];
+        return [20, 50, 30];
     }
 
     return bounded.map((size) => Number(((size / total) * 100).toFixed(2))) as [number, number, number];
@@ -63,14 +69,19 @@ export const useKnowledgeWorkspaceStore = defineStore('knowledge-workspace', {
         activeDocument: null,
         draftContent: '',
         dirtyPaths: {},
-        panelSizes: [22, 48, 30],
+        panelSizes: [20, 50, 30],
         isHydrating: false,
         isSaving: false,
         isResolvingAgent: false,
         accessInitialized: false,
         currentError: null,
         activeAgent: null,
-        agentResolutionError: null
+        agentResolutionError: null,
+        fileChangeService: markRaw(new FileChangeService()),
+        latestFileChange: null,
+        activeDiffEntries: [],
+        canUndoActiveFile: false,
+        canRedoActiveFile: false
     }),
     getters: {
         activeNode(state): ContextNode | null {
@@ -79,6 +90,53 @@ export const useKnowledgeWorkspaceStore = defineStore('knowledge-workspace', {
         }
     },
     actions: {
+        syncActiveFileChange(path = this.activePath) {
+            if (!path) {
+                this.latestFileChange = null;
+                this.activeDiffEntries = [];
+                this.canUndoActiveFile = false;
+                this.canRedoActiveFile = false;
+                return;
+            }
+
+            const record = this.fileChangeService.getVisibleRecord(path);
+            this.latestFileChange = record;
+            this.activeDiffEntries = record
+                ? buildLineDiffEntries(record.beforeContent, record.afterContent)
+                : [];
+            this.canUndoActiveFile = this.fileChangeService.canUndo(path);
+            this.canRedoActiveFile = this.fileChangeService.canRedo(path);
+        },
+
+        applyActiveContent(content: string, path = this.activePath) {
+            if (!path) {
+                return;
+            }
+
+            const updatedAt = Date.now();
+            if (this.activePath === path) {
+                this.activeDocument = {
+                    path,
+                    content,
+                    updatedAt
+                };
+                this.draftContent = content;
+            }
+
+            this.nodes = this.nodes.map((node) => node.path === path ? { ...node, updatedAt } : node);
+            this.dirtyPaths = {
+                ...this.dirtyPaths,
+                [path]: false
+            };
+        },
+
+        recordFileChange(change: { path: string; beforeContent: string; afterContent: string }) {
+            const record = this.fileChangeService.recordChange(change);
+            this.applyActiveContent(change.afterContent, change.path);
+            this.syncActiveFileChange(change.path);
+            return record;
+        },
+
         setContextProvider(provider: IContextProvider | null) {
             this.contextProvider = provider ? markRaw(provider) : null;
             this.nodes = [];
@@ -93,6 +151,10 @@ export const useKnowledgeWorkspaceStore = defineStore('knowledge-workspace', {
             this.activeAgent = null;
             this.agentResolutionError = null;
             this.isResolvingAgent = false;
+            this.latestFileChange = null;
+            this.activeDiffEntries = [];
+            this.canUndoActiveFile = false;
+            this.canRedoActiveFile = false;
             clearAutoSaveTimer(this);
         },
 
@@ -110,12 +172,12 @@ export const useKnowledgeWorkspaceStore = defineStore('knowledge-workspace', {
                 this.expandedPaths = [];
 
                 if (!this.activePath) {
-                    const firstFile = this.nodes.find((node) => node.kind === 'file');
-                    if (firstFile) {
-                        await this.openNode(firstFile.path);
-                    } else {
-                        await this.resolveActiveAgent('/');
-                    }
+                    this.selectedNodePath = null;
+                    this.activePath = null;
+                    this.activeDocument = null;
+                    this.draftContent = '';
+                    this.syncActiveFileChange(null);
+                    await this.resolveActiveAgent('/');
                 }
             } catch (error) {
                 this.currentError = error instanceof Error ? error.message : String(error);
@@ -146,6 +208,10 @@ export const useKnowledgeWorkspaceStore = defineStore('knowledge-workspace', {
             if (node.kind === 'directory') {
                 this.selectedNodePath = path;
                 this.toggleExpanded(path);
+                this.activePath = null;
+                this.activeDocument = null;
+                this.draftContent = '';
+                this.syncActiveFileChange(null);
                 await this.resolveActiveAgent(path);
                 return;
             }
@@ -160,6 +226,7 @@ export const useKnowledgeWorkspaceStore = defineStore('knowledge-workspace', {
                 ...this.dirtyPaths,
                 [path]: false
             };
+            this.syncActiveFileChange(path);
             await this.resolveActiveAgent(path);
         },
 
@@ -198,6 +265,7 @@ export const useKnowledgeWorkspaceStore = defineStore('knowledge-workspace', {
                     ...this.dirtyPaths,
                     [this.activePath]: false
                 };
+                this.syncActiveFileChange(this.activePath);
             } finally {
                 this.isSaving = false;
             }
@@ -240,6 +308,34 @@ export const useKnowledgeWorkspaceStore = defineStore('knowledge-workspace', {
             if (input.kind === 'file') {
                 await this.openNode(createdPath);
             }
+        },
+
+        async undoActiveFileChange() {
+            if (!this.contextProvider || !this.activePath) {
+                return;
+            }
+
+            const result = await this.fileChangeService.undo(this.activePath, this.contextProvider);
+            if (!result) {
+                return;
+            }
+
+            this.applyActiveContent(result.content, this.activePath);
+            this.syncActiveFileChange(this.activePath);
+        },
+
+        async redoActiveFileChange() {
+            if (!this.contextProvider || !this.activePath) {
+                return;
+            }
+
+            const result = await this.fileChangeService.redo(this.activePath, this.contextProvider);
+            if (!result) {
+                return;
+            }
+
+            this.applyActiveContent(result.content, this.activePath);
+            this.syncActiveFileChange(this.activePath);
         },
 
         setPanelSizes(sizes: [number, number, number]) {

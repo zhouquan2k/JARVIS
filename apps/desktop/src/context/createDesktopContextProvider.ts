@@ -1,4 +1,4 @@
-import type { CreateContextNodeInput } from '@packages/core/src';
+import type { ContextSearchRequest, CreateContextNodeInput } from '@packages/core/src';
 
 export function createDesktopContextProvider() {
     return {
@@ -29,6 +29,13 @@ export function createDesktopContextProvider() {
             }
 
             return window.chatprismDesktop.createContextNode(input);
+        },
+        async searchInScope(request: ContextSearchRequest) {
+            if (!window.chatprismDesktop) {
+                throw new Error('Desktop context bridge is unavailable');
+            }
+
+            return window.chatprismDesktop.searchContextInScope(request);
         },
         async resolveScopedAgentConfig(targetPath: string) {
             if (!window.chatprismDesktop) {

@@ -40,3 +40,13 @@
 - **WHEN** Gemini Provider 发起一次原生 Agent 请求且当前 Agent 具有可用工具边界
 - **THEN** Provider MUST 在 Gemini 请求中携带对应的 tools / function calling 配置
 - **AND** Provider MUST 允许上层应用在收到工具调用后继续维护后续循环
+
+#### Scenario: Consume runtime-resolved tool declarations
+- **WHEN** `AgentRuntime` 已为本次请求解析出结构化工具声明
+- **THEN** Gemini Provider MUST 使用这些运行时工具声明生成 function declarations
+- **AND** Provider MUST NOT 要求自己直接从原始 `agent.tools` 推导本地工具实现细节
+
+#### Scenario: Consume runtime-augmented agent and workspace context
+- **WHEN** `AgentRuntime` 已为本次请求准备好增强后的 Agent/Workspace 上下文
+- **THEN** Gemini Provider MUST 直接消费这份运行时输入发起原生 Agent 请求
+- **AND** Provider MUST NOT 自行决定是否读取或注入当前活动文件内容

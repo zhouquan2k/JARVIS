@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono';
 import type { ServerConfig } from '../config.js';
 import { HttpContextService } from '../services/httpContextService.js';
-import type { CreateContextNodeInput } from '../types/context.js';
+import type { ContextSearchRequest, CreateContextNodeInput } from '../types/context.js';
 
 const ALLOW_HEADERS = 'content-type';
 const ALLOW_METHODS = 'POST, OPTIONS';
@@ -81,6 +81,28 @@ function normalizeCreateNodeInput(body: Record<string, unknown>): CreateContextN
     };
 }
 
+function normalizeSearchRequest(body: Record<string, unknown>): ContextSearchRequest {
+    if (typeof body.query !== 'string' || !body.query.trim()) {
+        throw new Error('query 不能为空。');
+    }
+
+    if (body.scopePath !== undefined && body.scopePath !== null && typeof body.scopePath !== 'string') {
+        throw new Error('scopePath 必须是字符串。');
+    }
+
+    if (body.maxResults !== undefined && body.maxResults !== null) {
+        if (typeof body.maxResults !== 'number' || !Number.isFinite(body.maxResults)) {
+            throw new Error('maxResults 必须是数字。');
+        }
+    }
+
+    return {
+        query: body.query,
+        scopePath: typeof body.scopePath === 'string' ? body.scopePath : undefined,
+        maxResults: typeof body.maxResults === 'number' ? body.maxResults : undefined
+    };
+}
+
 export function createContextRouter(options: { service: HttpContextService; config: ServerConfig }) {
     const app = new Hono();
     const { service, config } = options;
@@ -154,6 +176,16 @@ export function createContextRouter(options: { service: HttpContextService; conf
             return c.json({ node: await service.createNode(normalizeCreateNodeInput(body)) });
         } catch (error) {
             const message = error instanceof Error ? error.message : '创建节点失败。';
+            return c.json({ error: message }, 400);
+        }
+    });
+
+    app.post('/search-in-scope', async (c) => {
+        try {
+            const body = normalizeObjectBody(await readJsonBody(c));
+            return c.json({ matches: await service.searchInScope(normalizeSearchRequest(body)) });
+        } catch (error) {
+            const message = error instanceof Error ? error.message : '搜索作用域失败。';
             return c.json({ error: message }, 400);
         }
     });

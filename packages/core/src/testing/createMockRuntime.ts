@@ -253,6 +253,7 @@ class MockStreamingProvider implements IAgentCapableProvider {
         }
 
         if (request.prompt.includes('TRIGGER_AGENT_TOOL_LOOP') && request.agent.tools?.[0]?.id) {
+            const runtimeTool = request.tools?.[0]?.id || request.agent.tools[0].id;
             return {
                 text: '',
                 conversationId: request.context?.conversationId || crypto.randomUUID(),
@@ -260,8 +261,26 @@ class MockStreamingProvider implements IAgentCapableProvider {
                 toolCalls: [
                     {
                         id: 'mock-tool-call-1',
-                        name: request.agent.tools[0].id,
+                        name: runtimeTool,
                         arguments: { scopePath: request.agent.scopePath }
+                    }
+                ]
+            };
+        }
+
+        if (request.prompt.includes('TRIGGER_AGENT_REPLACE_ACTIVE_FILE') && request.agent.tools?.some((tool) => tool.id === 'replace_text_in_file')) {
+            return {
+                text: '',
+                conversationId: request.context?.conversationId || crypto.randomUUID(),
+                messageId: crypto.randomUUID(),
+                toolCalls: [
+                    {
+                        id: 'mock-tool-call-replace',
+                        name: 'replace_text_in_file',
+                        arguments: {
+                            target: 'Playwright knowledge web',
+                            replacement: 'Playwright knowledge web updated by agent'
+                        }
                     }
                 ]
             };

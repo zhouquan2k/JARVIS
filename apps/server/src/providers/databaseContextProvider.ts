@@ -1,6 +1,8 @@
 import type {
     ContextDocument,
     ContextNode,
+    ContextSearchMatch,
+    ContextSearchRequest,
     ContextProvider,
     CreateContextNodeInput,
     ResolvedAgentConfig
@@ -31,6 +33,10 @@ export class DatabaseContextProvider implements ContextProvider {
 
     async createNode(_input: CreateContextNodeInput): Promise<ContextNode> {
         notImplemented();
+    }
+
+    async searchInScope(_request: ContextSearchRequest): Promise<ContextSearchMatch[]> {
+        throw new Error('DatabaseContextProvider 暂不支持 searchInScope。');
     }
 
     async resolveScopedAgentConfig(_targetPath: string): Promise<ResolvedAgentConfig> {

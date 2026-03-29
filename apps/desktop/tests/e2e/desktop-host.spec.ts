@@ -83,6 +83,8 @@ test('desktop host boots with proxy runtime and can send a chatgpt-web message',
         const browser = await chromium.connectOverCDP(cdpEndpoint);
         const page = await waitForFirstPage(browser);
 
+        await expect(page.getByTestId('topbar-workspace-normal-chat')).toBeVisible();
+        await page.getByTestId('topbar-workspace-normal-chat').click();
         await expect(page.getByTestId('conversation-workspace')).toBeVisible();
         await expect(page.getByTestId('history-source-external')).toBeVisible();
         await expect(page.getByTestId('normal-provider')).toHaveValue('chatgpt-web');

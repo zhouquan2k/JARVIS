@@ -1,6 +1,8 @@
 import type {
     ContextDocument,
     ContextNode,
+    ContextSearchMatch,
+    ContextSearchRequest,
     ContextProvider,
     CreateContextNodeInput,
     ResolvedAgentConfig
@@ -27,6 +29,10 @@ export class HttpContextService {
 
     async createNode(input: CreateContextNodeInput): Promise<ContextNode> {
         return this.provider.createNode(input);
+    }
+
+    async searchInScope(request: ContextSearchRequest): Promise<ContextSearchMatch[]> {
+        return this.provider.searchInScope(request);
     }
 
     async resolveScopedAgentConfig(targetPath: string): Promise<ResolvedAgentConfig> {

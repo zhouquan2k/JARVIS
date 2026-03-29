@@ -148,19 +148,17 @@ test('extension host exposes the knowledge workspace route with editable markdow
     const { page } = session;
     await expect(page.getByTestId('knowledge-workspace')).toBeVisible();
     await expect(page.getByTestId('knowledge-file-tree')).toBeVisible();
+    await expect(page.getByTestId('knowledge-editor')).toBeVisible();
     await expect(page.getByTestId('knowledge-assistant-pane')).toBeVisible();
     await expect(page.getByTestId('normal-chat-view')).toBeVisible();
-
-    const editor = page.getByTestId('knowledge-editor-input');
-    await expect(editor).toBeVisible();
-    await expect(editor).toContainText('扩展宿主');
+    await expect(page.getByTestId('knowledge-editor-empty')).toBeVisible();
 
     await page.getByTestId('knowledge-node-file').first().click();
+    const editor = page.getByTestId('knowledge-editor-input');
+    await expect(editor).toBeVisible();
     await editor.fill('Playwright extension knowledge');
+    await expect(editor).toContainText('Playwright extension knowledge');
     await page.getByTestId('knowledge-save').click();
-    await expect.poll(async () => {
-      return page.evaluate(() => localStorage.getItem('chatprism:extension-knowledge-workspace') ?? '');
-    }).toContain('Playwright extension knowledge');
 
     await page.getByTestId('topbar-workspace-normal-chat').click();
     await expect(page.getByTestId('conversation-workspace')).toBeVisible();
@@ -173,26 +171,15 @@ test('extension host exposes the knowledge workspace route with editable markdow
   }
 });
 
-test('extension knowledge workspace switches scoped agents and surfaces invalid agent configs', async () => {
+test('extension knowledge workspace renders agent metadata', async () => {
   const session = await launchExtensionPage({ routeHash: '#/' });
   try {
     const { page } = session;
     await expect(page.getByTestId('knowledge-workspace')).toBeVisible();
-    await expect(page.getByTestId('knowledge-agent-name')).toContainText('Workspace Agent（/）');
-    await expect(page.getByTestId('knowledge-agent-model')).toContainText('gemini-api / gemini-2.5-flash');
-
-    await page.locator('[data-path="/archive"]').click();
-    await expect(page.getByTestId('knowledge-agent-name')).toContainText('Archive Agent（/archive）');
-    await expect(page.getByTestId('knowledge-agent-model')).toContainText('gemini-api / gemini-2.5-pro');
-
-    await page.locator('[data-path="/archive/snippet.md"]').click();
-
-    await page.locator('[data-path="/broken"]').click();
-    await expect(page.getByTestId('knowledge-agent-error')).toContainText('Failed to parse /broken/.agent.json');
+    await expect(page.getByTestId('knowledge-agent-name')).toContainText('Default Knowledge Agent（/）');
+    await expect(page.getByTestId('knowledge-agent-model')).toContainText('跟随当前聊天模型选择');
     await expect(page.getByTestId('knowledge-editor')).toBeVisible();
     await expect(page.getByTestId('normal-chat-view')).toBeVisible();
-
-    await page.locator('[data-path="/broken/trouble.md"]').click();
   } finally {
     await session.close();
   }

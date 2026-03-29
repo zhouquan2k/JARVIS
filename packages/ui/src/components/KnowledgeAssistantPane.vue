@@ -36,13 +36,17 @@
 </template>
 
 <script setup lang="ts">
-import type { ResolvedAgentConfig } from '@packages/core/src';
+import type { ContextDocument, IContextProvider, ResolvedAgentConfig } from '@packages/core/src';
 import { onBeforeUnmount, watch } from 'vue';
 import NormalChatView from '../views/NormalChatView.vue';
 import { useChatStore } from '../store/chat';
 
 const props = defineProps<{
   activeAgent?: ResolvedAgentConfig | null;
+  activePath?: string | null;
+  activeDocument?: Pick<ContextDocument, 'path' | 'content'> | null;
+  contextProvider?: IContextProvider | null;
+  onFileChanged?: ((change: { path: string; beforeContent: string; afterContent: string }) => void | Promise<void>) | null;
   agentResolutionError?: string | null;
   isResolvingAgent?: boolean;
 }>();
@@ -76,8 +80,27 @@ watch(() => props.activeAgent ?? null, (agent) => {
   chatStore.setActiveAgentContext(agent);
 }, { immediate: true });
 
+watch(
+  () => [props.activePath ?? null, props.activeDocument ?? null, props.contextProvider ?? null, props.onFileChanged ?? null] as const,
+  ([activePath, activeDocument, contextProvider, onFileChanged]) => {
+    chatStore.setWorkspaceContext({
+      activePath,
+      activeDocument,
+      contextProvider,
+      onFileChanged
+    });
+  },
+  { immediate: true }
+);
+
 onBeforeUnmount(() => {
   chatStore.setActiveAgentContext(null);
+  chatStore.setWorkspaceContext({
+    activePath: null,
+    activeDocument: null,
+    contextProvider: null,
+    onFileChanged: null
+  });
 });
 </script>
 
@@ -85,6 +108,9 @@ onBeforeUnmount(() => {
 .knowledge-assistant-pane {
   display: flex;
   flex: 1;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
   min-width: 0;
   min-height: 0;
   flex-direction: column;
@@ -107,6 +133,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
 }
 
 .agent-meta {
@@ -134,6 +161,10 @@ onBeforeUnmount(() => {
   color: #f8fafc;
   font-size: 14px;
   flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .agent-name-path {
@@ -160,7 +191,9 @@ onBeforeUnmount(() => {
   color: #94a3b8;
   font-size: 12px;
   line-height: 1.5;
-  word-break: break-word;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .agent-error {

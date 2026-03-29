@@ -22,6 +22,19 @@ export interface CreateContextNodeInput {
     kind: 'file' | 'directory';
 }
 
+export interface ContextSearchRequest {
+    query: string;
+    scopePath?: string;
+    maxResults?: number;
+}
+
+export interface ContextSearchMatch {
+    path: string;
+    line: number;
+    column: number;
+    preview: string;
+}
+
 export interface IContextProvider {
     id: string;
     initializeAccess(): Promise<void>;
@@ -29,5 +42,6 @@ export interface IContextProvider {
     readDocument(path: string): Promise<ContextDocument>;
     writeDocument(path: string, content: string): Promise<void>;
     createNode(input: CreateContextNodeInput): Promise<ContextNode>;
+    searchInScope(request: ContextSearchRequest): Promise<ContextSearchMatch[]>;
     resolveScopedAgentConfig(targetPath: string): Promise<ResolvedAgentConfig>;
 }

@@ -1,5 +1,9 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import {
+    normalizeScopePath as normalizeSearchScopePath,
+    searchInScopedFiles
+} from '../../../../packages/core/src/providers/fileSearch.ts';
 import type {
     AgentConfig,
     AgentInheritanceMode,
@@ -7,6 +11,8 @@ import type {
     AgentToolBinding,
     ContextDocument,
     ContextNode,
+    ContextSearchMatch,
+    ContextSearchRequest,
     ContextProvider,
     CreateContextNodeInput,
     ResolvedAgentConfig
@@ -18,12 +24,22 @@ export interface LocalFileContextProviderOptions {
 
 const DEFAULT_SCOPED_AGENT_CONFIG: AgentConfig = {
     name: 'Default Knowledge Agent',
-    description: '通用知识工作区助手',
-    instructions: '基于当前知识工作区的文件内容帮助用户整理、撰写和修改文档。',
+    description: 'General-purpose assistant for the knowledge workspace.',
+    instructions: [
+        'Treat the active file as the primary context for the current request when it is provided.',
+        'Use workspace tools to gather additional relevant information from the current scope only when needed.',
+        'Do not claim to have used tools that are not available, and do not infer facts outside the current scope without checking.'
+    ].join(' '),
     tools: [
-        { id: 'list_tree', description: '查看当前知识工作区目录树' },
-        { id: 'read_document', description: '读取当前知识工作区文件' },
-        { id: 'write_document', description: '修改当前知识工作区文件' }
+        { id: 'read_current_file', description: 'Read the currently active file.' },
+        { id: 'list_directory', description: 'List files and directories within the knowledge workspace.' },
+        { id: 'read_file', description: 'Read a file within the current knowledge workspace.' },
+        { id: 'search_in_scope', description: 'Search for relevant text within the current agent scope.' },
+        { id: 'replace_text_in_file', description: 'Replace an exact text match in a file.' },
+        { id: 'replace_range_in_file', description: 'Replace text within a specific line and column range.' },
+        { id: 'insert_text_in_file', description: 'Insert text at a specific position in a file.' },
+        { id: 'delete_range_in_file', description: 'Delete text within a specific line and column range.' },
+        { id: 'write_file', description: 'Create or overwrite an entire file.' }
     ]
 };
 
@@ -380,6 +396,40 @@ export class LocalFileContextProvider implements ContextProvider {
             hasChildren,
             updatedAt: stats.mtimeMs
         };
+    }
+
+    async searchInScope(request: ContextSearchRequest): Promise<ContextSearchMatch[]> {
+        const rootDirectory = await this.resolveRootDirectory();
+        const scopePath = normalizeVirtualPath(request.scopePath);
+        const startDirectory = scopePath
+            ? path.join(rootDirectory, ...scopePath.split('/').filter(Boolean))
+            : rootDirectory;
+
+        const files: Array<{ path: string; readContent: () => Promise<string> }> = [];
+        const walk = async (directoryPath: string, currentVirtualPath?: string): Promise<void> => {
+            const entries = await fs.readdir(directoryPath, { withFileTypes: true });
+            for (const entry of entries) {
+                const entryVirtualPath = currentVirtualPath ? `${currentVirtualPath}/${entry.name}` : `/${entry.name}`;
+                const entryRealPath = path.join(directoryPath, entry.name);
+                if (entry.isDirectory()) {
+                    await walk(entryRealPath, entryVirtualPath);
+                    continue;
+                }
+
+                files.push({
+                    path: entryVirtualPath,
+                    readContent: async () => fs.readFile(entryRealPath, 'utf8')
+                });
+            }
+        };
+
+        await walk(startDirectory, normalizeSearchScopePath(scopePath ?? '/'));
+        return searchInScopedFiles({
+            query: request.query,
+            scopePath: scopePath,
+            maxResults: request.maxResults,
+            files
+        });
     }
 
     async resolveScopedAgentConfig(targetPath: string): Promise<ResolvedAgentConfig> {

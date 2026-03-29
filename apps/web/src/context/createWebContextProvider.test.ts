@@ -55,6 +55,12 @@ describe('createWebContextProvider', () => {
           node: { path: '/notes/draft.md', name: 'draft.md', kind: 'file', parentPath: '/notes' }
         }), { status: 200 });
       }
+      if (url.endsWith('/search-in-scope')) {
+        expect(body).toEqual({ query: 'Today', scopePath: '/notes', maxResults: 3 });
+        return new Response(JSON.stringify({
+          matches: [{ path: '/notes/today.md', line: 1, column: 3, preview: '# Today' }]
+        }), { status: 200 });
+      }
       if (url.endsWith('/resolve-scoped-agent-config')) {
         expect(body).toEqual({ path: '/notes/today.md' });
         return new Response(JSON.stringify({
@@ -96,6 +102,13 @@ describe('createWebContextProvider', () => {
       kind: 'file',
       parentPath: '/notes'
     });
+    await expect(provider.searchInScope({
+      query: 'Today',
+      scopePath: '/notes',
+      maxResults: 3
+    })).resolves.toEqual([
+      { path: '/notes/today.md', line: 1, column: 3, preview: '# Today' }
+    ]);
     await expect(provider.resolveScopedAgentConfig('/notes/today.md')).resolves.toEqual({
       name: 'Notes Agent',
       scopePath: '/notes',
@@ -105,7 +118,7 @@ describe('createWebContextProvider', () => {
       modelName: 'gemini-2.5-flash'
     });
 
-    expect(fetchImpl).toHaveBeenCalledTimes(6);
+    expect(fetchImpl).toHaveBeenCalledTimes(7);
   });
 
   it('surfaces server-side context errors', async () => {
@@ -162,6 +175,12 @@ describe('createWebContextProvider', () => {
       path: '/notes/draft.md',
       kind: 'file'
     });
+    await expect(provider.searchInScope({
+      query: 'Today',
+      scopePath: '/notes'
+    })).resolves.toEqual([
+      expect.objectContaining({ path: '/notes/today.md', line: 1, column: 3 })
+    ]);
     await expect(provider.resolveScopedAgentConfig('/notes/today.md')).resolves.toMatchObject({
       scopePath: '/',
       name: 'Default Knowledge Agent'

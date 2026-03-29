@@ -5,3 +5,4 @@
 注意：
   - MV3 扩展测试需要走 channel: 'chromium'，否则 Playwright 默认的 headless shell 拉不起扩展 service worker。
   - extension e2e测试通过后，请运行pnpm --filter extension build
+- 当任务涉及 e2e、Playwright 失败排查、浏览器侧调试或 flaky 用例修复时，请参考 [`.codex/skills/e2e-debugging/SKILL.md`](/Users/quanzhou/Workspace/ChatPrism/.codex/skills/e2e-debugging/SKILL.md)。

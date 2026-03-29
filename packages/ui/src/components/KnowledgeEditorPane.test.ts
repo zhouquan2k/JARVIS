@@ -37,7 +37,11 @@ describe('KnowledgeEditorPane', () => {
             props: {
                 activePath: '/notes/today.md',
                 modelValue: '# Today',
-                isSaving: false
+                isSaving: false,
+                latestFileChange: null,
+                diffEntries: [],
+                canUndo: false,
+                canRedo: false
             }
         });
 
@@ -61,7 +65,11 @@ describe('KnowledgeEditorPane', () => {
             props: {
                 activePath: '/welcome.md',
                 modelValue: '# Welcome',
-                isSaving: false
+                isSaving: false,
+                latestFileChange: null,
+                diffEntries: [],
+                canUndo: false,
+                canRedo: false
             }
         });
 
@@ -88,13 +96,23 @@ describe('KnowledgeEditorPane', () => {
             props: {
                 activePath: '/draft.md',
                 modelValue: '# Draft',
-                isSaving: false
+                isSaving: false,
+                latestFileChange: null,
+                diffEntries: [],
+                canUndo: false,
+                canRedo: false
             }
         });
 
         await Promise.resolve();
         await wrapper.vm.$nextTick();
 
+        expect(wrapper.get('[data-testid="knowledge-save"]').attributes('title')).toBe('保存');
+        expect(wrapper.get('[data-testid="knowledge-save"]').attributes('aria-label')).toBe('保存');
+        await wrapper.get('[data-testid="knowledge-save"]').trigger('mouseenter');
+        expect(document.body.textContent).toContain('保存');
+        await wrapper.get('[data-testid="knowledge-save"]').trigger('mouseleave');
+        expect(document.body.textContent).not.toContain('保存');
         await wrapper.get('[data-testid="knowledge-save"]').trigger('click');
         expect(wrapper.emitted('save')).toHaveLength(1);
 

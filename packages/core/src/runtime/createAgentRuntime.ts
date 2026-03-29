@@ -1,4 +1,6 @@
-import { buildAgentPromptEnvelope } from '../agents/buildAgentPromptEnvelope';
+import { augmentPromptWithAgentContext } from '../agents/augmentPromptWithAgentContext';
+import { createBuiltinWorkspaceToolDefinitions } from '../agent-tools/builtinWorkspaceTools';
+import { createAgentToolExecutor } from '../agent-tools/createAgentToolExecutor';
 import type {
     AgentRunRequest,
     AgentToolCall,
@@ -23,18 +25,6 @@ function createAbortError() {
     const error = new Error('Aborted');
     error.name = 'AbortError';
     return error;
-}
-
-function buildToolResult(call: AgentToolCall, agentName: string): AgentToolResult {
-    return {
-        toolCallId: call.id,
-        name: call.name,
-        isError: true,
-        result: JSON.stringify({
-            ok: false,
-            error: `Tool '${call.name}' declared by agent '${agentName}' is not implemented in phase one.`
-        })
-    };
 }
 
 function joinAgentTexts(segments: string[]): string {
@@ -79,12 +69,29 @@ function renderAgentToolExchange(call: AgentToolCall, result: AgentToolResult): 
     ].join('\n');
 }
 
+function renderAgentToolRound(toolExchanges: Array<{ call: AgentToolCall; result: AgentToolResult }>): string {
+    const total = toolExchanges.length;
+    const heading = `### 本轮工具调用（${total} 个函数调用）`;
+
+    return [
+        heading,
+        ...toolExchanges.flatMap((exchange, index) => {
+            return [
+                '',
+                `#### 调用 ${index + 1}: \`${exchange.call.name}\``,
+                renderAgentToolExchange(exchange.call, exchange.result)
+            ];
+        })
+    ].join('\n');
+}
+
 async function runNativeAgentLoop(
     provider: IAgentCapableProvider,
     request: AgentRuntimeRequest,
     onUpdate: (update: ProviderStreamUpdate) => void,
     shouldAbort: () => boolean,
-    maxToolIterations: number
+    maxToolIterations: number,
+    executeTool: (call: AgentToolCall, request: AgentRuntimeRequest) => Promise<AgentToolResult>
 ): Promise<ProviderSendResult> {
     const agent = request.agent;
     if (!agent) {
@@ -94,6 +101,9 @@ async function runNativeAgentLoop(
     const toolExchanges: AgentToolExchange[] = [];
     const completedTexts: string[] = [];
     let conversationId = request.context?.conversationId;
+    const resolvedTools = agent.tools?.length
+        ? createAgentToolExecutor(createBuiltinWorkspaceToolDefinitions()).getDeclarations(agent.tools)
+        : [];
 
     for (let iteration = 0; iteration <= maxToolIterations; iteration += 1) {
         if (shouldAbort()) {
@@ -113,6 +123,7 @@ async function runNativeAgentLoop(
                 attachments: request.attachments,
                 history: request.history,
                 modelOptions: request.modelOptions,
+                tools: resolvedTools,
                 toolExchanges
             } satisfies AgentRunRequest,
             (update) => {
@@ -138,7 +149,8 @@ async function runNativeAgentLoop(
             throw new Error(`Agent tool loop exceeded the iteration limit (${maxToolIterations}).`);
         }
 
-        const nextToolExchanges = result.toolCalls.map((call) => ({
+        const nextToolResults = await Promise.all(result.toolCalls.map((call) => executeTool(call, request)));
+        const nextToolExchanges = result.toolCalls.map((call, index) => ({
             modelTurn: result.modelTurn || {
                 role: 'model',
                 parts: [
@@ -148,11 +160,11 @@ async function runNativeAgentLoop(
                 ]
             },
             call,
-            result: buildToolResult(call, agent.name)
+            result: nextToolResults[index]
         }));
         const stepText = joinAgentTexts([
             result.text || iterationText,
-            ...nextToolExchanges.map((exchange) => renderAgentToolExchange(exchange.call, exchange.result))
+            renderAgentToolRound(nextToolExchanges)
         ]);
         if (stepText.trim().length > 0) {
             completedTexts.push(stepText);
@@ -166,6 +178,7 @@ async function runNativeAgentLoop(
 
 export function createAgentRuntime(options: CreateAgentRuntimeOptions): AgentRuntime {
     const maxToolIterations = options.maxToolIterations ?? 4;
+    const toolExecutor = createAgentToolExecutor(createBuiltinWorkspaceToolDefinitions());
     let activeProvider: IModelProvider | null = null;
     let abortRequested = false;
 
@@ -180,15 +193,37 @@ export function createAgentRuntime(options: CreateAgentRuntimeOptions): AgentRun
 
             const provider = options.providerRuntime.getProvider(providerId);
             activeProvider = provider;
+            const prompt = request.agent
+                ? augmentPromptWithAgentContext(request.prompt, {
+                    activeDocument: request.workspace?.activeDocument ?? null
+                })
+                : request.prompt;
 
             try {
                 if (request.agent && isAgentCapableProvider(provider) && provider.getAgentCapabilities().nativeAgent) {
-                    return await runNativeAgentLoop(provider, request, onUpdate, () => abortRequested, maxToolIterations);
-                }
+                    return await runNativeAgentLoop(
+                        provider,
+                        {
+                            ...request,
+                            prompt
+                        },
+                        onUpdate,
+                        () => abortRequested,
+                        maxToolIterations,
+                        async (call, currentRequest) => {
+                            if (!currentRequest.agent) {
+                                throw new Error('Native agent execution requires an active agent context.');
+                            }
 
-                const prompt = request.agent
-                    ? buildAgentPromptEnvelope(request.agent, request.prompt)
-                    : request.prompt;
+                            return toolExecutor.execute(call, {
+                                agent: currentRequest.agent,
+                                activePath: currentRequest.workspace?.activePath ?? null,
+                                contextProvider: currentRequest.workspace?.contextProvider ?? null,
+                                onFileChanged: currentRequest.workspace?.onFileChanged
+                            });
+                        }
+                    );
+                }
 
                 if (abortRequested) {
                     throw createAbortError();

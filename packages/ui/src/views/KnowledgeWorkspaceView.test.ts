@@ -56,6 +56,8 @@ describe('KnowledgeWorkspaceView', () => {
         expect(wrapper.get('[data-testid="knowledge-editor"]').exists()).toBe(true);
         expect(wrapper.get('[data-testid="knowledge-assistant-pane"]').exists()).toBe(true);
         expect(wrapper.get('[data-testid="knowledge-assistant-pane"]').attributes('data-agent-name')).toBe('Root Agent');
+        expect(wrapper.get('.knowledge-grid').attributes('style')).toContain('100% - 8px');
+        expect(wrapper.findAll('.grid-pane')).toHaveLength(3);
     });
 
     it('allows the host to override the default assistant pane through the slot', async () => {

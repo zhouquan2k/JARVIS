@@ -48,7 +48,9 @@ const historyProviders = createExtensionHistoryProviders();
 const isCompareMode = computed(() => currentRoute.value.path === '/compare');
 const isKnowledgeMode = computed(() => currentRoute.value.path === '/');
 const activeWorkspacePath = computed<ChatRoutePath>(() => currentRoute.value.path === '/compare' ? '/chat' : currentRoute.value.path);
-const contextProvider = createExtensionContextProvider(typeof localStorage !== 'undefined' ? localStorage : undefined);
+const contextProvider = createExtensionContextProvider({
+  env: import.meta.env as Record<string, string | undefined>
+});
 const isHydratingCompare = ref(false);
 const lastPersistedCompareKey = ref('');
 let storageProvider: SyncStorageProvider | null = null;
@@ -230,7 +232,6 @@ watchEffect(() => {
 .view-host {
   display: flex;
   flex: 1;
-  height: 100%;
   min-height: 0;
   min-width: 0;
   overflow: hidden;

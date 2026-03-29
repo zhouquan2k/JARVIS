@@ -1,5 +1,6 @@
 import type { ProviderConfig, ProviderModelCatalog, RuntimeMode } from '../../config';
 import type { ResolvedAgentConfig } from '../interfaces/IAgentConfig';
+import type { ContextDocument, IContextProvider } from '../interfaces/IContextProvider';
 import type { IModelProvider } from '../interfaces/IModelProvider';
 import type { MessageAttachment } from '../interfaces/IStorageProvider';
 import type { ProviderContextMessage, ProviderSendResult, ProviderStreamUpdate } from '../interfaces/IModelProvider';
@@ -25,6 +26,16 @@ export interface ProviderRuntime {
 export interface AgentRuntimeRequest {
     prompt: string;
     agent: ResolvedAgentConfig | null;
+    workspace?: {
+        activePath: string | null;
+        activeDocument?: Pick<ContextDocument, 'path' | 'content'> | null;
+        contextProvider: IContextProvider | null;
+        onFileChanged?: (change: {
+            path: string;
+            beforeContent: string;
+            afterContent: string;
+        }) => Promise<void> | void;
+    };
     providerId?: string;
     modelId?: string;
     attachments?: MessageAttachment[];

@@ -20,7 +20,14 @@ describe('KnowledgeAssistantPane', () => {
                     modelName: 'gemini-2.5-pro',
                     scopePath: '/docs',
                     sourcePaths: ['/docs/.agent.json']
-                }
+                },
+                activePath: '/docs/guide.md',
+                activeDocument: {
+                    path: '/docs/guide.md',
+                    content: '# Guide'
+                },
+                contextProvider: null,
+                onFileChanged: null
             },
             global: {
                 stubs: {
@@ -50,7 +57,14 @@ describe('KnowledgeAssistantPane', () => {
                     modelName: 'gemini-2.5-pro',
                     scopePath: '/workspace/archive/reports',
                     sourcePaths: ['/workspace/.agent.json', '/workspace/archive/.agent.json']
-                }
+                },
+                activePath: '/workspace/archive/reports/note.md',
+                activeDocument: {
+                    path: '/workspace/archive/reports/note.md',
+                    content: '# Note'
+                },
+                contextProvider: null,
+                onFileChanged: null
             },
             global: {
                 stubs: {
@@ -74,7 +88,14 @@ describe('KnowledgeAssistantPane', () => {
                     effectiveInstructions: 'Use workspace context',
                     scopePath: '/',
                     sourcePaths: []
-                }
+                },
+                activePath: '/welcome.md',
+                activeDocument: {
+                    path: '/welcome.md',
+                    content: '# Welcome'
+                },
+                contextProvider: null,
+                onFileChanged: null
             },
             global: {
                 stubs: {
@@ -100,7 +121,28 @@ describe('KnowledgeAssistantPane', () => {
                     modelName: 'gemini-2.5-flash',
                     scopePath: '/docs',
                     sourcePaths: ['/docs/.agent.json']
-                }
+                },
+                activePath: '/docs/guide.md',
+                activeDocument: {
+                    path: '/docs/guide.md',
+                    content: '# Guide'
+                },
+                contextProvider: {
+                    id: 'workspace-context',
+                    initializeAccess: async () => undefined,
+                    listTree: async () => [],
+                    readDocument: async (path: string) => ({ path, content: '' }),
+                    writeDocument: async () => undefined,
+                    createNode: async () => ({ path: '/draft.md', name: 'draft.md', kind: 'file' as const }),
+                    searchInScope: async () => [],
+                    resolveScopedAgentConfig: async () => ({
+                        name: 'Docs Agent',
+                        effectiveInstructions: 'Use docs context',
+                        scopePath: '/docs',
+                        sourcePaths: ['/docs/.agent.json']
+                    })
+                },
+                onFileChanged: async () => undefined
             },
             global: {
                 stubs: {
@@ -112,6 +154,12 @@ describe('KnowledgeAssistantPane', () => {
         });
 
         expect(chatStore.activeAgentContext?.name).toBe('Docs Agent');
+        expect(chatStore.activeWorkspacePath).toBe('/docs/guide.md');
+        expect(chatStore.activeWorkspaceDocument).toEqual({
+            path: '/docs/guide.md',
+            content: '# Guide'
+        });
+        expect(chatStore.activeWorkspaceContextProvider?.id).toBe('workspace-context');
 
         await wrapper.setProps({
             activeAgent: {
@@ -121,12 +169,24 @@ describe('KnowledgeAssistantPane', () => {
                 modelName: 'gemini-2.5-pro',
                 scopePath: '/archive',
                 sourcePaths: ['/archive/.agent.json']
+            },
+            activePath: '/archive/log.md',
+            activeDocument: {
+                path: '/archive/log.md',
+                content: '# Archive Log'
             }
         });
 
         expect(chatStore.activeAgentContext?.name).toBe('Archive Agent');
+        expect(chatStore.activeWorkspacePath).toBe('/archive/log.md');
+        expect(chatStore.activeWorkspaceDocument).toEqual({
+            path: '/archive/log.md',
+            content: '# Archive Log'
+        });
 
         wrapper.unmount();
         expect(chatStore.activeAgentContext).toBeNull();
+        expect(chatStore.activeWorkspacePath).toBeNull();
+        expect(chatStore.activeWorkspaceDocument).toBeNull();
     });
 });

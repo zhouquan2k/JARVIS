@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@milkdown/crepe": "7.19.2",
-    "@milkdown/kit": "7.19.2"
+    "@milkdown/kit": "7.19.2",
+    "lucide-vue-next": "^1.0.0"
   }
 }

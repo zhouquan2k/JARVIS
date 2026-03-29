@@ -1,4 +1,5 @@
 import { APP_CONFIG, type ModelConfig, type ProviderModelCatalog } from '../../config';
+import type { AgentToolDeclaration } from '../agent-tools/types';
 import type {
     AgentCapabilities,
     AgentModelTurn,
@@ -7,7 +8,6 @@ import type {
     AgentToolCall,
     IAgentCapableProvider
 } from '../interfaces/IAgentCapableProvider';
-import type { AgentToolBinding } from '../interfaces/IAgentConfig';
 import type { MessageAttachment } from '../interfaces/IStorageProvider';
 import {
     IModelProvider,
@@ -232,7 +232,7 @@ function buildGeminiContents(prompt: string, options: SendMessageOptions) {
     ];
 }
 
-function buildGeminiFunctionDeclarations(tools?: AgentToolBinding[]) {
+function buildGeminiFunctionDeclarations(tools?: AgentToolDeclaration[]) {
     if (!tools?.length) {
         return [];
     }
@@ -240,10 +240,7 @@ function buildGeminiFunctionDeclarations(tools?: AgentToolBinding[]) {
     return tools.map((tool) => ({
         name: tool.id,
         description: tool.description || `${tool.id} tool`,
-        parameters: {
-            type: 'OBJECT',
-            properties: {}
-        }
+        parameters: tool.inputSchema
     }));
 }
 
@@ -292,7 +289,7 @@ function buildGeminiSystemInstruction(request: AgentRunRequest): string {
     return request.agent.effectiveInstructions;
 }
 
-function buildGeminiRequestTools(input: { modelOptions?: Record<string, boolean>, tools?: AgentToolBinding[] }) {
+function buildGeminiRequestTools(input: { modelOptions?: Record<string, boolean>, tools?: AgentToolDeclaration[] }) {
     const declaredTools: Array<Record<string, unknown>> = [];
 
     if (input.modelOptions?.deep_research === true) {
@@ -319,8 +316,8 @@ async function parseGeminiSse(
     const decoder = new TextDecoder('utf-8');
     let fullText = '';
     let buffer = '';
-    let latestToolCalls: AgentToolCall[] | undefined;
-    let latestModelTurn: AgentModelTurn | undefined;
+    const aggregatedToolCalls: AgentToolCall[] = [];
+    const aggregatedModelParts: AgentResponsePart[] = [];
 
     while (true) {
         const { done, value } = await reader.read();
@@ -344,42 +341,40 @@ async function parseGeminiSse(
                     continue;
                 }
 
-                latestModelTurn = {
-                    role: 'model',
-                    parts: contentParts.map((contentPart) => ({
-                        text: contentPart.text,
-                        thoughtSignature: contentPart.thoughtSignature,
-                        functionCall: contentPart.functionCall?.name
-                            ? {
-                                id: contentPart.functionCall.id,
-                                name: contentPart.functionCall.name,
-                                args: contentPart.functionCall.args || {}
-                            }
-                            : undefined
-                    } satisfies AgentResponsePart))
-                };
-
                 const toolCalls: AgentToolCall[] = [];
                 let hasTextDelta = false;
 
                 contentParts.forEach((contentPart, index) => {
+                    const functionCall = contentPart.functionCall?.name
+                        ? {
+                            id: contentPart.functionCall.id,
+                            name: contentPart.functionCall.name,
+                            args: contentPart.functionCall.args || {}
+                        }
+                        : undefined;
+                    aggregatedModelParts.push({
+                        text: contentPart.text,
+                        thoughtSignature: contentPart.thoughtSignature,
+                        functionCall
+                    } satisfies AgentResponsePart);
+
                     if (contentPart.text) {
                         fullText += contentPart.text;
                         hasTextDelta = true;
                     }
 
-                    if (contentPart.functionCall?.name) {
-                        toolCalls.push({
-                            id: contentPart.functionCall.id || `${contentPart.functionCall.name}-${index}-${toolCalls.length}`,
-                            name: contentPart.functionCall.name,
-                            arguments: contentPart.functionCall.args || {}
-                        });
+                    if (functionCall?.name) {
+                        const toolCall = {
+                            id: functionCall.id || `${functionCall.name}-${index}-${toolCalls.length}`,
+                            name: functionCall.name,
+                            arguments: functionCall.args || {}
+                        };
+                        toolCalls.push(toolCall);
+                        if (!aggregatedToolCalls.some((existing) => existing.id === toolCall.id)) {
+                            aggregatedToolCalls.push(toolCall);
+                        }
                     }
                 });
-
-                if (toolCalls.length > 0) {
-                    latestToolCalls = toolCalls;
-                }
 
                 if (hasTextDelta || toolCalls.length > 0) {
                     onUpdate({
@@ -395,8 +390,13 @@ async function parseGeminiSse(
 
     return {
         text: fullText,
-        toolCalls: latestToolCalls,
-        modelTurn: latestModelTurn
+        toolCalls: aggregatedToolCalls.length > 0 ? aggregatedToolCalls : undefined,
+        modelTurn: aggregatedModelParts.length > 0
+            ? {
+                role: 'model',
+                parts: aggregatedModelParts
+            }
+            : undefined
     };
 }
 
@@ -571,13 +571,13 @@ export class GeminiApiProvider implements IAgentCapableProvider {
 
         const requestTools = buildGeminiRequestTools({
             modelOptions: request.modelOptions,
-            tools: request.agent.tools
+            tools: request.tools
         });
         if (requestTools.length > 0) {
             payload.tools = requestTools;
         }
 
-        const functionDeclarations = buildGeminiFunctionDeclarations(request.agent.tools);
+        const functionDeclarations = buildGeminiFunctionDeclarations(request.tools);
         if (functionDeclarations.length > 0) {
             payload.toolConfig = {
                 functionCallingConfig: {

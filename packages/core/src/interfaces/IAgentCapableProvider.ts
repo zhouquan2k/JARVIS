@@ -1,4 +1,5 @@
 import type { ResolvedAgentConfig } from './IAgentConfig';
+import type { AgentToolDeclaration } from '../agent-tools/types';
 import type {
     IModelProvider,
     ProviderContextMessage,
@@ -49,6 +50,7 @@ export interface AgentToolExchange {
 export interface AgentRunRequest {
     prompt: string;
     agent: ResolvedAgentConfig;
+    tools?: AgentToolDeclaration[];
     context?: { parentMessageId?: string, conversationId?: string };
     modelId?: string;
     attachments?: MessageAttachment[];

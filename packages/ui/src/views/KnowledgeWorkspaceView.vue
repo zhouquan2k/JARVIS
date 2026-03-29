@@ -3,40 +3,56 @@
     <div
       ref="shellRef"
       class="knowledge-grid"
-      :style="{ gridTemplateColumns: `${panelSizes[0]}fr 8px ${panelSizes[1]}fr 8px ${panelSizes[2]}fr` }"
+      :style="{ gridTemplateColumns: `minmax(0, calc((100% - 8px) * ${panelSizes[0]} / 100)) 4px minmax(0, calc((100% - 8px) * ${panelSizes[1]} / 100)) 4px minmax(0, calc((100% - 8px) * ${panelSizes[2]} / 100))` }"
     >
-      <KnowledgeFileTree
-        :nodes="knowledgeStore.nodes"
-        :expanded-paths="knowledgeStore.expandedPaths"
-        :active-path="knowledgeStore.selectedNodePath"
-        :current-error="knowledgeStore.currentError"
-        @open="knowledgeStore.openNode"
-        @create="knowledgeStore.createNode"
-      />
+      <div class="grid-pane">
+        <KnowledgeFileTree
+          :nodes="knowledgeStore.nodes"
+          :expanded-paths="knowledgeStore.expandedPaths"
+          :active-path="knowledgeStore.selectedNodePath"
+          :current-error="knowledgeStore.currentError"
+          @open="knowledgeStore.openNode"
+          @create="knowledgeStore.createNode"
+        />
+      </div>
       <div
         class="resize-handle"
         data-testid="knowledge-resize-left"
         @pointerdown="startResize(0, $event)"
       />
-      <KnowledgeEditorPane
-        :active-path="knowledgeStore.activePath"
-        :model-value="draftContent"
-        :is-saving="knowledgeStore.isSaving"
-        @update:model-value="onDraftChange"
-        @save="knowledgeStore.flushActiveDocument"
-      />
+      <div class="grid-pane">
+        <KnowledgeEditorPane
+          :active-path="knowledgeStore.activePath"
+          :model-value="draftContent"
+          :is-saving="knowledgeStore.isSaving"
+          :latest-file-change="knowledgeStore.latestFileChange"
+          :diff-entries="knowledgeStore.activeDiffEntries"
+          :can-undo="knowledgeStore.canUndoActiveFile"
+          :can-redo="knowledgeStore.canRedoActiveFile"
+          @update:model-value="onDraftChange"
+          @save="knowledgeStore.flushActiveDocument"
+          @undo-change="knowledgeStore.undoActiveFileChange"
+          @redo-change="knowledgeStore.redoActiveFileChange"
+        />
+      </div>
       <div
         class="resize-handle"
         data-testid="knowledge-resize-right"
         @pointerdown="startResize(1, $event)"
       />
-      <slot name="assistant-pane">
-        <KnowledgeAssistantPane
-          :active-agent="knowledgeStore.activeAgent"
-          :agent-resolution-error="knowledgeStore.agentResolutionError"
-          :is-resolving-agent="knowledgeStore.isResolvingAgent"
-        />
-      </slot>
+      <div class="grid-pane">
+        <slot name="assistant-pane">
+          <KnowledgeAssistantPane
+            :active-agent="knowledgeStore.activeAgent"
+            :active-path="knowledgeStore.activePath"
+            :active-document="activeAssistantDocument"
+            :context-provider="props.contextProvider"
+            :on-file-changed="knowledgeStore.recordFileChange"
+            :agent-resolution-error="knowledgeStore.agentResolutionError"
+            :is-resolving-agent="knowledgeStore.isResolvingAgent"
+          />
+        </slot>
+      </div>
     </div>
   </section>
 </template>
@@ -53,13 +69,23 @@ const props = withDefaults(defineProps<{
   contextProvider: IContextProvider;
   panelSizes?: [number, number, number];
 }>(), {
-  panelSizes: () => [22, 48, 30]
+  panelSizes: () => [20, 50, 30]
 });
 
 const knowledgeStore = useKnowledgeWorkspaceStore();
 const shellRef = ref<HTMLElement | null>(null);
 const panelSizes = computed(() => knowledgeStore.panelSizes);
 const draftContent = computed(() => knowledgeStore.draftContent);
+const activeAssistantDocument = computed(() => {
+  if (!knowledgeStore.activePath) {
+    return null;
+  }
+
+  return {
+    path: knowledgeStore.activePath,
+    content: knowledgeStore.draftContent
+  };
+});
 
 watch(() => props.panelSizes, (value) => {
   knowledgeStore.setPanelSizes(value);
@@ -140,7 +166,19 @@ onBeforeUnmount(() => {
   min-width: 0;
   min-height: 0;
   width: 100%;
+  max-width: 100%;
   height: 100%;
+  overflow: hidden;
+}
+
+.grid-pane {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
 }
 
 .resize-handle {

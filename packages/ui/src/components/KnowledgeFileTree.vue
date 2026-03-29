@@ -3,11 +3,36 @@
     <header class="tree-header">
       <div>
         <div class="tree-title">Knowledge</div>
-        <div class="tree-subtitle">Markdown 文件浏览</div>
       </div>
       <div class="tree-actions">
-        <button type="button" data-testid="knowledge-new-file" @click="createNode('file')">文件</button>
-        <button type="button" data-testid="knowledge-new-directory" @click="createNode('directory')">目录</button>
+        <button
+          type="button"
+          class="tree-icon-button"
+          data-testid="knowledge-new-file"
+          title="新建文件"
+          aria-label="新建文件"
+          @mouseenter="showTooltip($event, '新建文件')"
+          @mouseleave="hideTooltip"
+          @focus="showTooltip($event, '新建文件')"
+          @blur="hideTooltip"
+          @click="createNode('file')"
+        >
+          <FilePlus class="tree-icon" :size="18" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          class="tree-icon-button"
+          data-testid="knowledge-new-directory"
+          title="新建目录"
+          aria-label="新建目录"
+          @mouseenter="showTooltip($event, '新建目录')"
+          @mouseleave="hideTooltip"
+          @focus="showTooltip($event, '新建目录')"
+          @blur="hideTooltip"
+          @click="createNode('directory')"
+        >
+          <FolderPlus class="tree-icon" :size="18" aria-hidden="true" />
+        </button>
       </div>
     </header>
 
@@ -36,10 +61,21 @@
       </button>
     </div>
   </aside>
+  <Teleport to="body">
+    <div
+      v-if="tooltipState.visible"
+      class="floating-tooltip"
+      role="tooltip"
+      :style="{ left: `${tooltipState.left}px`, top: `${tooltipState.top}px` }"
+    >
+      {{ tooltipState.text }}
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, reactive } from 'vue';
+import { FilePlus, FolderPlus } from 'lucide-vue-next';
 import type { ContextNode } from '@packages/core/src';
 
 const props = defineProps<{
@@ -53,6 +89,13 @@ const emit = defineEmits<{
   (event: 'open', path: string): void;
   (event: 'create', input: { parentPath?: string; name: string; kind: 'file' | 'directory' }): void;
 }>();
+
+const tooltipState = reactive({
+  text: '',
+  top: 0,
+  left: 0,
+  visible: false
+});
 
 const childrenByParent = computed(() => {
   const grouped = new Map<string, ContextNode[]>();
@@ -110,14 +153,35 @@ function createNode(kind: 'file' | 'directory') {
     kind
   });
 }
+
+function showTooltip(event: MouseEvent | FocusEvent, text: string) {
+  const target = event.currentTarget;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  const rect = target.getBoundingClientRect();
+  tooltipState.text = text;
+  tooltipState.left = rect.left + rect.width / 2;
+  tooltipState.top = rect.top - 8;
+  tooltipState.visible = true;
+}
+
+function hideTooltip() {
+  tooltipState.visible = false;
+}
 </script>
 
 <style scoped>
 .file-tree {
   display: flex;
+  flex: 1;
   flex-direction: column;
+  width: 100%;
+  height: 100%;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
   background:
     radial-gradient(circle at top left, rgba(56, 189, 248, 0.1), transparent 28%),
     linear-gradient(180deg, rgba(7, 12, 18, 0.98), rgba(10, 14, 22, 0.94));
@@ -125,10 +189,10 @@ function createNode(kind: 'file' | 'directory') {
 
 .tree-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 14px 12px 10px;
+  padding: 10px 12px 8px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.14);
 }
 
@@ -137,24 +201,50 @@ function createNode(kind: 'file' | 'directory') {
   font-weight: 700;
 }
 
-.tree-subtitle {
-  margin-top: 4px;
-  color: #94a3b8;
-  font-size: 12px;
-}
-
 .tree-actions {
   display: flex;
-  gap: 6px;
+  gap: 2px;
 }
 
-.tree-actions button {
+.tree-icon-button {
   border: 0;
   border-radius: 8px;
-  padding: 6px 8px;
-  color: #dbeafe;
-  background: rgba(37, 99, 235, 0.4);
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: rgba(226, 232, 240, 0.86);
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
+}
+
+.tree-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.tree-icon-button:hover,
+.tree-icon-button:focus-visible {
+  background: rgba(255, 255, 255, 0.06);
+  color: #f8fafc;
+}
+
+.floating-tooltip {
+  position: fixed;
+  transform: translate(-50%, -100%);
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.96);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  color: #e2e8f0;
+  font-size: 12px;
+  line-height: 1.1;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+  z-index: 9999;
 }
 
 .tree-list {

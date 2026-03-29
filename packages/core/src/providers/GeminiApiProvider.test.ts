@@ -10,7 +10,7 @@ const scopedAgent = {
     modelName: 'gemini-2.5-pro',
     scopePath: '/docs',
     sourcePaths: ['/docs/.agent.json'],
-    tools: [{ id: 'read_document', description: 'Read docs' }],
+    tools: [{ id: 'read_file', description: 'Read docs' }],
     skills: [{ id: 'summarize', description: 'Summarize docs' }]
 };
 
@@ -332,6 +332,19 @@ describe('GeminiApiProvider', () => {
             {
                 prompt: '请分析当前文档',
                 agent: scopedAgent,
+                tools: [
+                    {
+                        id: 'read_file',
+                        description: 'Read docs',
+                        inputSchema: {
+                            type: 'OBJECT',
+                            properties: {
+                                path: { type: 'STRING', description: 'Absolute file path inside the workspace scope.' }
+                            },
+                            required: ['path']
+                        }
+                    }
+                ],
                 modelOptions: { deep_research: true },
                 toolExchanges: [
                     {
@@ -345,7 +358,7 @@ describe('GeminiApiProvider', () => {
                                 {
                                     functionCall: {
                                         id: 'call-1',
-                                        name: 'read_document',
+                                        name: 'read_file',
                                         args: { path: '/docs/guide.md' }
                                     }
                                 }
@@ -353,12 +366,12 @@ describe('GeminiApiProvider', () => {
                         },
                         call: {
                             id: 'call-1',
-                            name: 'read_document',
+                            name: 'read_file',
                             arguments: { path: '/docs/guide.md' }
                         },
                         result: {
                             toolCallId: 'call-1',
-                            name: 'read_document',
+                            name: 'read_file',
                             result: '文档内容',
                             isError: false
                         }
@@ -380,7 +393,7 @@ describe('GeminiApiProvider', () => {
                 {
                     functionCall: {
                         id: 'call-1',
-                        name: 'read_document',
+                        name: 'read_file',
                         args: { path: '/docs/guide.md' }
                     }
                 }
@@ -392,7 +405,7 @@ describe('GeminiApiProvider', () => {
                 {
                     functionResponse: {
                         id: 'call-1',
-                        name: 'read_document',
+                        name: 'read_file',
                         response: {
                             result: '文档内容',
                             isError: false
@@ -406,11 +419,17 @@ describe('GeminiApiProvider', () => {
             {
                 functionDeclarations: [
                     {
-                        name: 'read_document',
+                        name: 'read_file',
                         description: 'Read docs',
                         parameters: {
                             type: 'OBJECT',
-                            properties: {}
+                            properties: {
+                                path: {
+                                    type: 'STRING',
+                                    description: 'Absolute file path inside the workspace scope.'
+                                }
+                            },
+                            required: ['path']
                         }
                     }
                 ]
@@ -439,7 +458,7 @@ describe('GeminiApiProvider', () => {
                                     },
                                     {
                                         functionCall: {
-                                            name: 'read_document',
+                                            name: 'read_file',
                                             args: { path: '/docs/guide.md' },
                                             id: 'call-1'
                                         }
@@ -467,7 +486,20 @@ describe('GeminiApiProvider', () => {
         const result = await provider.runAgent(
             {
                 prompt: '请分析当前文档',
-                agent: scopedAgent
+                agent: scopedAgent,
+                tools: [
+                    {
+                        id: 'read_file',
+                        description: 'Read docs',
+                        inputSchema: {
+                            type: 'OBJECT',
+                            properties: {
+                                path: { type: 'STRING', description: 'Absolute file path inside the workspace scope.' }
+                            },
+                            required: ['path']
+                        }
+                    }
+                ]
             },
             (update) => updates.push(update)
         );
@@ -477,7 +509,7 @@ describe('GeminiApiProvider', () => {
             toolCalls: [
                 {
                     id: 'call-1',
-                    name: 'read_document',
+                    name: 'read_file',
                     arguments: { path: '/docs/guide.md' }
                 }
             ]
@@ -486,7 +518,7 @@ describe('GeminiApiProvider', () => {
         expect(result.toolCalls).toEqual([
             {
                 id: 'call-1',
-                name: 'read_document',
+                name: 'read_file',
                 arguments: { path: '/docs/guide.md' }
             }
         ]);
@@ -494,11 +526,133 @@ describe('GeminiApiProvider', () => {
             role: 'model',
             parts: [
                 {
+                    text: '前置思考',
+                    thoughtSignature: 'sig-1'
+                },
+                {
+                    functionCall: {
+                        id: 'call-1',
+                        name: 'read_file',
+                        args: { path: '/docs/guide.md' }
+                    }
+                },
+                {
                     text: '最终答案'
                 }
             ]
         });
         expect(result.text).toBe('前置思考最终答案');
+
+        vi.unstubAllGlobals();
+    });
+
+    it('accumulates multiple function calls emitted across separate SSE messages', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(
+            createGeminiSseResponse([
+                {
+                    candidates: [
+                        {
+                            content: {
+                                parts: [
+                                    {
+                                        functionCall: {
+                                            name: 'read_file',
+                                            args: { path: '/My-Job/overall-v2.md' },
+                                            id: 'call-1'
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    candidates: [
+                        {
+                            content: {
+                                parts: [
+                                    {
+                                        functionCall: {
+                                            name: 'read_file',
+                                            args: { path: '/My-Job/overall.md' },
+                                            id: 'call-2'
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    candidates: [
+                        {
+                            content: {
+                                parts: [{ text: '' }]
+                            },
+                            finishReason: 'STOP'
+                        }
+                    ]
+                }
+            ])
+        );
+        vi.stubGlobal('fetch', fetchMock);
+
+        const provider = new GeminiApiProvider({ apiKey: 'test-key' });
+        const result = await provider.runAgent(
+            {
+                prompt: '请读取两个文件',
+                agent: scopedAgent,
+                tools: [
+                    {
+                        id: 'read_file',
+                        description: 'Read docs',
+                        inputSchema: {
+                            type: 'OBJECT',
+                            properties: {
+                                path: { type: 'STRING', description: 'Absolute file path inside the workspace scope.' }
+                            },
+                            required: ['path']
+                        }
+                    }
+                ]
+            },
+            () => undefined
+        );
+
+        expect(result.toolCalls).toEqual([
+            {
+                id: 'call-1',
+                name: 'read_file',
+                arguments: { path: '/My-Job/overall-v2.md' }
+            },
+            {
+                id: 'call-2',
+                name: 'read_file',
+                arguments: { path: '/My-Job/overall.md' }
+            }
+        ]);
+        expect(result.modelTurn).toEqual({
+            role: 'model',
+            parts: [
+                {
+                    functionCall: {
+                        id: 'call-1',
+                        name: 'read_file',
+                        args: { path: '/My-Job/overall-v2.md' }
+                    }
+                },
+                {
+                    functionCall: {
+                        id: 'call-2',
+                        name: 'read_file',
+                        args: { path: '/My-Job/overall.md' }
+                    }
+                },
+                {
+                    text: ''
+                }
+            ]
+        });
 
         vi.unstubAllGlobals();
     });
