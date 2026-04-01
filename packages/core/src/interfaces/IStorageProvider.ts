@@ -1,4 +1,4 @@
-import type { AnalysisResult } from '../analysis/types';
+import type { AnalysisResult } from '../workflows/compare/types';
 import type { ConversationOrigin } from './IHistoryProvider';
 
 export type ConversationRole = 'user' | 'assistant';

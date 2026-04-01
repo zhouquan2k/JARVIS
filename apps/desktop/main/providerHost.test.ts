@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import type {
-    Conversation,
-    ConversationHistorySummary,
-    IHistoryProvider,
-    IModelProvider,
-    ProviderRuntime,
-    ProviderSendResult,
-    ProviderStreamUpdate,
-    SendMessageOptions
+import {
+    ExternalHistoryError,
+    type Conversation,
+    type ConversationHistorySummary,
+    type IHistoryProvider,
+    type IModelProvider,
+    type ProviderRuntime,
+    type ProviderSendResult,
+    type ProviderStreamUpdate,
+    type SendMessageOptions
 } from '@packages/core/src';
 import { createProviderHost } from './providerHost';
 import type { ProxyResponse } from '../shared/proxyProtocol';
@@ -92,6 +93,22 @@ class HistoryProviderStub implements IHistoryProvider {
             updatedAt: 1,
             messages: []
         };
+    }
+}
+
+class AuthRequiredHistoryProviderStub implements IHistoryProvider {
+    public id: 'gemini-web' = 'gemini-web';
+
+    async getHistoryList(): Promise<ConversationHistorySummary[]> {
+        throw new ExternalHistoryError('AUTH_REQUIRED', 'Gemini 页面当前未登录。', {
+            providerId: 'gemini-web'
+        });
+    }
+
+    async getHistoryDetail(): Promise<Conversation> {
+        throw new ExternalHistoryError('AUTH_REQUIRED', 'Gemini 页面当前未登录。', {
+            providerId: 'gemini-web'
+        });
     }
 }
 
@@ -189,6 +206,32 @@ describe('createProviderHost', () => {
                 requestId: 'history-error',
                 channelId: 'history-channel',
                 error: "Provider 'gemini-web' does not support history queries"
+            })
+        ]);
+    });
+
+    it('preserves external history error metadata for renderer recovery flows', async () => {
+        const responses: ProxyResponse[] = [];
+        const host = createProviderHost({
+            runtime: createRuntime(() => new StreamingProvider('provider')),
+            resolveHistoryProvider: async (providerId) => providerId === 'gemini-web' ? new AuthRequiredHistoryProviderStub() : undefined
+        });
+
+        await host.handleRequest({
+            action: 'GET_HISTORY_LIST',
+            requestId: 'gemini-auth-required',
+            channelId: 'history-channel',
+            providerId: 'gemini-web'
+        }, (response) => responses.push(response));
+
+        expect(responses).toEqual([
+            expect.objectContaining({
+                type: 'ERROR',
+                requestId: 'gemini-auth-required',
+                channelId: 'history-channel',
+                error: 'Gemini 页面当前未登录。',
+                historyErrorCode: 'AUTH_REQUIRED',
+                historyProviderId: 'gemini-web'
             })
         ]);
     });

@@ -2,7 +2,11 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_GEMINI_HISTORY_PAGE_URL } from '@packages/core/config';
-import { createMockRuntime } from '@packages/core/src';
+import {
+    createMockRuntime,
+    GeminiDomHistoryProvider,
+    GeminiHistoryConfigLoader
+} from '@packages/core/src';
 import {
     DESKTOP_PROXY_REQUEST_CHANNEL,
     DESKTOP_PROXY_RESPONSE_CHANNEL,
@@ -13,6 +17,7 @@ import { createAuthWindowManager } from './authWindow';
 import { registerProviderLoginIpc } from './authIpc';
 import { createControlledPageManager } from './controlledPageManager';
 import { registerContextIpc } from './contextIpc';
+import { GeminiHistoryPageBridge } from './GeminiHistoryPageBridge';
 import { createDesktopHostRuntime, createProviderHost } from './providerHost';
 import { getProviderSession } from './sessionManager';
 
@@ -20,12 +25,47 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const rendererDistDir = join(__dirname, '../../renderer');
 const preloadPath = join(__dirname, 'preload.cjs');
+const geminiHistoryPreloadPath = join(__dirname, 'gemini-history.preload.cjs');
 
 const controlledPageManager = createControlledPageManager();
-const authWindowManager = createAuthWindowManager();
 const useMockRuntime = process.env.VITE_E2E === '1';
 let disposeProviderLoginIpc: (() => void) | null = null;
 let disposeContextIpc: (() => void) | null = null;
+let geminiHistoryProvider: GeminiDomHistoryProvider | null = null;
+
+class MemoryConfigStorage {
+    private readonly data = new Map<string, string>();
+
+    async get(key: string): Promise<string | null> {
+        return this.data.get(key) ?? null;
+    }
+
+    async set(key: string, value: string): Promise<void> {
+        this.data.set(key, value);
+    }
+}
+
+const geminiHistoryConfigStorage = new MemoryConfigStorage();
+const geminiHistoryConfigLoader = new GeminiHistoryConfigLoader({
+    storage: geminiHistoryConfigStorage,
+    env: process.env
+});
+const geminiHistoryBridge = new GeminiHistoryPageBridge({
+    controlledPageManager,
+    preloadPath: geminiHistoryPreloadPath,
+    pageUrl: DEFAULT_GEMINI_HISTORY_PAGE_URL
+});
+const authWindowManager = createAuthWindowManager({
+    async probeGeminiHistoryReady() {
+        try {
+            const { config } = await geminiHistoryConfigLoader.load();
+            return await geminiHistoryBridge.probeHistoryListReady(config);
+        } catch (error) {
+            console.warn('Failed to probe Gemini history readiness from auth window.', error);
+            return false;
+        }
+    }
+});
 
 function createMockDesktopRuntime() {
     return createMockRuntime({
@@ -79,11 +119,14 @@ const providerHost = createProviderHost({
     },
     async resolveHistoryProvider(providerId) {
         if (providerId === 'gemini-web') {
-            await controlledPageManager.ensurePage('gemini-web', {
-                targetUrl: DEFAULT_GEMINI_HISTORY_PAGE_URL,
-                visible: false
-            });
-            throw new Error('Desktop Gemini history provider is not implemented yet');
+            if (!geminiHistoryProvider) {
+                geminiHistoryProvider = new GeminiDomHistoryProvider({
+                    configLoader: geminiHistoryConfigLoader,
+                    tabBridge: geminiHistoryBridge
+                });
+            }
+
+            return geminiHistoryProvider;
         }
 
         return undefined;

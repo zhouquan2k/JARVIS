@@ -9,6 +9,7 @@ import {
     type ConversationHistorySummary,
     cloneConversationMessage,
     ExternalHistoryError,
+    type ExternalHistoryErrorCode,
     type ExternalHistoryProviderEntry,
     type ExternalHistoryProviderId,
     type ContextDocument,
@@ -65,6 +66,7 @@ export interface ChatState {
     isGenerating: boolean;
     isAbortRequested: boolean;
     currentError: string | null;
+    currentHistoryErrorCode: ExternalHistoryErrorCode | null;
     currentProviderId: string;
     currentModelId: string;
     currentModelOptions: Record<string, boolean>;
@@ -427,6 +429,10 @@ function formatHistoryError(error: unknown): string {
     return error instanceof Error ? error.message : '外部历史加载失败。';
 }
 
+function extractHistoryErrorCode(error: unknown): ExternalHistoryErrorCode | null {
+    return error instanceof ExternalHistoryError ? error.code : null;
+}
+
 export const useChatStore = defineStore('chat', {
     state: (): ChatState => ({
         agentRuntime: null,
@@ -453,6 +459,7 @@ export const useChatStore = defineStore('chat', {
         isGenerating: false,
         isAbortRequested: false,
         currentError: null,
+        currentHistoryErrorCode: null,
         currentProviderId: '',
         currentModelId: '',
         currentModelOptions: {},
@@ -1060,6 +1067,7 @@ export const useChatStore = defineStore('chat', {
             this.workspaceMode = 'active';
             this.previewConversation = null;
             this.currentError = null;
+            this.currentHistoryErrorCode = null;
 
             if (this.historySource === 'external') {
                 await this.refreshActiveExternalSource();
@@ -1094,11 +1102,18 @@ export const useChatStore = defineStore('chat', {
 
             this.isExternalHistoryLoading = true;
             this.externalHistoryItems = [];
+            this.currentHistoryErrorCode = null;
             try {
                 const items = await provider.getHistoryList();
                 this.externalHistoryItems = this.applyImportedFlags(items);
+                this.currentHistoryErrorCode = null;
+                if (providerId === 'gemini-web') {
+                    this.currentHistoryErrorCode = null;
+                    this.currentError = null;
+                }
             } catch (error) {
                 this.externalHistoryItems = [];
+                this.currentHistoryErrorCode = extractHistoryErrorCode(error);
                 this.currentError = formatHistoryError(error);
                 throw error;
             } finally {
@@ -1113,6 +1128,7 @@ export const useChatStore = defineStore('chat', {
             }
 
             this.currentError = null;
+            this.currentHistoryErrorCode = null;
             this.isExternalPreviewLoading = true;
             this.externalPreviewLoadingId = externalId;
             try {
@@ -1121,7 +1137,9 @@ export const useChatStore = defineStore('chat', {
                 this.workspaceMode = 'preview';
                 this.historySource = 'external';
                 this.activeExternalProviderId = providerId;
+                this.currentHistoryErrorCode = null;
             } catch (error) {
+                this.currentHistoryErrorCode = extractHistoryErrorCode(error);
                 this.currentError = formatHistoryError(error);
                 throw error;
             } finally {

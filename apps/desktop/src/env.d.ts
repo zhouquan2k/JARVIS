@@ -31,6 +31,7 @@ declare global {
             onProxyResponse(listener: (response: ProxyResponse) => void): () => void;
             openProviderLoginWindow(providerId: string): Promise<void>;
             onProviderLoginWindowOpened(listener: (providerId: string) => void): () => void;
+            onProviderLoginCompleted(listener: (providerId: string) => void): () => void;
             onProviderLoginWindowClosed(listener: (providerId: string) => void): () => void;
         };
     }

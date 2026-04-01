@@ -33,7 +33,11 @@
         :auth-unavailable-message="authUnavailableMessage"
         :auth-recovery-action-label="authRecoveryActionLabel"
         :auth-recovery-action-disabled="authRecoveryActionDisabled"
+        :host-recovery-message="hostRecoveryMessage"
+        :host-recovery-action-label="hostRecoveryActionLabel"
+        :host-recovery-action-disabled="hostRecoveryActionDisabled"
         @request-auth-recovery="emit('request-auth-recovery')"
+        @request-host-recovery="emit('request-host-recovery')"
       />
     </div>
   </section>
@@ -72,6 +76,18 @@ const props = defineProps({
   authRecoveryActionDisabled: {
     type: Boolean,
     default: false
+  },
+  hostRecoveryMessage: {
+    type: String,
+    default: ''
+  },
+  hostRecoveryActionLabel: {
+    type: String,
+    default: ''
+  },
+  hostRecoveryActionDisabled: {
+    type: Boolean,
+    default: false
   }
 });
 
@@ -79,6 +95,7 @@ const emit = defineEmits<{
   (event: 'request-normal-mode'): void;
   (event: 'request-compare-mode'): void;
   (event: 'request-auth-recovery'): void;
+  (event: 'request-host-recovery'): void;
 }>();
 
 const chatStore = useChatStore();

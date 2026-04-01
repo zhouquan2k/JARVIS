@@ -4,10 +4,13 @@ import type {
     GeminiContentHistorySummary,
     GeminiContentRequest,
     GeminiContentResponse
-} from '../src/history/geminiContentProtocol';
-import { getRequiredSelectorKeys, waitForSelectorGroup } from '../src/history/geminiContentHealth';
-import { extractHistoryItemTitle } from '../src/history/geminiHistoryListTitle';
-import { extractGeminiMessageText } from '../src/history/geminiMessageSerializer';
+} from '@packages/core/src';
+import {
+    getRequiredSelectorKeys,
+    waitForSelectorGroup,
+    extractHistoryItemTitle,
+    extractGeminiMessageText
+} from '@packages/core/src';
 
 function createError(code: ExternalHistoryErrorCode, message: string): GeminiContentResponse {
     return {

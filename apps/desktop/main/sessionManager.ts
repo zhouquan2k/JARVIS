@@ -9,8 +9,20 @@ function sanitizeProviderId(providerId: string): string {
     return providerId.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
+function getSessionNamespace(): string | null {
+    const rawValue = process.env.CHATPRISM_SESSION_NAMESPACE?.trim();
+    if (!rawValue) {
+        return null;
+    }
+
+    const normalized = sanitizeProviderId(rawValue);
+    return normalized || null;
+}
+
 export function getProviderPartition(providerId: string): string {
-    return PROVIDER_PARTITIONS.get(providerId) || `persist:chatprism-${sanitizeProviderId(providerId)}`;
+    const basePartition = PROVIDER_PARTITIONS.get(providerId) || `persist:chatprism-${sanitizeProviderId(providerId)}`;
+    const namespace = getSessionNamespace();
+    return namespace ? `${basePartition}-${namespace}` : basePartition;
 }
 
 export function getProviderSession(providerId: string): Session {

@@ -45,19 +45,26 @@ export interface CreateDesktopSyncStorageProviderOptions {
 export function createDesktopSyncStorageProvider(options: CreateDesktopSyncStorageProviderOptions = {}) {
     const env = options.env ?? {};
     const storage = options.storage ?? (typeof localStorage !== 'undefined' ? localStorage : undefined);
+    const useMockSync = shouldUseMockDesktopSync(env);
+    const syncEnv = useMockSync && !env.VITE_SYNC_KEY && !env.CHATPRISM_SYNC_KEY
+        ? {
+            ...env,
+            VITE_SYNC_KEY: 'desktop-e2e'
+        }
+        : env;
     const syncKey = resolveSyncKey({
         storage,
-        env,
+        env: syncEnv,
         isDevelopment: options.isDevelopment
     });
 
     return new SyncStorageProvider({
         localStore: options.localStore ?? new IndexedDBStorageProvider(),
-        transport: shouldUseMockDesktopSync(env)
+        transport: useMockSync
             ? createMockSyncTransport(syncKey, { storage })
             : new FetchSyncTransport({
                 syncKey,
-                baseUrl: resolveSyncBaseUrl({ env }),
+                baseUrl: resolveSyncBaseUrl({ env: syncEnv }),
                 fetchImpl: options.fetchImpl
             }),
         syncKey,

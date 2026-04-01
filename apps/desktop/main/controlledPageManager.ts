@@ -4,6 +4,8 @@ import { getProviderPartition } from './sessionManager';
 export interface ControlledPageOptions {
     targetUrl?: string;
     visible?: boolean;
+    preloadPath?: string;
+    forceReload?: boolean;
 }
 
 type BrowserWindowLike = {
@@ -23,11 +25,11 @@ export interface ControlledPageManager {
 }
 
 export function createControlledPageManager(options: {
-    createWindow?: (providerId: string, visible: boolean) => BrowserWindowLike;
+    createWindow?: (providerId: string, visible: boolean, preloadPath?: string) => BrowserWindowLike;
 } = {}): ControlledPageManager {
-    const pages = new Map<string, BrowserWindowLike>();
+    const pages = new Map<string, { window: BrowserWindowLike; preloadPath?: string }>();
 
-    const createWindow = options.createWindow ?? ((providerId: string, visible: boolean) => {
+    const createWindow = options.createWindow ?? ((providerId: string, visible: boolean, preloadPath?: string) => {
         return new BrowserWindow({
             show: visible,
             width: 1280,
@@ -35,6 +37,7 @@ export function createControlledPageManager(options: {
             autoHideMenuBar: true,
             webPreferences: {
                 partition: getProviderPartition(providerId),
+                preload: preloadPath,
                 sandbox: false,
                 contextIsolation: true,
                 nodeIntegration: false
@@ -45,20 +48,40 @@ export function createControlledPageManager(options: {
     return {
         async ensurePage(providerId: string, pageOptions: ControlledPageOptions = {}) {
             const visible = pageOptions.visible === true;
-            let page = pages.get(providerId);
+            const requestedPreloadPath = pageOptions.preloadPath;
+            const forceReload = pageOptions.forceReload === true;
+            let pageEntry = pages.get(providerId);
 
-            if (!page || page.isDestroyed()) {
-                page = createWindow(providerId, visible);
-                pages.set(providerId, page);
+            if (
+                pageEntry
+                && (
+                    pageEntry.window.isDestroyed()
+                    || pageEntry.preloadPath !== requestedPreloadPath
+                )
+            ) {
+                if (!pageEntry.window.isDestroyed()) {
+                    pageEntry.window.destroy();
+                }
+                pages.delete(providerId);
+                pageEntry = undefined;
             }
 
+            if (!pageEntry) {
+                pageEntry = {
+                    window: createWindow(providerId, visible, requestedPreloadPath),
+                    preloadPath: requestedPreloadPath
+                };
+                pages.set(providerId, pageEntry);
+            }
+
+            const page = pageEntry.window;
             if (visible) {
                 page.show();
             } else {
                 page.hide();
             }
 
-            if (pageOptions.targetUrl && page.webContents.getURL() !== pageOptions.targetUrl) {
+            if (pageOptions.targetUrl && (forceReload || page.webContents.getURL() !== pageOptions.targetUrl)) {
                 await page.loadURL(pageOptions.targetUrl);
             }
 
@@ -69,11 +92,12 @@ export function createControlledPageManager(options: {
             const targetIds = providerId ? [providerId] : Array.from(pages.keys());
 
             for (const targetId of targetIds) {
-                const page = pages.get(targetId);
-                if (!page) {
+                const pageEntry = pages.get(targetId);
+                if (!pageEntry) {
                     continue;
                 }
 
+                const page = pageEntry.window;
                 if (!page.isDestroyed()) {
                     page.destroy();
                 }

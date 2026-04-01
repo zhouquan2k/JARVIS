@@ -2,6 +2,8 @@ import type {
     AnalysisResult,
     Conversation,
     ConversationHistorySummary,
+    ExternalHistoryErrorCode,
+    ExternalHistoryProviderId,
     ProviderSendResult,
     ProviderStreamUpdate,
     SendMessageOptions
@@ -108,6 +110,8 @@ export interface DoneResponse extends ProxyResponseBase {
 export interface ErrorResponse extends ProxyResponseBase {
     type: 'ERROR';
     error: string;
+    historyErrorCode?: ExternalHistoryErrorCode;
+    historyProviderId?: ExternalHistoryProviderId;
 }
 
 export type ProxyResponse = AuthResultResponse | UpdateResponse | DoneResponse | ErrorResponse;

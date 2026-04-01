@@ -40,7 +40,17 @@
           </div>
 
           <div v-if="chatStore.currentError" class="error" data-testid="normal-error">
-            {{ chatStore.currentError }}
+            <span>{{ hostRecoveryMessage || chatStore.currentError }}</span>
+            <button
+              v-if="hostRecoveryActionLabel"
+              type="button"
+              class="auth-recovery-btn"
+              data-testid="normal-host-recovery"
+              :disabled="hostRecoveryActionDisabled"
+              @click="emit('request-host-recovery')"
+            >
+              {{ hostRecoveryActionLabel }}
+            </button>
           </div>
         </div>
 
@@ -240,10 +250,23 @@ const props = defineProps({
   authRecoveryActionDisabled: {
     type: Boolean,
     default: false
+  },
+  hostRecoveryMessage: {
+    type: String,
+    default: ''
+  },
+  hostRecoveryActionLabel: {
+    type: String,
+    default: ''
+  },
+  hostRecoveryActionDisabled: {
+    type: Boolean,
+    default: false
   }
 });
 const emit = defineEmits<{
   (event: 'request-auth-recovery'): void;
+  (event: 'request-host-recovery'): void;
 }>();
 
 const chatStore = useChatStore();

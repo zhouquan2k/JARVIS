@@ -1,9 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import {
-    normalizeScopePath as normalizeSearchScopePath,
-    searchInScopedFiles
-} from '../../../../packages/core/src/providers/fileSearch.ts';
+import * as coreModule from '@packages/core/src';
 import type {
     AgentConfig,
     AgentInheritanceMode,
@@ -17,6 +14,12 @@ import type {
     CreateContextNodeInput,
     ResolvedAgentConfig
 } from '../types/context.js';
+
+const core = (coreModule as typeof coreModule & { default?: typeof coreModule }).default ?? coreModule;
+const {
+    normalizeScopePath: normalizeSearchScopePath,
+    searchInScopedFiles
+} = core;
 
 export interface LocalFileContextProviderOptions {
     rootPath?: string;

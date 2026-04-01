@@ -19,10 +19,14 @@
         :auth-status-override="chatgptAuthStatusOverride"
         :auth-unavailable-message="chatgptAuthMessage"
         :auth-recovery-action-label="chatgptAuthRecoveryLabel"
-        :auth-recovery-action-disabled="isOpeningChatGPTLogin"
+        :auth-recovery-action-disabled="isLoginActionDisabled('chatgpt-web')"
+        :host-recovery-message="hostRecoveryMessage"
+        :host-recovery-action-label="hostRecoveryActionLabel"
+        :host-recovery-action-disabled="hostRecoveryActionDisabled"
         @request-normal-mode="navigateTo('/chat')"
         @request-compare-mode="openCompareMode"
         @request-auth-recovery="requestChatGPTLogin"
+        @request-host-recovery="requestGeminiHistoryLogin"
       />
     </main>
   </div>
@@ -48,27 +52,45 @@ import { createDesktopSyncStorageProvider } from './sync';
 const chatStore = useChatStore();
 const compareStore = useCompareStore();
 const historyProviders = createDesktopHistoryProviders();
+type LoginProviderId = 'chatgpt-web' | 'gemini-web';
 const isCompareMode = computed(() => currentRoute.value.path === '/compare');
 const isKnowledgeMode = computed(() => currentRoute.value.path === '/');
 const activeWorkspacePath = computed<ChatRoutePath>(() => currentRoute.value.path === '/compare' ? '/chat' : currentRoute.value.path);
 const contextProvider = createDesktopContextProvider();
 const chatgptAuthStatus = ref<boolean | null>(null);
-const isOpeningChatGPTLogin = ref(false);
-const chatgptLoginLaunchAcknowledged = ref(false);
+const openingProviderLoginId = ref<LoginProviderId | null>(null);
+const acknowledgedProviderLoginId = ref<LoginProviderId | null>(null);
 let removeLoginWindowClosedListener: (() => void) | null = null;
 let removeLoginWindowOpenedListener: (() => void) | null = null;
+let removeLoginWindowCompletedListener: (() => void) | null = null;
 let authRefreshSequence = 0;
-let chatgptLoginLaunchTimer: ReturnType<typeof setTimeout> | null = null;
+let loginLaunchTimer: ReturnType<typeof setTimeout> | null = null;
+let geminiCompletedRefreshSucceeded = false;
+let geminiCompletedRefreshInFlight = false;
+const GEMINI_LOGIN_REFRESH_MAX_ATTEMPTS = 4;
+const GEMINI_LOGIN_REFRESH_RETRY_DELAY_MS = 1200;
+
+function isLoginOpening(providerId: LoginProviderId) {
+  return openingProviderLoginId.value === providerId;
+}
+
+function isLoginAcknowledged(providerId: LoginProviderId) {
+  return acknowledgedProviderLoginId.value === providerId;
+}
+
+function isLoginActionDisabled(providerId: LoginProviderId) {
+  return isLoginOpening(providerId);
+}
 
 const chatgptAuthStatusOverride = computed(() => {
   return chatStore.currentProviderId === 'chatgpt-web' ? chatgptAuthStatus.value : null;
 });
 const chatgptAuthMessage = computed(() => {
-  if (isOpeningChatGPTLogin.value) {
+  if (isLoginOpening('chatgpt-web')) {
     return '正在打开 ChatGPT 登录窗口...';
   }
 
-  if (chatgptLoginLaunchAcknowledged.value) {
+  if (isLoginAcknowledged('chatgpt-web')) {
     return '已请求打开 ChatGPT 登录窗口；如果未看到窗口，请检查当前桌面、Dock 或切换空间。';
   }
 
@@ -77,16 +99,45 @@ const chatgptAuthMessage = computed(() => {
     : '';
 });
 const chatgptAuthRecoveryLabel = computed(() => {
-  if (isOpeningChatGPTLogin.value) {
+  if (isLoginOpening('chatgpt-web')) {
     return '打开中...';
   }
 
-  if (chatgptAuthStatusOverride.value === false && chatgptLoginLaunchAcknowledged.value) {
+  if (chatgptAuthStatusOverride.value === false && isLoginAcknowledged('chatgpt-web')) {
     return '重新打开 ChatGPT';
   }
 
   return chatgptAuthStatusOverride.value === false ? '登录 ChatGPT' : '';
 });
+const hostRecoveryMessage = computed(() => {
+  if (
+    chatStore.historySource === 'external'
+    && chatStore.activeExternalProviderId === 'gemini-web'
+    && chatStore.currentHistoryErrorCode === 'AUTH_REQUIRED'
+  ) {
+    return isLoginOpening('gemini-web')
+      ? '正在打开 Gemini 登录窗口...'
+      : '当前桌面宿主的 Gemini 登录态不可用，请先登录后再继续。';
+  }
+
+  return '';
+});
+const hostRecoveryActionLabel = computed(() => {
+  if (!hostRecoveryMessage.value) {
+    return '';
+  }
+
+  if (isLoginOpening('gemini-web')) {
+    return '打开中...';
+  }
+
+  if (isLoginAcknowledged('gemini-web')) {
+    return '重新打开 Gemini';
+  }
+
+  return '登录 Gemini';
+});
+const hostRecoveryActionDisabled = computed(() => isLoginActionDisabled('gemini-web'));
 
 function openCompareMode() {
   compareStore.startNewCompare();
@@ -119,91 +170,188 @@ async function refreshChatGPTAuthStatus(): Promise<boolean | null> {
   }
 }
 
-async function requestChatGPTLogin(): Promise<void> {
+async function requestProviderLogin(providerId: LoginProviderId): Promise<void> {
   const bridge = window.chatprismDesktop;
-  if (!bridge || isOpeningChatGPTLogin.value || chatStore.currentProviderId !== 'chatgpt-web') {
+  if (!bridge || isLoginOpening(providerId)) {
     return;
   }
 
-  isOpeningChatGPTLogin.value = true;
-  chatgptLoginLaunchAcknowledged.value = false;
-  if (chatgptLoginLaunchTimer) {
-    clearTimeout(chatgptLoginLaunchTimer);
+  if (providerId === 'chatgpt-web' && chatStore.currentProviderId !== 'chatgpt-web') {
+    return;
   }
-  chatgptLoginLaunchTimer = setTimeout(() => {
-    isOpeningChatGPTLogin.value = false;
-    chatgptLoginLaunchAcknowledged.value = true;
+
+  if (
+    providerId === 'gemini-web'
+    && !(
+      chatStore.historySource === 'external'
+      && chatStore.activeExternalProviderId === 'gemini-web'
+      && chatStore.currentHistoryErrorCode === 'AUTH_REQUIRED'
+    )
+  ) {
+    return;
+  }
+
+  openingProviderLoginId.value = providerId;
+  acknowledgedProviderLoginId.value = null;
+  if (loginLaunchTimer) {
+    clearTimeout(loginLaunchTimer);
+  }
+  loginLaunchTimer = setTimeout(() => {
+    openingProviderLoginId.value = null;
+    acknowledgedProviderLoginId.value = providerId;
   }, 1500);
   try {
-    await bridge.openProviderLoginWindow('chatgpt-web');
+    await bridge.openProviderLoginWindow(providerId);
   } catch (error) {
-    isOpeningChatGPTLogin.value = false;
-    chatgptLoginLaunchAcknowledged.value = true;
-    console.error('Failed to open ChatGPT login window.', error);
+    openingProviderLoginId.value = null;
+    acknowledgedProviderLoginId.value = providerId;
+    console.error(`Failed to open ${providerId} login window.`, error);
+  }
+}
+
+async function requestChatGPTLogin(): Promise<void> {
+  await requestProviderLogin('chatgpt-web');
+}
+
+async function requestGeminiHistoryLogin(): Promise<void> {
+  geminiCompletedRefreshSucceeded = false;
+  geminiCompletedRefreshInFlight = false;
+  await requestProviderLogin('gemini-web');
+}
+
+function waitForGeminiRefreshRetry(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function refreshGeminiHistoryAfterLogin(trigger: 'completed' | 'closed'): Promise<void> {
+  if (trigger === 'closed' && (geminiCompletedRefreshInFlight || geminiCompletedRefreshSucceeded)) {
+    return;
+  }
+
+  if (trigger === 'completed') {
+    geminiCompletedRefreshInFlight = true;
+  }
+
+  try {
+    for (let attempt = 1; attempt <= GEMINI_LOGIN_REFRESH_MAX_ATTEMPTS; attempt += 1) {
+      try {
+        await chatStore.loadExternalHistory('gemini-web');
+        if (trigger === 'completed') {
+          geminiCompletedRefreshSucceeded = true;
+        }
+        return;
+      } catch (error) {
+        const isAuthRequired = chatStore.currentHistoryErrorCode === 'AUTH_REQUIRED';
+        const shouldRetry = isAuthRequired && attempt < GEMINI_LOGIN_REFRESH_MAX_ATTEMPTS;
+
+        if (!shouldRetry) {
+          return;
+        }
+
+        await waitForGeminiRefreshRetry(GEMINI_LOGIN_REFRESH_RETRY_DELAY_MS);
+      }
+    }
+  } finally {
+    if (trigger === 'completed') {
+      geminiCompletedRefreshInFlight = false;
+    }
   }
 }
 
 onMounted(() => {
   void (async () => {
-    try {
-      const providerCatalog = providerRuntime.getProviderCatalog();
-      await compareStore.setRuntime(providerRuntime);
+    const providerCatalog = providerRuntime.getProviderCatalog();
 
+    try {
       if (providerCatalog.length === 0) {
         chatStore.setProviderCatalog([]);
-        return;
+      } else {
+        chatStore.setAgentRuntime(agentRuntime);
+        const storageProvider = createDesktopSyncStorageProvider({
+          storage: typeof localStorage !== 'undefined' ? localStorage : undefined,
+          env: import.meta.env as Record<string, string | undefined>,
+          isDevelopment: import.meta.env.DEV
+        });
+
+        chatStore.setModelProviderResolver((providerId: string) => providerRuntime.getProvider(providerId));
+        chatStore.setProviderModelsResolver((providerId: string) => providerRuntime.getProviderModels(providerId));
+        chatStore.setProviders(
+          providerRuntime.getProvider(providerCatalog[0].id),
+          storageProvider
+        );
+        chatStore.setHistoryProviders(historyProviders);
+        chatStore.setExternalFileImportHandler(async () => {
+          return openConversationImportDialog();
+        });
+        await storageProvider.hydrate().catch((error) => {
+          console.warn('Desktop sync hydration failed, continuing with local data only.', error);
+        });
+        await chatStore.initializeProviderCatalog(providerCatalog);
+        await chatStore.init();
+        await refreshChatGPTAuthStatus();
       }
-
-      chatStore.setAgentRuntime(agentRuntime);
-      const storageProvider = createDesktopSyncStorageProvider({
-        storage: typeof localStorage !== 'undefined' ? localStorage : undefined,
-        env: import.meta.env as Record<string, string | undefined>,
-        isDevelopment: import.meta.env.DEV
-      });
-
-      chatStore.setModelProviderResolver((providerId: string) => providerRuntime.getProvider(providerId));
-      chatStore.setProviderModelsResolver((providerId: string) => providerRuntime.getProviderModels(providerId));
-      chatStore.setProviders(
-        providerRuntime.getProvider(providerCatalog[0].id),
-        storageProvider
-      );
-      chatStore.setHistoryProviders(historyProviders);
-      chatStore.setExternalFileImportHandler(async () => {
-        return openConversationImportDialog();
-      });
-      await storageProvider.hydrate().catch((error) => {
-        console.warn('Desktop sync hydration failed, continuing with local data only.', error);
-      });
-      await chatStore.initializeProviderCatalog(providerCatalog);
-      await chatStore.init();
-      await refreshChatGPTAuthStatus();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       chatStore.currentError = message;
-      compareStore.analysisError = message;
       console.error('Failed to initialize desktop provider catalogs', error);
+    }
+
+    try {
+      await compareStore.setRuntime(providerRuntime);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      compareStore.analysisError = message;
+      console.error('Failed to initialize desktop compare runtime', error);
     }
   })();
 
+  removeLoginWindowCompletedListener = window.chatprismDesktop?.onProviderLoginCompleted((providerId: string) => {
+    if (providerId === 'chatgpt-web' || providerId === 'gemini-web') {
+      openingProviderLoginId.value = null;
+      acknowledgedProviderLoginId.value = null;
+      if (loginLaunchTimer) {
+        clearTimeout(loginLaunchTimer);
+        loginLaunchTimer = null;
+      }
+    }
+
+    if (providerId === 'gemini-web') {
+      void refreshGeminiHistoryAfterLogin('completed');
+    }
+  }) || null;
   removeLoginWindowClosedListener = window.chatprismDesktop?.onProviderLoginWindowClosed((providerId: string) => {
+    if (providerId === 'chatgpt-web' || providerId === 'gemini-web') {
+      if (openingProviderLoginId.value === providerId) {
+        openingProviderLoginId.value = null;
+      }
+      if (acknowledgedProviderLoginId.value === providerId) {
+        acknowledgedProviderLoginId.value = null;
+      }
+    }
+
     if (providerId === 'chatgpt-web') {
-      isOpeningChatGPTLogin.value = false;
-      chatgptLoginLaunchAcknowledged.value = false;
       void (async () => {
         const isAuthenticated = await refreshChatGPTAuthStatus();
         if (isAuthenticated) {
           await chatStore.reloadProviderModels('chatgpt-web');
         }
       })();
+      return;
+    }
+
+    if (providerId === 'gemini-web') {
+      void refreshGeminiHistoryAfterLogin('closed');
     }
   }) || null;
   removeLoginWindowOpenedListener = window.chatprismDesktop?.onProviderLoginWindowOpened((providerId: string) => {
-    if (providerId === 'chatgpt-web') {
-      isOpeningChatGPTLogin.value = false;
-      chatgptLoginLaunchAcknowledged.value = true;
-      if (chatgptLoginLaunchTimer) {
-        clearTimeout(chatgptLoginLaunchTimer);
-        chatgptLoginLaunchTimer = null;
+    if (providerId === 'chatgpt-web' || providerId === 'gemini-web') {
+      openingProviderLoginId.value = null;
+      acknowledgedProviderLoginId.value = providerId as LoginProviderId;
+      if (loginLaunchTimer) {
+        clearTimeout(loginLaunchTimer);
+        loginLaunchTimer = null;
       }
     }
   }) || null;
@@ -214,12 +362,14 @@ watch(() => chatStore.currentProviderId, () => {
 });
 
 onBeforeUnmount(() => {
-  if (chatgptLoginLaunchTimer) {
-    clearTimeout(chatgptLoginLaunchTimer);
-    chatgptLoginLaunchTimer = null;
+  if (loginLaunchTimer) {
+    clearTimeout(loginLaunchTimer);
+    loginLaunchTimer = null;
   }
   removeLoginWindowOpenedListener?.();
   removeLoginWindowOpenedListener = null;
+  removeLoginWindowCompletedListener?.();
+  removeLoginWindowCompletedListener = null;
   removeLoginWindowClosedListener?.();
   removeLoginWindowClosedListener = null;
 });

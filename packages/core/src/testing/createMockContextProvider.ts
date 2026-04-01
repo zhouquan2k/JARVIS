@@ -1,4 +1,4 @@
-import { DEFAULT_SCOPED_AGENT_CONFIG, resolveScopedAgentConfig } from '../agents/resolveScopedAgentConfig';
+import { DEFAULT_SCOPED_AGENT_CONFIG, resolveScopedAgentConfig } from '../agents/config/resolveScopedAgentConfig';
 import type {
     ContextDocument,
     ContextNode,
@@ -7,7 +7,7 @@ import type {
     CreateContextNodeInput,
     IContextProvider
 } from '../interfaces/IContextProvider';
-import { searchInScopedFiles } from '../providers/fileSearch';
+import { searchInScopedFiles } from '../providers/context/fileSearch';
 
 export interface StoredContextNode {
     path: string;

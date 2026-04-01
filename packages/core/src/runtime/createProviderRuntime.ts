@@ -1,9 +1,9 @@
 import { APP_CONFIG, type ModelConfig, type ProviderConfig, type ProviderModelCatalog } from '../../config';
 import { IModelProvider } from '../interfaces/IModelProvider';
-import { ChatGPTWebProvider } from '../providers/ChatGPTWebProvider';
-import type { ChatGPTWebProviderOptions } from '../providers/providerHostTypes';
-import { GeminiApiProvider } from '../providers/GeminiApiProvider';
-import { ProviderRuntime, ProviderRuntimeOptions, RuntimeProviderFactory } from './types';
+import { ChatGPTWebProvider } from '../providers/model/ChatGPTWebProvider';
+import type { ChatGPTWebProviderOptions } from '../providers/model/providerHostTypes';
+import { GeminiApiProvider } from '../providers/model/GeminiApiProvider';
+import { ProviderRuntime, ProviderRuntimeOptions, RuntimeProviderFactory } from './providerRuntime.types';
 
 type ProviderFactory = (options: ProviderRuntimeOptions) => IModelProvider;
 

@@ -1,5 +1,5 @@
 import { APP_CONFIG, type ModelConfig, type ProviderConfig, type ProviderModelCatalog, type RuntimeMode } from '../../config';
-import type { AnalysisResult } from '../analysis/types';
+import type { AnalysisResult } from '../workflows/compare/types';
 import type {
     AgentCapabilities,
     AgentRunRequest,
@@ -7,7 +7,7 @@ import type {
 } from '../interfaces/IAgentCapableProvider';
 import type { IModelProvider, ProviderSendResult, ProviderStreamUpdate, SendMessageOptions } from '../interfaces/IModelProvider';
 import type { MessageAnnotation, MessageAttachment } from '../interfaces/IStorageProvider';
-import type { ProviderRuntime } from '../runtime/types';
+import type { ProviderRuntime } from '../runtime/providerRuntime.types';
 
 export interface CreateMockRuntimeOptions {
     runtimeMode: RuntimeMode;

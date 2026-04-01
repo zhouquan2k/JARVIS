@@ -11,8 +11,6 @@
     "types": ["node"]
   },
   "include": [
-    "src/**/*.ts",
-    "../../packages/core/src/interfaces/**/*.ts",
-    "../../packages/core/src/providers/fileSearch.ts"
+    "src/**/*.ts"
   ]
 }

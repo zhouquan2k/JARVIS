@@ -1,5 +1,5 @@
 import type { ResolvedAgentConfig } from './IAgentConfig';
-import type { AgentToolDeclaration } from '../agent-tools/types';
+import type { AgentToolDeclaration } from '../agents/tools/types';
 import type {
     IModelProvider,
     ProviderContextMessage,

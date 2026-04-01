@@ -1,9 +1,10 @@
 import { BrowserWindow, ipcMain, type IpcMain } from 'electron';
 import {
+    DESKTOP_PROVIDER_LOGIN_COMPLETED_CHANNEL,
     DESKTOP_PROVIDER_LOGIN_CLOSED_CHANNEL,
     DESKTOP_PROVIDER_LOGIN_OPEN_CHANNEL,
     DESKTOP_PROVIDER_LOGIN_OPENED_CHANNEL,
-    type ProviderLoginWindowClosedPayload
+    type ProviderLoginEventPayload
 } from '../shared/authBridge';
 import type { AuthWindowManager } from './authWindow';
 
@@ -17,7 +18,7 @@ export function registerProviderLoginIpc(options: {
     const ipc = options.ipc ?? ipcMain;
     const getBroadcastWindows = options.getBroadcastWindows ?? (() => BrowserWindow.getAllWindows());
     const emitToRendererWindows = (channel: string, providerId: string) => {
-        const payload: ProviderLoginWindowClosedPayload = { providerId };
+        const payload: ProviderLoginEventPayload = { providerId };
         for (const windowRef of getBroadcastWindows()) {
             if (!windowRef.isDestroyed()) {
                 windowRef.webContents.send(channel, payload);
@@ -27,6 +28,9 @@ export function registerProviderLoginIpc(options: {
 
     const unsubscribeOpened = options.authWindowManager.onLoginWindowOpened((providerId) => {
         emitToRendererWindows(DESKTOP_PROVIDER_LOGIN_OPENED_CHANNEL, providerId);
+    });
+    const unsubscribeCompleted = options.authWindowManager.onLoginWindowCompleted((providerId) => {
+        emitToRendererWindows(DESKTOP_PROVIDER_LOGIN_COMPLETED_CHANNEL, providerId);
     });
     const unsubscribeClosed = options.authWindowManager.onLoginWindowClosed((providerId) => {
         emitToRendererWindows(DESKTOP_PROVIDER_LOGIN_CLOSED_CHANNEL, providerId);
@@ -43,6 +47,7 @@ export function registerProviderLoginIpc(options: {
 
     return () => {
         unsubscribeOpened();
+        unsubscribeCompleted();
         unsubscribeClosed();
         ipc.removeHandler?.(DESKTOP_PROVIDER_LOGIN_OPEN_CHANNEL);
     };

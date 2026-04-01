@@ -9,10 +9,11 @@ import {
     DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL
 } from '../shared/contextBridge';
 import {
+    DESKTOP_PROVIDER_LOGIN_COMPLETED_CHANNEL,
     DESKTOP_PROVIDER_LOGIN_CLOSED_CHANNEL,
     DESKTOP_PROVIDER_LOGIN_OPEN_CHANNEL,
     DESKTOP_PROVIDER_LOGIN_OPENED_CHANNEL,
-    type ProviderLoginWindowClosedPayload
+    type ProviderLoginEventPayload
 } from '../shared/authBridge';
 import {
     DESKTOP_PROXY_REQUEST_CHANNEL,
@@ -60,7 +61,7 @@ contextBridge.exposeInMainWorld('chatprismDesktop', {
         return ipcRenderer.invoke(DESKTOP_PROVIDER_LOGIN_OPEN_CHANNEL, providerId);
     },
     onProviderLoginWindowOpened(listener: (providerId: string) => void) {
-        const wrapped = (_event: Electron.IpcRendererEvent, payload: ProviderLoginWindowClosedPayload) => {
+        const wrapped = (_event: Electron.IpcRendererEvent, payload: ProviderLoginEventPayload) => {
             listener(payload.providerId);
         };
 
@@ -69,8 +70,18 @@ contextBridge.exposeInMainWorld('chatprismDesktop', {
             ipcRenderer.off(DESKTOP_PROVIDER_LOGIN_OPENED_CHANNEL, wrapped);
         };
     },
+    onProviderLoginCompleted(listener: (providerId: string) => void) {
+        const wrapped = (_event: Electron.IpcRendererEvent, payload: ProviderLoginEventPayload) => {
+            listener(payload.providerId);
+        };
+
+        ipcRenderer.on(DESKTOP_PROVIDER_LOGIN_COMPLETED_CHANNEL, wrapped);
+        return () => {
+            ipcRenderer.off(DESKTOP_PROVIDER_LOGIN_COMPLETED_CHANNEL, wrapped);
+        };
+    },
     onProviderLoginWindowClosed(listener: (providerId: string) => void) {
-        const wrapped = (_event: Electron.IpcRendererEvent, payload: ProviderLoginWindowClosedPayload) => {
+        const wrapped = (_event: Electron.IpcRendererEvent, payload: ProviderLoginEventPayload) => {
             listener(payload.providerId);
         };
 

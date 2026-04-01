@@ -1,4 +1,4 @@
-import type { Conversation, ConversationHistorySummary, IHistoryProvider } from '@packages/core/src';
+import { ExternalHistoryError, type Conversation, type ConversationHistorySummary, type IHistoryProvider } from '@packages/core/src';
 import type { GetHistoryDetailRequest, GetHistoryListRequest, ProxyRequest, ProxyResponse } from './proxyProtocol';
 
 type PendingRequest = {
@@ -48,6 +48,13 @@ export class DesktopHistoryProxy implements IHistoryProvider {
 
         if (msg.type === 'DONE') {
             request.resolve(msg.result);
+            return;
+        }
+
+        if (msg.historyErrorCode) {
+            request.reject(new ExternalHistoryError(msg.historyErrorCode, msg.error, {
+                providerId: msg.historyProviderId
+            }));
             return;
         }
 

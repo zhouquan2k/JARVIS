@@ -2,6 +2,7 @@ import {
     APP_CONFIG,
     ComparisonAnalyzer,
     createProviderRuntime,
+    ExternalHistoryError,
     type ChatGPTWebProviderOptions,
     type IHistoryProvider,
     type IModelProvider,
@@ -96,11 +97,14 @@ export function createProviderHost(options: ProviderHostOptions = {}): ProviderH
     };
 
     const postError = (requestId: string, channelId: string, error: unknown, sendResponse: ResponseSender) => {
+        const historyError = error instanceof ExternalHistoryError ? error : null;
         sendResponse({
             type: 'ERROR',
             requestId,
             channelId,
-            error: error instanceof Error ? error.message : String(error)
+            error: error instanceof Error ? error.message : String(error),
+            historyErrorCode: historyError?.code,
+            historyProviderId: historyError?.providerId
         });
     };
 

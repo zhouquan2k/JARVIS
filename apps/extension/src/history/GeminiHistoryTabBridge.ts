@@ -6,7 +6,7 @@ import {
     type GeminiContentHistorySummary,
     type GeminiContentRequest,
     type GeminiContentResponse
-} from './geminiContentProtocol';
+} from '@packages/core/src';
 
 type AppEnv = Record<string, string | undefined>;
 

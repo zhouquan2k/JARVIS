@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+    DESKTOP_PROVIDER_LOGIN_COMPLETED_CHANNEL,
     DESKTOP_PROVIDER_LOGIN_CLOSED_CHANNEL,
     DESKTOP_PROVIDER_LOGIN_OPEN_CHANNEL,
     DESKTOP_PROVIDER_LOGIN_OPENED_CHANNEL
@@ -9,6 +10,7 @@ import { registerProviderLoginIpc } from './authIpc';
 describe('registerProviderLoginIpc', () => {
     it('opens login windows via ipc and relays close events back to renderer windows', async () => {
         let openListener: ((providerId: string) => void) | null = null;
+        let completedListener: ((providerId: string) => void) | null = null;
         let closeListener: ((providerId: string) => void) | null = null;
         const openProviderLoginWindow = vi.fn();
         const ipc = {
@@ -29,6 +31,12 @@ describe('registerProviderLoginIpc', () => {
                     closeListener = listener;
                     return () => {
                         closeListener = null;
+                    };
+                },
+                onLoginWindowCompleted(listener) {
+                    completedListener = listener;
+                    return () => {
+                        completedListener = null;
                     };
                 },
                 dispose() {
@@ -62,6 +70,11 @@ describe('registerProviderLoginIpc', () => {
 
         openListener?.('chatgpt-web');
         expect(rendererSend).toHaveBeenCalledWith(DESKTOP_PROVIDER_LOGIN_OPENED_CHANNEL, {
+            providerId: 'chatgpt-web'
+        });
+
+        completedListener?.('chatgpt-web');
+        expect(rendererSend).toHaveBeenCalledWith(DESKTOP_PROVIDER_LOGIN_COMPLETED_CHANNEL, {
             providerId: 'chatgpt-web'
         });
 

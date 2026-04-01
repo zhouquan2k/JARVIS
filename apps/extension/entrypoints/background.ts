@@ -1,8 +1,8 @@
 /// <reference types="chrome"/>
 import type { IHistoryProvider, IModelProvider, ProviderRuntime } from '@packages/core/src';
-import { GeminiHistoryConfigLoader } from '../src/history/GeminiHistoryConfigLoader';
+import { GeminiHistoryConfigLoader } from '@packages/core/src';
 import { GeminiHistoryTabBridge } from '../src/history/GeminiHistoryTabBridge';
-import { GeminiDomHistoryProvider } from '../src/history/GeminiDomHistoryProvider';
+import { GeminiDomHistoryProvider } from '@packages/core/src';
 import type {
     AbortRequest,
     AnalyzeComparisonRequest,
@@ -17,7 +17,7 @@ import type {
 
 type RuntimeDeps = {
     createProviderRuntime: typeof import('@packages/core/src/runtime/createProviderRuntime').createProviderRuntime;
-    ComparisonAnalyzer: typeof import('@packages/core/src/analysis/ComparisonAnalyzer').ComparisonAnalyzer;
+    ComparisonAnalyzer: typeof import('@packages/core/src/workflows/compare/ComparisonAnalyzer').ComparisonAnalyzer;
     APP_CONFIG: typeof import('@packages/core/config').APP_CONFIG;
     createMockRuntime: typeof import('../src/testing/createMockRuntime').createMockRuntime;
 };
@@ -29,7 +29,7 @@ const loadRuntimeDeps = async (): Promise<RuntimeDeps> => {
     if (!runtimeDepsPromise) {
         runtimeDepsPromise = Promise.all([
             import('@packages/core/src/runtime/createProviderRuntime'),
-            import('@packages/core/src/analysis/ComparisonAnalyzer'),
+            import('@packages/core/src/workflows/compare/ComparisonAnalyzer'),
             import('@packages/core/config'),
             import('../src/testing/createMockRuntime')
         ])
@@ -134,6 +134,16 @@ export default defineBackground(() => {
                     if (!geminiHistoryProvider) {
                         geminiHistoryProvider = new GeminiDomHistoryProvider({
                             configLoader: new GeminiHistoryConfigLoader({
+                                storage: {
+                                    async get(key: string) {
+                                        const result = await chrome.storage.local.get(key);
+                                        const value = result[key];
+                                        return typeof value === 'string' ? value : null;
+                                    },
+                                    async set(key: string, value: string) {
+                                        await chrome.storage.local.set({ [key]: value });
+                                    }
+                                },
                                 env: import.meta.env as Record<string, string | undefined>
                             }),
                             tabBridge: new GeminiHistoryTabBridge({

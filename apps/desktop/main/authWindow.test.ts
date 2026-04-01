@@ -17,7 +17,11 @@ function createWindowHarness() {
             return undefined;
         }),
         webContents: {
-            getURL: vi.fn().mockReturnValue('')
+            getURL: vi.fn().mockReturnValue(''),
+            executeJavaScript: vi.fn().mockResolvedValue({
+                authenticated: false,
+                href: 'https://gemini.google.com/app'
+            })
         },
         emit(event: string) {
             for (const listener of listeners.get(event) ?? []) {
@@ -30,6 +34,7 @@ function createWindowHarness() {
 describe('createAuthWindowManager', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.useRealTimers();
     });
 
     it('opens a session-bound chatgpt login window and reuses it', () => {
@@ -87,10 +92,67 @@ describe('createAuthWindowManager', () => {
 
         expect(onOpened).toHaveBeenCalledWith('chatgpt-web');
     });
+
+    it('auto closes the Gemini login window after login is detected', async () => {
+        vi.useFakeTimers();
+        const windowHarness = createWindowHarness();
+        windowHarness.webContents.executeJavaScript = vi.fn()
+            .mockResolvedValueOnce({
+                authenticated: false,
+                href: 'https://accounts.google.com/ServiceLogin'
+            })
+            .mockResolvedValueOnce({
+                authenticated: false,
+                href: 'https://gemini.google.com/app'
+            })
+            .mockResolvedValueOnce({
+                authenticated: true,
+                href: 'https://gemini.google.com/app'
+            })
+            .mockResolvedValueOnce({
+                authenticated: true,
+                href: 'https://gemini.google.com/app'
+            });
+        const probeGeminiHistoryReady = vi.fn()
+            .mockResolvedValueOnce(false)
+            .mockResolvedValueOnce(true);
+        const manager = createAuthWindowManager({
+            createWindow: vi.fn().mockReturnValue(windowHarness),
+            getProviderSession: vi.fn().mockReturnValue({}),
+            probeGeminiHistoryReady
+        });
+        const onCompleted = vi.fn();
+        manager.onLoginWindowCompleted(onCompleted);
+
+        manager.openProviderLoginWindow('gemini-web');
+        await vi.advanceTimersByTimeAsync(1500);
+        expect(windowHarness.destroy).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(1500);
+        expect(onCompleted).not.toHaveBeenCalled();
+        expect(windowHarness.destroy).not.toHaveBeenCalled();
+        expect(probeGeminiHistoryReady).toHaveBeenCalledTimes(0);
+
+        await vi.advanceTimersByTimeAsync(1500);
+        expect(onCompleted).not.toHaveBeenCalled();
+        expect(windowHarness.destroy).not.toHaveBeenCalled();
+        expect(probeGeminiHistoryReady).toHaveBeenCalledTimes(1);
+        expect(probeGeminiHistoryReady).toHaveBeenNthCalledWith(1, { forceReload: true });
+
+        await vi.advanceTimersByTimeAsync(1500);
+        expect(onCompleted).toHaveBeenCalledWith('gemini-web');
+        expect(windowHarness.destroy).toHaveBeenCalledTimes(1);
+        expect(probeGeminiHistoryReady).toHaveBeenCalledTimes(2);
+        expect(probeGeminiHistoryReady).toHaveBeenNthCalledWith(2, { forceReload: false });
+    });
 });
 
 describe('getProviderLoginUrl', () => {
     it('returns the chatgpt desktop login url', () => {
         expect(getProviderLoginUrl('chatgpt-web')).toBe('https://chatgpt.com/');
+    });
+
+    it('returns the gemini desktop login url', () => {
+        expect(getProviderLoginUrl('gemini-web')).toBe('https://gemini.google.com/app');
     });
 });
