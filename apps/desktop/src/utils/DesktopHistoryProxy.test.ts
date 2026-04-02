@@ -9,9 +9,11 @@ describe('DesktopHistoryProxy', () => {
 
     it('forwards history list requests through the desktop bridge', async () => {
         const listeners = new Set<(message: unknown) => void>();
+        let forwardedMessage: Record<string, unknown> | null = null;
 
         window.chatprismDesktop = {
             sendProxyRequest(message) {
+                forwardedMessage = message as Record<string, unknown>;
                 listeners.forEach((listener) => {
                     listener({
                         type: 'DONE',
@@ -35,7 +37,7 @@ describe('DesktopHistoryProxy', () => {
         };
 
         const provider = new DesktopHistoryProxy('chatgpt-web', { channelId: 'desktop-history-channel' });
-        await expect(provider.getHistoryList()).resolves.toEqual([
+        await expect(provider.getHistoryList({ query: 'incident' })).resolves.toEqual([
             {
                 id: 'history-1',
                 title: '桌面对话',
@@ -43,6 +45,11 @@ describe('DesktopHistoryProxy', () => {
                 origin: 'chatgpt-web'
             }
         ]);
+        expect(forwardedMessage).toEqual(expect.objectContaining({
+            action: 'GET_HISTORY_LIST',
+            providerId: 'chatgpt-web',
+            query: 'incident'
+        }));
     });
 
     it('rejects history detail requests when host returns an error', async () => {

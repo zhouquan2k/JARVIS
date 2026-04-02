@@ -91,6 +91,37 @@ describe('GeminiHistoryTabBridge', () => {
         expect(chromeStub.tabs.remove).not.toHaveBeenCalled();
     });
 
+    it('forwards the history search query to the Gemini content script request', async () => {
+        const chromeStub = createChromeStub();
+        chromeStub.tabs.query = vi.fn().mockResolvedValue([
+            {
+                id: 42,
+                url: 'https://gemini.google.com/app',
+                status: 'complete',
+                active: true
+            }
+        ]);
+        chromeStub.tabs.get = vi.fn().mockResolvedValue({
+            id: 42,
+            url: 'https://gemini.google.com/app',
+            status: 'complete',
+            active: true
+        });
+        chromeStub.tabs.sendMessage = vi.fn()
+            .mockResolvedValueOnce({ ok: true, data: { ready: true } })
+            .mockResolvedValueOnce({ ok: true, data: [] });
+
+        vi.stubGlobal('chrome', chromeStub);
+
+        const bridge = new GeminiHistoryTabBridge();
+        await bridge.getHistoryList(CONFIG, { query: 'incident' });
+
+        expect(chromeStub.tabs.sendMessage).toHaveBeenLastCalledWith(42, expect.objectContaining({
+            action: 'GET_HISTORY_LIST',
+            query: 'incident'
+        }));
+    });
+
     it('creates and keeps an inactive Gemini tab when none is already open', async () => {
         const chromeStub = createChromeStub();
         chromeStub.tabs.query = vi.fn().mockResolvedValue([]);

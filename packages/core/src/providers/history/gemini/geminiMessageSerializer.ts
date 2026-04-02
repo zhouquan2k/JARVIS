@@ -82,7 +82,7 @@ function normalizeSpeakerPrefixCandidate(value: string): string {
         .trim();
 }
 
-function shouldSkipElement(element: Element): boolean {
+function shouldSkipElement(element: DomElementLike): boolean {
     if (SKIP_TAGS.has(element.tagName)) {
         return true;
     }
@@ -267,6 +267,6 @@ export function cleanupGeminiAssistantText(value: string): string {
 }
 
 export function extractGeminiMessageText(element: Element, role: GeminiMessageRole): string {
-    const serialized = normalizeMarkdownishText(serializeNode(element));
+    const serialized = normalizeMarkdownishText(serializeNode(element as unknown as DomNodeLike));
     return role === 'user' ? cleanupGeminiUserText(serialized) : cleanupGeminiAssistantText(serialized);
 }

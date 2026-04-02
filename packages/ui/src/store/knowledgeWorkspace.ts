@@ -90,8 +90,9 @@ export const useKnowledgeWorkspaceStore = defineStore('knowledge-workspace', {
         }
     },
     actions: {
-        syncActiveFileChange(path = this.activePath) {
-            if (!path) {
+        syncActiveFileChange(path?: string | null) {
+            const targetPath = path ?? this.activePath;
+            if (!targetPath) {
                 this.latestFileChange = null;
                 this.activeDiffEntries = [];
                 this.canUndoActiveFile = false;
@@ -99,34 +100,35 @@ export const useKnowledgeWorkspaceStore = defineStore('knowledge-workspace', {
                 return;
             }
 
-            const record = this.fileChangeService.getVisibleRecord(path);
+            const record = this.fileChangeService.getVisibleRecord(targetPath);
             this.latestFileChange = record;
             this.activeDiffEntries = record
                 ? buildLineDiffEntries(record.beforeContent, record.afterContent)
                 : [];
-            this.canUndoActiveFile = this.fileChangeService.canUndo(path);
-            this.canRedoActiveFile = this.fileChangeService.canRedo(path);
+            this.canUndoActiveFile = this.fileChangeService.canUndo(targetPath);
+            this.canRedoActiveFile = this.fileChangeService.canRedo(targetPath);
         },
 
-        applyActiveContent(content: string, path = this.activePath) {
-            if (!path) {
+        applyActiveContent(content: string, path?: string | null) {
+            const targetPath = path ?? this.activePath;
+            if (!targetPath) {
                 return;
             }
 
             const updatedAt = Date.now();
-            if (this.activePath === path) {
+            if (this.activePath === targetPath) {
                 this.activeDocument = {
-                    path,
+                    path: targetPath,
                     content,
                     updatedAt
                 };
                 this.draftContent = content;
             }
 
-            this.nodes = this.nodes.map((node) => node.path === path ? { ...node, updatedAt } : node);
+            this.nodes = this.nodes.map((node) => node.path === targetPath ? { ...node, updatedAt } : node);
             this.dirtyPaths = {
                 ...this.dirtyPaths,
-                [path]: false
+                [targetPath]: false
             };
         },
 

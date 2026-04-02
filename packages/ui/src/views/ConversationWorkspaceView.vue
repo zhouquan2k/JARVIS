@@ -8,6 +8,9 @@
       :external-providers="chatStore.historyProviders"
       :external-items="chatStore.externalHistoryItems"
       :external-history-loading="chatStore.isExternalHistoryLoading"
+      :external-history-query="chatStore.externalHistoryQuery"
+      :show-external-history-search="showExternalHistorySearch"
+      :external-history-search-placeholder="externalHistorySearchPlaceholder"
       :external-preview-loading-id="chatStore.externalPreviewLoadingId"
       :active-external-provider-id="chatStore.activeExternalProviderId"
       :active-local-id="chatStore.workspaceMode === 'active' ? chatStore.currentConversation?.id : null"
@@ -19,6 +22,9 @@
       @select-local="onSelectLocal"
       @delete-local="onDeleteLocal"
       @select-external="onSelectExternal"
+      @update-external-query="chatStore.setExternalHistoryQuery"
+      @submit-external-query="chatStore.submitExternalHistoryQuery"
+      @clear-external-query="chatStore.clearExternalHistoryQuery"
       @new-chat="onNewChat"
       @new-compare="onNewCompare"
     />
@@ -44,7 +50,7 @@
 </template>
 
 <script setup lang="ts">
-import { type PropType } from 'vue';
+import { computed, type PropType } from 'vue';
 import '../theme/chatgpt-dark.css';
 import CompareChatView from './CompareChatView.vue';
 import ConversationSidebar from '../components/ConversationSidebar.vue';
@@ -99,6 +105,13 @@ const emit = defineEmits<{
 }>();
 
 const chatStore = useChatStore();
+const activeExternalProviderFeatures = computed(() => chatStore.activeExternalProvider?.features || null);
+const showExternalHistorySearch = computed(() => {
+  return chatStore.historySource === 'external' && activeExternalProviderFeatures.value?.historySearch === true;
+});
+const externalHistorySearchPlaceholder = computed(() => {
+  return activeExternalProviderFeatures.value?.historySearchPlaceholder || '搜索外部历史';
+});
 
 async function onSwitchSource(source: 'local' | 'external') {
   await chatStore.setHistorySource(source);

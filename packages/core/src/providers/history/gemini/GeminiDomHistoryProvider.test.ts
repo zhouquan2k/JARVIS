@@ -24,6 +24,7 @@ const CONFIG: GeminiHistoryRemoteConfig = {
 describe('GeminiDomHistoryProvider', () => {
     it('normalizes Gemini history summaries with shared origin ids', async () => {
         let validatedConfig: GeminiHistoryRemoteConfig | null = null;
+        let receivedQuery: string | undefined;
         const provider = new GeminiDomHistoryProvider({
             configLoader: {
                 async load() {
@@ -42,7 +43,8 @@ describe('GeminiDomHistoryProvider', () => {
                 }
             } as any,
             tabBridge: {
-                async getHistoryList() {
+                async getHistoryList(_config: GeminiHistoryRemoteConfig, options?: { query?: string }) {
+                    receivedQuery = options?.query;
                     return [
                         { id: 'gemini-1', title: 'Gemini Summary', updatedAt: 10 }
                     ];
@@ -59,6 +61,38 @@ describe('GeminiDomHistoryProvider', () => {
             }
         ]);
         expect(validatedConfig).toEqual(CONFIG);
+        expect(receivedQuery).toBeUndefined();
+    });
+
+    it('forwards non-empty query to the Gemini bridge and supports empty results', async () => {
+        let receivedQuery: string | undefined;
+        const provider = new GeminiDomHistoryProvider({
+            configLoader: {
+                async load() {
+                    return {
+                        config: CONFIG,
+                        metadata: {
+                            providerId: 'gemini-history',
+                            version: 'test-1',
+                            fetchedAt: 1,
+                            source: 'remote'
+                        }
+                    };
+                },
+                async markValidated() {
+                    return undefined;
+                }
+            } as any,
+            tabBridge: {
+                async getHistoryList(_config: GeminiHistoryRemoteConfig, options?: { query?: string }) {
+                    receivedQuery = options?.query;
+                    return [];
+                }
+            } as any
+        });
+
+        await expect(provider.getHistoryList({ query: 'incident' })).resolves.toEqual([]);
+        expect(receivedQuery).toBe('incident');
     });
 
     it('returns normalized recoverable errors for empty details', async () => {

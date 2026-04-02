@@ -47,7 +47,7 @@
             :active-path="knowledgeStore.activePath"
             :active-document="activeAssistantDocument"
             :context-provider="props.contextProvider"
-            :on-file-changed="knowledgeStore.recordFileChange"
+            :on-file-changed="handleAssistantFileChanged"
             :agent-resolution-error="knowledgeStore.agentResolutionError"
             :is-resolving-agent="knowledgeStore.isResolvingAgent"
           />
@@ -100,6 +100,10 @@ let cleanupResize: (() => void) | null = null;
 
 function onDraftChange(markdown: string) {
   knowledgeStore.updateActiveDocument(markdown);
+}
+
+function handleAssistantFileChanged(change: { path: string; beforeContent: string; afterContent: string }) {
+  void knowledgeStore.recordFileChange(change);
 }
 
 function startResize(handleIndex: 0 | 1, event: PointerEvent) {

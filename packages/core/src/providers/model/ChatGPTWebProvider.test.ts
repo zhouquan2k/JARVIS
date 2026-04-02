@@ -401,6 +401,82 @@ describe('normalizeChatGPTConversationDetail', () => {
         vi.unstubAllGlobals();
     });
 
+    it('returns recent history summaries when query is empty', async () => {
+        const requestClient = {
+            fetch: vi.fn().mockResolvedValue({
+                ok: true,
+                json: async () => ({
+                    items: [
+                        {
+                            id: 'recent-1',
+                            title: 'Recent Chat',
+                            update_time: 1_700_000_000
+                        }
+                    ]
+                })
+            })
+        };
+        const provider = new ChatGPTWebProvider({ requestClient });
+        (provider as { accessToken: string }).accessToken = 'token';
+
+        await expect(provider.getHistoryList()).resolves.toEqual([
+            {
+                id: 'recent-1',
+                title: 'Recent Chat',
+                updatedAt: 1_700_000_000_000,
+                origin: 'chatgpt-web'
+            }
+        ]);
+        expect(requestClient.fetch).toHaveBeenCalledWith(
+            'https://chatgpt.com/backend-api/conversations?offset=0&limit=28&order=updated',
+            expect.objectContaining({
+                credentials: 'include',
+                headers: expect.objectContaining({
+                    Authorization: 'Bearer token'
+                })
+            })
+        );
+    });
+
+    it('uses the ChatGPT history search path and normalizes nested result payloads', async () => {
+        const requestClient = {
+            fetch: vi.fn().mockResolvedValue({
+                ok: true,
+                json: async () => ({
+                    results: [
+                        {
+                            conversation: {
+                                id: 'search-1',
+                                title: 'Incident Search Result',
+                                update_time: 1_700_000_123
+                            }
+                        }
+                    ]
+                })
+            })
+        };
+        const provider = new ChatGPTWebProvider({ requestClient });
+        (provider as { accessToken: string }).accessToken = 'token';
+
+        await expect(provider.getHistoryList({ query: 'incident' })).resolves.toEqual([
+            {
+                id: 'search-1',
+                title: 'Incident Search Result',
+                updatedAt: 1_700_000_123_000,
+                origin: 'chatgpt-web'
+            }
+        ]);
+        expect(requestClient.fetch).toHaveBeenCalledWith(
+            'https://chatgpt.com/backend-api/conversations/search?query=incident&offset=0&limit=28',
+            expect.objectContaining({
+                credentials: 'include',
+                headers: expect.objectContaining({
+                    Authorization: 'Bearer token'
+                })
+            })
+        );
+    });
+
     it('sends multimodal payload and normalizes cite/image_group updates', async () => {
         const provider = new ChatGPTWebProvider();
         (provider as { accessToken: string }).accessToken = 'token';

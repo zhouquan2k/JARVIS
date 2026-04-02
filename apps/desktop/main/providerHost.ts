@@ -253,7 +253,7 @@ export function createProviderHost(options: ProviderHostOptions = {}): ProviderH
     const handleGetHistoryList = async (msg: GetHistoryListRequest, sendResponse: ResponseSender) => {
         try {
             const provider = await resolveHistoryProvider(msg.providerId);
-            const result = await provider.getHistoryList();
+            const result = await provider.getHistoryList({ query: msg.query });
             sendResponse({
                 type: 'DONE',
                 requestId: msg.requestId,

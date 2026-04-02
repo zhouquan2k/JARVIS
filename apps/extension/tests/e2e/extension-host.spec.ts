@@ -77,10 +77,19 @@ test('extension host supports external provider switching, Gemini preview/error 
     await expect(page.getByTestId('external-provider-chatgpt-web')).toBeVisible();
     await expect(page.getByTestId('external-provider-gemini-web')).toBeVisible();
     await expect(page.getByTestId('external-provider-external-file')).toBeVisible();
-    await expect(page.getByTestId('external-history-item')).toHaveCount(2);
+    await expect(page.getByTestId('external-history-search')).toBeVisible();
+
+    const searchInput = page.getByTestId('external-history-search-input');
+    await searchInput.fill('incident');
+    await page.getByTestId('external-history-search-submit').click();
+
+    await expect(page.getByTestId('external-history-item')).toHaveCount(1);
+    await expect(page.getByTestId('external-history-item').first()).toContainText('Beta Planning Session');
 
     await page.getByTestId('external-provider-gemini-web').click();
+    await expect(searchInput).toHaveValue('incident');
     await expect(page.getByTestId('external-history-item')).toHaveCount(2);
+    await expect(page.getByTestId('external-history-item').first()).toContainText('Gemini Sprint Review');
     await page.getByTestId('external-history-item').first().click();
     await expect(page.getByTestId('preview-import')).toBeVisible();
     await expect(page.getByTestId('normal-input')).toHaveCount(0);
@@ -100,12 +109,16 @@ test('extension host supports external provider switching, Gemini preview/error 
 
     await page.getByTestId('history-source-external').click();
     await page.getByTestId('external-provider-gemini-web').click();
+    await page.getByTestId('external-history-search-clear').click();
+    await expect(searchInput).toHaveValue('');
+    await expect(page.getByTestId('external-history-item')).toHaveCount(2);
     await expect(page.getByTestId('history-imported-badge').first()).toBeVisible();
     await page.getByTestId('external-history-item').nth(1).click();
     await expect(page.getByTestId('normal-error')).toContainText('页面结构已变化');
 
     const fileChooserPromise = page.waitForEvent('filechooser');
     await page.getByTestId('external-provider-external-file').click();
+    await expect(page.getByTestId('external-history-search')).toHaveCount(0);
     const fileChooser = await fileChooserPromise;
     await fileChooser.setFiles({
       name: 'external-history.json',

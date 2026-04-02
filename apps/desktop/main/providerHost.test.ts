@@ -71,8 +71,10 @@ class StreamingProvider implements IModelProvider {
 
 class HistoryProviderStub implements IHistoryProvider {
     public id: 'chatgpt-web' = 'chatgpt-web';
+    public lastQuery: string | undefined;
 
-    async getHistoryList(): Promise<ConversationHistorySummary[]> {
+    async getHistoryList(options?: { query?: string }): Promise<ConversationHistorySummary[]> {
+        this.lastQuery = options?.query;
         return [
             {
                 id: 'history-1',
@@ -172,16 +174,18 @@ describe('createProviderHost', () => {
 
     it('forwards history responses and unsupported-history errors', async () => {
         const historyResponses: ProxyResponse[] = [];
+        const historyProvider = new HistoryProviderStub();
         const host = createProviderHost({
             runtime: createRuntime(() => new StreamingProvider('provider')),
-            resolveHistoryProvider: async (providerId) => providerId === 'chatgpt-web' ? new HistoryProviderStub() : undefined
+            resolveHistoryProvider: async (providerId) => providerId === 'chatgpt-web' ? historyProvider : undefined
         });
 
         await host.handleRequest({
             action: 'GET_HISTORY_LIST',
             requestId: 'history-list',
             channelId: 'history-channel',
-            providerId: 'chatgpt-web'
+            providerId: 'chatgpt-web',
+            query: 'incident'
         }, (response) => historyResponses.push(response));
 
         expect(historyResponses).toEqual([
@@ -191,6 +195,7 @@ describe('createProviderHost', () => {
                 channelId: 'history-channel'
             })
         ]);
+        expect(historyProvider.lastQuery).toBe('incident');
 
         const errorResponses: ProxyResponse[] = [];
         await host.handleRequest({

@@ -27,6 +27,7 @@ export interface GeminiContentRequest {
     action: GeminiContentAction;
     config: GeminiHistoryRemoteConfigShape;
     externalId?: string;
+    query?: string;
 }
 
 export type GeminiContentResponse =

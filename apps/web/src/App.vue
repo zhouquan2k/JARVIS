@@ -56,6 +56,9 @@ function openCompareMode() {
 }
 
 function onNavigateWorkspace(path: ChatRoutePath) {
+  if (path !== currentRoute.value.path) {
+    chatStore.resetWorkspaceConversationState();
+  }
   navigateTo(path);
 }
 

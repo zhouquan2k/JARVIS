@@ -119,7 +119,7 @@ const activePathLabel = computed(() => {
   }
 
   const segments = props.activePath.split('/').filter(Boolean);
-  return segments.at(-1) ?? props.activePath;
+  return segments[segments.length - 1] ?? props.activePath;
 });
 const saveButtonLabel = computed(() => props.isSaving ? '保存中' : '保存');
 const editorRoot = ref<HTMLElement | null>(null);

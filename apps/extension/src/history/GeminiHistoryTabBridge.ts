@@ -1,5 +1,10 @@
 /// <reference types="chrome"/>
-import { ExternalHistoryError, resolveGeminiHistoryRuntimeConfig, type GeminiHistoryRemoteConfig } from '@packages/core/src';
+import {
+    ExternalHistoryError,
+    resolveGeminiHistoryRuntimeConfig,
+    type GeminiHistoryRemoteConfig,
+    type HistoryListQueryOptions
+} from '@packages/core/src';
 import {
     assertGeminiContentResponse,
     type GeminiContentConversationDetail,
@@ -33,12 +38,16 @@ export class GeminiHistoryTabBridge {
         this.pageUrl = runtimeConfig.pageUrl;
     }
 
-    async getHistoryList(config: GeminiHistoryRemoteConfig): Promise<GeminiContentHistorySummary[]> {
+    async getHistoryList(
+        config: GeminiHistoryRemoteConfig,
+        options: HistoryListQueryOptions = {}
+    ): Promise<GeminiContentHistorySummary[]> {
         const tabId = await this.ensureTab();
         await this.waitForContentScriptReady(tabId);
         const response = await this.sendRequest(tabId, {
             action: 'GET_HISTORY_LIST',
-            config
+            config,
+            query: options.query
         });
         return assertGeminiContentResponse<GeminiContentHistorySummary[]>(response);
     }

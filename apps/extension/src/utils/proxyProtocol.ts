@@ -2,6 +2,9 @@ import type {
     AnalysisResult,
     Conversation,
     ConversationHistorySummary,
+    ExternalHistoryErrorCode,
+    ExternalHistoryProviderId,
+    HistoryListQueryOptions,
     ProviderSendResult,
     ProviderStreamUpdate,
     SendMessageOptions
@@ -59,6 +62,7 @@ export interface AbortRequest extends ProxyRequestBase {
 export interface GetHistoryListRequest extends ProxyRequestBase {
     action: 'GET_HISTORY_LIST';
     providerId: string;
+    query?: HistoryListQueryOptions['query'];
 }
 
 export interface GetHistoryDetailRequest extends ProxyRequestBase {
@@ -105,6 +109,8 @@ export interface DoneResponse extends ProxyResponseBase {
 export interface ErrorResponse extends ProxyResponseBase {
     type: 'ERROR';
     error: string;
+    historyErrorCode?: ExternalHistoryErrorCode;
+    historyProviderId?: ExternalHistoryProviderId;
 }
 
 export type ProxyResponse = AuthResultResponse | UpdateResponse | DoneResponse | ErrorResponse;

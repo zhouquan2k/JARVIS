@@ -1,6 +1,7 @@
 import {
     ExternalHistoryError,
     type ConversationHistorySummary,
+    type HistoryListQueryOptions,
     type IHistoryProvider
 } from '../../../interfaces/IHistoryProvider';
 import type { GeminiHistoryBridge } from './GeminiHistoryBridge';
@@ -26,9 +27,9 @@ export class GeminiDomHistoryProvider implements IHistoryProvider {
         tabBridge: GeminiHistoryBridge;
     }) {}
 
-    async getHistoryList(): Promise<ConversationHistorySummary[]> {
+    async getHistoryList(options: HistoryListQueryOptions = {}): Promise<ConversationHistorySummary[]> {
         const configResult = await this.deps.configLoader.load();
-        const summaries = await this.deps.tabBridge.getHistoryList(configResult.config);
+        const summaries = await this.deps.tabBridge.getHistoryList(configResult.config, options);
         await this.deps.configLoader.markValidated(configResult.config);
 
         return summaries.map((item) => {

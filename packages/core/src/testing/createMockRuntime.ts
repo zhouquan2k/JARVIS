@@ -37,7 +37,7 @@ function toMockModelId(providerId: string, preferredDefaultModel: string): strin
 }
 
 function ensurePreferredDefaultModel(provider: ProviderConfig): ModelConfig[] {
-    const models = provider.models.map((model) => ({
+    const models: ModelConfig[] = provider.models.map((model) => ({
         ...model,
         options: model.options?.map((option) => ({
             ...option,
@@ -228,7 +228,7 @@ class MockStreamingProvider implements IAgentCapableProvider {
 
     getAgentCapabilities(): AgentCapabilities {
         return {
-            nativeAgent: this.id === 'gemini-api',
+            nativeAgent: true,
             toolLoop: 'application-managed'
         };
     }

@@ -1,6 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
-import type { Conversation, ConversationHistorySummary, IHistoryProvider, IModelProvider, IStorageProvider, ResolvedAgentConfig } from '@packages/core/src';
+import type {
+    Conversation,
+    ConversationHistorySummary,
+    HistoryListQueryOptions,
+    IHistoryProvider,
+    IModelProvider,
+    IStorageProvider,
+    ResolvedAgentConfig
+} from '@packages/core/src';
 import type { ProviderConfig } from '@packages/core/config';
 import { useChatStore } from './chat';
 
@@ -145,14 +153,30 @@ class MockStorageProvider implements IStorageProvider {
 
 class MockHistoryProvider implements IHistoryProvider {
     id = 'chatgpt-web';
+    historyListCalls: HistoryListQueryOptions[] = [];
 
     constructor(
         private readonly summaries: ConversationHistorySummary[],
         private readonly details: Record<string, Conversation>
     ) {}
 
-    async getHistoryList(): Promise<ConversationHistorySummary[]> {
-        return this.summaries.map((item) => ({ ...item }));
+    async getHistoryList(options: HistoryListQueryOptions = {}): Promise<ConversationHistorySummary[]> {
+        this.historyListCalls.push({ ...options });
+        const normalizedQuery = options.query?.trim().toLowerCase() || '';
+        if (!normalizedQuery) {
+            return this.summaries.map((item) => ({ ...item }));
+        }
+
+        return this.summaries
+            .filter((item) => {
+                const detail = this.details[item.id];
+                const haystacks = [
+                    item.title,
+                    ...(detail?.messages.map((message) => message.content) || [])
+                ];
+                return haystacks.some((value) => value.toLowerCase().includes(normalizedQuery));
+            })
+            .map((item) => ({ ...item }));
     }
 
     async getHistoryDetail(externalId: string): Promise<Conversation> {
@@ -846,6 +870,155 @@ describe('useChatStore workspace history flow', () => {
         expect(store.externalHistoryItems).toHaveLength(1);
     });
 
+    it('shares submitted external history query across searchable providers and reloads on provider switch', async () => {
+        const chatgptHistory = new MockHistoryProvider(
+            [
+                { id: 'chatgpt-1', title: 'Alpha Notes', updatedAt: 2, origin: 'chatgpt-web' },
+                { id: 'chatgpt-2', title: 'Incident Draft', updatedAt: 1, origin: 'chatgpt-web' }
+            ],
+            {
+                'chatgpt-1': {
+                    id: 'preview-chatgpt-1',
+                    title: 'Alpha Notes',
+                    origin: 'chatgpt-web',
+                    externalId: 'chatgpt-1',
+                    backendId: 'chatgpt-1',
+                    updatedAt: 2,
+                    messages: [{ id: 'm1', role: 'user', content: 'alpha' }]
+                },
+                'chatgpt-2': {
+                    id: 'preview-chatgpt-2',
+                    title: 'Incident Draft',
+                    origin: 'chatgpt-web',
+                    externalId: 'chatgpt-2',
+                    backendId: 'chatgpt-2',
+                    updatedAt: 1,
+                    messages: [{ id: 'm2', role: 'assistant', content: 'incident summary' }]
+                }
+            }
+        );
+        const geminiHistory = new MockHistoryProvider(
+            [
+                { id: 'gemini-1', title: 'Sprint Review', updatedAt: 2, origin: 'gemini-web' },
+                { id: 'gemini-2', title: 'Incident Timeline', updatedAt: 1, origin: 'gemini-web' }
+            ],
+            {
+                'gemini-1': {
+                    id: 'preview-gemini-1',
+                    title: 'Sprint Review',
+                    origin: 'gemini-web',
+                    externalId: 'gemini-1',
+                    backendId: 'gemini-1',
+                    updatedAt: 2,
+                    messages: [{ id: 'g1', role: 'assistant', content: 'review' }]
+                },
+                'gemini-2': {
+                    id: 'preview-gemini-2',
+                    title: 'Incident Timeline',
+                    origin: 'gemini-web',
+                    externalId: 'gemini-2',
+                    backendId: 'gemini-2',
+                    updatedAt: 1,
+                    messages: [{ id: 'g2', role: 'assistant', content: 'incident timeline' }]
+                }
+            }
+        );
+        geminiHistory.id = 'gemini-web';
+
+        const store = useChatStore();
+        store.setProviders(new MockModelProvider(), new MockStorageProvider([]));
+        store.setHistoryProviders([
+            {
+                id: 'chatgpt-web',
+                label: 'ChatGPT',
+                kind: 'history-provider',
+                features: {
+                    historySearch: true
+                },
+                provider: chatgptHistory
+            },
+            {
+                id: 'gemini-web',
+                label: 'Gemini',
+                kind: 'history-provider',
+                features: {
+                    historySearch: true
+                },
+                provider: geminiHistory
+            }
+        ]);
+
+        await store.setHistorySource('external');
+        store.setExternalHistoryQuery('incident');
+        await store.submitExternalHistoryQuery();
+
+        expect(store.externalHistoryQuerySubmitted).toBe('incident');
+        expect(chatgptHistory.historyListCalls.at(-1)).toEqual({ query: 'incident' });
+        expect(store.externalHistoryItems.map((item) => item.id)).toEqual(['chatgpt-2']);
+
+        await store.setActiveExternalProvider('gemini-web');
+
+        expect(store.externalHistoryQuery).toBe('incident');
+        expect(store.externalHistoryQuerySubmitted).toBe('incident');
+        expect(geminiHistory.historyListCalls.at(-1)).toEqual({ query: 'incident' });
+        expect(store.externalHistoryItems.map((item) => item.id)).toEqual(['gemini-2']);
+    });
+
+    it('clears the shared external history query and reloads the recent list', async () => {
+        const history = new MockHistoryProvider(
+            [
+                { id: 'remote-1', title: 'Recent Chat', updatedAt: 2, origin: 'chatgpt-web' },
+                { id: 'remote-2', title: 'Incident Analysis', updatedAt: 1, origin: 'chatgpt-web' }
+            ],
+            {
+                'remote-1': {
+                    id: 'preview-1',
+                    title: 'Recent Chat',
+                    origin: 'chatgpt-web',
+                    externalId: 'remote-1',
+                    backendId: 'remote-1',
+                    updatedAt: 2,
+                    messages: [{ id: 'm1', role: 'user', content: 'recent' }]
+                },
+                'remote-2': {
+                    id: 'preview-2',
+                    title: 'Incident Analysis',
+                    origin: 'chatgpt-web',
+                    externalId: 'remote-2',
+                    backendId: 'remote-2',
+                    updatedAt: 1,
+                    messages: [{ id: 'm2', role: 'assistant', content: 'incident details' }]
+                }
+            }
+        );
+
+        const store = useChatStore();
+        store.setProviders(new MockModelProvider(), new MockStorageProvider([]));
+        store.setHistoryProviders([
+            {
+                id: 'chatgpt-web',
+                label: 'ChatGPT',
+                kind: 'history-provider',
+                features: {
+                    historySearch: true
+                },
+                provider: history
+            }
+        ]);
+
+        await store.setHistorySource('external');
+        store.setExternalHistoryQuery('incident');
+        await store.submitExternalHistoryQuery();
+        expect(store.externalHistoryItems.map((item) => item.id)).toEqual(['remote-2']);
+
+        await store.clearExternalHistoryQuery();
+
+        expect(store.externalHistoryQuery).toBe('');
+        expect(store.externalHistoryQuerySubmitted).toBe('');
+        expect(history.historyListCalls.at(-1)).toEqual({ query: '' });
+        expect(store.externalHistoryItems.map((item) => item.id)).toEqual(['remote-1', 'remote-2']);
+    });
+
     it('toggles question stars and filters starred question index items', async () => {
         const storage = new MockStorageProvider([
             {
@@ -962,6 +1135,72 @@ describe('useChatStore workspace history flow', () => {
             content: '需要修改的提问'
         });
         expect((await storage.getAllConversations())).toHaveLength(1);
+    });
+
+    it('resets workspace conversation state without touching model selection', async () => {
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(new MockModelProvider(), storage);
+        await store.initializeProviderCatalog(providerCatalog);
+        await store.startNewConversation();
+
+        store.currentConversation = {
+            id: 'conversation-active',
+            title: 'Workspace Chat',
+            origin: 'local',
+            updatedAt: Date.now(),
+            messages: [{ id: 'user-1', role: 'user', content: '保留前的内容' }]
+        };
+        store.previewConversation = {
+            id: 'conversation-preview',
+            title: 'Preview Chat',
+            origin: 'external-file',
+            updatedAt: Date.now(),
+            messages: []
+        };
+        store.workspaceMode = 'preview';
+        store.historySource = 'external';
+        store.currentError = 'temporary error';
+        store.currentHistoryErrorCode = 'AUTH_REQUIRED';
+        store.isExternalPreviewLoading = true;
+        store.externalPreviewLoadingId = 'external-1';
+        store.isQuestionIndexPanelOpen = false;
+        store.activeQuestionId = 'question-1';
+        store.pendingScrollQuestionId = 'question-1';
+        store.setDraftPrompt('临时草稿');
+        store.lastSubmittedPrompt = '上一条问题';
+        store.draftAttachments = [
+            {
+                id: 'attachment-1',
+                type: 'file',
+                name: 'note.md',
+                mimeType: 'text/markdown',
+                size: 10
+            }
+        ];
+        store.attachmentError = '附件错误';
+        store.currentProviderId = 'mock-provider';
+        store.currentModelId = 'mock-model';
+
+        store.resetWorkspaceConversationState();
+
+        expect(store.currentConversation).toBeNull();
+        expect(store.previewConversation).toBeNull();
+        expect(store.workspaceMode).toBe('active');
+        expect(store.historySource).toBe('local');
+        expect(store.currentError).toBeNull();
+        expect(store.currentHistoryErrorCode).toBeNull();
+        expect(store.isExternalPreviewLoading).toBe(false);
+        expect(store.externalPreviewLoadingId).toBeNull();
+        expect(store.isQuestionIndexPanelOpen).toBe(true);
+        expect(store.activeQuestionId).toBeNull();
+        expect(store.pendingScrollQuestionId).toBeNull();
+        expect(store.draftPrompt).toBe('');
+        expect(store.lastSubmittedPrompt).toBeNull();
+        expect(store.draftAttachments).toEqual([]);
+        expect(store.attachmentError).toBeNull();
+        expect(store.currentProviderId).toBe('mock-provider');
+        expect(store.currentModelId).toBe('mock-model');
     });
 
     it('delegates aborts to AgentRuntime when the runtime is active', async () => {

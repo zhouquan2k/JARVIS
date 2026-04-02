@@ -1,7 +1,18 @@
 /// <reference types="chrome"/>
 import { APP_CONFIG, type ModelConfig, type ProviderModelCatalog } from '../../../config';
-import type { ConversationHistorySummary, ExternalHistoryProviderId, IHistoryProvider } from '../../interfaces/IHistoryProvider';
-import type { Conversation, ConversationMessage, MessageAnnotation, MessageAttachment } from '../../interfaces/IStorageProvider';
+import type {
+    ConversationHistorySummary,
+    ExternalHistoryProviderId,
+    HistoryListQueryOptions,
+    IHistoryProvider
+} from '../../interfaces/IHistoryProvider';
+import type {
+    CiteAnnotation,
+    Conversation,
+    ConversationMessage,
+    MessageAnnotation,
+    MessageAttachment
+} from '../../interfaces/IStorageProvider';
 import { IModelProvider, type ProviderSendResult, type ProviderStreamUpdate, type SendMessageOptions } from '../../interfaces/IModelProvider';
 import { sha3_512 } from 'js-sha3';
 import type { ChatGPTWebProviderOptions, ProviderCookieStore, ProviderRequestClient } from './providerHostTypes';
@@ -106,6 +117,7 @@ type ChatGPTConversationDetail = {
 };
 
 const CHATGPT_HISTORY_ORIGIN: ExternalHistoryProviderId = 'chatgpt-web';
+const CHATGPT_HISTORY_LIST_LIMIT = 28;
 const PRIVATE_CITE_PATTERN = /cite(?:([^]+))?/g;
 const PRIVATE_IMAGE_GROUP_PATTERN = /image_group(?:([^]+))??/g;
 const DEFAULT_CHATGPT_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
@@ -187,6 +199,10 @@ function normalizeTitle(title: string | null | undefined): string {
     return trimmed || 'Untitled Conversation';
 }
 
+function normalizeHistoryQuery(query: string | undefined): string {
+    return query?.trim() || '';
+}
+
 function extractTextPart(part: unknown): string {
     if (typeof part === 'string') {
         return part;
@@ -237,6 +253,65 @@ function toRecordArray(value: unknown): Record<string, unknown>[] {
     return value
         .map((item) => toRecord(item))
         .filter((item): item is Record<string, unknown> => !!item);
+}
+
+function normalizeChatGPTListItem(value: unknown): ChatGPTListItem | null {
+    const record = toRecord(value);
+    if (!record) {
+        return null;
+    }
+
+    const conversationRecord = toRecord(record.conversation) || toRecord(record.item) || toRecord(record.data);
+    const source = conversationRecord || record;
+    const idCandidate = typeof source.id === 'string'
+        ? source.id
+        : typeof source.conversation_id === 'string'
+            ? source.conversation_id
+            : '';
+    if (!idCandidate) {
+        return null;
+    }
+
+    const titleCandidate = typeof source.title === 'string' || source.title === null
+        ? source.title
+        : typeof record.title === 'string' || record.title === null
+            ? record.title
+            : null;
+    const updateTimeCandidate = source.update_time ?? record.update_time ?? source.updated_at ?? record.updated_at ?? null;
+
+    return {
+        id: idCandidate,
+        title: typeof titleCandidate === 'string' || titleCandidate === null ? titleCandidate : null,
+        update_time: typeof updateTimeCandidate === 'number' || typeof updateTimeCandidate === 'string' || updateTimeCandidate === null
+            ? updateTimeCandidate
+            : null
+    };
+}
+
+function extractChatGPTHistoryItems(payload: unknown): ChatGPTListItem[] {
+    const record = toRecord(payload);
+    const nestedData = toRecord(record?.data);
+    const candidates = [
+        payload,
+        record?.items,
+        record?.results,
+        record?.conversations,
+        nestedData?.items,
+        nestedData?.results,
+        nestedData?.conversations
+    ];
+
+    for (const candidate of candidates) {
+        if (!Array.isArray(candidate)) {
+            continue;
+        }
+
+        return candidate
+            .map((item) => normalizeChatGPTListItem(item))
+            .filter((item): item is ChatGPTListItem => !!item);
+    }
+
+    return [];
 }
 
 function stripDataUriPrefix(data: string | undefined): string | undefined {
@@ -474,7 +549,7 @@ function buildBestCiteCandidateMap(candidates: Record<string, unknown>[]): Map<s
     return bestByRefId;
 }
 
-function buildCitePayload(candidate: Record<string, unknown> | undefined, index: number): MessageAnnotation | null {
+function buildCitePayload(candidate: Record<string, unknown> | undefined, index: number): CiteAnnotation | null {
     if (!candidate) {
         return null;
     }
@@ -767,23 +842,23 @@ export function normalizeChatGPTConversationDetail(
     fallbackExternalId: string
 ): Conversation {
     const backendId = detail.conversation_id || detail.id || fallbackExternalId;
-    const messages = buildPrimaryNodeChain(detail)
-        .map((node) => {
-            const role = toRenderableRole(node.message?.author?.role);
-            const message = normalizeChatGPTMessage(node.message?.content, node.message?.metadata);
-            if (!role || !message.content) {
-                return null;
-            }
+    const messages: ConversationMessage[] = [];
 
-            return {
-                id: node.message?.id || node.id || generateUUID(),
-                role,
-                content: message.content,
-                attachments: message.attachments,
-                annotations: message.annotations
-            };
-        })
-        .filter((item): item is Conversation['messages'][number] => item !== null);
+    for (const node of buildPrimaryNodeChain(detail)) {
+        const role = toRenderableRole(node.message?.author?.role);
+        const message = normalizeChatGPTMessage(node.message?.content, node.message?.metadata);
+        if (!role || !message.content) {
+            continue;
+        }
+
+        messages.push({
+            id: node.message?.id || node.id || generateUUID(),
+            role,
+            content: message.content,
+            attachments: message.attachments,
+            annotations: message.annotations
+        });
+    }
 
     return {
         id: generateUUID(),
@@ -797,7 +872,7 @@ export function normalizeChatGPTConversationDetail(
 }
 
 export class ChatGPTWebProvider implements IModelProvider, IHistoryProvider {
-    public id = 'chatgpt-web';
+    public id: ExternalHistoryProviderId = 'chatgpt-web';
     private accessToken: string | null = null;
     private abortController: AbortController | null = null;
     private readonly requestClient: ProviderRequestClient;
@@ -907,17 +982,69 @@ export class ChatGPTWebProvider implements IModelProvider, IHistoryProvider {
         return response.json() as Promise<T>;
     }
 
-    async getHistoryList(): Promise<ConversationHistorySummary[]> {
-        const data = await this.fetchJson<{ items?: ChatGPTListItem[] }>(
-            'https://chatgpt.com/backend-api/conversations?offset=0&limit=28&order=updated'
-        );
-
-        return (data.items || []).map((item) => ({
+    private normalizeHistorySummaries(items: ChatGPTListItem[]): ConversationHistorySummary[] {
+        return items.map((item) => ({
             id: item.id,
             title: normalizeTitle(item.title),
             updatedAt: normalizeTimestamp(item.update_time),
             origin: CHATGPT_HISTORY_ORIGIN
         }));
+    }
+
+    private async fetchHistoryListJson(input: string, init?: RequestInit): Promise<ConversationHistorySummary[]> {
+        const payload = await this.fetchJson<unknown>(input, init);
+        return this.normalizeHistorySummaries(extractChatGPTHistoryItems(payload));
+    }
+
+    private async searchHistoryList(query: string): Promise<ConversationHistorySummary[]> {
+        const encodedQuery = encodeURIComponent(query);
+        const searchCandidates: Array<{ input: string; init?: RequestInit }> = [
+            {
+                input: `https://chatgpt.com/backend-api/conversations/search?query=${encodedQuery}&offset=0&limit=${CHATGPT_HISTORY_LIST_LIMIT}`
+            },
+            {
+                input: `https://chatgpt.com/backend-api/conversations/search?q=${encodedQuery}&offset=0&limit=${CHATGPT_HISTORY_LIST_LIMIT}`
+            },
+            {
+                input: 'https://chatgpt.com/backend-api/conversations/search',
+                init: {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        query,
+                        offset: 0,
+                        limit: CHATGPT_HISTORY_LIST_LIMIT
+                    })
+                }
+            },
+            {
+                input: `https://chatgpt.com/backend-api/conversations?offset=0&limit=${CHATGPT_HISTORY_LIST_LIMIT}&order=updated&query=${encodedQuery}`
+            }
+        ];
+        let lastError: unknown;
+
+        for (const candidate of searchCandidates) {
+            try {
+                return await this.fetchHistoryListJson(candidate.input, candidate.init);
+            } catch (error) {
+                lastError = error;
+            }
+        }
+
+        throw lastError instanceof Error ? lastError : new Error('ChatGPT history search failed');
+    }
+
+    async getHistoryList(options: HistoryListQueryOptions = {}): Promise<ConversationHistorySummary[]> {
+        const query = normalizeHistoryQuery(options.query);
+        if (query) {
+            return this.searchHistoryList(query);
+        }
+
+        return this.fetchHistoryListJson(
+            `https://chatgpt.com/backend-api/conversations?offset=0&limit=${CHATGPT_HISTORY_LIST_LIMIT}&order=updated`
+        );
     }
 
     async getHistoryDetail(externalId: string): Promise<Conversation> {

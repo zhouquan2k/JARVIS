@@ -409,12 +409,24 @@ export class GeminiApiProvider implements IAgentCapableProvider {
         this.apiKey = options?.apiKey;
     }
 
+    private readProcessEnvApiKey(): string | undefined {
+        const processEnv = typeof process !== 'undefined' && process?.env ? process.env : undefined;
+        return processEnv?.CHATPRISM_LLM_API_KEY || processEnv?.VITE_LLM_API_KEY;
+    }
+
+    private readGlobalEnvApiKey(): string | undefined {
+        const globalEnv = (globalThis as typeof globalThis & {
+            CHATPRISM_ENV?: Record<string, string | undefined>;
+        }).CHATPRISM_ENV;
+        return globalEnv?.WXT_GEMINI_API_KEY || globalEnv?.VITE_GEMINI_API_KEY || globalEnv?.CHATPRISM_LLM_API_KEY;
+    }
+
     private resolveApiKey(): string | undefined {
         if (this.apiKey) {
             return this.apiKey;
         }
-        // @ts-ignore
-        return import.meta.env?.WXT_GEMINI_API_KEY || import.meta.env?.VITE_GEMINI_API_KEY;
+
+        return this.readProcessEnvApiKey() || this.readGlobalEnvApiKey();
     }
 
     async getAvailableModels(): Promise<ProviderModelCatalog> {

@@ -4,6 +4,7 @@ import type {
     ConversationHistorySummary,
     ExternalHistoryErrorCode,
     ExternalHistoryProviderId,
+    HistoryListQueryOptions,
     ProviderSendResult,
     ProviderStreamUpdate,
     SendMessageOptions
@@ -64,6 +65,7 @@ export interface AbortRequest extends ProxyRequestBase {
 export interface GetHistoryListRequest extends ProxyRequestBase {
     action: 'GET_HISTORY_LIST';
     providerId: string;
+    query?: HistoryListQueryOptions['query'];
 }
 
 export interface GetHistoryDetailRequest extends ProxyRequestBase {

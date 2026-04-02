@@ -17,13 +17,17 @@ export interface ConfigStorage {
 
 const BUILTIN_GEMINI_HISTORY_CONFIG: GeminiHistoryRemoteConfig = {
     providerId: 'gemini-web',
-    version: 'builtin-2026-03-11.1',
+    version: 'builtin-2026-04-01.3',
     matchOrigins: ['https://gemini.google.com'],
     selectors: {
         historyListContainer: 'conversations-list[data-test-id="all-conversations"], nav[aria-label="Chat history"], [data-test-id="conversation-list"]',
         historyListItem: 'a[data-test-id="conversation"], a[href*="/app/"]',
         historyTitle: '.conversation-title, [data-test-id="conversation-title"]',
         historyLink: 'a[data-test-id="conversation"], a[href*="/app/"]',
+        historySearchInput: 'input[type="search"], input[aria-label*="Search" i], input[placeholder*="Search" i], input[aria-label*="搜索" i], input[placeholder*="搜索" i], textarea[aria-label*="Search" i], textarea[placeholder*="Search" i], [role="searchbox"], [contenteditable="true"][aria-label*="Search" i], [contenteditable="true"][aria-label*="搜索" i]',
+        historySearchResultContainer: 'search-window',
+        historySearchResultItem: '[data-test-id="conversation"], [data-test-id="search-result"], [ng-reflect-router-link*="/app/"], [routerlink*="/app/"], [href*="/app/"]',
+        historySearchEmptyState: 'search-window [data-test-id="empty-state"], search-window [data-test-id="no-results"], search-window [role="status"], search-window [aria-live="polite"]',
         conversationRoot: 'main, [data-test-id="conversation-root"]',
         userBubble: '[data-test-id="user-query"], user-query, [data-message-author="user"]',
         assistantBubble: '[data-test-id="model-response"], model-response, [data-message-author="assistant"]',

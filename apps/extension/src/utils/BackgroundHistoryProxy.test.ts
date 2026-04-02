@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ExternalHistoryError } from '@packages/core/src';
 import { BackgroundHistoryProxy } from './BackgroundHistoryProxy';
 
 type PortHarness = ReturnType<typeof createPortHarness>;
@@ -51,13 +52,14 @@ describe('BackgroundHistoryProxy', () => {
         };
 
         const provider = new BackgroundHistoryProxy('gemini-web', { channelId: 'history-test-channel' });
-        const resultPromise = provider.getHistoryList();
+        const resultPromise = provider.getHistoryList({ query: 'incident' });
 
         const firstMessage = firstPort.port.postMessage.mock.calls[0]?.[0];
         expect(firstMessage).toEqual(expect.objectContaining({
             action: 'GET_HISTORY_LIST',
             providerId: 'gemini-web',
-            channelId: 'history-test-channel'
+            channelId: 'history-test-channel',
+            query: 'incident'
         }));
 
         firstPort.disconnect();
@@ -111,5 +113,35 @@ describe('BackgroundHistoryProxy', () => {
 
         await expect(resultPromise).rejects.toThrow('Background history proxy connection disconnected');
         expect(connect).toHaveBeenCalledTimes(2);
+    });
+
+    it('preserves structured external history errors from background responses', async () => {
+        const port = createPortHarness();
+
+        // @ts-expect-error simplified test double
+        globalThis.chrome = {
+            runtime: {
+                connect: vi.fn().mockReturnValue(port.port)
+            }
+        };
+
+        const provider = new BackgroundHistoryProxy('gemini-web', { channelId: 'history-test-channel' });
+        const resultPromise = provider.getHistoryList();
+
+        const message = port.port.postMessage.mock.calls[0]?.[0];
+        port.emitMessage({
+            type: 'ERROR',
+            requestId: message.requestId,
+            channelId: message.channelId,
+            error: 'Gemini 页面当前未登录。',
+            historyErrorCode: 'AUTH_REQUIRED',
+            historyProviderId: 'gemini-web'
+        });
+
+        await expect(resultPromise).rejects.toMatchObject({
+            name: 'ExternalHistoryError',
+            code: 'AUTH_REQUIRED',
+            providerId: 'gemini-web'
+        } satisfies Partial<ExternalHistoryError>);
     });
 });

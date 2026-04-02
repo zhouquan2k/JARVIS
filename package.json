@@ -5,8 +5,11 @@
         "dev:server": "pnpm --filter server dev",
         "dev:desktop:renderer": "pnpm --filter desktop dev:renderer",
         "dev:desktop:host": "pnpm --filter desktop dev:host",
+        "typecheck": "pnpm --filter server typecheck && pnpm --filter web exec vue-tsc -p tsconfig.typecheck.json --noEmit && pnpm --filter desktop exec vue-tsc -p tsconfig.typecheck.json --noEmit",
+        "lint": "pnpm run typecheck",
         "build:server": "pnpm --filter server build",
         "build:desktop": "pnpm --filter desktop build",
+        "diagram:core": "pnpm exec tsuml2 --glob \"./packages/core/src/**/!(*.d|*.test|*.spec).ts\" --outMermaidDsl \"./docs/architecture/core-class-diagram.mmd\" --outFile \"./docs/architecture/core-class-diagram.svg\" --memberAssociations --exportedTypesOnly",
         "test:server": "pnpm --filter server test",
         "test:core": "pnpm --filter @packages/core test",
         "test:ui": "pnpm --filter @packages/ui test",
@@ -27,5 +30,9 @@
             "esbuild",
             "spawn-sync"
         ]
+    },
+    "devDependencies": {
+        "tsuml2": "^0.17.1",
+        "typescript": "^5.9.3"
     }
 }

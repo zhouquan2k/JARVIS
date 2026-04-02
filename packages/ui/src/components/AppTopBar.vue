@@ -13,7 +13,7 @@
         type="button"
         class="workspace-btn"
         :class="{ active: option.path === activeWorkspacePath }"
-        :aria-pressed="String(option.path === activeWorkspacePath)"
+        :aria-pressed="option.path === activeWorkspacePath"
         :data-testid="`topbar-workspace-${option.name}`"
         @click="emit('navigate-workspace', option.path)"
       >

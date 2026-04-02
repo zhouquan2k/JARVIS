@@ -51,7 +51,31 @@ describe('GeminiHistoryPageBridge', () => {
         });
     });
 
+    it('forwards the search query through the hidden-page request payload', async () => {
+        const executeJavaScript = vi.fn().mockResolvedValue({
+            ok: true,
+            data: []
+        });
+        const controlledPageManager: ControlledPageManager = {
+            ensurePage: vi.fn().mockResolvedValue({
+                executeJavaScript,
+                getURL: vi.fn().mockReturnValue('https://gemini.google.com/app')
+            } as any),
+            dispose: vi.fn()
+        };
+
+        const bridge = new GeminiHistoryPageBridge({
+            controlledPageManager,
+            preloadPath: '/tmp/gemini-history.preload.cjs'
+        });
+
+        await bridge.getHistoryList(CONFIG as any, { query: 'incident' });
+
+        expect(executeJavaScript.mock.calls[0]?.[0]).toContain('"query":"incident"');
+    });
+
     it('navigates to the target conversation page when requesting detail', async () => {
+        const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
         const controlledPageManager: ControlledPageManager = {
             ensurePage: vi.fn().mockResolvedValue({
                 getURL: vi.fn().mockReturnValue('https://gemini.google.com/app/remote-1'),
@@ -77,6 +101,47 @@ describe('GeminiHistoryPageBridge', () => {
 
         expect(controlledPageManager.ensurePage).toHaveBeenCalledWith('gemini-web', {
             targetUrl: 'https://gemini.google.com/app/remote-1',
+            visible: false,
+            preloadPath: '/tmp/gemini-history.preload.cjs',
+            forceReload: false
+        });
+        expect(logSpy.mock.calls.some((call) => {
+            const line = String(call[0] ?? '');
+            const payload = String(call[1] ?? '');
+            return line.includes('[GeminiHistoryBridge]')
+                && payload.includes('"stage":"detail-request-dispatch"')
+                && payload.includes('"externalId":"remote-1"')
+                && payload.includes('"targetUrl":"https://gemini.google.com/app/remote-1"');
+        })).toBe(true);
+        logSpy.mockRestore();
+    });
+
+    it('keeps the hidden page on /app when requesting detail for a temporary search result id', async () => {
+        const controlledPageManager: ControlledPageManager = {
+            ensurePage: vi.fn().mockResolvedValue({
+                getURL: vi.fn().mockReturnValue('https://gemini.google.com/app'),
+                executeJavaScript: vi.fn().mockResolvedValue({
+                    ok: true,
+                    data: {
+                        id: 'gemini-search-result:%E4%B9%9D%E5%AE%AB%E6%A0%BC:0',
+                        title: 'Gemini Conversation',
+                        updatedAt: 2,
+                        messages: [{ id: 'm1', role: 'assistant', content: 'hello' }]
+                    }
+                })
+            } as any),
+            dispose: vi.fn()
+        };
+
+        const bridge = new GeminiHistoryPageBridge({
+            controlledPageManager,
+            preloadPath: '/tmp/gemini-history.preload.cjs'
+        });
+
+        await bridge.getHistoryDetail(CONFIG as any, 'gemini-search-result:%E4%B9%9D%E5%AE%AB%E6%A0%BC:0');
+
+        expect(controlledPageManager.ensurePage).toHaveBeenCalledWith('gemini-web', {
+            targetUrl: 'https://gemini.google.com/app',
             visible: false,
             preloadPath: '/tmp/gemini-history.preload.cjs',
             forceReload: false

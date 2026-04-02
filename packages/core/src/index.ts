@@ -23,6 +23,7 @@ export * from './providers/history/gemini/GeminiHistoryConfigLoader';
 export * from './providers/history/gemini/GeminiDomHistoryProvider';
 export * from './providers/history/gemini/geminiContentHealth';
 export * from './providers/history/gemini/geminiContentProtocol';
+export * from './providers/history/gemini/geminiDomScraper';
 export * from './providers/history/gemini/geminiHistoryListTitle';
 export * from './providers/history/gemini/geminiMessageSerializer';
 export * from './agents/tools/types';

@@ -15,8 +15,9 @@
       "@packages/ui": ["../../packages/ui"],
       "@packages/ui/*": ["../../packages/ui/*"]
     },
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
-    "types": ["vite/client"]
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
+    "skipLibCheck": true
   },
   "include": ["src/**/*.ts", "src/**/*.vue", "shared/**/*.ts", "vite.config.ts", "playwright.config.ts"]
 }

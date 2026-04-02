@@ -12,6 +12,7 @@ import {
     type ExternalHistoryErrorCode,
     type ExternalHistoryProviderEntry,
     type ExternalHistoryProviderId,
+    type HistoryListQueryOptions,
     type ContextDocument,
     type IContextProvider,
     type IHistoryProvider,
@@ -56,6 +57,8 @@ export interface ChatState {
     conversations: Conversation[];
     currentConversation: Conversation | null;
     externalHistoryItems: ConversationHistorySummary[];
+    externalHistoryQuery: string;
+    externalHistoryQuerySubmitted: string;
     isExternalHistoryLoading: boolean;
     isExternalPreviewLoading: boolean;
     externalPreviewLoadingId: string | null;
@@ -433,6 +436,14 @@ function extractHistoryErrorCode(error: unknown): ExternalHistoryErrorCode | nul
     return error instanceof ExternalHistoryError ? error.code : null;
 }
 
+function normalizeHistoryQuery(query: string | null | undefined): string {
+    return query?.trim() || '';
+}
+
+function getHistorySearchFeatures(entry: ExternalHistoryProviderEntry | null | undefined) {
+    return entry?.features?.historySearch === true ? entry.features : null;
+}
+
 export const useChatStore = defineStore('chat', {
     state: (): ChatState => ({
         agentRuntime: null,
@@ -449,6 +460,8 @@ export const useChatStore = defineStore('chat', {
         conversations: [],
         currentConversation: null,
         externalHistoryItems: [],
+        externalHistoryQuery: '',
+        externalHistoryQuerySubmitted: '',
         isExternalHistoryLoading: false,
         isExternalPreviewLoading: false,
         externalPreviewLoadingId: null,
@@ -604,13 +617,34 @@ export const useChatStore = defineStore('chat', {
             this.syncCurrentConversationModelSelection();
         },
 
-        resolveHistoryProviderEntry(providerId = this.activeExternalProviderId): ExternalHistoryProviderEntry | null {
-            return this.historyProviders.find((entry) => entry.id === providerId) || null;
+        resolveHistoryProviderEntry(providerId?: ExternalHistoryProviderId): ExternalHistoryProviderEntry | null {
+            const targetProviderId = providerId ?? this.activeExternalProviderId;
+            return this.historyProviders.find((entry) => entry.id === targetProviderId) || null;
         },
 
-        resolveHistoryProvider(providerId = this.activeExternalProviderId): IHistoryProvider | null {
+        resolveHistoryProvider(providerId?: ExternalHistoryProviderId): IHistoryProvider | null {
             const entry = this.resolveHistoryProviderEntry(providerId);
             return entry?.kind === 'history-provider' && entry.provider ? entry.provider : null;
+        },
+
+        resolveHistoryQueryOptions(
+            providerId?: ExternalHistoryProviderId,
+            options: HistoryListQueryOptions = {}
+        ): HistoryListQueryOptions {
+            const entry = this.resolveHistoryProviderEntry(providerId);
+            if (!getHistorySearchFeatures(entry)) {
+                return {};
+            }
+
+            if (Object.prototype.hasOwnProperty.call(options, 'query')) {
+                return {
+                    query: normalizeHistoryQuery(options.query)
+                };
+            }
+
+            return {
+                query: normalizeHistoryQuery(this.externalHistoryQuerySubmitted)
+            };
         },
 
         setProviders(
@@ -1053,6 +1087,66 @@ export const useChatStore = defineStore('chat', {
             this.sidebarCollapsed = collapsed;
         },
 
+        resetWorkspaceConversationState() {
+            this.currentConversation = null;
+            this.previewConversation = null;
+            this.workspaceMode = 'active';
+            this.historySource = 'local';
+            this.currentError = null;
+            this.currentHistoryErrorCode = null;
+            this.isExternalPreviewLoading = false;
+            this.externalPreviewLoadingId = null;
+            this.isQuestionIndexPanelOpen = true;
+            this.activeQuestionId = null;
+            this.pendingScrollQuestionId = null;
+            this.draftPrompt = '';
+            this.lastSubmittedPrompt = null;
+            this.draftAttachments = [];
+            this.attachmentError = null;
+        },
+
+        setExternalHistoryQuery(query: string) {
+            this.externalHistoryQuery = query;
+        },
+
+        async submitExternalHistoryQuery(query?: string) {
+            if (typeof query === 'string') {
+                this.externalHistoryQuery = query;
+            }
+
+            this.externalHistoryQuerySubmitted = normalizeHistoryQuery(this.externalHistoryQuery);
+            if (this.historySource !== 'external') {
+                return;
+            }
+
+            const entry = this.resolveHistoryProviderEntry();
+            if (!getHistorySearchFeatures(entry) || entry?.kind !== 'history-provider') {
+                return;
+            }
+
+            await this.loadExternalHistory(entry.id, {
+                query: this.externalHistoryQuerySubmitted
+            });
+        },
+
+        async clearExternalHistoryQuery() {
+            this.externalHistoryQuery = '';
+            this.externalHistoryQuerySubmitted = '';
+
+            if (this.historySource !== 'external') {
+                return;
+            }
+
+            const entry = this.resolveHistoryProviderEntry();
+            if (!getHistorySearchFeatures(entry) || entry?.kind !== 'history-provider') {
+                return;
+            }
+
+            await this.loadExternalHistory(entry.id, {
+                query: ''
+            });
+        },
+
         async setHistorySource(source: WorkspaceHistorySource) {
             this.historySource = source;
             this.currentError = null;
@@ -1092,7 +1186,7 @@ export const useChatStore = defineStore('chat', {
             await this.loadExternalHistory(entry.id);
         },
 
-        async loadExternalHistory(providerId = this.activeExternalProviderId) {
+        async loadExternalHistory(providerId?: ExternalHistoryProviderId, options: HistoryListQueryOptions = {}) {
             const provider = this.resolveHistoryProvider(providerId);
             if (!provider) {
                 this.isExternalHistoryLoading = false;
@@ -1100,11 +1194,12 @@ export const useChatStore = defineStore('chat', {
                 return;
             }
 
+            const queryOptions = this.resolveHistoryQueryOptions(providerId, options);
             this.isExternalHistoryLoading = true;
             this.externalHistoryItems = [];
             this.currentHistoryErrorCode = null;
             try {
-                const items = await provider.getHistoryList();
+                const items = await provider.getHistoryList(queryOptions);
                 this.externalHistoryItems = this.applyImportedFlags(items);
                 this.currentHistoryErrorCode = null;
                 if (providerId === 'gemini-web') {

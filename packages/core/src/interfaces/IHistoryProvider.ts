@@ -5,10 +5,16 @@ export type ConversationOrigin = 'local' | ExternalHistoryProviderId;
 
 export type ExternalHistoryProviderKind = 'history-provider' | 'file-import';
 
+export interface ExternalHistoryProviderFeatures {
+    historySearch?: boolean;
+    historySearchPlaceholder?: string;
+}
+
 export interface ExternalHistoryProviderEntry {
     id: ExternalHistoryProviderId;
     label: string;
     kind: ExternalHistoryProviderKind;
+    features?: ExternalHistoryProviderFeatures;
     provider?: IHistoryProvider;
 }
 
@@ -53,8 +59,12 @@ export interface ConversationHistorySummary {
     isImported?: boolean;
 }
 
+export interface HistoryListQueryOptions {
+    query?: string;
+}
+
 export interface IHistoryProvider {
     id: ExternalHistoryProviderId;
-    getHistoryList(): Promise<ConversationHistorySummary[]>;
+    getHistoryList(options?: HistoryListQueryOptions): Promise<ConversationHistorySummary[]>;
     getHistoryDetail(externalId: string): Promise<Conversation>;
 }

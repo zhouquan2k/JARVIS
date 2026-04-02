@@ -45,4 +45,19 @@ describe('extractHistoryItemTitle', () => {
 
         expect(extractHistoryItemTitle(item as unknown as Element, '.conversation-title, [aria-label]', null)).toBe('来自整体文本的标题');
     });
+
+    it('prefers only the first line of title-like text instead of including summary content', () => {
+        const item = new MockElement('标题文本\n这里是摘要内容');
+
+        expect(extractHistoryItemTitle(item as unknown as Element, '.conversation-title, [aria-label]', null)).toBe('标题文本');
+    });
+
+    it('uses builtin conversation title selectors when the provided selector misses', () => {
+        const builtinTitleElement = new MockElement('内建标题');
+        const item = new MockElement('内建标题 这里是摘要', {}, {
+            '.conversation-title': builtinTitleElement
+        });
+
+        expect(extractHistoryItemTitle(item as unknown as Element, '.non-existent-title', null)).toBe('内建标题');
+    });
 });

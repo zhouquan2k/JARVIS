@@ -228,6 +228,8 @@ describe('NormalChatView', () => {
         expect(wrapper.find('.input-actions [data-testid="toolbar-collapse-toggle"]').exists()).toBe(true);
         expect(wrapper.find('[data-testid="selector-row"]').exists()).toBe(false);
         expect(wrapper.find('[data-testid="provider-selector-stub"]').exists()).toBe(false);
+        expect(wrapper.get('[data-testid="normal-chat-view"]').classes()).toContain('agent-mode');
+        expect(wrapper.get('[data-testid="normal-chat-view"]').classes()).not.toContain('standard-mode');
     });
 
     it('keeps the top selector row expanded by default outside agent mode', async () => {
@@ -243,6 +245,8 @@ describe('NormalChatView', () => {
         expect(wrapper.find('[data-testid="toolbar-collapse-toggle"]').exists()).toBe(false);
         expect(wrapper.find('[data-testid="selector-row"]').exists()).toBe(true);
         expect(wrapper.find('[data-testid="provider-selector-stub"]').exists()).toBe(true);
+        expect(wrapper.get('[data-testid="normal-chat-view"]').classes()).toContain('standard-mode');
+        expect(wrapper.get('[data-testid="normal-chat-view"]').classes()).not.toContain('agent-mode');
     });
 
     it('toggles the top selector row in agent mode', async () => {

@@ -1,5 +1,11 @@
 /// <reference types="chrome"/>
-import type { Conversation, ConversationHistorySummary, IHistoryProvider } from '@packages/core/src';
+import {
+    ExternalHistoryError,
+    type Conversation,
+    type ConversationHistorySummary,
+    type HistoryListQueryOptions,
+    type IHistoryProvider
+} from '@packages/core/src';
 import type { GetHistoryDetailRequest, GetHistoryListRequest, ProxyRequest, ProxyResponse } from './proxyProtocol';
 
 type PendingRequest = {
@@ -71,6 +77,13 @@ export class BackgroundHistoryProxy implements IHistoryProvider {
             return;
         }
 
+        if (msg.historyErrorCode) {
+            request.reject(new ExternalHistoryError(msg.historyErrorCode, msg.error, {
+                providerId: msg.historyProviderId
+            }));
+            return;
+        }
+
         request.reject(new Error(msg.error));
     };
 
@@ -97,12 +110,13 @@ export class BackgroundHistoryProxy implements IHistoryProvider {
         });
     }
 
-    getHistoryList(): Promise<ConversationHistorySummary[]> {
+    getHistoryList(options: HistoryListQueryOptions = {}): Promise<ConversationHistorySummary[]> {
         const request: GetHistoryListRequest = {
             action: 'GET_HISTORY_LIST',
             requestId: this.nextRequestId('GET_HISTORY_LIST'),
             channelId: this.channelId,
-            providerId: this.id
+            providerId: this.id,
+            query: options.query
         };
 
         return this.createTrackedRequest<ConversationHistorySummary[]>(request);

@@ -1,4 +1,11 @@
-import { ExternalHistoryError, type Conversation, type ConversationHistorySummary, type ExternalHistoryProviderId, type IHistoryProvider } from '@packages/core/src';
+import {
+    ExternalHistoryError,
+    type Conversation,
+    type ConversationHistorySummary,
+    type ExternalHistoryProviderId,
+    type HistoryListQueryOptions,
+    type IHistoryProvider
+} from '@packages/core/src';
 
 const MOCK_SUMMARIES: Record<Exclude<ExternalHistoryProviderId, 'external-file'>, ConversationHistorySummary[]> = {
     'chatgpt-web': [
@@ -52,8 +59,8 @@ const MOCK_DETAILS: Record<string, Conversation> = {
         origin: 'chatgpt-web',
         updatedAt: 1_709_900_000_000,
         messages: [
-            { id: 'beta-u1', role: 'user', content: '给我一个 Beta 版本排期草案。' },
-            { id: 'beta-a1', role: 'assistant', content: '建议先完成接口冻结，再预留一周给联调和回归。' }
+            { id: 'beta-u1', role: 'user', content: '给我一个 incident 版本排期草案。' },
+            { id: 'beta-a1', role: 'assistant', content: '建议先完成 incident triage，再预留一周给联调和回归。' }
         ]
     },
     'gemini-alpha': {
@@ -64,7 +71,7 @@ const MOCK_DETAILS: Record<string, Conversation> = {
         origin: 'gemini-web',
         updatedAt: 1_710_100_000_000,
         messages: [
-            { id: 'ga-u1', role: 'user', content: '整理一下这周的 Gemini 迭代结论。' },
+            { id: 'ga-u1', role: 'user', content: '整理一下这周的 Gemini incident 迭代结论。' },
             { id: 'ga-a1', role: 'assistant', content: '本周重点是规则远程化、标签页桥接和错误规范化。' }
         ]
     },
@@ -83,10 +90,29 @@ const MOCK_DETAILS: Record<string, Conversation> = {
 };
 
 export function createMockHistoryProvider(providerId: Exclude<ExternalHistoryProviderId, 'external-file'> = 'chatgpt-web'): IHistoryProvider {
+    const allSummaries = MOCK_SUMMARIES[providerId] || [];
+
     return {
         id: providerId,
-        async getHistoryList() {
-            return (MOCK_SUMMARIES[providerId] || []).map((item) => ({ ...item }));
+        async getHistoryList(options: HistoryListQueryOptions = {}) {
+            const normalizedQuery = options.query?.trim().toLowerCase() || '';
+            if (!normalizedQuery) {
+                return allSummaries.map((item) => ({ ...item }));
+            }
+
+            return allSummaries
+                .filter((item) => {
+                    const detail = MOCK_DETAILS[item.id];
+                    const haystacks = [
+                        item.title,
+                        ...(
+                            detail?.messages.map((message) => message.content) || []
+                        )
+                    ];
+
+                    return haystacks.some((value) => value.toLowerCase().includes(normalizedQuery));
+                })
+                .map((item) => ({ ...item }));
         },
         async getHistoryDetail(externalId: string) {
             if (providerId === 'gemini-web' && externalId === 'gemini-beta') {

@@ -20,6 +20,12 @@ export interface ResolveContextBaseUrlOptions {
     env?: Record<string, string | undefined>;
 }
 
+function hasEnvContainer(
+    value: ResolveContextBaseUrlOptions | Record<string, string | undefined>
+): value is ResolveContextBaseUrlOptions {
+    return 'env' in value;
+}
+
 function normalizeBaseUrl(value?: string): string {
     const normalized = value?.trim();
     return (normalized ? normalized : DEFAULT_CONTEXT_BASE_URL).replace(/\/+$/, '');
@@ -36,7 +42,7 @@ async function readJson(response: Response): Promise<unknown> {
 export function resolveContextBaseUrl(
     options: ResolveContextBaseUrlOptions | Record<string, string | undefined> = {}
 ): string {
-    const env = 'env' in options ? options.env : options;
+    const env = hasEnvContainer(options) ? options.env : options;
     const explicit = env?.CHATPRISM_CONTEXT_BASE_URL?.trim()
         || env?.VITE_CONTEXT_BASE_URL?.trim()
         || env?.WXT_CONTEXT_BASE_URL?.trim();
@@ -85,12 +91,12 @@ export class HttpContextProvider implements IContextProvider {
     }
 
     async createNode(input: CreateContextNodeInput): Promise<ContextNode> {
-        const response = await this.post('/create-node', input);
+        const response = await this.post('/create-node', { ...input });
         return (response as { node: ContextNode }).node;
     }
 
     async searchInScope(request: ContextSearchRequest): Promise<ContextSearchMatch[]> {
-        const response = await this.post('/search-in-scope', request);
+        const response = await this.post('/search-in-scope', { ...request });
         return (response as { matches: ContextSearchMatch[] }).matches;
     }
 

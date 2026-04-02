@@ -100,6 +100,7 @@ function onModelChange() {
 
 <style scoped>
 .provider-model-selector {
+  --selector-control-height: 35px;
   display: flex;
   gap: 10px;
   align-items: center;
@@ -127,6 +128,7 @@ function onModelChange() {
   position: relative;
   display: flex;
   align-items: center;
+  min-height: var(--selector-control-height);
   min-width: 0;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
@@ -153,26 +155,27 @@ function onModelChange() {
 
 .provider-shell {
   flex: 0 0 auto;
-  width: clamp(168px, 16vw, 212px);
+  width: clamp(148px, 14vw, 184px);
 }
 
 .model-shell {
   flex: 0 0 auto;
-  width: clamp(220px, 23vw, 296px);
+  width: clamp(188px, 19vw, 248px);
 }
 
 .provider-model-selector.compact .provider-shell {
-  width: clamp(154px, 17vw, 196px);
+  width: clamp(140px, 15vw, 172px);
 }
 
 .provider-model-selector.compact .model-shell {
-  width: clamp(188px, 20vw, 248px);
+  width: clamp(170px, 17vw, 214px);
 }
 
 .select-control {
   width: 100%;
+  height: var(--selector-control-height);
   min-width: 0;
-  padding: 11px 42px 11px 14px;
+  padding: 0 42px 0 14px;
   border: none;
   border-radius: 14px;
   background: transparent;

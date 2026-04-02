@@ -154,6 +154,16 @@
           </button>
         </div>
 
+        <ExternalHistorySearchBox
+          v-if="showExternalHistorySearch"
+          :model-value="externalHistoryQuery"
+          :loading="externalHistoryLoading"
+          :placeholder="externalHistorySearchPlaceholder"
+          @update:model-value="(value) => $emit('update-external-query', value)"
+          @submit="$emit('submit-external-query')"
+          @clear="$emit('clear-external-query')"
+        />
+
         <div class="history-list">
           <p
             v-if="externalHistoryLoading"
@@ -199,6 +209,7 @@
 
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue';
+import ExternalHistorySearchBox from './ExternalHistorySearchBox.vue';
 import type {
   Conversation,
   ConversationHistorySummary,
@@ -214,6 +225,9 @@ defineProps<{
   externalProviders: ExternalHistoryProviderEntry[];
   externalItems: ConversationHistorySummary[];
   externalHistoryLoading: boolean;
+  externalHistoryQuery: string;
+  showExternalHistorySearch?: boolean;
+  externalHistorySearchPlaceholder?: string;
   externalPreviewLoadingId?: string | null;
   activeExternalProviderId: ExternalHistoryProviderId;
   activeLocalId?: string | null;
@@ -229,6 +243,9 @@ const emit = defineEmits<{
   (event: 'select-local', id: string): void;
   (event: 'delete-local', id: string): void;
   (event: 'select-external', id: string): void;
+  (event: 'update-external-query', value: string): void;
+  (event: 'submit-external-query'): void;
+  (event: 'clear-external-query'): void;
   (event: 'new-chat'): void;
   (event: 'new-compare'): void;
 }>();

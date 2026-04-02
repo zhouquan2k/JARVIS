@@ -1,5 +1,8 @@
 <template>
-  <div class="chat-container" data-testid="normal-chat-view">
+  <div
+    :class="['chat-container', isAgentMode ? 'agent-mode' : 'standard-mode']"
+    data-testid="normal-chat-view"
+  >
     <div class="chat-main">
       <div class="chat-thread">
         <div class="chat-messages" ref="messagesRef" data-testid="normal-messages" @scroll="onMessagesScroll">
@@ -146,7 +149,7 @@
                 v-if="isAgentMode"
                 type="button"
                 class="toolbar-collapse-toggle"
-                :aria-expanded="String(!isTopToolbarCollapsed)"
+                :aria-expanded="!isTopToolbarCollapsed"
                 :aria-label="isTopToolbarCollapsed ? '展开顶部工具栏' : '折叠顶部工具栏'"
                 :title="isTopToolbarCollapsed ? '展开选项' : '折叠选项'"
                 data-testid="toolbar-collapse-toggle"
@@ -604,6 +607,14 @@ async function startNewChat() {
   background: transparent;
 }
 
+.chat-container.standard-mode {
+  --standard-action-column-width: 48px;
+  --standard-toolbar-offset: 58px;
+  background:
+    radial-gradient(circle at top center, rgba(59, 130, 246, 0.05), transparent 36%),
+    linear-gradient(180deg, rgba(9, 12, 18, 0.14), rgba(9, 12, 18, 0));
+}
+
 .chat-main {
   display: flex;
   flex: 1;
@@ -787,10 +798,25 @@ async function startNewChat() {
   /* gap: 14px; */
 }
 
+.chat-container.standard-mode .chat-messages {
+  padding: 32px 32px 18px;
+}
+
+.chat-container.standard-mode .chat-inputarea {
+  padding: 18px 18px 20px;
+  background:
+    linear-gradient(180deg, rgba(9, 12, 18, 0.92), rgba(7, 10, 18, 0.98)),
+    radial-gradient(circle at top center, rgba(59, 130, 246, 0.08), transparent 38%);
+}
+
 .toolbar-stack {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.chat-container.standard-mode .toolbar-stack {
+  gap: 16px;
 }
 
 .toolbar-collapse-toggle {
@@ -818,6 +844,11 @@ async function startNewChat() {
   gap: 10px;
   flex-wrap: wrap;
   min-width: 0;
+}
+
+.chat-container.standard-mode .selector-row {
+  gap: 14px;
+  align-items: flex-start;
 }
 
 .auth-warning {
@@ -858,6 +889,14 @@ async function startNewChat() {
   gap: 10px;
 }
 
+.chat-container.standard-mode .input-row {
+  position: relative;
+  align-items: stretch;
+  gap: 0;
+  margin-top: 8px;
+  padding-right: calc(var(--standard-action-column-width) + 14px);
+}
+
 .input-actions {
   display: flex;
   flex-direction: column;
@@ -866,6 +905,18 @@ async function startNewChat() {
   justify-content: space-between;
   align-self: stretch;
   margin-top: -20px;
+}
+
+.chat-container.standard-mode .input-actions {
+  position: absolute;
+  top: calc(-1 * var(--standard-toolbar-offset));
+  right: 0;
+  bottom: 0;
+  width: var(--standard-action-column-width);
+  min-width: var(--standard-action-column-width);
+  align-self: auto;
+  margin-top: 0;
+  align-items: center;
 }
 
 .secondary-actions {
@@ -891,6 +942,19 @@ textarea {
     rgba(255, 255, 255, 0.05);
   color: var(--cp-text-primary);
   font: inherit;
+}
+
+.chat-container.standard-mode textarea {
+  min-height: 88px;
+  padding: 18px 20px;
+  border-radius: 26px;
+  border-color: rgba(148, 163, 184, 0.14);
+  background:
+    radial-gradient(circle at top, rgba(59, 130, 246, 0.1), transparent 42%),
+    rgba(255, 255, 255, 0.045);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 14px 34px rgba(0, 0, 0, 0.18);
 }
 
 textarea:focus {
@@ -936,6 +1000,13 @@ button[data-testid="normal-send"] {
   transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease;
 }
 
+.chat-container.standard-mode button[data-testid="normal-send"] {
+  width: 48px;
+  height: 48px;
+  min-height: 48px;
+  border-radius: 16px;
+}
+
 button[data-testid="normal-send"]:not(:disabled):hover,
 button[data-testid="normal-send"]:not(:disabled):focus-visible {
   transform: translateY(-1px);
@@ -966,6 +1037,20 @@ button[data-testid="normal-send"]:disabled {
   align-items: center;
   justify-content: center;
   text-decoration: none;
+}
+
+.chat-container.standard-mode .secondary-actions {
+  gap: 10px;
+  min-height: 38px;
+  justify-content: center;
+}
+
+.chat-container.standard-mode .secondary-action-btn,
+.chat-container.standard-mode .toolbar-collapse-toggle {
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  color: rgba(226, 232, 240, 0.9);
 }
 
 .secondary-action-btn:not(:disabled):hover,
@@ -1061,6 +1146,22 @@ button[data-testid="normal-send"]:disabled {
     flex-direction: row;
     justify-content: flex-end;
     align-items: center;
+  }
+
+  .chat-container.standard-mode .input-row {
+    margin-top: 0;
+    padding-right: 0;
+    gap: 14px;
+  }
+
+  .chat-container.standard-mode .input-actions {
+    position: static;
+    top: auto;
+    right: auto;
+    bottom: auto;
+    width: auto;
+    min-width: 0;
+    align-self: flex-end;
   }
 }
 </style>

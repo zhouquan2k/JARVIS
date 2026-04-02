@@ -45,12 +45,20 @@ export function createExtensionHistoryProviders(): ExternalHistoryProviderEntry[
             id: 'chatgpt-web',
             label: 'ChatGPT',
             kind: 'history-provider',
+            features: {
+                historySearch: true,
+                historySearchPlaceholder: '搜索 ChatGPT 历史'
+            },
             provider: createExtensionHistoryProvider('chatgpt-web')
         },
         {
             id: 'gemini-web',
             label: 'Gemini',
             kind: 'history-provider',
+            features: {
+                historySearch: true,
+                historySearchPlaceholder: '搜索 Gemini 历史'
+            },
             provider: createExtensionHistoryProvider('gemini-web')
         },
         {

@@ -13,6 +13,10 @@ function normalizeHistoryTitle(value: string): string {
     return value.replace(/\s+/g, ' ').trim();
 }
 
+function firstLine(value: string | null | undefined): string {
+    return normalizeHistoryTitle((value ?? '').split(/\r?\n/u)[0] ?? '');
+}
+
 function queryFirstMatching(item: Element, selectorList: string): Element | null {
     const selectors = selectorList
         .split(',')
@@ -38,17 +42,25 @@ export function extractHistoryItemTitle(
     titleSelector: string,
     linkElement: HTMLAnchorElement | null
 ): string {
-    const titleElement = queryFirstMatching(item, titleSelector);
+    const titleElement = queryFirstMatching(
+        item,
+        [titleSelector, '.conversation-title', '[data-test-id="conversation-title"]', '[role="heading"]', 'h1, h2, h3, h4, h5, h6']
+            .filter(Boolean)
+            .join(', ')
+    );
     const rawTitle = firstNonEmpty([
-        titleElement?.textContent,
+        firstLine(titleElement?.textContent),
         titleElement?.getAttribute('aria-label'),
         titleElement?.getAttribute('title'),
         titleElement?.getAttribute('data-title'),
         linkElement?.getAttribute('aria-label'),
         linkElement?.getAttribute('title'),
         linkElement?.getAttribute('data-title'),
-        linkElement?.textContent,
-        item.textContent
+        firstLine(linkElement?.textContent),
+        item.getAttribute('aria-label'),
+        item.getAttribute('title'),
+        item.getAttribute('data-title'),
+        firstLine(item.textContent)
     ]);
 
     return normalizeHistoryTitle(rawTitle);

@@ -1,5 +1,6 @@
 {
   "compilerOptions": {
+    "baseUrl": ".",
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
@@ -8,6 +9,12 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
+    "paths": {
+      "@packages/core": ["../../packages/core/src/index.ts"],
+      "@packages/core/*": ["../../packages/core/*"],
+      "@packages/core/src": ["../../packages/core/src/index.ts"],
+      "@packages/core/config": ["../../packages/core/config.ts"]
+    },
     "types": ["node"]
   },
   "include": [

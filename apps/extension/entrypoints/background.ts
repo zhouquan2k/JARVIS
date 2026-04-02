@@ -1,6 +1,6 @@
 /// <reference types="chrome"/>
+import { ExternalHistoryError, GeminiHistoryConfigLoader } from '@packages/core/src';
 import type { IHistoryProvider, IModelProvider, ProviderRuntime } from '@packages/core/src';
-import { GeminiHistoryConfigLoader } from '@packages/core/src';
 import { GeminiHistoryTabBridge } from '../src/history/GeminiHistoryTabBridge';
 import { GeminiDomHistoryProvider } from '@packages/core/src';
 import type {
@@ -108,11 +108,14 @@ export default defineBackground(() => {
             };
 
             const postError = (requestId: string, channelId: string, error: unknown) => {
+                const historyError = error instanceof ExternalHistoryError ? error : null;
                 const delivered = postResponse({
                     type: 'ERROR',
                     requestId,
                     channelId,
-                    error: error instanceof Error ? error.message : String(error)
+                    error: error instanceof Error ? error.message : String(error),
+                    historyErrorCode: historyError?.code,
+                    historyProviderId: historyError?.providerId
                 });
 
                 if (!delivered) {
@@ -293,7 +296,7 @@ export default defineBackground(() => {
             const handleGetHistoryList = async (msg: GetHistoryListRequest) => {
                 try {
                     const provider = await resolveHistoryProvider(msg.providerId);
-                    const result = await provider.getHistoryList();
+                    const result = await provider.getHistoryList({ query: msg.query });
                     postResponse({
                         type: 'DONE',
                         requestId: msg.requestId,

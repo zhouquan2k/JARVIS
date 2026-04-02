@@ -125,7 +125,11 @@ export class DesktopProxyProvider implements IModelProvider {
             options
         };
 
-        return this.createTrackedRequest<ProviderSendResult>(request, onUpdate);
+        return this.createTrackedRequest<ProviderSendResult>(request, (update) => {
+            if (typeof update !== 'string') {
+                onUpdate(update);
+            }
+        });
     }
 
     analyzeComparison(
@@ -149,7 +153,11 @@ export class DesktopProxyProvider implements IModelProvider {
             analyzerModelId: payload.analyzerModelId
         };
 
-        return this.createTrackedRequest<AnalysisResult>(request, onUpdate);
+        return this.createTrackedRequest<AnalysisResult>(request, (update) => {
+            if (typeof update === 'string') {
+                onUpdate(update);
+            }
+        });
     }
 
     abort(): void {

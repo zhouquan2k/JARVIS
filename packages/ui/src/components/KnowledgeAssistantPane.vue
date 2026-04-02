@@ -63,7 +63,7 @@ function resolveAgentModelLabel(agent: ResolvedAgentConfig): string {
 }
 
 function resolveAgentConfigDirectory(agent: ResolvedAgentConfig): string {
-  const sourcePath = agent.sourcePaths.at(-1);
+  const sourcePath = agent.sourcePaths[agent.sourcePaths.length - 1];
   if (!sourcePath) {
     return agent.scopePath;
   }
