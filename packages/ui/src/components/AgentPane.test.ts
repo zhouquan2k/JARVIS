@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import type { Conversation, IModelProvider, IStorageProvider } from '@packages/core/src';
+import type { Conversation, IConversationPersistProvider, IModelProvider } from '@packages/core/src';
 import { encodeTextDocument } from '@packages/core/src';
 import type { ProviderConfig } from '@packages/core/config';
 import AgentPane from './AgentPane.vue';
@@ -44,7 +44,7 @@ class PaneTestProvider implements IModelProvider {
     abort(): void {}
 }
 
-class PaneTestStorageProvider implements IStorageProvider {
+class PaneTestStorageProvider implements IConversationPersistProvider {
     id = 'pane-test-storage';
     private readonly conversations: Conversation[] = [];
 

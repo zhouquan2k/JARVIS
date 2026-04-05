@@ -9,11 +9,11 @@ import type {
     IAgentCapableProvider
 } from '../../interfaces/IAgentCapableProvider';
 import type { IModelProvider, ProviderSendResult, ProviderStreamUpdate } from '../../interfaces/IModelProvider';
-import type { ProviderRuntime } from '../../runtime/providerRuntime.types';
+import type { ModelProviderRuntime } from '../../runtime/modelProviderRuntime.types';
 import type { AgentRuntime, AgentRuntimeRequest } from './types';
 
 export interface CreateAgentRuntimeOptions {
-    providerRuntime: ProviderRuntime;
+    providerRuntime: ModelProviderRuntime;
     maxToolIterations?: number;
 }
 

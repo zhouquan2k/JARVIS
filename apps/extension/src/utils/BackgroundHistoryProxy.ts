@@ -4,7 +4,7 @@ import {
     type Conversation,
     type ConversationHistorySummary,
     type HistoryListQueryOptions,
-    type IHistoryProvider
+    type IExternalConversationProvider
 } from '@packages/core/src';
 import type { GetHistoryDetailRequest, GetHistoryListRequest, ProxyRequest, ProxyResponse } from './proxyProtocol';
 
@@ -15,7 +15,7 @@ type PendingRequest = {
     reject: (reason: Error) => void;
 };
 
-export class BackgroundHistoryProxy implements IHistoryProvider {
+export class BackgroundHistoryProxy implements IExternalConversationProvider {
     public id: string;
     private port: chrome.runtime.Port | null = null;
     private readonly channelId: string;

@@ -1,6 +1,6 @@
 /// <reference types="chrome"/>
 import { ExternalHistoryError, GeminiHistoryConfigLoader } from '@packages/core/src';
-import type { IHistoryProvider, IModelProvider, ProviderRuntime } from '@packages/core/src';
+import type { IExternalConversationProvider, IModelProvider, ModelProviderRuntime } from '@packages/core/src';
 import { GeminiHistoryTabBridge } from '../src/history/GeminiHistoryTabBridge';
 import { GeminiDomHistoryProvider } from '@packages/core/src';
 import type {
@@ -17,25 +17,25 @@ import type {
 } from '../src/utils/proxyProtocol';
 
 type RuntimeDeps = {
-    createProviderRuntime: typeof import('@packages/core/src/runtime/createProviderRuntime').createProviderRuntime;
+    createModelProviderRuntime: typeof import('@packages/core/src/runtime/createModelProviderRuntime').createModelProviderRuntime;
     ComparisonAnalyzer: typeof import('@packages/core/src/workflows/compare/ComparisonAnalyzer').ComparisonAnalyzer;
     APP_CONFIG: typeof import('@packages/core/config').APP_CONFIG;
     createMockRuntime: typeof import('../src/testing/createMockRuntime').createMockRuntime;
 };
 
 let runtimeDepsPromise: Promise<RuntimeDeps> | null = null;
-let geminiHistoryProvider: IHistoryProvider | null = null;
+let geminiHistoryProvider: IExternalConversationProvider | null = null;
 
 const loadRuntimeDeps = async (): Promise<RuntimeDeps> => {
     if (!runtimeDepsPromise) {
         runtimeDepsPromise = Promise.all([
-            import('@packages/core/src/runtime/createProviderRuntime'),
+            import('@packages/core/src/runtime/createModelProviderRuntime'),
             import('@packages/core/src/workflows/compare/ComparisonAnalyzer'),
             import('@packages/core/config'),
             import('../src/testing/createMockRuntime')
         ])
             .then(([runtimeModule, analysisModule, configModule, mockRuntimeModule]) => ({
-                createProviderRuntime: runtimeModule.createProviderRuntime,
+                createModelProviderRuntime: runtimeModule.createModelProviderRuntime,
                 ComparisonAnalyzer: analysisModule.ComparisonAnalyzer,
                 APP_CONFIG: configModule.APP_CONFIG,
                 createMockRuntime: mockRuntimeModule.createMockRuntime
@@ -74,15 +74,15 @@ export default defineBackground(() => {
         if (port.name === 'ai-provider-proxy') {
             const activeRequests = new Map<string, { provider: IModelProvider; channelId: string }>();
             const ownedRequestIds = new Set<string>();
-            let runtimePromise: Promise<ProviderRuntime> | null = null;
+            let runtimePromise: Promise<ModelProviderRuntime> | null = null;
             let portDisconnected = false;
 
-            const getRuntime = async (): Promise<ProviderRuntime> => {
+            const getRuntime = async (): Promise<ModelProviderRuntime> => {
                 if (!runtimePromise) {
-                    runtimePromise = loadRuntimeDeps().then(({ createMockRuntime, createProviderRuntime }) => (
+                    runtimePromise = loadRuntimeDeps().then(({ createMockRuntime, createModelProviderRuntime }) => (
                         import.meta.env.WXT_E2E === '1'
                             ? createMockRuntime()
-                            : createProviderRuntime({ runtimeMode: 'extension' })
+                            : createModelProviderRuntime({ runtimeMode: 'extension' })
                     ));
                 }
                 return runtimePromise;
@@ -133,7 +133,7 @@ export default defineBackground(() => {
                 return runtime.getProvider(providerId, { fresh: true });
             };
 
-            const resolveHistoryProvider = async (providerId: string): Promise<IHistoryProvider> => {
+            const resolveHistoryProvider = async (providerId: string): Promise<IExternalConversationProvider> => {
                 if (providerId === 'gemini-web') {
                     if (!geminiHistoryProvider) {
                         geminiHistoryProvider = new GeminiDomHistoryProvider({
@@ -161,12 +161,12 @@ export default defineBackground(() => {
 
                 const provider = await resolveProvider(providerId);
                 if (
-                    typeof (provider as Partial<IHistoryProvider>).getHistoryList !== 'function' ||
-                    typeof (provider as Partial<IHistoryProvider>).getHistoryDetail !== 'function'
+                    typeof (provider as Partial<IExternalConversationProvider>).getHistoryList !== 'function' ||
+                    typeof (provider as Partial<IExternalConversationProvider>).getHistoryDetail !== 'function'
                 ) {
                     throw new Error(`Provider '${providerId}' does not support history queries`);
                 }
-                return provider as IHistoryProvider;
+                return provider as IExternalConversationProvider;
             };
 
             const trackActiveRequest = (requestId: string, channelId: string, provider: IModelProvider) => {
@@ -225,7 +225,7 @@ export default defineBackground(() => {
             const handleAnalyzeComparison = async (msg: AnalyzeComparisonRequest) => {
                 try {
                     const runtime = await getRuntime();
-                    const analyzerRuntime: ProviderRuntime = {
+                    const analyzerRuntime: ModelProviderRuntime = {
                         getAvailableProviders() {
                             return runtime.getAvailableProviders();
                         },

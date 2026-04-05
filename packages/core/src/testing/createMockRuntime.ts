@@ -7,7 +7,7 @@ import type {
 } from '../interfaces/IAgentCapableProvider';
 import type { IModelProvider, ProviderSendResult, ProviderStreamUpdate, SendMessageOptions } from '../interfaces/IModelProvider';
 import type { MessageAnnotation, MessageAttachment } from '../interfaces/IStorageProvider';
-import type { ProviderRuntime } from '../runtime/providerRuntime.types';
+import type { ModelProviderRuntime } from '../runtime/modelProviderRuntime.types';
 
 export interface CreateMockRuntimeOptions {
     runtimeMode: RuntimeMode;
@@ -373,7 +373,7 @@ class MockStreamingProvider implements IAgentCapableProvider {
     }
 }
 
-export function createMockRuntime(options: CreateMockRuntimeOptions): ProviderRuntime {
+export function createMockRuntime(options: CreateMockRuntimeOptions): ModelProviderRuntime {
     const cache = new Map<string, IModelProvider>();
     const modelCatalogCache = new Map<string, ProviderModelCatalog>();
     const mockProviders = buildMockProviders(options.runtimeMode);

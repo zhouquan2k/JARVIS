@@ -1,9 +1,9 @@
 import {
   createAgentRuntime,
-  createProviderRuntime,
+  createModelProviderRuntime,
   type ExternalHistoryProviderEntry,
   type ExternalHistoryProviderId,
-  type IHistoryProvider
+  type IExternalConversationProvider
 } from '@packages/core/src';
 import { createMockRuntime } from './testing/createMockRuntime';
 import { createMockHistoryProvider } from './testing/createMockHistoryProvider';
@@ -12,7 +12,7 @@ const useMockRuntime = import.meta.env.VITE_E2E === '1';
 
 export const providerRuntime = useMockRuntime
   ? createMockRuntime()
-  : createProviderRuntime({
+  : createModelProviderRuntime({
       runtimeMode: 'web',
       credentials: {
         geminiApiKey: import.meta.env.VITE_LLM_API_KEY
@@ -23,7 +23,9 @@ export const agentRuntime = createAgentRuntime({
   providerRuntime
 });
 
-export function createWebHistoryProvider(providerId: Exclude<ExternalHistoryProviderId, 'external-file'> = 'chatgpt-web'): IHistoryProvider {
+export function createWebHistoryProvider(
+  providerId: Exclude<ExternalHistoryProviderId, 'external-file'> = 'chatgpt-web'
+): IExternalConversationProvider {
   if (useMockRuntime) {
     return createMockHistoryProvider(providerId);
   }
@@ -33,12 +35,12 @@ export function createWebHistoryProvider(providerId: Exclude<ExternalHistoryProv
     return createMockHistoryProvider(providerId);
   }
 
-  const provider = providerRuntime.getProvider(providerId, { fresh: true }) as Partial<IHistoryProvider>;
+  const provider = providerRuntime.getProvider(providerId, { fresh: true }) as Partial<IExternalConversationProvider>;
   if (typeof provider.getHistoryList !== 'function' || typeof provider.getHistoryDetail !== 'function') {
     return createMockHistoryProvider(providerId);
   }
 
-  return provider as IHistoryProvider;
+  return provider as IExternalConversationProvider;
 }
 
 export function createWebHistoryProviders(): ExternalHistoryProviderEntry[] {

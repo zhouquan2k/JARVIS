@@ -487,7 +487,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             this.dirtyPaths = nextDirtyPaths;
 
             const visibleRecord = previousActivePath ? this.fileChangeService.getVisibleRecord(previousActivePath) : null;
-            if (visibleRecord && nextActivePath && nextActivePath !== previousActivePath) {
+            if (visibleRecord && previousActivePath && nextActivePath && nextActivePath !== previousActivePath) {
                 this.fileChangeService.clear(previousActivePath);
                 this.fileChangeService.recordChange({
                     path: nextActivePath,

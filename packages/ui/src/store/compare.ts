@@ -1,6 +1,11 @@
 import { defineStore } from 'pinia';
 import type { ProviderConfig } from '@packages/core/config';
-import { CompareWorkflowController, type CompareWorkflowStage, type AnalysisResult, type ProviderRuntime } from '../../../core/src';
+import {
+    CompareWorkflowController,
+    type CompareWorkflowStage,
+    type AnalysisResult,
+    type ModelProviderRuntime
+} from '../../../core/src';
 import { markRaw } from 'vue';
 
 export type CompareTab = 'native' | 'analysis';
@@ -11,7 +16,7 @@ type ProviderModelLoadState = {
 };
 
 export interface CompareState {
-    runtime: ProviderRuntime | null;
+    runtime: ModelProviderRuntime | null;
     controller: CompareWorkflowController | null;
     providerCatalog: ProviderConfig[];
     availableProviders: ProviderConfig[];
@@ -217,7 +222,7 @@ export const useCompareStore = defineStore('compare', {
             return this.resolveProviderConfig(providerId) || null;
         },
 
-        async setRuntime(runtime: ProviderRuntime) {
+        async setRuntime(runtime: ModelProviderRuntime) {
             this.runtime = markRaw(runtime);
             this.controller = markRaw(new CompareWorkflowController(runtime));
             this.setProviderCatalog(runtime.getProviderCatalog());

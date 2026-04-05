@@ -1,10 +1,10 @@
 import {
     createAgentRuntime,
-    createProviderRuntime,
+    createModelProviderRuntime,
     type ExternalHistoryProviderEntry,
     type ExternalHistoryProviderId,
-    type IHistoryProvider,
-    type ProviderRuntime
+    type IExternalConversationProvider,
+    type ModelProviderRuntime
 } from '@packages/core/src';
 import { DesktopHistoryProxy } from './utils/DesktopHistoryProxy';
 import { DesktopProxyProvider } from './utils/DesktopProxyProvider';
@@ -14,8 +14,8 @@ function createChannelId(providerId: string): string {
     return `${providerId}-${crypto.randomUUID()}`;
 }
 
-export function createDesktopProxyRuntime(): ProviderRuntime {
-    return createProviderRuntime({
+export function createDesktopProxyRuntime(): ModelProviderRuntime {
+    return createModelProviderRuntime({
         runtimeMode: 'desktop',
         providerFactory(providerId) {
             return new DesktopProxyProvider(providerId, { channelId: createChannelId(providerId) });
@@ -35,7 +35,7 @@ export const agentRuntime = createAgentRuntime({
 
 export function createDesktopHistoryProvider(
     providerId: Exclude<ExternalHistoryProviderId, 'external-file'> = 'chatgpt-web'
-): IHistoryProvider {
+): IExternalConversationProvider {
     return new DesktopHistoryProxy(providerId, { channelId: createChannelId(`${providerId}-history`) });
 }
 

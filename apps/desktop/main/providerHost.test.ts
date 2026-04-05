@@ -3,9 +3,9 @@ import {
     ExternalHistoryError,
     type Conversation,
     type ConversationHistorySummary,
-    type IHistoryProvider,
+    type IExternalConversationProvider,
     type IModelProvider,
-    type ProviderRuntime,
+    type ModelProviderRuntime,
     type ProviderSendResult,
     type ProviderStreamUpdate,
     type SendMessageOptions
@@ -75,7 +75,7 @@ class StreamingProvider implements IModelProvider {
     }
 }
 
-class HistoryProviderStub implements IHistoryProvider {
+class HistoryProviderStub implements IExternalConversationProvider {
     public id: 'chatgpt-web' = 'chatgpt-web';
     public lastQuery: string | undefined;
 
@@ -104,7 +104,7 @@ class HistoryProviderStub implements IHistoryProvider {
     }
 }
 
-class AuthRequiredHistoryProviderStub implements IHistoryProvider {
+class AuthRequiredHistoryProviderStub implements IExternalConversationProvider {
     public id: 'gemini-web' = 'gemini-web';
 
     async getHistoryList(): Promise<ConversationHistorySummary[]> {
@@ -120,7 +120,7 @@ class AuthRequiredHistoryProviderStub implements IHistoryProvider {
     }
 }
 
-function createRuntime(providerFactory: (providerId: string) => IModelProvider): ProviderRuntime {
+function createRuntime(providerFactory: (providerId: string) => IModelProvider): ModelProviderRuntime {
     return {
         getAvailableProviders() {
             return [];

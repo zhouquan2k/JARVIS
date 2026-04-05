@@ -1,6 +1,6 @@
 import { APP_CONFIG } from '../../../config';
 import type { IModelProvider } from '../../interfaces/IModelProvider';
-import type { ProviderRuntime } from '../../runtime/providerRuntime.types';
+import type { ModelProviderRuntime } from '../../runtime/modelProviderRuntime.types';
 import { ANALYSIS_RESULT_FIELDS, type AnalysisResult } from './types';
 
 const REQUIRED_PROMPT_TOKENS = ['{prompt}', '{outputA}', '{outputB}'] as const;
@@ -18,7 +18,7 @@ export class AnalysisParseError extends Error {
 
 export class ComparisonAnalyzer {
     constructor(
-        private readonly runtime: ProviderRuntime,
+        private readonly runtime: ModelProviderRuntime,
         private readonly analyzerConfig = APP_CONFIG.analyzer
     ) {
         const missingTokens = REQUIRED_PROMPT_TOKENS.filter((token) => !this.analyzerConfig.systemPrompt.includes(token));

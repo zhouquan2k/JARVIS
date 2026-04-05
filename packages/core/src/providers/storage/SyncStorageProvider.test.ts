@@ -5,14 +5,15 @@ import type {
     SyncPullResult,
     SyncPushResult
 } from '../../interfaces/ISyncTransport';
-import { cloneConversationMessage, type Conversation, type IStorageProvider } from '../../interfaces/IStorageProvider';
+import { cloneConversationMessage, type Conversation } from '../../interfaces/IStorageProvider';
+import type { IConversationPersistProvider } from '../../interfaces/IConversationPersistProvider';
 import {
     SyncStorageProvider,
     type DeletedConversationStateStore,
     type SyncStateStore
 } from './SyncStorageProvider';
 
-class MemoryStorageProvider implements IStorageProvider {
+class MemoryStorageProvider implements IConversationPersistProvider {
     id = 'memory-storage';
 
     private readonly conversations = new Map<string, Conversation>();

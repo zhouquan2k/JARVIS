@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { IModelProvider } from '../../interfaces/IModelProvider';
-import type { ProviderRuntime } from '../../runtime/providerRuntime.types';
+import type { ModelProviderRuntime } from '../../runtime/modelProviderRuntime.types';
 import { CompareWorkflowController } from './CompareWorkflowController';
 
 class AsyncMockProvider implements IModelProvider {
@@ -55,7 +55,7 @@ describe('CompareWorkflowController', () => {
         const providerB = new AsyncMockProvider('provider-b', 'final B', 10);
         const runtimeCalls: Array<{ providerId: string; fresh?: boolean }> = [];
 
-        const runtime: ProviderRuntime = {
+        const runtime: ModelProviderRuntime = {
             getAvailableProviders: () => [],
             getProviderCatalog: () => [],
             getProviderModels: async (providerId) => ({
@@ -116,7 +116,7 @@ describe('CompareWorkflowController', () => {
     it('emits failed stage when workflow throws', async () => {
         const providerA = new AsyncMockProvider('provider-a', 'final A', 10);
         const providerB = new AsyncMockProvider('provider-b', 'final B', 10, true);
-        const runtime: ProviderRuntime = {
+        const runtime: ModelProviderRuntime = {
             getAvailableProviders: () => [],
             getProviderCatalog: () => [],
             getProviderModels: async (providerId) => ({

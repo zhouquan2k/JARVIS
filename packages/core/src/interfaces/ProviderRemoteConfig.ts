@@ -1,4 +1,4 @@
-import type { ExternalHistoryProviderId } from './IHistoryProvider';
+import type { ExternalHistoryProviderId } from './IExternalConversationProvider';
 
 export type ProviderRemoteConfigId = 'gemini-history';
 export type ProviderRemoteConfigSource = 'remote' | 'cache' | 'builtin';

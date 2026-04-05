@@ -143,6 +143,34 @@ test('extension host supports external provider switching, Gemini preview/error 
   }
 });
 
+test('extension host restores imported external history from local persistence after reload', async () => {
+  const session = await launchExtensionPage();
+  try {
+    const { page } = session;
+    await expect(page.getByTestId('conversation-workspace')).toBeVisible();
+
+    await page.getByTestId('history-source-external').click();
+    await page.getByTestId('external-provider-gemini-web').click();
+    await expect(page.getByTestId('external-history-item')).toHaveCount(2);
+    await page.getByTestId('external-history-item').first().click();
+    await expect(page.getByTestId('preview-import')).toBeVisible();
+    await expect(page.getByTestId('normal-messages')).toContainText('规则远程化');
+
+    await page.getByTestId('preview-import').click();
+    await expect(page.getByTestId('local-history-item')).toHaveCount(1);
+    await expect(page.getByTestId('local-history-item').first()).toContainText('Gemini Sprint Review');
+
+    await page.reload();
+    await expect(page.getByTestId('conversation-workspace')).toBeVisible();
+    await expect(page.getByTestId('local-history-item')).toHaveCount(1);
+    await expect(page.getByTestId('local-history-item').first()).toContainText('Gemini Sprint Review');
+    await page.getByTestId('local-history-item').first().click();
+    await expect(page.getByTestId('normal-messages')).toContainText('规则远程化');
+  } finally {
+    await session.close();
+  }
+});
+
 test('extension host applies unified host font baseline', async () => {
   const session = await launchExtensionPage();
   try {

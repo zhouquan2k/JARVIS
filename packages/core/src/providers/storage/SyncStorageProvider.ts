@@ -9,8 +9,8 @@ import {
     normalizeConversation,
     type Conversation,
     type ConversationSyncState,
-    type IStorageProvider
 } from '../../interfaces/IStorageProvider';
+import type { IConversationPersistProvider } from '../../interfaces/IConversationPersistProvider';
 
 export interface SyncStateStore {
     getCursor(syncKey: string): Promise<number | null>;
@@ -23,7 +23,7 @@ export interface DeletedConversationStateStore {
 }
 
 export interface SyncStorageProviderOptions {
-    localStore: IStorageProvider;
+    localStore: IConversationPersistProvider;
     transport: ISyncTransport;
     syncKey: string;
     initialCursor?: number | null;
@@ -117,10 +117,10 @@ class LocalForageDeletedConversationStateStore implements DeletedConversationSta
     }
 }
 
-export class SyncStorageProvider implements IStorageProvider {
+export class SyncStorageProvider implements IConversationPersistProvider {
     public readonly id: string;
 
-    private readonly localStore: IStorageProvider;
+    private readonly localStore: IConversationPersistProvider;
     private readonly transport: ISyncTransport;
     private readonly syncKey: string;
     private readonly stateStore: SyncStateStore;

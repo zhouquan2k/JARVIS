@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
-import type { IModelProvider, ProviderRuntime } from '@packages/core/src';
+import type { IModelProvider, ModelProviderRuntime } from '@packages/core/src';
 import type { ProviderConfig } from '@packages/core/config';
 import { useCompareStore } from './compare';
 
@@ -51,7 +51,7 @@ const providerCatalog: ProviderConfig[] = [
     }
 ];
 
-function createRuntime(): ProviderRuntime {
+function createRuntime(): ModelProviderRuntime {
     return {
         getAvailableProviders: () => providerCatalog,
         getProviderCatalog: () => providerCatalog,

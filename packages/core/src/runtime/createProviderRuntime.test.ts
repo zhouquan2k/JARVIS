@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createProviderRuntime } from './createProviderRuntime';
+import { createModelProviderRuntime } from './createModelProviderRuntime';
 import type { IModelProvider, ProviderStreamUpdate, SendMessageOptions } from '../interfaces/IModelProvider';
 
 class CustomGeminiProvider implements IModelProvider {
@@ -47,22 +47,22 @@ class InvalidCatalogProvider extends CustomGeminiProvider {
     }
 }
 
-describe('createProviderRuntime', () => {
+describe('createModelProviderRuntime', () => {
     it('filters providers by runtimeMode', () => {
-        const runtime = createProviderRuntime({ runtimeMode: 'web' });
+        const runtime = createModelProviderRuntime({ runtimeMode: 'web' });
         const providers = runtime.getProviderCatalog();
         expect(providers.every((provider) => provider.supportedRuntimeModes.includes('web'))).toBe(true);
     });
 
     it('filters providers by desktop runtimeMode', () => {
-        const runtime = createProviderRuntime({ runtimeMode: 'desktop' });
+        const runtime = createModelProviderRuntime({ runtimeMode: 'desktop' });
         const providers = runtime.getProviderCatalog();
         expect(providers.length).toBeGreaterThan(0);
         expect(providers.every((provider) => provider.supportedRuntimeModes.includes('desktop'))).toBe(true);
     });
 
     it('returns model provider instances with IModelProvider contract', () => {
-        const runtime = createProviderRuntime({ runtimeMode: 'extension' });
+        const runtime = createModelProviderRuntime({ runtimeMode: 'extension' });
         const provider = runtime.getProvider('gemini-api');
         expect(provider.id).toBe('gemini-api');
         expect(typeof provider.checkAuth).toBe('function');
@@ -71,14 +71,14 @@ describe('createProviderRuntime', () => {
     });
 
     it('returns cached instance in default mode', () => {
-        const runtime = createProviderRuntime({ runtimeMode: 'web' });
+        const runtime = createModelProviderRuntime({ runtimeMode: 'web' });
         const providerA = runtime.getProvider('gemini-api');
         const providerB = runtime.getProvider('gemini-api');
         expect(providerA).toBe(providerB);
     });
 
     it('returns fresh instance when fresh option is true', () => {
-        const runtime = createProviderRuntime({ runtimeMode: 'web' });
+        const runtime = createModelProviderRuntime({ runtimeMode: 'web' });
         const cached = runtime.getProvider('gemini-api');
         const freshA = runtime.getProvider('gemini-api', { fresh: true });
         const freshB = runtime.getProvider('gemini-api', { fresh: true });
@@ -90,7 +90,7 @@ describe('createProviderRuntime', () => {
     });
 
     it('uses injected credentials with higher priority', async () => {
-        const runtime = createProviderRuntime({
+        const runtime = createModelProviderRuntime({
             runtimeMode: 'web',
             credentials: {
                 geminiApiKey: 'injected-key'
@@ -102,7 +102,7 @@ describe('createProviderRuntime', () => {
     });
 
     it('uses custom providerFactory when provided', () => {
-        const runtime = createProviderRuntime({
+        const runtime = createModelProviderRuntime({
             runtimeMode: 'web',
             providerFactory(providerId) {
                 if (providerId !== 'gemini-api') {
@@ -125,7 +125,7 @@ describe('createProviderRuntime', () => {
             get: vi.fn().mockResolvedValue({ value: 'device-from-host' })
         };
 
-        const runtime = createProviderRuntime({
+        const runtime = createModelProviderRuntime({
             runtimeMode: 'desktop',
             providerOptionsResolver(providerId) {
                 if (providerId !== 'chatgpt-web') {
@@ -149,7 +149,7 @@ describe('createProviderRuntime', () => {
 
     it('returns provider-driven model catalogs', async () => {
         const customProvider = new CustomGeminiProvider();
-        const runtime = createProviderRuntime({
+        const runtime = createModelProviderRuntime({
             runtimeMode: 'web',
             providerFactory(providerId) {
                 if (providerId !== 'gemini-api') {
@@ -171,7 +171,7 @@ describe('createProviderRuntime', () => {
 
     it('caches resolved provider model catalogs', async () => {
         const customProvider = new CustomGeminiProvider();
-        const runtime = createProviderRuntime({
+        const runtime = createModelProviderRuntime({
             runtimeMode: 'web',
             providerFactory(providerId) {
                 if (providerId !== 'gemini-api') {
@@ -189,7 +189,7 @@ describe('createProviderRuntime', () => {
     });
 
     it('falls back to static provider catalog when dynamic catalog is invalid', async () => {
-        const runtime = createProviderRuntime({
+        const runtime = createModelProviderRuntime({
             runtimeMode: 'web',
             providerFactory(providerId) {
                 if (providerId !== 'gemini-api') {
@@ -227,7 +227,7 @@ describe('createProviderRuntime', () => {
     });
 
     it('applies configured preferred default model when the dynamic catalog contains a match', async () => {
-        const runtime = createProviderRuntime({
+        const runtime = createModelProviderRuntime({
             runtimeMode: 'extension',
             providerFactory(providerId) {
                 if (providerId !== 'chatgpt-web') {
@@ -267,7 +267,7 @@ describe('createProviderRuntime', () => {
     });
 
     it('falls back to the provider catalog default when configured preferred default model does not exist in the dynamic catalog', async () => {
-        const runtime = createProviderRuntime({
+        const runtime = createModelProviderRuntime({
             runtimeMode: 'extension',
             providerFactory(providerId) {
                 if (providerId !== 'chatgpt-web') {

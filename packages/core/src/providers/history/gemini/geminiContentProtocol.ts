@@ -1,7 +1,7 @@
 import {
     ExternalHistoryError,
     type ExternalHistoryErrorCode
-} from '../../../interfaces/IHistoryProvider';
+} from '../../../interfaces/IExternalConversationProvider';
 import type { GeminiHistoryRemoteConfig as GeminiHistoryRemoteConfigShape } from '../../../interfaces/ProviderRemoteConfig';
 
 export type GeminiContentAction = 'PING' | 'GET_HISTORY_LIST' | 'GET_HISTORY_DETAIL';

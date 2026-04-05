@@ -3,7 +3,7 @@ import {
     type Conversation,
     type ConversationHistorySummary,
     type HistoryListQueryOptions,
-    type IHistoryProvider
+    type IExternalConversationProvider
 } from '@packages/core/src';
 import type { GetHistoryDetailRequest, GetHistoryListRequest, ProxyRequest, ProxyResponse } from './proxyProtocol';
 
@@ -12,7 +12,7 @@ type PendingRequest = {
     reject: (reason: Error) => void;
 };
 
-export class DesktopHistoryProxy implements IHistoryProvider {
+export class DesktopHistoryProxy implements IExternalConversationProvider {
     public id: 'chatgpt-web' | 'gemini-web';
     private unsubscribe: (() => void) | null = null;
     private readonly channelId: string;

@@ -2,7 +2,7 @@ import {
     resolveGeminiHistoryRuntimeConfig,
     type GeminiHistoryRuntimeConfig
 } from '../../../../config';
-import { ExternalHistoryError } from '../../../interfaces/IHistoryProvider';
+import { ExternalHistoryError } from '../../../interfaces/IExternalConversationProvider';
 import type {
     GeminiHistoryRemoteConfig,
     ProviderRemoteConfigLoadResult

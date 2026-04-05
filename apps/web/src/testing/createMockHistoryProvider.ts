@@ -4,7 +4,7 @@ import {
     type ConversationHistorySummary,
     type ExternalHistoryProviderId,
     type HistoryListQueryOptions,
-    type IHistoryProvider
+    type IExternalConversationProvider
 } from '@packages/core/src';
 
 const MOCK_SUMMARIES: Record<Exclude<ExternalHistoryProviderId, 'external-file'>, ConversationHistorySummary[]> = {
@@ -89,7 +89,9 @@ const MOCK_DETAILS: Record<string, Conversation> = {
     }
 };
 
-export function createMockHistoryProvider(providerId: Exclude<ExternalHistoryProviderId, 'external-file'> = 'chatgpt-web'): IHistoryProvider {
+export function createMockHistoryProvider(
+    providerId: Exclude<ExternalHistoryProviderId, 'external-file'> = 'chatgpt-web'
+): IExternalConversationProvider {
     const allSummaries = MOCK_SUMMARIES[providerId] || [];
 
     return {

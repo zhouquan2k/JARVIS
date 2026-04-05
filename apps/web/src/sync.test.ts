@@ -2,14 +2,14 @@ import { describe, expect, it } from 'vitest';
 import type {
     Conversation,
     DeletedConversationStateStore,
-    IStorageProvider,
+    IConversationPersistProvider,
     SyncDeletedConversation,
     SyncStateStore
 } from '@packages/core/src';
 import { createApp } from '../../server/src/app.js';
 import { createWebSyncStorageProvider } from './sync';
 
-class MemoryStorageProvider implements IStorageProvider {
+class MemoryStorageProvider implements IConversationPersistProvider {
     id = 'memory-storage';
 
     private readonly conversations = new Map<string, Conversation>();

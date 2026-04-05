@@ -1,4 +1,4 @@
-import type { DeletedConversationStateStore, IStorageProvider, SyncStateStore } from '@packages/core/src';
+import type { DeletedConversationStateStore, IConversationPersistProvider, SyncStateStore } from '@packages/core/src';
 import {
     createMockSyncTransport,
     FetchSyncTransport,
@@ -36,7 +36,7 @@ export interface CreateWebSyncStorageProviderOptions {
     storage?: Pick<Storage, 'getItem' | 'setItem'>;
     env?: AppEnv;
     isDevelopment?: boolean;
-    localStore?: IStorageProvider;
+    localStore?: IConversationPersistProvider;
     fetchImpl?: typeof fetch;
     stateStore?: SyncStateStore;
     deletedConversationStore?: DeletedConversationStateStore;

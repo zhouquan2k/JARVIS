@@ -1,5 +1,6 @@
 import type { AnalysisResult } from '../workflows/compare/types';
-import type { ConversationOrigin } from './IHistoryProvider';
+import type { ConversationOrigin } from './IExternalConversationProvider';
+import type { IConversationPersistProvider } from './IConversationPersistProvider';
 
 export type ConversationRole = 'user' | 'assistant';
 export type MessageAttachmentType = 'image' | 'file';
@@ -373,12 +374,8 @@ export function normalizeConversation(conversation: Conversation): Conversation 
     };
 }
 
-export interface IStorageProvider {
-    id: string; // 如：'indexeddb-storage', 'sqlite-storage'
-    saveConversation(chat: Conversation): Promise<void>;
-    getConversation(id: string): Promise<Conversation | null>;
-    getAllConversations(): Promise<Conversation[]>;
-    deleteConversation(id: string): Promise<void>;
-}
+export interface IStorageProvider extends IConversationPersistProvider {}
+
+export type { IConversationPersistProvider } from './IConversationPersistProvider';
 
 export type { IConversationStorageProvider } from './IConversationStorageProvider';

@@ -5,6 +5,7 @@ import type {
     ContextSearchRequest,
     ContextProvider,
     CreateContextNodeInput,
+    RenameContextNodeInput,
     ResolvedAgentConfig
 } from '../types/context.js';
 
@@ -32,6 +33,14 @@ export class DatabaseContextProvider implements ContextProvider {
     }
 
     async createNode(_input: CreateContextNodeInput): Promise<ContextNode> {
+        notImplemented();
+    }
+
+    async deleteNode(_path: string): Promise<void> {
+        notImplemented();
+    }
+
+    async renameNode(_input: RenameContextNodeInput): Promise<ContextNode> {
         notImplemented();
     }
 

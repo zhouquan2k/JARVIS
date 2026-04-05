@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { IModelProvider } from '../../interfaces/IModelProvider';
-import type { ProviderRuntime } from '../../runtime/providerRuntime.types';
+import type { ModelProviderRuntime } from '../../runtime/modelProviderRuntime.types';
 import { AnalysisParseError, ComparisonAnalyzer } from './ComparisonAnalyzer';
 
 class MockModelProvider implements IModelProvider {
@@ -60,7 +60,7 @@ describe('ComparisonAnalyzer', () => {
         );
 
         const runtimeCalls: Array<{ providerId: string; fresh?: boolean }> = [];
-        const runtime: ProviderRuntime = {
+        const runtime: ModelProviderRuntime = {
             getAvailableProviders: () => [],
             getProviderCatalog: () => [],
             getProviderModels: async () => ({ models: [{ id: 'mock-model', name: 'Mock Model' }], defaultModel: 'mock-model' }),
@@ -92,7 +92,7 @@ describe('ComparisonAnalyzer', () => {
         const provider = new MockModelProvider(
             'analysis:\n{"agreements":"x","conflictsA":"a","conflictsB":"b","uniqueA":"ua","uniqueB":"ub"}\nend'
         );
-        const runtime: ProviderRuntime = {
+        const runtime: ModelProviderRuntime = {
             getAvailableProviders: () => [],
             getProviderCatalog: () => [],
             getProviderModels: async () => ({ models: [{ id: 'mock', name: 'Mock' }], defaultModel: 'mock' }),
@@ -111,7 +111,7 @@ describe('ComparisonAnalyzer', () => {
 
     it('throws AnalysisParseError when response cannot be parsed', async () => {
         const provider = new MockModelProvider('not-json');
-        const runtime: ProviderRuntime = {
+        const runtime: ModelProviderRuntime = {
             getAvailableProviders: () => [],
             getProviderCatalog: () => [],
             getProviderModels: async () => ({ models: [{ id: 'mock', name: 'Mock' }], defaultModel: 'mock' }),
@@ -136,7 +136,7 @@ describe('ComparisonAnalyzer', () => {
   "uniqueB": ["ub1"]
 }
 \`\`\``);
-        const runtime: ProviderRuntime = {
+        const runtime: ModelProviderRuntime = {
             getAvailableProviders: () => [],
             getProviderCatalog: () => [],
             getProviderModels: async () => ({ models: [{ id: 'mock', name: 'Mock' }], defaultModel: 'mock' }),

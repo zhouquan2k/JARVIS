@@ -1,7 +1,8 @@
 import localforage from 'localforage';
-import { IStorageProvider, Conversation, normalizeConversation } from '../../interfaces/IStorageProvider';
+import { type Conversation, normalizeConversation } from '../../interfaces/IStorageProvider';
+import type { IConversationPersistProvider } from '../../interfaces/IConversationPersistProvider';
 
-export class IndexedDBStorageProvider implements IStorageProvider {
+export class IndexedDBStorageProvider implements IConversationPersistProvider {
     public id = 'indexeddb-storage';
     private store: LocalForage;
 

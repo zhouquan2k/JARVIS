@@ -1,10 +1,10 @@
 import {
     createAgentRuntime,
-    createProviderRuntime,
+    createModelProviderRuntime,
     type ExternalHistoryProviderEntry,
     type ExternalHistoryProviderId,
-    type IHistoryProvider,
-    type ProviderRuntime
+    type IExternalConversationProvider,
+    type ModelProviderRuntime
 } from '@packages/core/src';
 import { BackgroundProxyProvider } from './utils/BackgroundProxyProvider';
 import { BackgroundHistoryProxy } from './utils/BackgroundHistoryProxy';
@@ -14,8 +14,8 @@ function createChannelId(providerId: string): string {
     return `${providerId}-${crypto.randomUUID()}`;
 }
 
-export function createExtensionProxyRuntime(): ProviderRuntime {
-    return createProviderRuntime({
+export function createExtensionProxyRuntime(): ModelProviderRuntime {
+    return createModelProviderRuntime({
         runtimeMode: 'extension',
         providerFactory(providerId) {
             return new BackgroundProxyProvider(providerId, { channelId: createChannelId(providerId) });
@@ -31,7 +31,9 @@ export const agentRuntime = createAgentRuntime({
     providerRuntime
 });
 
-export function createExtensionHistoryProvider(providerId: Exclude<ExternalHistoryProviderId, 'external-file'> = 'chatgpt-web'): IHistoryProvider {
+export function createExtensionHistoryProvider(
+    providerId: Exclude<ExternalHistoryProviderId, 'external-file'> = 'chatgpt-web'
+): IExternalConversationProvider {
     if (useMockRuntime) {
         return createMockHistoryProvider(providerId);
     }

@@ -1,4 +1,4 @@
-import type { AnalysisResult, Conversation, IStorageProvider } from '@packages/core/src';
+import type { AnalysisResult, Conversation, IConversationPersistProvider } from '@packages/core/src';
 
 const LAST_COMPARE_SNAPSHOT_KEY = 'chatprism:last-compare-snapshot';
 
@@ -23,7 +23,7 @@ function buildTitle(prompt: string): string {
 }
 
 export async function saveCompareConversation(
-    storage: IStorageProvider,
+    storage: IConversationPersistProvider,
     payload: CompareConversationPayload
 ): Promise<Conversation> {
     const now = Date.now();
@@ -72,7 +72,7 @@ export async function saveCompareConversation(
 }
 
 export async function loadLatestCompareConversation(
-    storage: IStorageProvider
+    storage: IConversationPersistProvider
 ): Promise<Conversation | null> {
     let snapshotConversation: Conversation | null = null;
     if (typeof localStorage !== 'undefined') {

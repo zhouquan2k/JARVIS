@@ -4,8 +4,8 @@ import type {
     ConversationHistorySummary,
     ExternalHistoryProviderId,
     HistoryListQueryOptions,
-    IHistoryProvider
-} from '../../interfaces/IHistoryProvider';
+    IExternalConversationProvider
+} from '../../interfaces/IExternalConversationProvider';
 import type {
     CiteAnnotation,
     Conversation,
@@ -871,7 +871,7 @@ export function normalizeChatGPTConversationDetail(
     };
 }
 
-export class ChatGPTWebProvider implements IModelProvider, IHistoryProvider {
+export class ChatGPTWebProvider implements IModelProvider, IExternalConversationProvider {
     public id: ExternalHistoryProviderId = 'chatgpt-web';
     private accessToken: string | null = null;
     private abortController: AbortController | null = null;

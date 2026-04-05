@@ -14,10 +14,10 @@ import {
     type ExternalHistoryProviderId,
     type HistoryListQueryOptions,
     type ContextDocument,
+    type IConversationPersistProvider,
     type IContextProvider,
-    type IHistoryProvider,
+    type IExternalConversationProvider,
     type IModelProvider,
-    type IStorageProvider,
     type MessageAttachment,
     type ResolvedAgentConfig
 } from '@packages/core/src';
@@ -47,7 +47,7 @@ export interface ChatState {
     modelProvider: IModelProvider | null;
     modelProviderResolver: ((providerId: string) => IModelProvider) | null;
     providerModelsResolver: ((providerId: string) => Promise<ProviderModelCatalog>) | null;
-    storageProvider: IStorageProvider | null;
+    storageProvider: IConversationPersistProvider | null;
     historyProviders: ExternalHistoryProviderEntry[];
     externalFileImportHandler: ExternalFileImportHandler | null;
     activeExternalProviderId: ExternalHistoryProviderId;
@@ -677,7 +677,7 @@ export const useChatStore = defineStore('chat', {
             return this.historyProviders.find((entry) => entry.id === targetProviderId) || null;
         },
 
-        resolveHistoryProvider(providerId?: ExternalHistoryProviderId): IHistoryProvider | null {
+        resolveHistoryProvider(providerId?: ExternalHistoryProviderId): IExternalConversationProvider | null {
             const entry = this.resolveHistoryProviderEntry(providerId);
             return entry?.kind === 'history-provider' && entry.provider ? entry.provider : null;
         },
@@ -704,8 +704,8 @@ export const useChatStore = defineStore('chat', {
 
         setProviders(
             modelProvider: IModelProvider,
-            storageProvider: IStorageProvider,
-            historyProvider?: IHistoryProvider
+            storageProvider: IConversationPersistProvider,
+            historyProvider?: IExternalConversationProvider
         ) {
             this.modelProvider = markRaw(modelProvider);
             if (!this.modelProviderResolver) {
@@ -720,7 +720,7 @@ export const useChatStore = defineStore('chat', {
             }
         },
 
-        setHistoryProvider(provider: IHistoryProvider) {
+        setHistoryProvider(provider: IExternalConversationProvider) {
             const currentEntries = this.historyProviders.filter((entry) => entry.id !== provider.id);
             this.setHistoryProviders([
                 ...currentEntries,

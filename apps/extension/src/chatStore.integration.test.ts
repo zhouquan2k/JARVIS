@@ -1,9 +1,15 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { useChatStore } from '@packages/ui';
-import type { Conversation, ConversationHistorySummary, IHistoryProvider, IModelProvider, IStorageProvider } from '@packages/core/src';
+import type {
+    Conversation,
+    ConversationHistorySummary,
+    IConversationPersistProvider,
+    IExternalConversationProvider,
+    IModelProvider
+} from '@packages/core/src';
 
-class MemoryStorageProvider implements IStorageProvider {
+class MemoryStorageProvider implements IConversationPersistProvider {
     id = 'memory-storage';
     private readonly conversations = new Map<string, Conversation>();
 
@@ -24,7 +30,7 @@ class MemoryStorageProvider implements IStorageProvider {
     }
 }
 
-class StaticHistoryProvider implements IHistoryProvider {
+class StaticHistoryProvider implements IExternalConversationProvider {
     id = 'gemini-web' as const;
 
     async getHistoryList(): Promise<ConversationHistorySummary[]> {

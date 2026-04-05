@@ -4,9 +4,9 @@ import type {
     Conversation,
     ConversationHistorySummary,
     HistoryListQueryOptions,
-    IHistoryProvider,
+    IConversationPersistProvider,
+    IExternalConversationProvider,
     IModelProvider,
-    IStorageProvider,
     ResolvedAgentConfig
 } from '@packages/core/src';
 import { encodeTextDocument } from '@packages/core/src';
@@ -129,7 +129,7 @@ class AbortableMockModelProvider extends MockModelProvider {
     }
 }
 
-class MockStorageProvider implements IStorageProvider {
+class MockStorageProvider implements IConversationPersistProvider {
     id = 'mock-storage';
 
     constructor(private readonly conversations: Conversation[]) {}
@@ -159,7 +159,7 @@ class MockStorageProvider implements IStorageProvider {
     }
 }
 
-class MockHistoryProvider implements IHistoryProvider {
+class MockHistoryProvider implements IExternalConversationProvider {
     id = 'chatgpt-web';
     historyListCalls: HistoryListQueryOptions[] = [];
 
@@ -1195,7 +1195,7 @@ describe('useChatStore workspace history flow', () => {
 
     it('marks external history loading while provider history is being fetched', async () => {
         let resolveHistoryList: ((value: ConversationHistorySummary[]) => void) | null = null;
-        const historyProvider: IHistoryProvider = {
+        const historyProvider: IExternalConversationProvider = {
             id: 'chatgpt-web',
             getHistoryList() {
                 return new Promise((resolve) => {

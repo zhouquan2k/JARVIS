@@ -8,7 +8,7 @@ import type {
     IAgentCapableProvider
 } from '../../interfaces/IAgentCapableProvider';
 import type { IModelProvider, ProviderSendResult, ProviderStreamUpdate, SendMessageOptions } from '../../interfaces/IModelProvider';
-import type { ProviderRuntime } from '../../runtime/providerRuntime.types';
+import type { ModelProviderRuntime } from '../../runtime/modelProviderRuntime.types';
 import { createAgentRuntime } from './createAgentRuntime';
 
 const scopedAgent = {
@@ -214,7 +214,7 @@ class MultiToolAgentProvider extends BasicProvider implements IAgentCapableProvi
     }
 }
 
-function createRuntime(provider: IModelProvider): ProviderRuntime {
+function createRuntime(provider: IModelProvider): ModelProviderRuntime {
     return {
         getAvailableProviders: () => [],
         getProviderCatalog: () => [],

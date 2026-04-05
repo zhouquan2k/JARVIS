@@ -1,4 +1,4 @@
-import type { HistoryListQueryOptions } from '../../../interfaces/IHistoryProvider';
+import type { HistoryListQueryOptions } from '../../../interfaces/IExternalConversationProvider';
 import type { GeminiHistoryRemoteConfig } from '../../../interfaces/ProviderRemoteConfig';
 import type {
     GeminiContentConversationDetail,

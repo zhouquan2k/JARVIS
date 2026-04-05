@@ -1,6 +1,6 @@
 import { ComparisonAnalyzer } from './ComparisonAnalyzer';
 import type { AnalysisResult } from './types';
-import type { ProviderRuntime } from '../../runtime/providerRuntime.types';
+import type { ModelProviderRuntime } from '../../runtime/modelProviderRuntime.types';
 
 export interface CompareModelSelection {
     providerId: string;
@@ -41,7 +41,7 @@ export class CompareWorkflowController {
     private activeProviders: Array<{ abort: () => void }> = [];
 
     constructor(
-        private readonly runtime: ProviderRuntime,
+        private readonly runtime: ModelProviderRuntime,
         private readonly analyzer: ComparisonAnalyzerLike = new ComparisonAnalyzer(runtime)
     ) {}
 

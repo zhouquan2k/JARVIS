@@ -1,12 +1,12 @@
 import {
     APP_CONFIG,
     ComparisonAnalyzer,
-    createProviderRuntime,
+    createModelProviderRuntime,
     ExternalHistoryError,
     type ChatGPTWebProviderOptions,
-    type IHistoryProvider,
+    type IExternalConversationProvider,
     type IModelProvider,
-    type ProviderRuntime
+    type ModelProviderRuntime
 } from '@packages/core/src';
 import type {
     AbortRequest,
@@ -26,8 +26,8 @@ export interface CreateDesktopHostRuntimeOptions {
     resolveChatGPTProviderOptions?: () => ChatGPTWebProviderOptions | undefined;
 }
 
-export function createDesktopHostRuntime(options: CreateDesktopHostRuntimeOptions = {}): ProviderRuntime {
-    return createProviderRuntime({
+export function createDesktopHostRuntime(options: CreateDesktopHostRuntimeOptions = {}): ModelProviderRuntime {
+    return createModelProviderRuntime({
         runtimeMode: 'desktop',
         credentials: {
             geminiApiKey: options.geminiApiKey
@@ -45,9 +45,9 @@ export function createDesktopHostRuntime(options: CreateDesktopHostRuntimeOption
 type ResponseSender = (response: ProxyResponse) => void;
 
 export interface ProviderHostOptions {
-    runtime?: ProviderRuntime;
-    createRuntime?: () => ProviderRuntime;
-    resolveHistoryProvider?: (providerId: string) => Promise<IHistoryProvider | undefined>;
+    runtime?: ModelProviderRuntime;
+    createRuntime?: () => ModelProviderRuntime;
+    resolveHistoryProvider?: (providerId: string) => Promise<IExternalConversationProvider | undefined>;
 }
 
 export interface ProviderHost {
@@ -58,7 +58,7 @@ export interface ProviderHost {
 export function createProviderHost(options: ProviderHostOptions = {}): ProviderHost {
     const activeRequests = new Map<string, { provider: IModelProvider; channelId: string }>();
     const requestIdsByChannel = new Map<string, Set<string>>();
-    let runtimePromise: Promise<ProviderRuntime> | null = null;
+    let runtimePromise: Promise<ModelProviderRuntime> | null = null;
 
     const getRuntime = async () => {
         if (options.runtime) {
@@ -114,7 +114,7 @@ export function createProviderHost(options: ProviderHostOptions = {}): ProviderH
         return runtime.getProvider(providerId, { fresh: true });
     };
 
-    const resolveHistoryProvider = async (providerId: string): Promise<IHistoryProvider> => {
+    const resolveHistoryProvider = async (providerId: string): Promise<IExternalConversationProvider> => {
         const injected = await options.resolveHistoryProvider?.(providerId);
         if (injected) {
             return injected;
@@ -122,13 +122,13 @@ export function createProviderHost(options: ProviderHostOptions = {}): ProviderH
 
         const provider = await resolveProvider(providerId);
         if (
-            typeof (provider as Partial<IHistoryProvider>).getHistoryList !== 'function'
-            || typeof (provider as Partial<IHistoryProvider>).getHistoryDetail !== 'function'
+            typeof (provider as Partial<IExternalConversationProvider>).getHistoryList !== 'function'
+            || typeof (provider as Partial<IExternalConversationProvider>).getHistoryDetail !== 'function'
         ) {
             throw new Error(`Provider '${providerId}' does not support history queries`);
         }
 
-        return provider as IHistoryProvider;
+        return provider as IExternalConversationProvider;
     };
 
     const abortRequest = (requestId: string) => {
@@ -186,7 +186,7 @@ export function createProviderHost(options: ProviderHostOptions = {}): ProviderH
     const handleAnalyzeComparison = async (msg: AnalyzeComparisonRequest, sendResponse: ResponseSender) => {
         try {
             const runtime = await getRuntime();
-            const analyzerRuntime: ProviderRuntime = {
+            const analyzerRuntime: ModelProviderRuntime = {
                 getAvailableProviders() {
                     return runtime.getAvailableProviders();
                 },

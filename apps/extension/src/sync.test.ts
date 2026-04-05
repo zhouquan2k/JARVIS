@@ -5,7 +5,7 @@ import type {
     Conversation,
     DeletedConversationStateStore,
     IModelProvider,
-    IStorageProvider,
+    IConversationPersistProvider,
     ProviderStreamUpdate,
     SendMessageOptions,
     SyncDeletedConversation,
@@ -14,7 +14,7 @@ import type {
 import { createApp } from '../../server/src/app.js';
 import { createExtensionSyncStorageProvider } from './sync';
 
-class MemoryStorageProvider implements IStorageProvider {
+class MemoryStorageProvider implements IConversationPersistProvider {
     id = 'memory-storage';
 
     private readonly conversations = new Map<string, Conversation>();

@@ -2,8 +2,8 @@ import {
     ExternalHistoryError,
     type ConversationHistorySummary,
     type HistoryListQueryOptions,
-    type IHistoryProvider
-} from '../../../interfaces/IHistoryProvider';
+    type IExternalConversationProvider
+} from '../../../interfaces/IExternalConversationProvider';
 import type { GeminiHistoryBridge } from './GeminiHistoryBridge';
 import type { GeminiHistoryConfigLoader } from './GeminiHistoryConfigLoader';
 import type { Conversation } from '../../../interfaces/IStorageProvider';
@@ -18,7 +18,7 @@ function isGenericGeminiTitle(value: string | undefined): boolean {
     return !normalized || normalized === 'google gemini' || normalized === 'gemini';
 }
 
-export class GeminiDomHistoryProvider implements IHistoryProvider {
+export class GeminiDomHistoryProvider implements IExternalConversationProvider {
     public readonly id = 'gemini-web' as const;
     private readonly summaryTitleById = new Map<string, string>();
 
