@@ -275,6 +275,38 @@ describe('NormalChatView', () => {
         expect(wrapper.find('[data-testid="selector-row"]').exists()).toBe(false);
     });
 
+    it('keeps the attachment panel visible in agent mode when draft attachments exist', async () => {
+        const store = useChatStore();
+        store.workspaceMode = 'active';
+        store.currentConversation = createConversation([]);
+        store.activeAgentContext = {
+            name: 'Docs Agent',
+            effectiveInstructions: 'Use docs context',
+            scopePath: '/docs',
+            sourcePaths: ['/docs/.agent.json']
+        };
+        store.draftAttachments = [
+            {
+                id: 'attachment-1',
+                type: 'file',
+                name: 'guide.md',
+                mimeType: 'text/markdown',
+                size: 128,
+                base64Data: 'Z3VpZGU='
+            }
+        ];
+        store.init = vi.fn().mockResolvedValue(undefined);
+        store.checkAuth = vi.fn().mockResolvedValue(true);
+
+        const wrapper = mountView();
+        await flushPromises();
+
+        expect(wrapper.get('[data-testid="normal-chat-view"]').classes()).toContain('agent-mode');
+        expect(wrapper.find('[data-testid="selector-row"]').exists()).toBe(true);
+        expect(wrapper.find('[data-testid="attachment-composer-stub"]').exists()).toBe(true);
+        expect(wrapper.find('[data-testid="provider-selector-stub"]').exists()).toBe(true);
+    });
+
     it('renders a new chat action below the send button and calls the existing store entry', async () => {
         const store = useChatStore();
         store.workspaceMode = 'active';
@@ -290,6 +322,84 @@ describe('NormalChatView', () => {
         expect(wrapper.find('.secondary-actions [data-testid="normal-new-chat"]').exists()).toBe(true);
         await wrapper.get('[data-testid="normal-new-chat"]').trigger('click');
         expect(store.startNewConversation).toHaveBeenCalledTimes(1);
+    });
+
+    it('renders attachments in agent mode when they are stored on the message', async () => {
+        const store = useChatStore();
+        store.workspaceMode = 'active';
+        store.activeAgentContext = {
+            name: 'Docs Agent',
+            effectiveInstructions: 'Use docs context',
+            scopePath: '/docs',
+            sourcePaths: ['/docs/.agent.json']
+        };
+        store.currentConversation = createConversation([
+            {
+                id: 'user-1',
+                role: 'user',
+                content: '当前文档已作为附件提供：/docs/guide.md',
+                attachments: [
+                    {
+                        id: 'attachment-1',
+                        type: 'file',
+                        name: 'guide.md',
+                        mimeType: 'text/markdown',
+                        size: 128,
+                        base64Data: 'Z3VpZGU='
+                    }
+                ],
+                createdAt: 1
+            }
+        ]);
+        store.init = vi.fn().mockResolvedValue(undefined);
+        store.checkAuth = vi.fn().mockResolvedValue(true);
+
+        const wrapper = mountView();
+        await flushPromises();
+
+        expect(wrapper.findAll('[data-testid="attachment-strip-stub"]')).toHaveLength(1);
+        expect(wrapper.get('[data-testid="normal-chat-view"]').classes()).toContain('agent-mode');
+    });
+
+    it('renders attachments in agent mode when they only exist in the request snapshot', async () => {
+        const store = useChatStore();
+        store.workspaceMode = 'active';
+        store.activeAgentContext = {
+            name: 'Docs Agent',
+            effectiveInstructions: 'Use docs context',
+            scopePath: '/docs',
+            sourcePaths: ['/docs/.agent.json']
+        };
+        store.currentConversation = createConversation([
+            {
+                id: 'user-1',
+                role: 'user',
+                content: '当前文档已作为附件提供：/docs/guide.md',
+                requestSnapshot: {
+                    prompt: '当前文档已作为附件提供：/docs/guide.md',
+                    attachments: [
+                        {
+                            id: 'attachment-1',
+                            type: 'file',
+                            name: 'guide.md',
+                            mimeType: 'text/markdown',
+                            size: 128,
+                            base64Data: 'Z3VpZGU='
+                        }
+                    ],
+                    activeDocumentMode: 'attachment'
+                },
+                createdAt: 1
+            }
+        ]);
+        store.init = vi.fn().mockResolvedValue(undefined);
+        store.checkAuth = vi.fn().mockResolvedValue(true);
+
+        const wrapper = mountView();
+        await flushPromises();
+
+        expect(wrapper.findAll('[data-testid="attachment-strip-stub"]')).toHaveLength(1);
+        expect(wrapper.get('[data-testid="normal-chat-view"]').classes()).toContain('agent-mode');
     });
 
     it('disables model option controls when chat input is unavailable', async () => {

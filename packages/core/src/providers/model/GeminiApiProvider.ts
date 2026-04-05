@@ -105,8 +105,33 @@ function normalizeGeminiFallbackDefault(models: ProviderModelCatalog['models'], 
         return fallbackDefaultModel;
     }
 
-    const preferredModel = models.find((model) => model.id === 'gemini-2.5-flash');
+    const preferredModel = findGeminiModelMatch(
+        models,
+        APP_CONFIG.providers.find((provider) => provider.id === 'gemini-api')?.preferredDefaultModel || 'Gemini Pro Latest'
+    ) || models.find((model) => model.id === 'gemini-2.5-pro');
     return preferredModel?.id || models[0]?.id || fallbackDefaultModel;
+}
+
+function findGeminiModelMatch(
+    models: ProviderModelCatalog['models'],
+    requestedModel: string
+): ProviderModelCatalog['models'][number] | undefined {
+    const normalizedRequested = requestedModel.trim();
+    if (!normalizedRequested) {
+        return undefined;
+    }
+
+    const normalizedRequestedToken = normalizedModelToken(normalizedRequested);
+    return models.find((model) => {
+        return model.id === normalizedRequested
+            || model.name === normalizedRequested
+            || normalizedModelToken(model.id) === normalizedRequestedToken
+            || normalizedModelToken(model.name) === normalizedRequestedToken;
+    });
+}
+
+function normalizedModelToken(value: string): string {
+    return value.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
 function isGeminiChatModel(model: GeminiModelListItem): boolean {
@@ -429,6 +454,46 @@ export class GeminiApiProvider implements IAgentCapableProvider {
         return this.readProcessEnvApiKey() || this.readGlobalEnvApiKey();
     }
 
+    private resolveStaticGeminiModelId(requestedModel?: string): string {
+        const fallbackCatalog = getGeminiModelCatalog();
+        const normalizedRequested = requestedModel?.trim();
+        if (!normalizedRequested) {
+            return fallbackCatalog.defaultModel === 'gemini-pro-latest'
+                ? 'gemini-2.5-pro'
+                : fallbackCatalog.defaultModel;
+        }
+
+        const matchedStaticModel = findGeminiModelMatch(fallbackCatalog.models, normalizedRequested);
+        if (matchedStaticModel) {
+            if (matchedStaticModel.id === 'gemini-pro-latest') {
+                return 'gemini-2.5-pro';
+            }
+            return matchedStaticModel.id;
+        }
+
+        return normalizedRequested;
+    }
+
+    private async resolveRequestedModelId(requestedModel?: string): Promise<string> {
+        const normalizedRequested = requestedModel?.trim();
+
+        try {
+            const catalog = await this.getAvailableModels();
+            if (!normalizedRequested) {
+                return catalog.defaultModel === 'gemini-pro-latest' ? this.resolveStaticGeminiModelId(catalog.defaultModel) : catalog.defaultModel;
+            }
+
+            const matchedModel = findGeminiModelMatch(catalog.models, normalizedRequested);
+            if (matchedModel) {
+                return matchedModel.id === 'gemini-pro-latest' ? this.resolveStaticGeminiModelId(matchedModel.id) : matchedModel.id;
+            }
+        } catch {
+            return this.resolveStaticGeminiModelId(normalizedRequested);
+        }
+
+        return this.resolveStaticGeminiModelId(normalizedRequested);
+    }
+
     async getAvailableModels(): Promise<ProviderModelCatalog> {
         const fallbackCatalog = getGeminiModelCatalog();
         const apiKey = this.resolveApiKey();
@@ -498,6 +563,12 @@ export class GeminiApiProvider implements IAgentCapableProvider {
         return !!this.resolveApiKey();
     }
 
+    async getDocumentCapability() {
+        return {
+            acceptedMimeTypes: ['text/plain', 'text/markdown', 'application/pdf']
+        };
+    }
+
     async sendMessage(
         prompt: string,
         options: SendMessageOptions = {},
@@ -508,7 +579,7 @@ export class GeminiApiProvider implements IAgentCapableProvider {
             throw new Error('No Gemini API Key found in environment variables');
         }
 
-        const modelId = options.modelId || 'gemini-2.5-flash';
+        const modelId = await this.resolveRequestedModelId(options.modelId);
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:streamGenerateContent?alt=sse&key=${apiKey}`;
 
         this.abortController = new AbortController();
@@ -569,7 +640,7 @@ export class GeminiApiProvider implements IAgentCapableProvider {
             throw new Error('No Gemini API Key found in environment variables');
         }
 
-        const modelId = request.modelId || request.agent.modelName?.trim() || 'gemini-2.5-flash';
+        const modelId = await this.resolveRequestedModelId(request.modelId || request.agent.modelName?.trim());
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:streamGenerateContent?alt=sse&key=${apiKey}`;
 
         this.abortController = new AbortController();

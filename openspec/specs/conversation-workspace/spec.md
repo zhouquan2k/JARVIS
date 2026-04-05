@@ -73,6 +73,19 @@
 - **THEN** 系统 MUST 拒绝将其加入发送草稿
 - **AND** 系统 MUST 显示明确的大小限制提示
 
+### Requirement: Conversation history MUST persist the actual sent request content
+系统 MUST 以“实际发送了什么”作为用户消息与后续历史重放的唯一依据，而不是同时并存一份原始输入正文和另一份实际请求正文。任何实际进入某轮请求的自动工作区上下文，都 MUST 反映在该轮用户消息的 `content` 与 `attachments` 中。
+
+#### Scenario: Persist an auto-attached current document in user history
+- **WHEN** 知识工作区在发送一条用户消息时自动将当前文档加入实际请求
+- **THEN** 系统 MUST 将该文档作为该条用户消息的附件持久化到历史中
+- **AND** 若系统为该文档追加了稳定提示，该提示 MUST 体现在该条用户消息的最终正文中
+
+#### Scenario: Replay follow-up turns from the persisted actual request
+- **WHEN** 用户基于一条已发送过自动上下文文档的消息继续 follow-up
+- **THEN** 后续 provider history MUST 基于已持久化的用户消息 `content` 与 `attachments` 重放
+- **AND** 系统 MUST NOT 再根据当前工作区节点重新推断上一轮实际发送过的上下文
+
 ### Requirement: Assistant message rendering MUST support structured annotations
 系统 MUST 基于标准化的 `text + annotations` 契约渲染助手消息，并分别支持正文内联注解与块级注解。
 

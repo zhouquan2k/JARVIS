@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { augmentPromptWithAgentContext } from '../augmentPromptWithAgentContext';
 import { createMockContextProvider } from '../../testing/createMockContextProvider';
+import { encodeTextDocument } from '../../utils/documentData';
 import type {
     AgentCapabilities,
     AgentRunRequest,
@@ -24,6 +25,7 @@ const scopedAgent = {
 
 class BasicProvider implements IModelProvider {
     public id = 'basic-provider';
+    public acceptedMimeTypes = ['text/plain', 'text/markdown', 'application/pdf'];
     public sendMessage = vi.fn(async (
         prompt: string,
         _options: SendMessageOptions,
@@ -46,6 +48,12 @@ class BasicProvider implements IModelProvider {
 
     async checkAuth(): Promise<boolean> {
         return true;
+    }
+
+    async getDocumentCapability() {
+        return {
+            acceptedMimeTypes: [...this.acceptedMimeTypes]
+        };
     }
 
     abort(): void {}
@@ -124,6 +132,7 @@ class AgentProvider extends BasicProvider implements IAgentCapableProvider {
         expect(request.toolExchanges?.[0]?.result.isError).toBeUndefined();
         expect(JSON.parse(request.toolExchanges?.[0]?.result.result || '{}')).toEqual({
             path: '/docs/guide.md',
+            mimeType: 'text/markdown',
             content: '# Guide'
         });
         onUpdate({ text: 'native:done' });
@@ -279,7 +288,8 @@ describe('createAgentRuntime', () => {
                     activePath: '/docs/guide.md',
                     activeDocument: {
                         path: '/docs/guide.md',
-                        content: '# Guide'
+                        mimeType: 'text/markdown',
+                        dataBase64: encodeTextDocument('# Guide')
                     },
                     contextProvider: null
                 },
@@ -293,10 +303,29 @@ describe('createAgentRuntime', () => {
         expect(provider.sendMessage.mock.calls[0]?.[0]).toBe(augmentPromptWithAgentContext('请总结文档', {
             activeDocument: {
                 path: '/docs/guide.md',
-                content: '# Guide'
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('# Guide')
             }
         }));
         expect(result.text).toContain('fallback:');
+        expect(result.requestSnapshot).toEqual({
+            prompt: augmentPromptWithAgentContext('请总结文档', {
+                activeDocument: {
+                    path: '/docs/guide.md',
+                    mimeType: 'text/markdown',
+                    dataBase64: encodeTextDocument('# Guide')
+                }
+            }),
+            attachments: [
+                expect.objectContaining({
+                    id: 'active-document:/docs/guide.md',
+                    name: 'guide.md',
+                    mimeType: 'text/markdown',
+                    base64Data: encodeTextDocument('# Guide')
+                })
+            ],
+            activeDocumentMode: 'attachment'
+        });
     });
 
     it('reuses the standard stream/update contracts for non-agent requests', async () => {
@@ -320,7 +349,12 @@ describe('createAgentRuntime', () => {
         expect(result).toEqual({
             text: 'fallback:普通聊天',
             conversationId: 'conversation-id',
-            messageId: 'message-id'
+            messageId: 'message-id',
+            requestSnapshot: {
+                prompt: '普通聊天',
+                attachments: [],
+                activeDocumentMode: 'none'
+            }
         });
     });
 
@@ -355,7 +389,8 @@ describe('createAgentRuntime', () => {
                     activePath: '/docs/guide.md',
                     activeDocument: {
                         path: '/docs/guide.md',
-                        content: '# Guide'
+                        mimeType: 'text/markdown',
+                        dataBase64: encodeTextDocument('# Guide')
                     },
                     contextProvider
                 },
@@ -384,7 +419,8 @@ describe('createAgentRuntime', () => {
                     activePath: '/docs/guide.md',
                     activeDocument: {
                         path: '/docs/guide.md',
-                        content: '# Guide'
+                        mimeType: 'text/markdown',
+                        dataBase64: encodeTextDocument('# Guide')
                     },
                     contextProvider: createMockContextProvider({
                         nodes: [{ path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' }],
@@ -397,9 +433,97 @@ describe('createAgentRuntime', () => {
             () => undefined
         );
 
-        expect(provider.runAgent.mock.calls[0]?.[0]?.prompt).toContain('[[Active File Context]]');
-        expect(provider.runAgent.mock.calls[0]?.[0]?.prompt).toContain('Path: /docs/guide.md');
-        expect(provider.runAgent.mock.calls[0]?.[0]?.prompt).toContain('# Guide');
-        expect(provider.runAgent.mock.calls[0]?.[0]?.prompt).not.toContain('Allowed Tools:');
+        expect(provider.runAgent.mock.calls[0]?.[0]?.prompt).toBe('当前文档已作为附件提供：/docs/guide.md\n\n请总结文档');
+        expect(provider.runAgent.mock.calls[0]?.[0]?.attachments).toEqual([
+            expect.objectContaining({
+                id: 'active-document:/docs/guide.md',
+                name: 'guide.md',
+                mimeType: 'text/markdown',
+                base64Data: encodeTextDocument('# Guide')
+            })
+        ]);
+    });
+
+    it('attaches active pdf documents for providers that accept application/pdf', async () => {
+        const provider = new BasicProvider();
+        const runtime = createAgentRuntime({
+            providerRuntime: createRuntime(provider)
+        });
+
+        const result = await runtime.run(
+            {
+                prompt: '请总结这个 PDF',
+                agent: scopedAgent,
+                workspace: {
+                    activePath: '/docs/spec.pdf',
+                    activeDocument: {
+                        path: '/docs/spec.pdf',
+                        mimeType: 'application/pdf',
+                        dataBase64: 'JVBERi0xLjQ='
+                    },
+                    contextProvider: null
+                },
+                providerId: 'chatgpt-web',
+                modelId: 'gpt-4o'
+            },
+            () => undefined
+        );
+
+        expect(provider.sendMessage.mock.calls[0]?.[0]).toBe('请总结这个 PDF');
+        expect(provider.sendMessage.mock.calls[0]?.[1]?.attachments).toEqual([
+            expect.objectContaining({
+                id: 'active-document:/docs/spec.pdf',
+                name: 'spec.pdf',
+                mimeType: 'application/pdf',
+                base64Data: 'JVBERi0xLjQ='
+            })
+        ]);
+        expect(result.requestSnapshot).toMatchObject({
+            prompt: '请总结这个 PDF',
+            activeDocumentMode: 'attachment',
+            attachments: [
+                expect.objectContaining({
+                    id: 'active-document:/docs/spec.pdf',
+                    name: 'spec.pdf',
+                    mimeType: 'application/pdf',
+                    base64Data: 'JVBERi0xLjQ='
+                })
+            ]
+        });
+    });
+
+    it('omits unsupported active document payloads from fallback requests', async () => {
+        const provider = new BasicProvider();
+        provider.acceptedMimeTypes = ['text/plain', 'text/markdown'];
+        const runtime = createAgentRuntime({
+            providerRuntime: createRuntime(provider)
+        });
+
+        const result = await runtime.run(
+            {
+                prompt: '请总结这个 PDF',
+                agent: scopedAgent,
+                workspace: {
+                    activePath: '/docs/spec.pdf',
+                    activeDocument: {
+                        path: '/docs/spec.pdf',
+                        mimeType: 'application/pdf',
+                        dataBase64: 'JVBERi0xLjQ='
+                    },
+                    contextProvider: null
+                },
+                providerId: 'chatgpt-web',
+                modelId: 'gpt-4o'
+            },
+            () => undefined
+        );
+
+        expect(provider.sendMessage.mock.calls[0]?.[0]).toBe('请总结这个 PDF');
+        expect(provider.sendMessage.mock.calls[0]?.[1]?.attachments).toEqual([]);
+        expect(result.requestSnapshot).toEqual({
+            prompt: '请总结这个 PDF',
+            attachments: [],
+            activeDocumentMode: 'omitted'
+        });
     });
 });

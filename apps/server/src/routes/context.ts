@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono';
 import type { ServerConfig } from '../config.js';
 import { HttpContextService } from '../services/httpContextService.js';
-import type { ContextSearchRequest, CreateContextNodeInput } from '../types/context.js';
+import type { ContextSearchRequest, CreateContextNodeInput, RenameContextNodeInput, WriteContextDocumentInput } from '../types/context.js';
 
 const ALLOW_HEADERS = 'content-type';
 const ALLOW_METHODS = 'POST, OPTIONS';
@@ -59,11 +59,25 @@ function normalizeRequiredPath(body: Record<string, unknown>): string {
     return value;
 }
 
-function normalizeContent(body: Record<string, unknown>): string {
-    if (typeof body.content !== 'string') {
-        throw new Error('content 必须是字符串。');
+function normalizeWriteDocumentInput(body: Record<string, unknown>): WriteContextDocumentInput {
+    if (typeof body.mimeType !== 'string' || !body.mimeType.trim()) {
+        throw new Error('mimeType 不能为空。');
     }
-    return body.content;
+
+    if (typeof body.dataBase64 !== 'string') {
+        throw new Error('dataBase64 必须是字符串。');
+    }
+
+    if (body.expectedVersion !== undefined && body.expectedVersion !== null && typeof body.expectedVersion !== 'string') {
+        throw new Error('expectedVersion 必须是字符串。');
+    }
+
+    return {
+        path: normalizeRequiredPath(body),
+        mimeType: body.mimeType,
+        dataBase64: body.dataBase64,
+        expectedVersion: typeof body.expectedVersion === 'string' ? body.expectedVersion : undefined
+    };
 }
 
 function normalizeCreateNodeInput(body: Record<string, unknown>): CreateContextNodeInput {
@@ -78,6 +92,17 @@ function normalizeCreateNodeInput(body: Record<string, unknown>): CreateContextN
         parentPath: normalizeOptionalPath(body),
         name: body.name,
         kind: body.kind
+    };
+}
+
+function normalizeRenameNodeInput(body: Record<string, unknown>): RenameContextNodeInput {
+    if (typeof body.name !== 'string' || !body.name.trim()) {
+        throw new Error('name 不能为空。');
+    }
+
+    return {
+        path: normalizeRequiredPath(body),
+        name: body.name
     };
 }
 
@@ -162,7 +187,7 @@ export function createContextRouter(options: { service: HttpContextService; conf
     app.post('/write-document', async (c) => {
         try {
             const body = normalizeObjectBody(await readJsonBody(c));
-            await service.writeDocument(normalizeRequiredPath(body), normalizeContent(body));
+            await service.writeDocument(normalizeWriteDocumentInput(body));
             return c.json({ ok: true });
         } catch (error) {
             const message = error instanceof Error ? error.message : '写入文档失败。';
@@ -176,6 +201,27 @@ export function createContextRouter(options: { service: HttpContextService; conf
             return c.json({ node: await service.createNode(normalizeCreateNodeInput(body)) });
         } catch (error) {
             const message = error instanceof Error ? error.message : '创建节点失败。';
+            return c.json({ error: message }, 400);
+        }
+    });
+
+    app.post('/delete-node', async (c) => {
+        try {
+            const body = normalizeObjectBody(await readJsonBody(c));
+            await service.deleteNode(normalizeRequiredPath(body));
+            return c.json({ ok: true });
+        } catch (error) {
+            const message = error instanceof Error ? error.message : '删除节点失败。';
+            return c.json({ error: message }, 400);
+        }
+    });
+
+    app.post('/rename-node', async (c) => {
+        try {
+            const body = normalizeObjectBody(await readJsonBody(c));
+            return c.json({ node: await service.renameNode(normalizeRenameNodeInput(body)) });
+        } catch (error) {
+            const message = error instanceof Error ? error.message : '重命名节点失败。';
             return c.json({ error: message }, 400);
         }
     });

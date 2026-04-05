@@ -903,6 +903,12 @@ export class ChatGPTWebProvider implements IModelProvider, IHistoryProvider {
         }
     }
 
+    async getDocumentCapability() {
+        return {
+            acceptedMimeTypes: ['text/plain', 'text/markdown', 'application/pdf']
+        };
+    }
+
     async getAvailableModels(): Promise<ProviderModelCatalog> {
         const fallbackCatalog = getStaticChatGPTModelCatalog();
         const payload = await this.fetchModelCatalogPayload();

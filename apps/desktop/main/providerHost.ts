@@ -12,6 +12,7 @@ import type {
     AbortRequest,
     AnalyzeComparisonRequest,
     CheckAuthRequest,
+    GetDocumentCapabilityRequest,
     GetAvailableModelsRequest,
     GetHistoryDetailRequest,
     GetHistoryListRequest,
@@ -250,6 +251,21 @@ export function createProviderHost(options: ProviderHostOptions = {}): ProviderH
         }
     };
 
+    const handleGetDocumentCapability = async (msg: GetDocumentCapabilityRequest, sendResponse: ResponseSender) => {
+        try {
+            const provider = await resolveProvider(msg.providerId);
+            const result = await provider.getDocumentCapability?.() ?? null;
+            sendResponse({
+                type: 'DONE',
+                requestId: msg.requestId,
+                channelId: msg.channelId,
+                result
+            });
+        } catch (error) {
+            postError(msg.requestId, msg.channelId, error, sendResponse);
+        }
+    };
+
     const handleGetHistoryList = async (msg: GetHistoryListRequest, sendResponse: ResponseSender) => {
         try {
             const provider = await resolveHistoryProvider(msg.providerId);
@@ -305,6 +321,9 @@ export function createProviderHost(options: ProviderHostOptions = {}): ProviderH
                     break;
                 case 'GET_AVAILABLE_MODELS':
                     await handleGetAvailableModels(message, sendResponse);
+                    break;
+                case 'GET_DOCUMENT_CAPABILITY':
+                    await handleGetDocumentCapability(message, sendResponse);
                     break;
                 case 'GET_HISTORY_LIST':
                     await handleGetHistoryList(message, sendResponse);

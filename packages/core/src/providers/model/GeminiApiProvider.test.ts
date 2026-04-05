@@ -7,7 +7,7 @@ const scopedAgent = {
     instructions: 'Use documentation context only.',
     effectiveInstructions: 'Use documentation context only.',
     modelProviderName: 'gemini-api',
-    modelName: 'gemini-2.5-pro',
+    modelName: 'Gemini Pro Latest',
     scopePath: '/docs',
     sourcePaths: ['/docs/.agent.json'],
     tools: [{ id: 'read_file', description: 'Read docs' }],
@@ -50,7 +50,7 @@ describe('GeminiApiProvider', () => {
                     {
                         name: 'models/gemini-2.5-pro',
                         baseModelId: 'gemini-2.5-pro',
-                        displayName: 'Gemini 2.5 Pro',
+                        displayName: 'Gemini Pro Latest',
                         supportedGenerationMethods: ['generateContent']
                     }
                 ]
@@ -68,11 +68,11 @@ describe('GeminiApiProvider', () => {
                 },
                 {
                     id: 'gemini-2.5-pro',
-                    name: 'Gemini 2.5 Pro',
+                    name: 'Gemini Pro Latest',
                     options: [expect.objectContaining({ key: 'deep_research', type: 'boolean' })]
                 }
             ],
-            defaultModel: 'gemini-2.5-flash'
+            defaultModel: 'gemini-2.5-pro'
         });
 
         expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -102,12 +102,17 @@ describe('GeminiApiProvider', () => {
                     options: [expect.objectContaining({ key: 'deep_research', type: 'boolean' })]
                 },
                 {
+                    id: 'gemini-pro-latest',
+                    name: 'Gemini Pro Latest',
+                    options: [expect.objectContaining({ key: 'deep_research', type: 'boolean' })]
+                },
+                {
                     id: 'gemini-2.5-pro',
                     name: 'Gemini 2.5 Pro',
                     options: [expect.objectContaining({ key: 'deep_research', type: 'boolean' })]
                 }
             ],
-            defaultModel: 'gemini-2.5-flash'
+            defaultModel: 'gemini-pro-latest'
         });
 
         vi.unstubAllGlobals();
@@ -166,8 +171,8 @@ describe('GeminiApiProvider', () => {
             (update) => updates.push(update.text)
         );
 
-        expect(fetchMock).toHaveBeenCalledTimes(1);
-        const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        const requestBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
         expect(requestBody.contents[0]?.parts).toEqual([
             { text: '分析这张图' },
             { inlineData: { mimeType: 'image/png', data: 'aW1n' } },
@@ -214,11 +219,55 @@ describe('GeminiApiProvider', () => {
             () => undefined
         );
 
-        const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+        const requestBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
         expect(requestBody.contents[0]?.parts).toEqual([
             { text: '分析附件' },
             { inlineData: { mimeType: 'text/plain', data: 'IyBUaXRsZQ==' } }
         ]);
+
+        vi.unstubAllGlobals();
+    });
+
+    it('resolves Gemini Pro Latest to the real dynamic model id before sending', async () => {
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    models: [
+                        {
+                            name: 'models/gemini-3.1-pro',
+                            baseModelId: 'gemini-3.1-pro',
+                            displayName: 'Gemini Pro Latest',
+                            supportedGenerationMethods: ['generateContent', 'streamGenerateContent']
+                        }
+                    ]
+                })
+            })
+            .mockResolvedValueOnce(
+                createGeminiSseResponse([
+                    {
+                        candidates: [
+                            {
+                                content: {
+                                    parts: [{ text: '已发送' }]
+                                }
+                            }
+                        ]
+                    }
+                ])
+            );
+        vi.stubGlobal('fetch', fetchMock);
+
+        const provider = new GeminiApiProvider({ apiKey: 'test-key' });
+        await provider.sendMessage(
+            '分析附件',
+            {
+                modelId: 'Gemini Pro Latest'
+            },
+            () => undefined
+        );
+
+        expect(String(fetchMock.mock.calls[1]?.[0])).toContain('/models/gemini-3.1-pro:streamGenerateContent');
 
         vi.unstubAllGlobals();
     });
@@ -252,7 +301,7 @@ describe('GeminiApiProvider', () => {
             () => undefined
         );
 
-        const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+        const requestBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
         expect(requestBody.contents).toEqual([
             {
                 role: 'user',
@@ -297,7 +346,7 @@ describe('GeminiApiProvider', () => {
             () => undefined
         );
 
-        const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+        const requestBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
         expect(requestBody.tools).toEqual([{ googleSearch: {} }]);
 
         vi.unstubAllGlobals();
@@ -381,7 +430,7 @@ describe('GeminiApiProvider', () => {
             () => undefined
         );
 
-        const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+        const requestBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
         expect(requestBody.systemInstruction.parts[0].text).toBe('Use documentation context only.');
         expect(requestBody.contents.at(-2)).toEqual({
             role: 'model',

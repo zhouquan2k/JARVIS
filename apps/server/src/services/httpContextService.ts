@@ -5,7 +5,9 @@ import type {
     ContextSearchRequest,
     ContextProvider,
     CreateContextNodeInput,
-    ResolvedAgentConfig
+    RenameContextNodeInput,
+    ResolvedAgentConfig,
+    WriteContextDocumentInput
 } from '../types/context.js';
 
 export class HttpContextService {
@@ -23,12 +25,20 @@ export class HttpContextService {
         return this.provider.readDocument(path);
     }
 
-    async writeDocument(path: string, content: string): Promise<void> {
-        await this.provider.writeDocument(path, content);
+    async writeDocument(input: WriteContextDocumentInput): Promise<void> {
+        await this.provider.writeDocument(input);
     }
 
     async createNode(input: CreateContextNodeInput): Promise<ContextNode> {
         return this.provider.createNode(input);
+    }
+
+    async deleteNode(path: string): Promise<void> {
+        await this.provider.deleteNode(path);
+    }
+
+    async renameNode(input: RenameContextNodeInput): Promise<ContextNode> {
+        return this.provider.renameNode(input);
     }
 
     async searchInScope(request: ContextSearchRequest): Promise<ContextSearchMatch[]> {

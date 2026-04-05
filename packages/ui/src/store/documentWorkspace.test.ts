@@ -1,15 +1,15 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
-import { createMockContextProvider } from '@packages/core/src';
-import { useKnowledgeWorkspaceStore } from './knowledgeWorkspace';
+import { createMockContextProvider, decodeTextDocument } from '@packages/core/src';
+import { useDocumentWorkspaceStore } from './documentWorkspace';
 
-describe('useKnowledgeWorkspaceStore', () => {
+describe('useDocumentWorkspaceStore', () => {
     beforeEach(() => {
         setActivePinia(createPinia());
     });
 
     it('hydrates the tree without opening a file and resolves the root agent context', async () => {
-        const store = useKnowledgeWorkspaceStore();
+        const store = useDocumentWorkspaceStore();
         store.setContextProvider(createMockContextProvider({
             nodes: [
                 { path: '/notes', name: 'notes', kind: 'directory' },
@@ -24,9 +24,9 @@ describe('useKnowledgeWorkspaceStore', () => {
 
         expect(store.nodes).toHaveLength(2);
         expect(store.activePath).toBeNull();
-        expect(store.selectedNodePath).toBeNull();
+        expect(store.selectedNodePath).toBe('/');
         expect(store.draftContent).toBe('');
-        expect(store.expandedPaths).toEqual([]);
+        expect(store.expandedPaths).toEqual(['/']);
         expect(store.activeAgent?.name).toBe('Default Knowledge Agent');
         expect(store.activeAgent?.scopePath).toBe('/');
     });
@@ -42,7 +42,7 @@ describe('useKnowledgeWorkspaceStore', () => {
                 '/beta.md': 'beta'
             }
         });
-        const store = useKnowledgeWorkspaceStore();
+        const store = useDocumentWorkspaceStore();
         store.setContextProvider(provider);
 
         await store.hydrateWorkspace();
@@ -51,13 +51,13 @@ describe('useKnowledgeWorkspaceStore', () => {
         await store.openNode('/beta.md');
 
         const alpha = await provider.readDocument('/alpha.md');
-        expect(alpha.content).toBe('alpha updated');
+        expect(decodeTextDocument(alpha.dataBase64)).toBe('alpha updated');
         expect(store.activePath).toBe('/beta.md');
         expect(store.draftContent).toBe('beta');
     });
 
     it('creates files and opens them immediately', async () => {
-        const store = useKnowledgeWorkspaceStore();
+        const store = useDocumentWorkspaceStore();
         store.setContextProvider(createMockContextProvider());
 
         await store.hydrateWorkspace();
@@ -70,8 +70,92 @@ describe('useKnowledgeWorkspaceStore', () => {
         expect(store.activePath).toBe('/new-note.md');
     });
 
+    it('creates directories and selects them after refreshing the tree', async () => {
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(createMockContextProvider());
+
+        await store.hydrateWorkspace();
+        await store.createNode({
+            name: 'docs',
+            kind: 'directory'
+        });
+
+        expect(store.nodes.some((node) => node.path === '/docs' && node.kind === 'directory')).toBe(true);
+        expect(store.selectedNodePath).toBe('/docs');
+        expect(store.activePath).toBeNull();
+        expect(store.expandedPaths).toContain('/docs');
+    });
+
+    it('resolves text/plain with the shared text viewer', async () => {
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(createMockContextProvider({
+            nodes: [
+                { path: '/notes.txt', name: 'notes.txt', kind: 'file' }
+            ],
+            documents: {
+                '/notes.txt': 'plain text body'
+            }
+        }));
+
+        await store.hydrateWorkspace();
+        await store.openNode('/notes.txt');
+
+        expect(store.activeViewerId).toBe('text');
+        expect(store.activeViewerCapabilities).toEqual({ view: true, edit: true });
+        expect(store.activePaneMode).toBe('viewer');
+        expect(store.draftContent).toBe('plain text body');
+    });
+
+    it('opens pdf documents in the read-only pdf viewer', async () => {
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(createMockContextProvider({
+            nodes: [
+                { path: '/guide.pdf', name: 'guide.pdf', kind: 'file' }
+            ],
+            documents: {
+                '/guide.pdf': {
+                    mimeType: 'application/pdf',
+                    dataBase64: 'JVBERg==',
+                    canWrite: false
+                }
+            }
+        }));
+
+        await store.hydrateWorkspace();
+        await store.openNode('/guide.pdf');
+
+        expect(store.activeViewerId).toBe('pdf');
+        expect(store.activeViewerCapabilities).toEqual({ view: true, edit: false });
+        expect(store.activePaneMode).toBe('viewer');
+        expect(store.draftContent).toBe('');
+        expect(store.activeDocument?.canWrite).toBe(false);
+    });
+
+    it('falls back to unsupported mode when no viewer matches the mime type', async () => {
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(createMockContextProvider({
+            nodes: [
+                { path: '/archive.bin', name: 'archive.bin', kind: 'file' }
+            ],
+            documents: {
+                '/archive.bin': {
+                    mimeType: 'application/octet-stream',
+                    dataBase64: 'AQID',
+                    canWrite: false
+                }
+            }
+        }));
+
+        await store.hydrateWorkspace();
+        await store.openNode('/archive.bin');
+
+        expect(store.activeViewerId).toBeNull();
+        expect(store.activeViewerCapabilities).toBeNull();
+        expect(store.activePaneMode).toBe('unsupported');
+    });
+
     it('filters dot-prefixed files and directories from the visible tree', async () => {
-        const store = useKnowledgeWorkspaceStore();
+        const store = useDocumentWorkspaceStore();
         store.setContextProvider(createMockContextProvider({
             nodes: [
                 { path: '/.git', name: '.git', kind: 'directory' },
@@ -92,11 +176,11 @@ describe('useKnowledgeWorkspaceStore', () => {
             '/visible/note.md'
         ]);
         expect(store.activePath).toBeNull();
-        expect(store.selectedNodePath).toBeNull();
+        expect(store.selectedNodePath).toBe('/');
     });
 
     it('refreshes the active agent when switching across scoped files', async () => {
-        const store = useKnowledgeWorkspaceStore();
+        const store = useDocumentWorkspaceStore();
         store.setContextProvider(createMockContextProvider({
             nodes: [
                 { path: '/workspace', name: 'workspace', kind: 'directory' },
@@ -138,8 +222,80 @@ describe('useKnowledgeWorkspaceStore', () => {
         expect(store.agentResolutionError).toBeNull();
     });
 
+    it('refreshes the tree while preserving the selected path when it still exists', async () => {
+        const provider = createMockContextProvider({
+            nodes: [
+                { path: '/workspace', name: 'workspace', kind: 'directory' },
+                { path: '/workspace/guide.md', name: 'guide.md', kind: 'file', parentPath: '/workspace' }
+            ],
+            documents: {
+                '/workspace/guide.md': '# Guide'
+            }
+        });
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(provider);
+
+        await store.hydrateWorkspace();
+        await store.openNode('/workspace/guide.md');
+        await provider.createNode({
+            parentPath: '/workspace',
+            name: 'notes.md',
+            kind: 'file'
+        });
+
+        await store.refreshTree();
+
+        expect(store.selectedNodePath).toBe('/workspace/guide.md');
+        expect(store.activePath).toBe('/workspace/guide.md');
+        expect(store.nodes.some((node) => node.path === '/workspace/notes.md')).toBe(true);
+    });
+
+    it('deletes the active file and falls back to the parent directory', async () => {
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(createMockContextProvider({
+            nodes: [
+                { path: '/workspace', name: 'workspace', kind: 'directory' },
+                { path: '/workspace/guide.md', name: 'guide.md', kind: 'file', parentPath: '/workspace' }
+            ],
+            documents: {
+                '/workspace/guide.md': '# Guide'
+            }
+        }));
+
+        await store.hydrateWorkspace();
+        await store.openNode('/workspace/guide.md');
+        await store.deleteNode('/workspace/guide.md');
+
+        expect(store.nodes.some((node) => node.path === '/workspace/guide.md')).toBe(false);
+        expect(store.selectedNodePath).toBe('/workspace');
+        expect(store.activePath).toBeNull();
+        expect(store.activeDocument).toBeNull();
+    });
+
+    it('renames the active file and keeps it open on the new path', async () => {
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(createMockContextProvider({
+            nodes: [
+                { path: '/workspace', name: 'workspace', kind: 'directory' },
+                { path: '/workspace/guide.md', name: 'guide.md', kind: 'file', parentPath: '/workspace' }
+            ],
+            documents: {
+                '/workspace/guide.md': '# Guide'
+            }
+        }));
+
+        await store.hydrateWorkspace();
+        await store.openNode('/workspace/guide.md');
+        await store.renameNode({ path: '/workspace/guide.md', name: 'guide-renamed.md' });
+
+        expect(store.nodes.some((node) => node.path === '/workspace/guide-renamed.md')).toBe(true);
+        expect(store.activePath).toBe('/workspace/guide-renamed.md');
+        expect(store.selectedNodePath).toBe('/workspace/guide-renamed.md');
+        expect(store.activeDocument?.path).toBe('/workspace/guide-renamed.md');
+    });
+
     it('clears the current file context when selecting a directory', async () => {
-        const store = useKnowledgeWorkspaceStore();
+        const store = useDocumentWorkspaceStore();
         store.setContextProvider(createMockContextProvider({
             nodes: [
                 { path: '/workspace', name: 'workspace', kind: 'directory' },
@@ -164,7 +320,7 @@ describe('useKnowledgeWorkspaceStore', () => {
     });
 
     it('falls back to the default agent when no scoped config exists', async () => {
-        const store = useKnowledgeWorkspaceStore();
+        const store = useDocumentWorkspaceStore();
         store.setContextProvider(createMockContextProvider({
             nodes: [
                 { path: '/notes', name: 'notes', kind: 'directory' },
@@ -183,7 +339,7 @@ describe('useKnowledgeWorkspaceStore', () => {
     });
 
     it('surfaces agent resolution errors without blocking document editing', async () => {
-        const store = useKnowledgeWorkspaceStore();
+        const store = useDocumentWorkspaceStore();
         store.setContextProvider(createMockContextProvider({
             nodes: [
                 { path: '/broken', name: 'broken', kind: 'directory' },
@@ -209,11 +365,11 @@ describe('useKnowledgeWorkspaceStore', () => {
         await store.flushActiveDocument();
 
         const document = await store.contextProvider!.readDocument('/broken/note.md');
-        expect(document.content).toBe('# Fixed Content');
+        expect(decodeTextDocument(document.dataBase64)).toBe('# Fixed Content');
     });
 
     it('records file changes and supports in-memory undo/redo for the active file', async () => {
-        const store = useKnowledgeWorkspaceStore();
+        const store = useDocumentWorkspaceStore();
         store.setContextProvider(createMockContextProvider({
             nodes: [
                 { path: '/notes.md', name: 'notes.md', kind: 'file' }
@@ -244,5 +400,59 @@ describe('useKnowledgeWorkspaceStore', () => {
         await store.redoActiveFileChange();
         expect(store.draftContent).toBe('# After');
         expect(store.canUndoActiveFile).toBe(true);
+    });
+
+    it('refreshes document versions after save, agent changes, undo, and redo', async () => {
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(createMockContextProvider({
+            nodes: [
+                { path: '/notes.md', name: 'notes.md', kind: 'file' }
+            ],
+            documents: {
+                '/notes.md': '# Before'
+            }
+        }));
+
+        await store.hydrateWorkspace();
+        await store.openNode('/notes.md');
+
+        store.updateActiveDocument('# First save');
+        await expect(store.flushActiveDocument()).resolves.toBeUndefined();
+        expect(store.activeDocument?.version).toBeTruthy();
+
+        store.updateActiveDocument('# Second save');
+        await expect(store.flushActiveDocument()).resolves.toBeUndefined();
+        expect(store.activeDocument?.version).toBeTruthy();
+
+        store.recordFileChange({
+            path: '/notes.md',
+            beforeContent: '# Second save',
+            afterContent: '# Agent rewrite'
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(store.activeDocument?.version).toBeTruthy();
+
+        store.updateActiveDocument('# Agent rewrite plus manual edit');
+        await expect(store.flushActiveDocument()).resolves.toBeUndefined();
+        expect(store.activeDocument?.version).toBeTruthy();
+
+        store.recordFileChange({
+            path: '/notes.md',
+            beforeContent: '# Agent rewrite plus manual edit',
+            afterContent: '# Redo target'
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        await expect(store.undoActiveFileChange()).resolves.toBeUndefined();
+        expect(store.activeDocument?.version).toBeTruthy();
+        store.updateActiveDocument('# Undo plus manual edit');
+        await expect(store.flushActiveDocument()).resolves.toBeUndefined();
+        expect(store.activeDocument?.version).toBeTruthy();
+
+        await expect(store.redoActiveFileChange()).resolves.toBeUndefined();
+        expect(store.activeDocument?.version).toBeTruthy();
+        store.updateActiveDocument('# Redo plus manual edit');
+        await expect(store.flushActiveDocument()).resolves.toBeUndefined();
+        expect(store.activeDocument?.version).toBeTruthy();
     });
 });

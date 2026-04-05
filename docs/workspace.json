@@ -1,0 +1,688 @@
+{
+  "configuration" : { },
+  "description" : "Context and Container views for current codebase",
+  "documentation" : { },
+  "id" : 1,
+  "lastModifiedDate" : "2026-04-04T20:17:33Z",
+  "model" : {
+    "people" : [ {
+      "description" : "发起多模型聊天、结果对比、历史检索、知识整理",
+      "id" : "1",
+      "name" : "重度 AI 对话用户",
+      "properties" : {
+        "structurizr.dsl.identifier" : "user"
+      },
+      "relationships" : [ {
+        "description" : "使用",
+        "destinationId" : "6",
+        "id" : "22",
+        "sourceId" : "1",
+        "tags" : "Relationship",
+        "technology" : "UI"
+      }, {
+        "description" : "使用",
+        "destinationId" : "7",
+        "id" : "27",
+        "sourceId" : "1",
+        "tags" : "Relationship",
+        "technology" : "Browser Extension"
+      }, {
+        "description" : "使用",
+        "destinationId" : "8",
+        "id" : "28",
+        "sourceId" : "1",
+        "tags" : "Relationship",
+        "technology" : "Browser"
+      }, {
+        "description" : "使用",
+        "destinationId" : "9",
+        "id" : "29",
+        "sourceId" : "1",
+        "tags" : "Relationship",
+        "technology" : "Desktop UI"
+      } ],
+      "tags" : "Element,Person"
+    } ],
+    "softwareSystems" : [ {
+      "description" : "chatgpt.com；网页登录型模型调用与历史读取",
+      "documentation" : { },
+      "id" : "2",
+      "name" : "ChatGPT Web",
+      "properties" : {
+        "structurizr.dsl.identifier" : "chatgptWeb"
+      },
+      "tags" : "Element,Software System"
+    }, {
+      "description" : "generativelanguage.googleapis.com；模型推理、模型目录获取、对比分析",
+      "documentation" : { },
+      "id" : "3",
+      "name" : "Google Gemini API",
+      "properties" : {
+        "structurizr.dsl.identifier" : "geminiApi"
+      },
+      "tags" : "Element,Software System"
+    }, {
+      "description" : "gemini.google.com；历史会话页面桥接与读取",
+      "documentation" : { },
+      "id" : "4",
+      "name" : "Gemini Web",
+      "properties" : {
+        "structurizr.dsl.identifier" : "geminiWeb"
+      },
+      "tags" : "Element,Software System"
+    }, {
+      "description" : "本地知识目录、扩展托管文档与外部导入文件",
+      "documentation" : { },
+      "id" : "5",
+      "name" : "用户知识资料库",
+      "properties" : {
+        "structurizr.dsl.identifier" : "knowledgeRepo"
+      },
+      "tags" : "Element,Software System"
+    }, {
+      "containers" : [ {
+        "description" : "浏览器扩展宿主；提供聊天、对比、历史导入、知识工作区，并通过扩展机制承载代理能力",
+        "documentation" : { },
+        "id" : "7",
+        "name" : "Browser Extension App",
+        "properties" : {
+          "structurizr.dsl.identifier" : "extensionApp"
+        },
+        "relationships" : [ {
+          "description" : "同步会话、通过服务端读取知识上下文、获取 provider 配置",
+          "destinationId" : "10",
+          "id" : "32",
+          "sourceId" : "7",
+          "tags" : "Relationship",
+          "technology" : "HTTP"
+        }, {
+          "description" : "发送消息、检查登录态、读取历史",
+          "destinationId" : "2",
+          "id" : "33",
+          "sourceId" : "7",
+          "tags" : "Relationship",
+          "technology" : "HTTPS / Browser Cookies"
+        }, {
+          "description" : "发送消息、获取模型列表、执行对比分析",
+          "destinationId" : "3",
+          "id" : "34",
+          "sourceId" : "7",
+          "tags" : "Relationship",
+          "technology" : "HTTPS"
+        }, {
+          "description" : "读取 Gemini 历史",
+          "destinationId" : "4",
+          "id" : "35",
+          "sourceId" : "7",
+          "tags" : "Relationship",
+          "technology" : "Content Script / DOM Bridge"
+        } ],
+        "tags" : "Element,Container",
+        "technology" : "TypeScript, Vue, WXT"
+      }, {
+        "description" : "Web 宿主；提供聊天、对比、知识工作区",
+        "documentation" : { },
+        "id" : "8",
+        "name" : "Web App",
+        "properties" : {
+          "structurizr.dsl.identifier" : "webApp"
+        },
+        "relationships" : [ {
+          "description" : "同步会话、通过服务端读取知识上下文、获取 provider 配置",
+          "destinationId" : "10",
+          "id" : "30",
+          "sourceId" : "8",
+          "tags" : "Relationship",
+          "technology" : "HTTP"
+        }, {
+          "description" : "发送消息、获取模型列表、执行对比分析",
+          "destinationId" : "3",
+          "id" : "31",
+          "sourceId" : "8",
+          "tags" : "Relationship",
+          "technology" : "HTTPS"
+        } ],
+        "tags" : "Element,Container",
+        "technology" : "TypeScript, Vue, Vite"
+      }, {
+        "description" : "Electron 桌面宿主；提供聊天、对比、历史导入、知识工作区，并通过桌面宿主承载代理与文件能力",
+        "documentation" : { },
+        "id" : "9",
+        "name" : "Desktop App",
+        "properties" : {
+          "structurizr.dsl.identifier" : "desktopApp"
+        },
+        "relationships" : [ {
+          "description" : "同步会话",
+          "destinationId" : "10",
+          "id" : "36",
+          "sourceId" : "9",
+          "tags" : "Relationship",
+          "technology" : "HTTP"
+        }, {
+          "description" : "发送消息、检查登录态、读取历史",
+          "destinationId" : "2",
+          "id" : "37",
+          "sourceId" : "9",
+          "tags" : "Relationship",
+          "technology" : "HTTPS / Session / Cookies"
+        }, {
+          "description" : "发送消息、获取模型列表、执行对比分析",
+          "destinationId" : "3",
+          "id" : "38",
+          "sourceId" : "9",
+          "tags" : "Relationship",
+          "technology" : "HTTPS"
+        }, {
+          "description" : "读取 Gemini 历史",
+          "destinationId" : "4",
+          "id" : "39",
+          "sourceId" : "9",
+          "tags" : "Relationship",
+          "technology" : "Controlled Page"
+        }, {
+          "description" : "读取、写入、搜索知识文档",
+          "destinationId" : "5",
+          "id" : "40",
+          "sourceId" : "9",
+          "tags" : "Relationship",
+          "technology" : "Filesystem"
+        } ],
+        "tags" : "Element,Container",
+        "technology" : "TypeScript, Vue, Electron"
+      }, {
+        "description" : "提供会话同步、知识上下文 API 与 provider 配置 API",
+        "documentation" : { },
+        "id" : "10",
+        "name" : "Sync Server",
+        "properties" : {
+          "structurizr.dsl.identifier" : "syncServer"
+        },
+        "relationships" : [ {
+          "description" : "读取、写入、搜索知识文档",
+          "destinationId" : "5",
+          "id" : "41",
+          "sourceId" : "10",
+          "tags" : "Relationship",
+          "technology" : "Filesystem / Database"
+        } ],
+        "tags" : "Element,Container",
+        "technology" : "TypeScript, Hono, Node.js"
+      }, {
+        "components" : [ {
+          "description" : "统一解析并提供可用的模型 provider 与模型目录。典型实现/工厂：createProviderRuntime, createDesktopHostRuntime",
+          "documentation" : { },
+          "id" : "12",
+          "name" : "ModelProviderRuntime",
+          "properties" : {
+            "structurizr.dsl.identifier" : "modelProviderRuntime"
+          },
+          "relationships" : [ {
+            "description" : "解析并提供",
+            "destinationId" : "13",
+            "id" : "42",
+            "sourceId" : "12",
+            "tags" : "Relationship"
+          } ],
+          "tags" : "Element,Component",
+          "technology" : "Interface"
+        }, {
+          "description" : "统一模型调用契约。典型实现：ChatGPTWebProvider, GeminiApiProvider, DesktopProxyProvider",
+          "documentation" : { },
+          "id" : "13",
+          "name" : "IModelProvider",
+          "properties" : {
+            "structurizr.dsl.identifier" : "modelProvider"
+          },
+          "relationships" : [ {
+            "description" : "消费消息上下文并产出结果",
+            "destinationId" : "19",
+            "id" : "50",
+            "sourceId" : "13",
+            "tags" : "Relationship"
+          } ],
+          "tags" : "Element,Component",
+          "technology" : "Interface"
+        }, {
+          "description" : "具备原生 Agent 执行能力的模型 provider 扩展契约。当前典型实现：GeminiApiProvider",
+          "documentation" : { },
+          "id" : "14",
+          "name" : "IAgentCapableProvider",
+          "properties" : {
+            "structurizr.dsl.identifier" : "agentCapableProvider"
+          },
+          "relationships" : [ {
+            "description" : "扩展",
+            "destinationId" : "13",
+            "id" : "43",
+            "sourceId" : "14",
+            "tags" : "Relationship"
+          } ],
+          "tags" : "Element,Component",
+          "technology" : "Interface"
+        }, {
+          "description" : "外部会话来源契约。典型实现：ChatGPTWebProvider, GeminiDomHistoryProvider, DesktopHistoryProxy",
+          "documentation" : { },
+          "id" : "15",
+          "name" : "IExternalConversationProvider",
+          "properties" : {
+            "structurizr.dsl.identifier" : "externalConversationProvider"
+          },
+          "relationships" : [ {
+            "description" : "返回外部会话",
+            "destinationId" : "19",
+            "id" : "44",
+            "sourceId" : "15",
+            "tags" : "Relationship"
+          } ],
+          "tags" : "Element,Component",
+          "technology" : "Interface"
+        }, {
+          "description" : "会话持久化契约。典型实现：IndexedDBStorageProvider, SyncStorageProvider",
+          "documentation" : { },
+          "id" : "16",
+          "name" : "IConversationPersistProvider",
+          "properties" : {
+            "structurizr.dsl.identifier" : "conversationPersistProvider"
+          },
+          "relationships" : [ {
+            "description" : "持久化与读取",
+            "destinationId" : "19",
+            "id" : "45",
+            "sourceId" : "16",
+            "tags" : "Relationship"
+          } ],
+          "tags" : "Element,Component",
+          "technology" : "Interface"
+        }, {
+          "description" : "知识目录、文档读写、作用域搜索与 Agent 解析契约。典型实现：HttpContextProvider, LocalFileContextProvider, desktop-context bridge",
+          "documentation" : { },
+          "id" : "17",
+          "name" : "IContextProvider",
+          "properties" : {
+            "structurizr.dsl.identifier" : "contextProvider"
+          },
+          "relationships" : [ {
+            "description" : "解析并返回",
+            "destinationId" : "20",
+            "id" : "46",
+            "sourceId" : "17",
+            "tags" : "Relationship"
+          } ],
+          "tags" : "Element,Component",
+          "technology" : "Interface"
+        }, {
+          "description" : "Agent 请求编排入口。典型实现/工厂：createAgentRuntime",
+          "documentation" : { },
+          "id" : "18",
+          "name" : "AgentRuntime",
+          "properties" : {
+            "structurizr.dsl.identifier" : "agentRuntime"
+          },
+          "relationships" : [ {
+            "description" : "获取执行 provider",
+            "destinationId" : "12",
+            "id" : "47",
+            "sourceId" : "18",
+            "tags" : "Relationship"
+          }, {
+            "description" : "使用知识工作区上下文",
+            "destinationId" : "17",
+            "id" : "48",
+            "sourceId" : "18",
+            "tags" : "Relationship"
+          }, {
+            "description" : "消费当前 Agent 配置",
+            "destinationId" : "20",
+            "id" : "49",
+            "sourceId" : "18",
+            "tags" : "Relationship"
+          } ],
+          "tags" : "Element,Component",
+          "technology" : "Interface"
+        }, {
+          "description" : "聊天、导入、同步共用的核心会话数据模型",
+          "documentation" : { },
+          "id" : "19",
+          "name" : "Conversation",
+          "properties" : {
+            "structurizr.dsl.identifier" : "conversationModel"
+          },
+          "tags" : "Element,Component",
+          "technology" : "Domain model"
+        }, {
+          "description" : "作用域解析后的 Agent 配置",
+          "documentation" : { },
+          "id" : "20",
+          "name" : "ResolvedAgentConfig",
+          "properties" : {
+            "structurizr.dsl.identifier" : "resolvedAgentConfig"
+          },
+          "tags" : "Element,Component",
+          "technology" : "Domain model"
+        }, {
+          "description" : "双模型对比工作流编排器。典型实现：CompareWorkflowController",
+          "documentation" : { },
+          "id" : "21",
+          "name" : "CompareWorkflowController",
+          "properties" : {
+            "structurizr.dsl.identifier" : "compareWorkflowController"
+          },
+          "relationships" : [ {
+            "description" : "获取对比执行 provider",
+            "destinationId" : "12",
+            "id" : "51",
+            "sourceId" : "21",
+            "tags" : "Relationship"
+          } ],
+          "tags" : "Element,Component",
+          "technology" : "Core service"
+        } ],
+        "description" : "用于表达共享核心接口、运行时契约与领域对象之间的关系",
+        "documentation" : { },
+        "id" : "11",
+        "name" : "Core Abstractions",
+        "properties" : {
+          "structurizr.dsl.identifier" : "coreAbstractions"
+        },
+        "tags" : "Element,Container",
+        "technology" : "TypeScript interfaces and domain abstractions"
+      } ],
+      "description" : "多宿主 AI 工作台，支持 Web、浏览器扩展、Desktop 与同步服务",
+      "documentation" : { },
+      "id" : "6",
+      "name" : "ChatPrism",
+      "properties" : {
+        "structurizr.dsl.identifier" : "chatprism"
+      },
+      "relationships" : [ {
+        "description" : "发送消息、检查登录态、读取会话历史",
+        "destinationId" : "2",
+        "id" : "23",
+        "sourceId" : "6",
+        "tags" : "Relationship",
+        "technology" : "HTTPS / Browser Session"
+      }, {
+        "description" : "发送消息、获取模型列表、执行对比分析",
+        "destinationId" : "3",
+        "id" : "24",
+        "sourceId" : "6",
+        "tags" : "Relationship",
+        "technology" : "HTTPS"
+      }, {
+        "description" : "桥接页面并读取 Gemini 历史",
+        "destinationId" : "4",
+        "id" : "25",
+        "sourceId" : "6",
+        "tags" : "Relationship",
+        "technology" : "Controlled Page / Content Script"
+      }, {
+        "description" : "读取、写入、搜索知识文档与导入文件",
+        "destinationId" : "5",
+        "id" : "26",
+        "sourceId" : "6",
+        "tags" : "Relationship",
+        "technology" : "Filesystem / HTTP Context / Extension Storage"
+      } ],
+      "tags" : "Element,Software System"
+    } ]
+  },
+  "name" : "ChatPrism",
+  "properties" : {
+    "structurizr.inspection.error" : "15",
+    "structurizr.dsl" : "d29ya3NwYWNlICJDaGF0UHJpc20iICJDb250ZXh0IGFuZCBDb250YWluZXIgdmlld3MgZm9yIGN1cnJlbnQgY29kZWJhc2UiIHsKCiAgICBtb2RlbCB7CiAgICAgICAgdXNlciA9IHBlcnNvbiAi6YeN5bqmIEFJIOWvueivneeUqOaItyIgIuWPkei1t+WkmuaooeWei+iBiuWkqeOAgee7k+aenOWvueavlOOAgeWOhuWPsuajgOe0ouOAgeefpeivhuaVtOeQhiIKCiAgICAgICAgY2hhdGdwdFdlYiA9IHNvZnR3YXJlU3lzdGVtICJDaGF0R1BUIFdlYiIgImNoYXRncHQuY29t77yb572R6aG155m75b2V5Z6L5qih5Z6L6LCD55So5LiO5Y6G5Y+y6K+75Y+WIgogICAgICAgIGdlbWluaUFwaSA9IHNvZnR3YXJlU3lzdGVtICJHb29nbGUgR2VtaW5pIEFQSSIgImdlbmVyYXRpdmVsYW5ndWFnZS5nb29nbGVhcGlzLmNvbe+8m+aooeWei+aOqOeQhuOAgeaooeWei+ebruW9leiOt+WPluOAgeWvueavlOWIhuaekCIKICAgICAgICBnZW1pbmlXZWIgPSBzb2Z0d2FyZVN5c3RlbSAiR2VtaW5pIFdlYiIgImdlbWluaS5nb29nbGUuY29t77yb5Y6G5Y+y5Lya6K+d6aG16Z2i5qGl5o6l5LiO6K+75Y+WIgogICAgICAgIGtub3dsZWRnZVJlcG8gPSBzb2Z0d2FyZVN5c3RlbSAi55So5oi355+l6K+G6LWE5paZ5bqTIiAi5pys5Zyw55+l6K+G55uu5b2V44CB5omp5bGV5omY566h5paH5qGj5LiO5aSW6YOo5a+85YWl5paH5Lu2IgoKICAgICAgICBjaGF0cHJpc20gPSBzb2Z0d2FyZVN5c3RlbSAiQ2hhdFByaXNtIiAi5aSa5a6/5Li7IEFJIOW3peS9nOWPsO+8jOaUr+aMgSBXZWLjgIHmtY/op4jlmajmianlsZXjgIFEZXNrdG9wIOS4juWQjOatpeacjeWKoSIgewogICAgICAgICAgICBleHRlbnNpb25BcHAgPSBjb250YWluZXIgIkJyb3dzZXIgRXh0ZW5zaW9uIEFwcCIgIua1j+iniOWZqOaJqeWxleWuv+S4u++8m+aPkOS+m+iBiuWkqeOAgeWvueavlOOAgeWOhuWPsuWvvOWFpeOAgeefpeivhuW3peS9nOWMuu+8jOW5tumAmui/h+aJqeWxleacuuWItuaJv+i9veS7o+eQhuiDveWKmyIgIlR5cGVTY3JpcHQsIFZ1ZSwgV1hUIgogICAgICAgICAgICB3ZWJBcHAgPSBjb250YWluZXIgIldlYiBBcHAiICJXZWIg5a6/5Li777yb5o+Q5L6b6IGK5aSp44CB5a+55q+U44CB55+l6K+G5bel5L2c5Yy6IiAiVHlwZVNjcmlwdCwgVnVlLCBWaXRlIgogICAgICAgICAgICBkZXNrdG9wQXBwID0gY29udGFpbmVyICJEZXNrdG9wIEFwcCIgIkVsZWN0cm9uIOahjOmdouWuv+S4u++8m+aPkOS+m+iBiuWkqeOAgeWvueavlOOAgeWOhuWPsuWvvOWFpeOAgeefpeivhuW3peS9nOWMuu+8jOW5tumAmui/h+ahjOmdouWuv+S4u+aJv+i9veS7o+eQhuS4juaWh+S7tuiDveWKmyIgIlR5cGVTY3JpcHQsIFZ1ZSwgRWxlY3Ryb24iCiAgICAgICAgICAgIHN5bmNTZXJ2ZXIgPSBjb250YWluZXIgIlN5bmMgU2VydmVyIiAi5o+Q5L6b5Lya6K+d5ZCM5q2l44CB55+l6K+G5LiK5LiL5paHIEFQSSDkuI4gcHJvdmlkZXIg6YWN572uIEFQSSIgIlR5cGVTY3JpcHQsIEhvbm8sIE5vZGUuanMiCiAgICAgICAgICAgIGNvcmVBYnN0cmFjdGlvbnMgPSBjb250YWluZXIgIkNvcmUgQWJzdHJhY3Rpb25zIiAi55So5LqO6KGo6L6+5YWx5Lqr5qC45b+D5o6l5Y+j44CB6L+Q6KGM5pe25aWR57qm5LiO6aKG5Z+f5a+56LGh5LmL6Ze055qE5YWz57O7IiAiVHlwZVNjcmlwdCBpbnRlcmZhY2VzIGFuZCBkb21haW4gYWJzdHJhY3Rpb25zIiB7CiAgICAgICAgICAgICAgICBtb2RlbFByb3ZpZGVyUnVudGltZSA9IGNvbXBvbmVudCAiTW9kZWxQcm92aWRlclJ1bnRpbWUiICLnu5/kuIDop6PmnpDlubbmj5Dkvpvlj6/nlKjnmoTmqKHlnosgcHJvdmlkZXIg5LiO5qih5Z6L55uu5b2V44CC5YW45Z6L5a6e546wL+W3peWOgu+8mmNyZWF0ZVByb3ZpZGVyUnVudGltZSwgY3JlYXRlRGVza3RvcEhvc3RSdW50aW1lIiAiSW50ZXJmYWNlIgogICAgICAgICAgICAgICAgbW9kZWxQcm92aWRlciA9IGNvbXBvbmVudCAiSU1vZGVsUHJvdmlkZXIiICLnu5/kuIDmqKHlnovosIPnlKjlpZHnuqbjgILlhbjlnovlrp7njrDvvJpDaGF0R1BUV2ViUHJvdmlkZXIsIEdlbWluaUFwaVByb3ZpZGVyLCBEZXNrdG9wUHJveHlQcm92aWRlciIgIkludGVyZmFjZSIKICAgICAgICAgICAgICAgIGFnZW50Q2FwYWJsZVByb3ZpZGVyID0gY29tcG9uZW50ICJJQWdlbnRDYXBhYmxlUHJvdmlkZXIiICLlhbflpIfljp/nlJ8gQWdlbnQg5omn6KGM6IO95Yqb55qE5qih5Z6LIHByb3ZpZGVyIOaJqeWxleWlkee6puOAguW9k+WJjeWFuOWei+WunueOsO+8mkdlbWluaUFwaVByb3ZpZGVyIiAiSW50ZXJmYWNlIgogICAgICAgICAgICAgICAgZXh0ZXJuYWxDb252ZXJzYXRpb25Qcm92aWRlciA9IGNvbXBvbmVudCAiSUV4dGVybmFsQ29udmVyc2F0aW9uUHJvdmlkZXIiICLlpJbpg6jkvJror53mnaXmupDlpZHnuqbjgILlhbjlnovlrp7njrDvvJpDaGF0R1BUV2ViUHJvdmlkZXIsIEdlbWluaURvbUhpc3RvcnlQcm92aWRlciwgRGVza3RvcEhpc3RvcnlQcm94eSIgIkludGVyZmFjZSIKICAgICAgICAgICAgICAgIGNvbnZlcnNhdGlvblBlcnNpc3RQcm92aWRlciA9IGNvbXBvbmVudCAiSUNvbnZlcnNhdGlvblBlcnNpc3RQcm92aWRlciIgIuS8muivneaMgeS5heWMluWlkee6puOAguWFuOWei+WunueOsO+8mkluZGV4ZWREQlN0b3JhZ2VQcm92aWRlciwgU3luY1N0b3JhZ2VQcm92aWRlciIgIkludGVyZmFjZSIKICAgICAgICAgICAgICAgIGNvbnRleHRQcm92aWRlciA9IGNvbXBvbmVudCAiSUNvbnRleHRQcm92aWRlciIgIuefpeivhuebruW9leOAgeaWh+aho+ivu+WGmeOAgeS9nOeUqOWfn+aQnOe0ouS4jiBBZ2VudCDop6PmnpDlpZHnuqbjgILlhbjlnovlrp7njrDvvJpIdHRwQ29udGV4dFByb3ZpZGVyLCBMb2NhbEZpbGVDb250ZXh0UHJvdmlkZXIsIGRlc2t0b3AtY29udGV4dCBicmlkZ2UiICJJbnRlcmZhY2UiCiAgICAgICAgICAgICAgICBhZ2VudFJ1bnRpbWUgPSBjb21wb25lbnQgIkFnZW50UnVudGltZSIgIkFnZW50IOivt+axgue8luaOkuWFpeWPo+OAguWFuOWei+WunueOsC/lt6XljoLvvJpjcmVhdGVBZ2VudFJ1bnRpbWUiICJJbnRlcmZhY2UiCiAgICAgICAgICAgICAgICBjb252ZXJzYXRpb25Nb2RlbCA9IGNvbXBvbmVudCAiQ29udmVyc2F0aW9uIiAi6IGK5aSp44CB5a+85YWl44CB5ZCM5q2l5YWx55So55qE5qC45b+D5Lya6K+d5pWw5o2u5qih5Z6LIiAiRG9tYWluIG1vZGVsIgogICAgICAgICAgICAgICAgcmVzb2x2ZWRBZ2VudENvbmZpZyA9IGNvbXBvbmVudCAiUmVzb2x2ZWRBZ2VudENvbmZpZyIgIuS9nOeUqOWfn+ino+aekOWQjueahCBBZ2VudCDphY3nva4iICJEb21haW4gbW9kZWwiCiAgICAgICAgICAgICAgICBjb21wYXJlV29ya2Zsb3dDb250cm9sbGVyID0gY29tcG9uZW50ICJDb21wYXJlV29ya2Zsb3dDb250cm9sbGVyIiAi5Y+M5qih5Z6L5a+55q+U5bel5L2c5rWB57yW5o6S5Zmo44CC5YW45Z6L5a6e546w77yaQ29tcGFyZVdvcmtmbG93Q29udHJvbGxlciIgIkNvcmUgc2VydmljZSIKICAgICAgICAgICAgfQogICAgICAgIH0KCiAgICAgICAgdXNlciAtPiBjaGF0cHJpc20gIuS9v+eUqCIgIlVJIgoKICAgICAgICBjaGF0cHJpc20gLT4gY2hhdGdwdFdlYiAi5Y+R6YCB5raI5oGv44CB5qOA5p+l55m75b2V5oCB44CB6K+75Y+W5Lya6K+d5Y6G5Y+yIiAiSFRUUFMgLyBCcm93c2VyIFNlc3Npb24iCiAgICAgICAgY2hhdHByaXNtIC0+IGdlbWluaUFwaSAi5Y+R6YCB5raI5oGv44CB6I635Y+W5qih5Z6L5YiX6KGo44CB5omn6KGM5a+55q+U5YiG5p6QIiAiSFRUUFMiCiAgICAgICAgY2hhdHByaXNtIC0+IGdlbWluaVdlYiAi5qGl5o6l6aG16Z2i5bm26K+75Y+WIEdlbWluaSDljoblj7IiICJDb250cm9sbGVkIFBhZ2UgLyBDb250ZW50IFNjcmlwdCIKICAgICAgICBjaGF0cHJpc20gLT4ga25vd2xlZGdlUmVwbyAi6K+75Y+W44CB5YaZ5YWl44CB5pCc57Si55+l6K+G5paH5qGj5LiO5a+85YWl5paH5Lu2IiAiRmlsZXN5c3RlbSAvIEhUVFAgQ29udGV4dCAvIEV4dGVuc2lvbiBTdG9yYWdlIgoKICAgICAgICB1c2VyIC0+IGV4dGVuc2lvbkFwcCAi5L2/55SoIiAiQnJvd3NlciBFeHRlbnNpb24iCiAgICAgICAgdXNlciAtPiB3ZWJBcHAgIuS9v+eUqCIgIkJyb3dzZXIiCiAgICAgICAgdXNlciAtPiBkZXNrdG9wQXBwICLkvb/nlKgiICJEZXNrdG9wIFVJIgoKICAgICAgICB3ZWJBcHAgLT4gc3luY1NlcnZlciAi5ZCM5q2l5Lya6K+d44CB6YCa6L+H5pyN5Yqh56uv6K+75Y+W55+l6K+G5LiK5LiL5paH44CB6I635Y+WIHByb3ZpZGVyIOmFjee9riIgIkhUVFAiCiAgICAgICAgd2ViQXBwIC0+IGdlbWluaUFwaSAi5Y+R6YCB5raI5oGv44CB6I635Y+W5qih5Z6L5YiX6KGo44CB5omn6KGM5a+55q+U5YiG5p6QIiAiSFRUUFMiCgogICAgICAgIGV4dGVuc2lvbkFwcCAtPiBzeW5jU2VydmVyICLlkIzmraXkvJror53jgIHpgJrov4fmnI3liqHnq6/or7vlj5bnn6Xor4bkuIrkuIvmlofjgIHojrflj5YgcHJvdmlkZXIg6YWN572uIiAiSFRUUCIKICAgICAgICBleHRlbnNpb25BcHAgLT4gY2hhdGdwdFdlYiAi5Y+R6YCB5raI5oGv44CB5qOA5p+l55m75b2V5oCB44CB6K+75Y+W5Y6G5Y+yIiAiSFRUUFMgLyBCcm93c2VyIENvb2tpZXMiCiAgICAgICAgZXh0ZW5zaW9uQXBwIC0+IGdlbWluaUFwaSAi5Y+R6YCB5raI5oGv44CB6I635Y+W5qih5Z6L5YiX6KGo44CB5omn6KGM5a+55q+U5YiG5p6QIiAiSFRUUFMiCiAgICAgICAgZXh0ZW5zaW9uQXBwIC0+IGdlbWluaVdlYiAi6K+75Y+WIEdlbWluaSDljoblj7IiICJDb250ZW50IFNjcmlwdCAvIERPTSBCcmlkZ2UiCgogICAgICAgIGRlc2t0b3BBcHAgLT4gc3luY1NlcnZlciAi5ZCM5q2l5Lya6K+dIiAiSFRUUCIKICAgICAgICBkZXNrdG9wQXBwIC0+IGNoYXRncHRXZWIgIuWPkemAgea2iOaBr+OAgeajgOafpeeZu+W9leaAgeOAgeivu+WPluWOhuWPsiIgIkhUVFBTIC8gU2Vzc2lvbiAvIENvb2tpZXMiCiAgICAgICAgZGVza3RvcEFwcCAtPiBnZW1pbmlBcGkgIuWPkemAgea2iOaBr+OAgeiOt+WPluaooeWei+WIl+ihqOOAgeaJp+ihjOWvueavlOWIhuaekCIgIkhUVFBTIgogICAgICAgIGRlc2t0b3BBcHAgLT4gZ2VtaW5pV2ViICLor7vlj5YgR2VtaW5pIOWOhuWPsiIgIkNvbnRyb2xsZWQgUGFnZSIKICAgICAgICBkZXNrdG9wQXBwIC0+IGtub3dsZWRnZVJlcG8gIuivu+WPluOAgeWGmeWFpeOAgeaQnOe0ouefpeivhuaWh+ahoyIgIkZpbGVzeXN0ZW0iCgogICAgICAgIHN5bmNTZXJ2ZXIgLT4ga25vd2xlZGdlUmVwbyAi6K+75Y+W44CB5YaZ5YWl44CB5pCc57Si55+l6K+G5paH5qGjIiAiRmlsZXN5c3RlbSAvIERhdGFiYXNlIgoKICAgICAgICBtb2RlbFByb3ZpZGVyUnVudGltZSAtPiBtb2RlbFByb3ZpZGVyICLop6PmnpDlubbmj5DkvpsiCiAgICAgICAgYWdlbnRDYXBhYmxlUHJvdmlkZXIgLT4gbW9kZWxQcm92aWRlciAi5omp5bGVIgogICAgICAgIGV4dGVybmFsQ29udmVyc2F0aW9uUHJvdmlkZXIgLT4gY29udmVyc2F0aW9uTW9kZWwgIui/lOWbnuWklumDqOS8muivnSIKICAgICAgICBjb252ZXJzYXRpb25QZXJzaXN0UHJvdmlkZXIgLT4gY29udmVyc2F0aW9uTW9kZWwgIuaMgeS5heWMluS4juivu+WPliIKICAgICAgICBjb250ZXh0UHJvdmlkZXIgLT4gcmVzb2x2ZWRBZ2VudENvbmZpZyAi6Kej5p6Q5bm26L+U5ZueIgogICAgICAgIGFnZW50UnVudGltZSAtPiBtb2RlbFByb3ZpZGVyUnVudGltZSAi6I635Y+W5omn6KGMIHByb3ZpZGVyIgogICAgICAgIGFnZW50UnVudGltZSAtPiBjb250ZXh0UHJvdmlkZXIgIuS9v+eUqOefpeivhuW3peS9nOWMuuS4iuS4i+aWhyIKICAgICAgICBhZ2VudFJ1bnRpbWUgLT4gcmVzb2x2ZWRBZ2VudENvbmZpZyAi5raI6LS55b2T5YmNIEFnZW50IOmFjee9riIKICAgICAgICBtb2RlbFByb3ZpZGVyIC0+IGNvbnZlcnNhdGlvbk1vZGVsICLmtojotLnmtojmga/kuIrkuIvmloflubbkuqflh7rnu5PmnpwiCiAgICAgICAgY29tcGFyZVdvcmtmbG93Q29udHJvbGxlciAtPiBtb2RlbFByb3ZpZGVyUnVudGltZSAi6I635Y+W5a+55q+U5omn6KGMIHByb3ZpZGVyIgogICAgfQoKICAgIHZpZXdzIHsKICAgICAgICBzeXN0ZW1Db250ZXh0IGNoYXRwcmlzbSAiY29udGV4dCIgewogICAgICAgICAgICBpbmNsdWRlICoKICAgICAgICB9CgogICAgICAgIGNvbnRhaW5lciBjaGF0cHJpc20gImNvbnRhaW5lcnMiIHsKICAgICAgICAgICAgaW5jbHVkZSBleHRlbnNpb25BcHAKICAgICAgICAgICAgaW5jbHVkZSB3ZWJBcHAKICAgICAgICAgICAgaW5jbHVkZSBkZXNrdG9wQXBwCiAgICAgICAgICAgIGluY2x1ZGUgc3luY1NlcnZlcgogICAgICAgICAgICBpbmNsdWRlIHVzZXIKICAgICAgICAgICAgaW5jbHVkZSBjaGF0Z3B0V2ViCiAgICAgICAgICAgIGluY2x1ZGUgZ2VtaW5pQXBpCiAgICAgICAgICAgIGluY2x1ZGUgZ2VtaW5pV2ViCiAgICAgICAgICAgIGluY2x1ZGUga25vd2xlZGdlUmVwbwogICAgICAgIH0KCiAgICAgICAgY29tcG9uZW50IGNvcmVBYnN0cmFjdGlvbnMgImNvcmUtYWJzdHJhY3Rpb25zIiB7CiAgICAgICAgICAgIGluY2x1ZGUgKgogICAgICAgIH0KCiAgICAgICAgdGhlbWUgZGVmYXVsdAogICAgfQp9",
+    "structurizr.inspection.info" : "0",
+    "structurizr.inspection.ignore" : "0",
+    "structurizr.inspection.warning" : "0"
+  },
+  "views" : {
+    "componentViews" : [ {
+      "containerId" : "11",
+      "elements" : [ {
+        "id" : "12",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "13",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "14",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "15",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "16",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "17",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "18",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "19",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "20",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "21",
+        "x" : 0,
+        "y" : 0
+      } ],
+      "externalContainerBoundariesVisible" : false,
+      "key" : "core-abstractions",
+      "name" : "Component View: ChatPrism - Core Abstractions",
+      "order" : 3,
+      "relationships" : [ {
+        "id" : "42"
+      }, {
+        "id" : "43"
+      }, {
+        "id" : "44"
+      }, {
+        "id" : "45"
+      }, {
+        "id" : "46"
+      }, {
+        "id" : "47"
+      }, {
+        "id" : "48"
+      }, {
+        "id" : "49"
+      }, {
+        "id" : "50"
+      }, {
+        "id" : "51"
+      } ]
+    } ],
+    "configuration" : {
+      "lastSavedView" : "containers",
+      "styles" : { },
+      "terminology" : { },
+      "themes" : [ "https://static.structurizr.com/themes/default/theme.json" ]
+    },
+    "containerViews" : [ {
+      "dimensions" : {
+        "height" : 3550,
+        "width" : 3288
+      },
+      "elements" : [ {
+        "id" : "1",
+        "x" : 199,
+        "y" : 2210
+      }, {
+        "id" : "2",
+        "x" : 2470,
+        "y" : 480
+      }, {
+        "id" : "3",
+        "x" : 2450,
+        "y" : 870
+      }, {
+        "id" : "4",
+        "x" : 2450,
+        "y" : 1250
+      }, {
+        "id" : "5",
+        "x" : 2619,
+        "y" : 2775
+      }, {
+        "id" : "7",
+        "x" : 989,
+        "y" : 2260
+      }, {
+        "id" : "8",
+        "x" : 989,
+        "y" : 2659
+      }, {
+        "id" : "9",
+        "x" : 989,
+        "y" : 1910
+      }, {
+        "id" : "10",
+        "x" : 1779,
+        "y" : 2515
+      } ],
+      "externalSoftwareSystemBoundariesVisible" : false,
+      "key" : "containers",
+      "name" : "Container View: ChatPrism",
+      "order" : 2,
+      "relationships" : [ {
+        "id" : "27"
+      }, {
+        "id" : "28",
+        "vertices" : [ {
+          "x" : 769,
+          "y" : 2809
+        } ]
+      }, {
+        "id" : "29",
+        "vertices" : [ {
+          "x" : 769,
+          "y" : 2060
+        } ]
+      }, {
+        "id" : "30"
+      }, {
+        "id" : "31",
+        "vertices" : [ {
+          "x" : 1609,
+          "y" : 1930
+        } ]
+      }, {
+        "id" : "32"
+      }, {
+        "id" : "33",
+        "vertices" : [ {
+          "x" : 1700,
+          "y" : 1355
+        } ]
+      }, {
+        "id" : "34",
+        "vertices" : [ {
+          "x" : 1609,
+          "y" : 1772
+        } ]
+      }, {
+        "id" : "35",
+        "vertices" : [ {
+          "x" : 1609,
+          "y" : 2410
+        } ]
+      }, {
+        "id" : "36",
+        "vertices" : [ {
+          "x" : 1609,
+          "y" : 2521
+        } ]
+      }, {
+        "id" : "37",
+        "vertices" : [ {
+          "x" : 1609,
+          "y" : 1309
+        } ]
+      }, {
+        "id" : "38",
+        "vertices" : [ {
+          "x" : 1609,
+          "y" : 1613
+        } ]
+      }, {
+        "id" : "39",
+        "vertices" : [ {
+          "x" : 1609,
+          "y" : 2060
+        } ]
+      }, {
+        "id" : "40",
+        "vertices" : [ {
+          "x" : 1609,
+          "y" : 2981
+        }, {
+          "x" : 2449,
+          "y" : 2981
+        } ]
+      }, {
+        "id" : "41",
+        "vertices" : [ {
+          "x" : 2449,
+          "y" : 2665
+        } ]
+      } ],
+      "softwareSystemId" : "6"
+    } ],
+    "systemContextViews" : [ {
+      "elements" : [ {
+        "id" : "1",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "2",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "3",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "4",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "5",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "6",
+        "x" : 0,
+        "y" : 0
+      } ],
+      "enterpriseBoundaryVisible" : true,
+      "key" : "context",
+      "name" : "System Context View: ChatPrism",
+      "order" : 1,
+      "relationships" : [ {
+        "id" : "22"
+      }, {
+        "id" : "23"
+      }, {
+        "id" : "24"
+      }, {
+        "id" : "25"
+      }, {
+        "id" : "26"
+      } ],
+      "softwareSystemId" : "6"
+    } ]
+  }
+}

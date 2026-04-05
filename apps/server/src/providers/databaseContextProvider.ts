@@ -27,7 +27,7 @@ export class DatabaseContextProvider implements ContextProvider {
         notImplemented();
     }
 
-    async writeDocument(_path: string, _content: string): Promise<void> {
+    async writeDocument(_input: { path: string; mimeType: string; dataBase64: string; expectedVersion?: string }): Promise<void> {
         notImplemented();
     }
 

@@ -1,4 +1,4 @@
-import type { IContextProvider } from '@packages/core/src';
+import { encodeTextDocument, type IContextProvider } from '@packages/core/src';
 
 export interface FileChangeRecord {
     id: string;
@@ -151,6 +151,10 @@ export class FileChangeService {
         return history.records[0] ?? null;
     }
 
+    clear(path: string): void {
+        this.historyByPath.delete(path);
+    }
+
     canUndo(path: string): boolean {
         const history = this.historyByPath.get(path);
         return !!history && history.currentIndex >= 0;
@@ -168,7 +172,11 @@ export class FileChangeService {
         }
 
         const current = history.records[history.currentIndex];
-        await provider.writeDocument(path, current.beforeContent);
+        await provider.writeDocument({
+            path,
+            mimeType: 'text/markdown',
+            dataBase64: encodeTextDocument(current.beforeContent)
+        });
         history.currentIndex -= 1;
         return {
             content: current.beforeContent,
@@ -184,7 +192,11 @@ export class FileChangeService {
 
         const nextIndex = history.currentIndex + 1;
         const current = history.records[nextIndex];
-        await provider.writeDocument(path, current.afterContent);
+        await provider.writeDocument({
+            path,
+            mimeType: 'text/markdown',
+            dataBase64: encodeTextDocument(current.afterContent)
+        });
         history.currentIndex = nextIndex;
         return {
             content: current.afterContent,

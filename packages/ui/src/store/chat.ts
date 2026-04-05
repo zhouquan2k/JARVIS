@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import {
-    augmentPromptWithAgentContext,
+    prepareRequestWithActiveDocument,
     type AgentRuntime,
     cloneConversation,
     type Conversation,
@@ -84,7 +84,7 @@ export interface ChatState {
     attachmentError: string | null;
     activeAgentContext: ResolvedAgentConfig | null;
     activeWorkspacePath: string | null;
-    activeWorkspaceDocument: Pick<ContextDocument, 'path' | 'content'> | null;
+    activeWorkspaceDocument: ContextDocument | null;
     activeWorkspaceContextProvider: IContextProvider | null;
     onWorkspaceFileChanged: ((change: { path: string; beforeContent: string; afterContent: string }) => Promise<void> | void) | null;
 }
@@ -185,15 +185,19 @@ function cloneResolvedAgentConfig(agent: ResolvedAgentConfig): ResolvedAgentConf
 }
 
 function cloneActiveWorkspaceDocument(
-    document: Pick<ContextDocument, 'path' | 'content'> | null | undefined
-): Pick<ContextDocument, 'path' | 'content'> | null {
+    document: ContextDocument | null | undefined
+): ContextDocument | null {
     if (!document) {
         return null;
     }
 
     return {
         path: document.path,
-        content: document.content
+        mimeType: document.mimeType,
+        dataBase64: document.dataBase64,
+        updatedAt: document.updatedAt,
+        version: document.version,
+        canWrite: document.canWrite
     };
 }
 
@@ -384,8 +388,12 @@ function buildVisibleMessages(messages: ConversationMessage[]): ConversationMess
 function buildProviderHistory(messages: ConversationMessage[]) {
     return buildVisibleMessages(messages).map((message) => ({
         role: message.role,
-        content: message.content,
-        attachments: message.attachments?.map((attachment) => ({ ...attachment }))
+        content: message.content || message.requestSnapshot?.prompt || '',
+        attachments: message.attachments?.length
+            ? message.attachments.map((attachment) => ({ ...attachment }))
+            : message.requestSnapshot?.attachments?.length
+                ? message.requestSnapshot.attachments.map((attachment) => ({ ...attachment }))
+                : undefined
     }));
 }
 
@@ -405,6 +413,53 @@ function buildProviderModelStates(providers: ProviderConfig[]): Record<string, P
     return Object.fromEntries(
         providers.map((provider) => [provider.id, { loading: false, loaded: false } satisfies ProviderModelLoadState])
     );
+}
+
+function normalizeModelToken(value?: string | null): string {
+    return value?.trim().toLowerCase().replace(/[^a-z0-9]+/g, '') || '';
+}
+
+function resolveProviderModelId(providerConfig: ProviderConfig, requestedModelId?: string | null): string | null {
+    const normalizedRequested = requestedModelId?.trim();
+    if (!normalizedRequested) {
+        return null;
+    }
+
+    const exactIdMatch = providerConfig.models.find((model) => model.id === normalizedRequested);
+    if (exactIdMatch) {
+        return exactIdMatch.id;
+    }
+
+    const exactNameMatch = providerConfig.models.find((model) => model.name === normalizedRequested);
+    if (exactNameMatch) {
+        return exactNameMatch.id;
+    }
+
+    const normalizedRequestedToken = normalizeModelToken(normalizedRequested);
+    if (!normalizedRequestedToken) {
+        return null;
+    }
+
+    const normalizedMatch = providerConfig.models.find((model) => {
+        return normalizeModelToken(model.id) === normalizedRequestedToken
+            || normalizeModelToken(model.name) === normalizedRequestedToken;
+    });
+    if (normalizedMatch) {
+        return normalizedMatch.id;
+    }
+
+    if (providerConfig.id === 'gemini-api' && normalizedRequestedToken === 'geminiprolatest') {
+        const geminiProFallback = providerConfig.models.find((model) => {
+            const normalizedId = normalizeModelToken(model.id);
+            const normalizedName = normalizeModelToken(model.name);
+            return normalizedId === 'gemini25pro'
+                || normalizedName === 'gemini25pro'
+                || normalizedId === 'geminiprolatest';
+        });
+        return geminiProFallback?.id || null;
+    }
+
+    return null;
 }
 
 function isConfiguredDefaultModelError(error: unknown): error is Error {
@@ -913,7 +968,7 @@ export const useChatStore = defineStore('chat', {
 
         setWorkspaceContext(input: {
             activePath: string | null;
-            activeDocument?: Pick<ContextDocument, 'path' | 'content'> | null;
+            activeDocument?: ContextDocument | null;
             contextProvider: IContextProvider | null;
             onFileChanged?: ((change: { path: string; beforeContent: string; afterContent: string }) => Promise<void> | void) | null;
         }) {
@@ -937,10 +992,11 @@ export const useChatStore = defineStore('chat', {
             const requestedModelId = this.activeAgentContext?.modelName?.trim();
             let resolvedModelId = providerConfig.defaultModel;
             if (requestedModelId) {
-                if (!providerConfig.models.some((model) => model.id === requestedModelId)) {
+                const matchedModelId = resolveProviderModelId(providerConfig, requestedModelId);
+                if (!matchedModelId) {
                     throw new Error(`Agent model '${requestedModelId}' is unavailable for provider '${requestedProviderId}'.`);
                 }
-                resolvedModelId = requestedModelId;
+                resolvedModelId = matchedModelId;
             } else if (
                 requestedProviderId === this.currentProviderId
                 && this.currentModelId
@@ -1383,6 +1439,28 @@ export const useChatStore = defineStore('chat', {
             const history = this.currentConversation
                 ? buildProviderHistory(this.currentConversation.messages)
                 : [];
+            const shouldAutoAttachActiveDocument = !!this.activeAgentContext && history.length === 0;
+            const activeDocumentForRequest = shouldAutoAttachActiveDocument
+                ? this.activeWorkspaceDocument
+                : null;
+            const requestProviderId = this.activeAgentContext?.modelProviderName?.trim() || this.currentProviderId;
+            const requestProvider = requestProviderId
+                ? this.resolveModelProvider(requestProviderId)
+                : null;
+            const initialPreparedRequest = this.activeAgentContext && requestProvider
+                ? await prepareRequestWithActiveDocument(
+                    requestProvider,
+                    trimmedPrompt,
+                    {
+                        activeDocument: activeDocumentForRequest,
+                        attachments: pendingAttachments
+                    }
+                )
+                : {
+                    prompt: trimmedPrompt,
+                    attachments: pendingAttachments,
+                    mode: 'none' as const
+                };
 
             const questionId = crypto.randomUUID();
             const createdAt = Date.now();
@@ -1392,10 +1470,17 @@ export const useChatStore = defineStore('chat', {
             this.currentConversation!.messages.push({
                 id: userMsgId,
                 role: 'user',
-                content: trimmedPrompt,
+                content: initialPreparedRequest.prompt,
                 createdAt,
                 questionId,
-                attachments: pendingAttachments.length > 0 ? pendingAttachments : undefined
+                attachments: initialPreparedRequest.attachments.length > 0
+                    ? initialPreparedRequest.attachments.map((attachment) => ({ ...attachment }))
+                    : undefined,
+                requestSnapshot: {
+                    prompt: initialPreparedRequest.prompt,
+                    attachments: initialPreparedRequest.attachments.map((attachment) => ({ ...attachment })),
+                    activeDocumentMode: initialPreparedRequest.mode
+                }
             });
 
             this.currentConversation!.messages.push({
@@ -1435,7 +1520,6 @@ export const useChatStore = defineStore('chat', {
                         lastMsg.annotations = update.annotations;
                     }
                 };
-
                 const result = this.agentRuntime
                     ? await this.agentRuntime.run(
                         {
@@ -1443,7 +1527,7 @@ export const useChatStore = defineStore('chat', {
                             agent: this.activeAgentContext,
                             workspace: {
                                 activePath: this.activeWorkspacePath,
-                                activeDocument: this.activeWorkspaceDocument,
+                                activeDocument: activeDocumentForRequest,
                                 contextProvider: this.activeWorkspaceContextProvider,
                                 onFileChanged: this.onWorkspaceFileChanged ?? undefined
                             },
@@ -1456,23 +1540,60 @@ export const useChatStore = defineStore('chat', {
                         },
                         onUpdate
                     )
-                    : await sendTarget.provider.sendMessage(
-                        this.activeAgentContext
-                            ? augmentPromptWithAgentContext(trimmedPrompt, {
-                                activeDocument: this.activeWorkspaceDocument
-                            })
-                            : trimmedPrompt,
-                        {
-                            context: { conversationId: backendId },
-                            modelId: sendTarget.modelId,
-                            attachments: pendingAttachments,
-                            history,
-                            modelOptions: cloneModelOptions(sendTarget.modelOptions)
-                        },
-                        onUpdate
-                    );
+                    : await (async () => {
+                        const preparedRequest = this.activeAgentContext
+                            ? await prepareRequestWithActiveDocument(
+                                sendTarget.provider,
+                                trimmedPrompt,
+                                {
+                                    activeDocument: activeDocumentForRequest,
+                                    attachments: pendingAttachments
+                                }
+                            )
+                            : {
+                                prompt: trimmedPrompt,
+                                attachments: pendingAttachments,
+                                mode: 'none' as const
+                            };
+
+                        const providerResult = await sendTarget.provider.sendMessage(
+                            preparedRequest.prompt,
+                            {
+                                context: { conversationId: backendId },
+                                modelId: sendTarget.modelId,
+                                attachments: preparedRequest.attachments,
+                                history,
+                                modelOptions: cloneModelOptions(sendTarget.modelOptions)
+                            },
+                            onUpdate
+                        );
+                        return {
+                            ...providerResult,
+                            requestSnapshot: {
+                                prompt: preparedRequest.prompt,
+                                attachments: preparedRequest.attachments.map((attachment) => ({ ...attachment })),
+                                activeDocumentMode: preparedRequest.mode
+                            }
+                        };
+                    })();
 
                 this.currentConversation!.backendId = result.conversationId;
+                const userMsg = this.currentConversation!.messages.find((message) => message.id === userMsgId);
+                if (userMsg?.role === 'user') {
+                    userMsg.content = result.requestSnapshot?.prompt ?? userMsg.content;
+                    userMsg.attachments = result.requestSnapshot?.attachments?.length
+                        ? result.requestSnapshot.attachments.map((attachment) => ({ ...attachment }))
+                        : pendingAttachments.length > 0
+                            ? pendingAttachments.map((attachment) => ({ ...attachment }))
+                            : undefined;
+                    userMsg.requestSnapshot = result.requestSnapshot
+                        ? {
+                            prompt: result.requestSnapshot.prompt,
+                            attachments: result.requestSnapshot.attachments?.map((attachment) => ({ ...attachment })),
+                            activeDocumentMode: result.requestSnapshot.activeDocumentMode
+                        }
+                        : undefined;
+                }
                 const lastMsg = this.currentConversation!.messages[this.currentConversation!.messages.length - 1];
                 if (lastMsg.role === 'assistant') {
                     lastMsg.content = result.text;

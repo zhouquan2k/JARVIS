@@ -33,6 +33,7 @@ export * from './agents/runtime/types';
 export * from './agents/runtime/createAgentRuntime';
 export * from './runtime/providerRuntime.types';
 export * from './runtime/createProviderRuntime';
+export * from './utils/documentData';
 export * from './workflows/compare/types';
 export * from './workflows/compare/ComparisonAnalyzer';
 export * from './workflows/compare/CompareWorkflowController';

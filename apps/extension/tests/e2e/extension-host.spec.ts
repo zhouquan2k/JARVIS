@@ -159,26 +159,27 @@ test('extension host exposes the knowledge workspace route with editable markdow
   const session = await launchExtensionPage({ routeHash: '#/' });
   try {
     const { page } = session;
-    await expect(page.getByTestId('knowledge-workspace')).toBeVisible();
-    await expect(page.getByTestId('knowledge-file-tree')).toBeVisible();
-    await expect(page.getByTestId('knowledge-editor')).toBeVisible();
-    await expect(page.getByTestId('knowledge-assistant-pane')).toBeVisible();
+    await expect(page.getByTestId('document-workspace')).toBeVisible();
+    await expect(page.getByTestId('document-file-tree')).toBeVisible();
+    await expect(page.getByTestId('document-editor')).toBeVisible();
+    await expect(page.getByTestId('agent-pane')).toBeVisible();
     await expect(page.getByTestId('normal-chat-view')).toBeVisible();
-    await expect(page.getByTestId('knowledge-editor-empty')).toBeVisible();
+    await expect(page.getByTestId('document-node-root')).toHaveClass(/active/);
+    await expect(page.getByTestId('document-editor-empty')).toBeVisible();
 
-    await page.getByTestId('knowledge-node-file').first().click();
-    const editor = page.getByTestId('knowledge-editor-input');
+    await page.getByTestId('document-node-file').filter({ hasText: 'guide.md' }).click();
+    const editor = page.getByTestId('document-editor-input');
     await expect(editor).toBeVisible();
     await editor.fill('Playwright extension knowledge');
     await expect(editor).toContainText('Playwright extension knowledge');
-    await page.getByTestId('knowledge-save').click();
+    await page.getByTestId('document-save').click();
 
     await page.getByTestId('topbar-workspace-normal-chat').click();
     await expect(page.getByTestId('conversation-workspace')).toBeVisible();
     await expect(page.getByTestId('normal-chat-view')).toBeVisible();
 
     await page.getByTestId('topbar-workspace-knowledge-workspace').click();
-    await expect(page.getByTestId('knowledge-workspace')).toBeVisible();
+    await expect(page.getByTestId('document-workspace')).toBeVisible();
   } finally {
     await session.close();
   }
@@ -188,11 +189,47 @@ test('extension knowledge workspace renders agent metadata', async () => {
   const session = await launchExtensionPage({ routeHash: '#/' });
   try {
     const { page } = session;
-    await expect(page.getByTestId('knowledge-workspace')).toBeVisible();
-    await expect(page.getByTestId('knowledge-agent-name')).toContainText('Default Knowledge Agent（/）');
-    await expect(page.getByTestId('knowledge-agent-model')).toContainText('跟随当前聊天模型选择');
-    await expect(page.getByTestId('knowledge-editor')).toBeVisible();
+    await expect(page.getByTestId('document-workspace')).toBeVisible();
+    await expect(page.getByTestId('agent-name')).toContainText('Default Knowledge Agent（/）');
+    await expect(page.getByTestId('agent-model')).toContainText('gemini-api / Gemini Pro Latest');
+    await expect(page.getByTestId('document-editor')).toBeVisible();
     await expect(page.getByTestId('normal-chat-view')).toBeVisible();
+  } finally {
+    await session.close();
+  }
+});
+
+test('extension knowledge workspace negotiates text pdf and unsupported document requests', async () => {
+  const session = await launchExtensionPage({ routeHash: '#/' });
+  try {
+    const { page } = session;
+    await expect(page.getByTestId('document-workspace')).toBeVisible();
+
+    await page.getByTestId('document-node-file').filter({ hasText: 'notes.txt' }).click();
+    await expect(page.getByTestId('document-editor-surface')).toBeVisible();
+    await expect(page.getByTestId('document-save')).toBeEnabled();
+
+    await page.getByTestId('document-node-file').filter({ hasText: 'report.pdf' }).click();
+    await expect(page.getByTestId('document-pdf-viewer')).toBeVisible();
+    await expect(page.getByTestId('document-save')).toBeDisabled();
+
+    await page.getByTestId('normal-input').fill('TRIGGER_ATTACHMENT_ECHO');
+    await page.getByTestId('normal-send').click();
+    await expect(page.getByTestId('normal-messages')).toContainText('report.pdf [application/pdf]');
+    await expect(page.locator('.message.user .attachment-card')).toHaveCount(1);
+    await expect(page.locator('.message.user').first()).toContainText('report.pdf');
+
+    await page.getByTestId('normal-input').fill('第二轮继续问');
+    await page.getByTestId('normal-send').click();
+    await expect(page.locator('.message.user .attachment-card')).toHaveCount(1);
+    await expect(page.locator('.message.user').last()).not.toContainText('report.pdf');
+
+    await page.getByTestId('document-node-file').filter({ hasText: 'archive.bin' }).click();
+    await expect(page.getByTestId('document-unsupported-viewer')).toContainText('application/octet-stream');
+
+    await page.getByTestId('normal-input').fill('TRIGGER_ATTACHMENT_ECHO');
+    await page.getByTestId('normal-send').click();
+    await expect(page.getByTestId('normal-messages')).not.toContainText('archive.bin [application/octet-stream]');
   } finally {
     await session.close();
   }

@@ -7,6 +7,7 @@ import type {
     AbortRequest,
     AnalyzeComparisonRequest,
     CheckAuthRequest,
+    GetDocumentCapabilityRequest,
     GetAvailableModelsRequest,
     GetHistoryDetailRequest,
     GetHistoryListRequest,
@@ -293,6 +294,21 @@ export default defineBackground(() => {
                 }
             };
 
+            const handleGetDocumentCapability = async (msg: GetDocumentCapabilityRequest) => {
+                try {
+                    const provider = await resolveProvider(msg.providerId);
+                    const result = await provider.getDocumentCapability?.() ?? null;
+                    postResponse({
+                        type: 'DONE',
+                        requestId: msg.requestId,
+                        channelId: msg.channelId,
+                        result
+                    });
+                } catch (error) {
+                    postError(msg.requestId, msg.channelId, error);
+                }
+            };
+
             const handleGetHistoryList = async (msg: GetHistoryListRequest) => {
                 try {
                     const provider = await resolveHistoryProvider(msg.providerId);
@@ -356,6 +372,9 @@ export default defineBackground(() => {
                         break;
                     case 'GET_AVAILABLE_MODELS':
                         void handleGetAvailableModels(msg);
+                        break;
+                    case 'GET_DOCUMENT_CAPABILITY':
+                        void handleGetDocumentCapability(msg);
                         break;
                     case 'GET_HISTORY_LIST':
                         void handleGetHistoryList(msg);

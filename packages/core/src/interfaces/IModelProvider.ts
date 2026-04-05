@@ -1,6 +1,6 @@
 import type { ProviderModelCatalog } from '../../config';
 import type { AgentModelTurn, AgentToolCall } from './IAgentCapableProvider';
-import type { ConversationRole, MessageAnnotation, MessageAttachment } from './IStorageProvider';
+import type { ConversationRole, MessageAnnotation, MessageAttachment, MessageRequestSnapshot } from './IStorageProvider';
 
 export interface ProviderContextMessage {
   role: ConversationRole;
@@ -29,12 +29,18 @@ export interface ProviderSendResult {
   annotations?: MessageAnnotation[];
   toolCalls?: AgentToolCall[];
   modelTurn?: AgentModelTurn;
+  requestSnapshot?: MessageRequestSnapshot;
+}
+
+export interface ProviderDocumentCapability {
+  acceptedMimeTypes: string[];
 }
 
 export interface IModelProvider {
   id: string; // 如：'chatgpt-web'
   getAvailableModels(): Promise<ProviderModelCatalog>;
   checkAuth(): Promise<boolean>;
+  getDocumentCapability?(): Promise<ProviderDocumentCapability>;
   sendMessage(
     prompt: string,
     options: SendMessageOptions,

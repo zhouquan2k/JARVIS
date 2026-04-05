@@ -8,7 +8,7 @@
       @navigate-workspace="onNavigateWorkspace"
     />
     <main class="view-host">
-      <KnowledgeWorkspaceView
+      <DocumentWorkspaceView
         v-if="isKnowledgeMode"
         :context-provider="contextProvider"
       />
@@ -28,7 +28,7 @@ import { computed, onMounted, onUnmounted, ref, toRaw, watchEffect } from 'vue';
 import {
   AppTopBar,
   ConversationWorkspaceView,
-  KnowledgeWorkspaceView,
+  DocumentWorkspaceView,
   PRIMARY_WORKSPACE_ROUTES,
   openConversationImportDialog,
   type ChatRoutePath,

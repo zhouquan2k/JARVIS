@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import * as coreModule from '@packages/core/src';
+import * as fileSearchImport from '../../../../packages/core/src/providers/context/fileSearch.ts';
+import * as documentDataImport from '../../../../packages/core/src/utils/documentData.ts';
 import type {
     AgentConfig,
     AgentInheritanceMode,
@@ -15,11 +16,23 @@ import type {
     ResolvedAgentConfig
 } from '../types/context.js';
 
-const core = (coreModule as typeof coreModule & { default?: typeof coreModule }).default ?? coreModule;
+function unwrapModuleNamespace<T extends object>(moduleNamespace: T): T {
+    return 'default' in moduleNamespace
+        ? (moduleNamespace.default as T)
+        : moduleNamespace;
+}
+
+const fileSearchModule = unwrapModuleNamespace(fileSearchImport);
+const documentDataModule = unwrapModuleNamespace(documentDataImport);
+const { normalizeScopePath: normalizeSearchScopePath, searchInScopedFiles } = fileSearchModule;
 const {
-    normalizeScopePath: normalizeSearchScopePath,
-    searchInScopedFiles
-} = core;
+    decodeBase64,
+    decodeTextDocument,
+    encodeBase64,
+    encodeTextDocument,
+    inferDocumentMimeType,
+    isTextDocumentMimeType
+} = documentDataModule;
 
 export interface LocalFileContextProviderOptions {
     rootPath?: string;
@@ -28,6 +41,8 @@ export interface LocalFileContextProviderOptions {
 const DEFAULT_SCOPED_AGENT_CONFIG: AgentConfig = {
     name: 'Default Knowledge Agent',
     description: 'General-purpose assistant for the knowledge workspace.',
+    modelProviderName: 'gemini-api',
+    modelName: 'Gemini Pro Latest',
     instructions: [
         'Treat the active file as the primary context for the current request when it is provided.',
         'Use workspace tools to gather additional relevant information from the current scope only when needed.',
@@ -345,31 +360,46 @@ export class LocalFileContextProvider implements ContextProvider {
         }
 
         const realPath = await this.resolveRealPath(normalizedPath, { expectExisting: true, expectDirectory: false });
-        const [content, stats] = await Promise.all([
-            fs.readFile(realPath, 'utf8'),
+        const mimeType = inferDocumentMimeType(normalizedPath);
+        const [contentBuffer, stats] = await Promise.all([
+            fs.readFile(realPath),
             fs.stat(realPath)
         ]);
 
         return {
             path: normalizedPath,
-            content,
+            mimeType,
+            dataBase64: isTextDocumentMimeType(mimeType)
+                ? encodeTextDocument(contentBuffer.toString('utf8'))
+                : encodeBase64(contentBuffer),
             updatedAt: stats.mtimeMs,
-            version: `${stats.mtimeMs}`
+            version: `${stats.mtimeMs}`,
+            canWrite: isTextDocumentMimeType(mimeType)
         };
     }
 
-    async writeDocument(filePath: string, content: string): Promise<void> {
-        const normalizedPath = normalizeVirtualPath(filePath, { allowRoot: false });
+    async writeDocument(input: { path: string; mimeType: string; dataBase64: string; expectedVersion?: string }): Promise<void> {
+        const normalizedPath = normalizeVirtualPath(input.path, { allowRoot: false });
         if (!normalizedPath || normalizedPath === '/') {
             throw new Error('文档路径不能为空。');
         }
 
+        if (!isTextDocumentMimeType(input.mimeType)) {
+            throw new Error(`当前文档类型暂不支持写入: ${input.mimeType}`);
+        }
+
         const realPath = await this.resolveRealPath(normalizedPath, { expectExisting: true, expectDirectory: false });
-        await fs.writeFile(realPath, content, 'utf8');
+        if (input.expectedVersion) {
+            const stats = await fs.stat(realPath);
+            if (`${stats.mtimeMs}` !== input.expectedVersion) {
+                throw new Error('文档版本已变更，请重新读取后再试。');
+            }
+        }
+
+        await fs.writeFile(realPath, Buffer.from(decodeBase64(input.dataBase64)));
     }
 
     async createNode(input: CreateContextNodeInput): Promise<ContextNode> {
-        const rootDirectory = await this.resolveRootDirectory();
         const parentPath = normalizeVirtualPath(input.parentPath);
         const targetPath = toVirtualPath(parentPath, input.name);
         const targetRealPath = await this.resolveRealPath(targetPath, { expectExisting: false });
@@ -401,6 +431,45 @@ export class LocalFileContextProvider implements ContextProvider {
         };
     }
 
+    async deleteNode(targetPath: string): Promise<void> {
+        const normalizedPath = normalizeVirtualPath(targetPath, { allowRoot: false });
+        if (!normalizedPath || normalizedPath === '/') {
+            throw new Error('不允许删除根目录。');
+        }
+
+        const realPath = await this.resolveRealPath(normalizedPath, { expectExisting: true });
+        await fs.rm(realPath, { recursive: true, force: false });
+    }
+
+    async renameNode(input: { path: string; name: string }): Promise<ContextNode> {
+        const normalizedPath = normalizeVirtualPath(input.path, { allowRoot: false });
+        if (!normalizedPath || normalizedPath === '/') {
+            throw new Error('不允许重命名根目录。');
+        }
+
+        const sourceRealPath = await this.resolveRealPath(normalizedPath, { expectExisting: true });
+        const parentPath = path.posix.dirname(normalizedPath) === '/' ? undefined : path.posix.dirname(normalizedPath);
+        const targetPath = toVirtualPath(parentPath, input.name);
+        const targetRealPath = await this.resolveRealPath(targetPath, { expectExisting: false });
+
+        if (await exists(targetRealPath)) {
+            throw new Error(`节点已存在: ${targetPath}`);
+        }
+
+        await fs.rename(sourceRealPath, targetRealPath);
+        const stats = await fs.stat(targetRealPath);
+        const kind = (await fs.stat(targetRealPath)).isDirectory() ? 'directory' : 'file';
+
+        return {
+            path: targetPath,
+            name: input.name.trim(),
+            kind,
+            parentPath,
+            hasChildren: kind === 'directory' ? true : undefined,
+            updatedAt: stats.mtimeMs
+        };
+    }
+
     async searchInScope(request: ContextSearchRequest): Promise<ContextSearchMatch[]> {
         const rootDirectory = await this.resolveRootDirectory();
         const scopePath = normalizeVirtualPath(request.scopePath);
@@ -421,7 +490,14 @@ export class LocalFileContextProvider implements ContextProvider {
 
                 files.push({
                     path: entryVirtualPath,
-                    readContent: async () => fs.readFile(entryRealPath, 'utf8')
+                    readContent: async () => {
+                        const mimeType = inferDocumentMimeType(entryVirtualPath);
+                        if (!isTextDocumentMimeType(mimeType)) {
+                            return '';
+                        }
+
+                        return fs.readFile(entryRealPath, 'utf8');
+                    }
                 });
             }
         };
@@ -563,7 +639,7 @@ export class LocalFileContextProvider implements ContextProvider {
             return {
                 scopePath,
                 configPath,
-                config: parseAgentConfig(document.content, configPath)
+                config: parseAgentConfig(decodeTextDocument(document.dataBase64), configPath)
             };
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);

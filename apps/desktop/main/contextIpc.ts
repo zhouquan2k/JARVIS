@@ -1,9 +1,15 @@
 import { ipcMain } from 'electron';
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import path from 'node:path';
 import {
     DEFAULT_SCOPED_AGENT_CONFIG,
+    decodeTextDocument,
+    decodeBase64,
+    encodeBase64,
+    encodeTextDocument,
+    inferDocumentMimeType,
+    isTextDocumentMimeType,
     normalizeScopePath,
     resolveScopedAgentConfig,
     type ContextSearchRequest,
@@ -13,9 +19,11 @@ import {
 } from '@packages/core/src';
 import {
     DESKTOP_CONTEXT_CREATE_NODE_CHANNEL,
+    DESKTOP_CONTEXT_DELETE_NODE_CHANNEL,
     DESKTOP_CONTEXT_INITIALIZE_CHANNEL,
     DESKTOP_CONTEXT_LIST_TREE_CHANNEL,
     DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL,
+    DESKTOP_CONTEXT_RENAME_NODE_CHANNEL,
     DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL,
     DESKTOP_CONTEXT_RESOLVE_AGENT_CHANNEL,
     DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL
@@ -148,18 +156,34 @@ export function registerContextIpc(options: RegisterContextIpcOptions = {}) {
         },
         async readDocument(targetPath: string) {
             const actualPath = toActualPath(await getWorkspaceRoot(), targetPath);
-            const content = await readFile(actualPath, 'utf8');
+            const mimeType = inferDocumentMimeType(targetPath);
+            const content = await readFile(actualPath);
             const entryStat = await stat(actualPath);
             return {
                 path: normalizeVirtualPath(targetPath) ?? '/',
-                content,
-                updatedAt: entryStat.mtimeMs
+                mimeType,
+                dataBase64: isTextDocumentMimeType(mimeType)
+                    ? encodeTextDocument(content.toString('utf8'))
+                    : encodeBase64(content),
+                updatedAt: entryStat.mtimeMs,
+                version: `${entryStat.mtimeMs}`,
+                canWrite: isTextDocumentMimeType(mimeType)
             };
         },
-        async writeDocument(targetPath: string, content: string) {
-            const actualPath = toActualPath(await getWorkspaceRoot(), targetPath);
+        async writeDocument(input: { path: string; mimeType: string; dataBase64: string; expectedVersion?: string }) {
+            if (!isTextDocumentMimeType(input.mimeType)) {
+                throw new Error(`Unsupported document write mime type: ${input.mimeType}`);
+            }
+
+            const actualPath = toActualPath(await getWorkspaceRoot(), input.path);
             await mkdir(dirname(actualPath), { recursive: true });
-            await writeFile(actualPath, content, 'utf8');
+            if (input.expectedVersion) {
+                const entryStat = await stat(actualPath);
+                if (`${entryStat.mtimeMs}` !== input.expectedVersion) {
+                    throw new Error('Document has changed on disk.');
+                }
+            }
+            await writeFile(actualPath, Buffer.from(decodeBase64(input.dataBase64)));
         },
         async createNode(input: { parentPath?: string; name: string; kind: ContextNodeKind }) {
             assertValidNodeName(input.name);
@@ -184,6 +208,38 @@ export function registerContextIpc(options: RegisterContextIpcOptions = {}) {
                 hasChildren: input.kind === 'directory'
             };
         },
+        async deleteNode(targetPath: string) {
+            const normalizedPath = normalizeVirtualPath(targetPath);
+            if (!normalizedPath) {
+                throw new Error('Deleting the workspace root is not allowed.');
+            }
+
+            const actualPath = toActualPath(await getWorkspaceRoot(), normalizedPath);
+            await rm(actualPath, { recursive: true, force: false });
+        },
+        async renameNode(input: { path: string; name: string }) {
+            const normalizedPath = normalizeVirtualPath(input.path);
+            if (!normalizedPath) {
+                throw new Error('Renaming the workspace root is not allowed.');
+            }
+
+            assertValidNodeName(input.name);
+            const parentPath = path.posix.dirname(normalizedPath) === '/' ? undefined : path.posix.dirname(normalizedPath);
+            const targetVirtualPath = parentPath ? `${parentPath}/${input.name}` : `/${input.name}`;
+            const sourceActualPath = toActualPath(await getWorkspaceRoot(), normalizedPath);
+            const targetActualPath = toActualPath(await getWorkspaceRoot(), targetVirtualPath);
+            await mkdir(dirname(targetActualPath), { recursive: true });
+            await import('node:fs/promises').then(({ rename }) => rename(sourceActualPath, targetActualPath));
+            const entryStat = await stat(targetActualPath);
+            return {
+                path: targetVirtualPath,
+                name: input.name,
+                kind: entryStat.isDirectory() ? 'directory' : 'file',
+                parentPath,
+                updatedAt: entryStat.mtimeMs,
+                hasChildren: entryStat.isDirectory()
+            };
+        },
         async searchInScope(request: ContextSearchRequest) {
             const workspaceRoot = await getWorkspaceRoot();
             const scopePath = normalizeVirtualPath(request.scopePath);
@@ -203,7 +259,14 @@ export function registerContextIpc(options: RegisterContextIpcOptions = {}) {
 
                     files.push({
                         path: entryVirtualPath,
-                        readContent: async () => readFile(entryRealPath, 'utf8')
+                        readContent: async () => {
+                            const mimeType = inferDocumentMimeType(entryVirtualPath);
+                            if (!isTextDocumentMimeType(mimeType)) {
+                                return '';
+                            }
+
+                            return readFile(entryRealPath, 'utf8');
+                        }
                     });
                 }
                 return files;
@@ -234,11 +297,17 @@ export function registerContextIpc(options: RegisterContextIpcOptions = {}) {
     ipc.handle(DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL, async (_event, targetPath: string) => {
         return provider.readDocument(targetPath);
     });
-    ipc.handle(DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL, async (_event, targetPath: string, content: string) => {
-        await provider.writeDocument(targetPath, content);
+    ipc.handle(DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL, async (_event, input: { path: string; mimeType: string; dataBase64: string; expectedVersion?: string }) => {
+        await provider.writeDocument(input);
     });
     ipc.handle(DESKTOP_CONTEXT_CREATE_NODE_CHANNEL, async (_event, input: { parentPath?: string; name: string; kind: ContextNodeKind }) => {
         return provider.createNode(input);
+    });
+    ipc.handle(DESKTOP_CONTEXT_DELETE_NODE_CHANNEL, async (_event, targetPath: string) => {
+        await provider.deleteNode(targetPath);
+    });
+    ipc.handle(DESKTOP_CONTEXT_RENAME_NODE_CHANNEL, async (_event, input: { path: string; name: string }) => {
+        return provider.renameNode(input);
     });
     ipc.handle(DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL, async (_event, request: ContextSearchRequest) => {
         return provider.searchInScope(request);
@@ -255,5 +324,7 @@ export function registerContextIpc(options: RegisterContextIpcOptions = {}) {
         ipc.removeHandler(DESKTOP_CONTEXT_RESOLVE_AGENT_CHANNEL);
         ipc.removeHandler(DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL);
         ipc.removeHandler(DESKTOP_CONTEXT_CREATE_NODE_CHANNEL);
+        ipc.removeHandler(DESKTOP_CONTEXT_DELETE_NODE_CHANNEL);
+        ipc.removeHandler(DESKTOP_CONTEXT_RENAME_NODE_CHANNEL);
     };
 }

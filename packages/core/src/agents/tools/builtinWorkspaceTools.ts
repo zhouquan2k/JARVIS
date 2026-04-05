@@ -1,4 +1,5 @@
-import type { ContextNode, IContextProvider } from '../../interfaces/IContextProvider';
+import { decodeTextDocument, encodeTextDocument, inferDocumentMimeType, isTextDocumentMimeType } from '../../utils/documentData';
+import type { ContextDocument, ContextNode, IContextProvider } from '../../interfaces/IContextProvider';
 import type { AgentToolDefinition, AgentToolExecutionContext } from './types';
 
 type ToolArgs = Record<string, unknown>;
@@ -69,15 +70,27 @@ function assertPathWithinScope(path: string, context: AgentToolExecutionContext)
     }
 }
 
-async function readDocumentForEdit(context: AgentToolExecutionContext, pathInput: unknown): Promise<{ path: string; beforeContent: string; provider: IContextProvider }> {
+function readTextDocument(document: ContextDocument, path: string): string {
+    if (!isTextDocumentMimeType(document.mimeType)) {
+        throw new Error(`File '${path}' is not a text document.`);
+    }
+
+    return decodeTextDocument(document.dataBase64);
+}
+
+async function readDocumentForEdit(
+    context: AgentToolExecutionContext,
+    pathInput: unknown
+): Promise<{ path: string; beforeContent: string; provider: IContextProvider; mimeType: string }> {
     const provider = requireContextProvider(context);
     const path = normalizeOptionalTargetPath(context, pathInput);
     assertPathWithinScope(path, context);
     const document = await provider.readDocument(path);
     return {
         path,
-        beforeContent: document.content,
-        provider
+        beforeContent: readTextDocument(document, path),
+        provider,
+        mimeType: document.mimeType
     };
 }
 
@@ -173,10 +186,14 @@ function resolveRange(content: string, input: RangeInput): { start: number; end:
 
 async function persistEdit(
     provider: IContextProvider,
-    change: FileChangeInput,
+    change: FileChangeInput & { mimeType?: string },
     context: AgentToolExecutionContext
 ): Promise<void> {
-    await provider.writeDocument(change.path, change.afterContent);
+    await provider.writeDocument({
+        path: change.path,
+        mimeType: change.mimeType ?? inferDocumentMimeType(change.path),
+        dataBase64: encodeTextDocument(change.afterContent)
+    });
     await context.onFileChanged?.(change);
 }
 
@@ -214,6 +231,10 @@ async function buildWriteFileResult(args: ToolArgs, context: AgentToolExecutionC
     assertPathWithinScope(path, context);
 
     const content = readString(args, 'content', { allowEmpty: true });
+    const mimeType = inferDocumentMimeType(path);
+    if (!isTextDocumentMimeType(mimeType)) {
+        throw new Error(`File '${path}' is not a supported text document.`);
+    }
     const mode = (() => {
         const raw = args.mode;
         if (raw === undefined) {
@@ -250,7 +271,8 @@ async function buildWriteFileResult(args: ToolArgs, context: AgentToolExecutionC
         await persistEdit(provider, {
             path,
             beforeContent: '',
-            afterContent: content
+            afterContent: content,
+            mimeType
         }, context);
 
         return {
@@ -262,10 +284,12 @@ async function buildWriteFileResult(args: ToolArgs, context: AgentToolExecutionC
     }
 
     const document = await provider.readDocument(path);
+    const beforeContent = readTextDocument(document, path);
     await persistEdit(provider, {
         path,
-        beforeContent: document.content,
-        afterContent: content
+        beforeContent,
+        afterContent: content,
+        mimeType: document.mimeType
     }, context);
 
     return {
@@ -296,7 +320,8 @@ export function createBuiltinWorkspaceToolDefinitions(): AgentToolDefinition[] {
                 const document = await provider.readDocument(path);
                 return {
                     path: document.path,
-                    content: document.content
+                    mimeType: document.mimeType,
+                    content: readTextDocument(document, path)
                 };
             }
         },
@@ -338,7 +363,8 @@ export function createBuiltinWorkspaceToolDefinitions(): AgentToolDefinition[] {
                 const document = await provider.readDocument(path);
                 return {
                     path: document.path,
-                    content: document.content
+                    mimeType: document.mimeType,
+                    content: readTextDocument(document, path)
                 };
             }
         },

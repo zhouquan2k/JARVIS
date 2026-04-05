@@ -9,6 +9,7 @@ import type {
     IStorageProvider,
     ResolvedAgentConfig
 } from '@packages/core/src';
+import { encodeTextDocument } from '@packages/core/src';
 import type { ProviderConfig } from '@packages/core/config';
 import { useChatStore } from './chat';
 
@@ -39,6 +40,7 @@ class MockModelProvider implements IModelProvider {
     id = 'mock-provider';
     promptsUsed: string[] = [];
     optionsUsed: Array<Record<string, unknown>> = [];
+    acceptedMimeTypes = ['text/plain', 'text/markdown', 'application/pdf'];
 
     async getAvailableModels() {
         return {
@@ -49,6 +51,12 @@ class MockModelProvider implements IModelProvider {
 
     async checkAuth(): Promise<boolean> {
         return true;
+    }
+
+    async getDocumentCapability() {
+        return {
+            acceptedMimeTypes: [...this.acceptedMimeTypes]
+        };
     }
 
     async sendMessage(
@@ -632,7 +640,7 @@ describe('useChatStore workspace history flow', () => {
         });
     });
 
-    it('injects only the active file context when an active agent context is present', async () => {
+    it('attaches the active text document with a stable prompt prefix when an active agent context is present', async () => {
         const provider = new MockModelProvider();
         const storage = new MockStorageProvider([]);
         const store = useChatStore();
@@ -648,18 +656,43 @@ describe('useChatStore workspace history flow', () => {
             activePath: '/docs/guide.md',
             activeDocument: {
                 path: '/docs/guide.md',
-                content: '# Guide'
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('# Guide')
             },
             contextProvider: null
         });
         await store.sendMessage('请分析当前文档');
 
-        expect(provider.promptsUsed[0]).toContain('[[Active File Context]]');
-        expect(provider.promptsUsed[0]).toContain('Path: /docs/guide.md');
-        expect(provider.promptsUsed[0]).toContain('# Guide');
-        expect(provider.promptsUsed[0]).toContain('[[User Prompt]]\n请分析当前文档');
-        expect(provider.promptsUsed[0]).not.toContain('Allowed Tools:');
-        expect(store.currentConversation?.messages[0]?.content).toBe('请分析当前文档');
+        expect(provider.promptsUsed[0]).toBe('当前文档已作为附件提供：/docs/guide.md\n\n请分析当前文档');
+        expect(provider.optionsUsed[0]?.attachments).toEqual([
+            expect.objectContaining({
+                id: 'active-document:/docs/guide.md',
+                name: 'guide.md',
+                mimeType: 'text/markdown',
+                base64Data: encodeTextDocument('# Guide')
+            })
+        ]);
+        expect(store.currentConversation?.messages[0]?.content).toBe('当前文档已作为附件提供：/docs/guide.md\n\n请分析当前文档');
+        expect(store.currentConversation?.messages[0]?.attachments).toEqual([
+            expect.objectContaining({
+                id: 'active-document:/docs/guide.md',
+                name: 'guide.md',
+                mimeType: 'text/markdown',
+                base64Data: encodeTextDocument('# Guide')
+            })
+        ]);
+        expect(store.currentConversation?.messages[0]?.requestSnapshot).toEqual({
+            prompt: '当前文档已作为附件提供：/docs/guide.md\n\n请分析当前文档',
+            attachments: [
+                expect.objectContaining({
+                    id: 'active-document:/docs/guide.md',
+                    name: 'guide.md',
+                    mimeType: 'text/markdown',
+                    base64Data: encodeTextDocument('# Guide')
+                })
+            ],
+            activeDocumentMode: 'attachment'
+        });
 
         store.setActiveAgentContext(null);
         await store.sendMessage('第二条消息');
@@ -667,16 +700,296 @@ describe('useChatStore workspace history flow', () => {
         expect(provider.promptsUsed[1]).toBe('第二条消息');
     });
 
+    it('attaches active pdf documents when the provider accepts application/pdf', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+
+        store.setActiveAgentContext({
+            ...scopedAgent,
+            modelProviderName: undefined,
+            modelName: undefined
+        });
+        store.setWorkspaceContext({
+            activePath: '/docs/spec.pdf',
+            activeDocument: {
+                path: '/docs/spec.pdf',
+                mimeType: 'application/pdf',
+                dataBase64: 'JVBERi0xLjQ='
+            },
+            contextProvider: null
+        });
+        await store.sendMessage('请总结这个 PDF');
+
+        expect(provider.promptsUsed[0]).toBe('请总结这个 PDF');
+        expect(provider.optionsUsed[0]?.attachments).toEqual([
+            expect.objectContaining({
+                id: 'active-document:/docs/spec.pdf',
+                name: 'spec.pdf',
+                mimeType: 'application/pdf',
+                base64Data: 'JVBERi0xLjQ='
+            })
+        ]);
+        expect(store.currentConversation?.messages[0]?.attachments).toEqual([
+            expect.objectContaining({
+                id: 'active-document:/docs/spec.pdf',
+                name: 'spec.pdf',
+                mimeType: 'application/pdf',
+                base64Data: 'JVBERi0xLjQ='
+            })
+        ]);
+        expect(store.currentConversation?.messages[0]?.requestSnapshot).toEqual({
+            prompt: '请总结这个 PDF',
+            attachments: [
+                expect.objectContaining({
+                    id: 'active-document:/docs/spec.pdf',
+                    name: 'spec.pdf',
+                    mimeType: 'application/pdf',
+                    base64Data: 'JVBERi0xLjQ='
+                })
+            ],
+            activeDocumentMode: 'attachment'
+        });
+    });
+
+    it('omits active document payloads when the provider does not accept the current mime type', async () => {
+        const provider = new MockModelProvider();
+        provider.acceptedMimeTypes = ['text/plain', 'text/markdown'];
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+
+        store.setActiveAgentContext({
+            ...scopedAgent,
+            modelProviderName: undefined,
+            modelName: undefined
+        });
+        store.setWorkspaceContext({
+            activePath: '/docs/spec.pdf',
+            activeDocument: {
+                path: '/docs/spec.pdf',
+                mimeType: 'application/pdf',
+                dataBase64: 'JVBERi0xLjQ='
+            },
+            contextProvider: null
+        });
+        await store.sendMessage('请总结这个 PDF');
+
+        expect(provider.promptsUsed[0]).toBe('请总结这个 PDF');
+        expect(provider.optionsUsed[0]?.attachments).toEqual([]);
+        expect(store.currentConversation?.messages[0]?.requestSnapshot).toEqual({
+            prompt: '请总结这个 PDF',
+            attachments: [],
+            activeDocumentMode: 'omitted'
+        });
+    });
+
+    it('keeps the prepared active document attachment visible when agent model resolution fails before send', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+
+        store.setActiveAgentContext({
+            ...scopedAgent,
+            modelProviderName: 'mock-provider',
+            modelName: 'missing-model'
+        });
+        store.setWorkspaceContext({
+            activePath: '/docs/guide.md',
+            activeDocument: {
+                path: '/docs/guide.md',
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('# Guide')
+            },
+            contextProvider: null
+        });
+
+        await store.sendMessage('请分析当前文档');
+
+        expect(store.currentError).toBe("Agent model 'missing-model' is unavailable for provider 'mock-provider'.");
+        expect(provider.promptsUsed).toHaveLength(0);
+        expect(store.currentConversation?.messages[0]).toMatchObject({
+            role: 'user',
+            content: '当前文档已作为附件提供：/docs/guide.md\n\n请分析当前文档'
+        });
+        expect(store.currentConversation?.messages[0]?.attachments).toEqual([
+            expect.objectContaining({
+                id: 'active-document:/docs/guide.md',
+                name: 'guide.md',
+                mimeType: 'text/markdown',
+                base64Data: encodeTextDocument('# Guide')
+            })
+        ]);
+        expect(store.currentConversation?.messages[0]?.requestSnapshot).toEqual({
+            prompt: '当前文档已作为附件提供：/docs/guide.md\n\n请分析当前文档',
+            attachments: [
+                expect.objectContaining({
+                    id: 'active-document:/docs/guide.md',
+                    name: 'guide.md',
+                    mimeType: 'text/markdown',
+                    base64Data: encodeTextDocument('# Guide')
+                })
+            ],
+            activeDocumentMode: 'attachment'
+        });
+    });
+
+    it('resolves an agent model by provider model name when the configured model uses a display label', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog([
+            {
+                id: 'gemini-api',
+                name: 'Gemini API',
+                models: [
+                    { id: 'gemini-pro-latest', name: 'Gemini Pro Latest' },
+                    { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' }
+                ],
+                defaultModel: 'gemini-pro-latest',
+                supportedRuntimeModes: ['web']
+            }
+        ]);
+
+        store.setActiveAgentContext({
+            ...scopedAgent,
+            modelProviderName: 'gemini-api',
+            modelName: 'Gemini Pro Latest'
+        });
+        await store.sendMessage('请分析当前文档');
+
+        expect(provider.optionsUsed[0]?.modelId).toBe('gemini-pro-latest');
+        expect(store.currentError).toBeNull();
+    });
+
+    it('resolves Gemini Pro Latest to the concrete pro model id when only the concrete model exists', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog([
+            {
+                id: 'gemini-api',
+                name: 'Gemini API',
+                models: [
+                    { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
+                    { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' }
+                ],
+                defaultModel: 'gemini-2.5-pro',
+                supportedRuntimeModes: ['web']
+            }
+        ]);
+
+        store.setActiveAgentContext({
+            ...scopedAgent,
+            modelProviderName: 'gemini-api',
+            modelName: 'Gemini Pro Latest'
+        });
+        await store.sendMessage('请分析当前文档');
+
+        expect(provider.optionsUsed[0]?.modelId).toBe('gemini-2.5-pro');
+        expect(store.currentError).toBeNull();
+    });
+
+    it('replays the first-turn pdf from persisted history instead of auto-attaching it again on follow-up turns', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+
+        store.setActiveAgentContext({
+            ...scopedAgent,
+            modelProviderName: undefined,
+            modelName: undefined
+        });
+        store.setWorkspaceContext({
+            activePath: '/docs/spec.pdf',
+            activeDocument: {
+                path: '/docs/spec.pdf',
+                mimeType: 'application/pdf',
+                dataBase64: 'JVBERi0xLjQ='
+            },
+            contextProvider: null
+        });
+
+        await store.sendMessage('第一轮总结这个 PDF');
+        await store.sendMessage('第二轮继续问');
+
+        expect(provider.optionsUsed[0]?.attachments).toEqual([
+            expect.objectContaining({
+                id: 'active-document:/docs/spec.pdf',
+                name: 'spec.pdf',
+                mimeType: 'application/pdf'
+            })
+        ]);
+        expect(provider.optionsUsed[1]?.attachments).toEqual([]);
+        expect(provider.optionsUsed[1]?.history).toEqual([
+            {
+                role: 'user',
+                content: '第一轮总结这个 PDF',
+                attachments: [
+                    expect.objectContaining({
+                        id: 'active-document:/docs/spec.pdf',
+                        name: 'spec.pdf',
+                        mimeType: 'application/pdf'
+                    })
+                ]
+            },
+            {
+                role: 'assistant',
+                content: 'reply:第一轮总结这个 PDF',
+                attachments: undefined
+            }
+        ]);
+        expect(store.currentConversation?.messages[2]?.attachments).toBeUndefined();
+        expect(store.currentConversation?.messages[2]?.requestSnapshot).toEqual({
+            prompt: '第二轮继续问',
+            attachments: [],
+            activeDocumentMode: 'none'
+        });
+    });
+
     it('passes the current agent context into AgentRuntime when available', async () => {
         const provider = new MockModelProvider();
         const storage = new MockStorageProvider([]);
         const store = useChatStore();
-        const run = vi.fn(async (_request: Record<string, unknown>, onUpdate: (update: { text: string }) => void) => {
+        const run = vi.fn(async (request: Record<string, unknown>, onUpdate: (update: { text: string }) => void) => {
             onUpdate({ text: 'agent-runtime:done' });
             return {
                 text: 'agent-runtime:done',
                 conversationId: 'runtime-conversation',
-                messageId: 'runtime-message'
+                messageId: 'runtime-message',
+                requestSnapshot: {
+                    prompt: String(request.prompt),
+                    attachments: request.workspace
+                        && typeof request.workspace === 'object'
+                        && 'activeDocument' in request.workspace
+                        && (request.workspace as { activeDocument?: unknown }).activeDocument
+                        ? [
+                            {
+                                id: 'active-document:/docs/guide.md',
+                                type: 'file' as const,
+                                name: 'guide.md',
+                                mimeType: 'text/markdown',
+                                size: 7,
+                                base64Data: encodeTextDocument('# Guide')
+                            }
+                        ]
+                        : [],
+                    activeDocumentMode: request.workspace
+                        && typeof request.workspace === 'object'
+                        && 'activeDocument' in request.workspace
+                        && (request.workspace as { activeDocument?: unknown }).activeDocument
+                        ? 'attachment'
+                        : 'none'
+                }
             };
         });
         store.setProviders(provider, storage);
@@ -712,13 +1025,14 @@ describe('useChatStore workspace history flow', () => {
             activePath: '/docs/guide.md',
             activeDocument: {
                 path: '/docs/guide.md',
-                content: '# Guide'
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('# Guide')
             },
             contextProvider: {
                 id: 'workspace-context',
                 initializeAccess: vi.fn(async () => undefined),
                 listTree: vi.fn(async () => []),
-                readDocument: vi.fn(async (path: string) => ({ path, content: '# Guide' })),
+                readDocument: vi.fn(async (path: string) => ({ path, mimeType: 'text/markdown', dataBase64: encodeTextDocument('# Guide') })),
                 writeDocument: vi.fn(async () => undefined),
                 createNode: vi.fn(async () => ({ path: '/docs/draft.md', name: 'draft.md', kind: 'file' as const })),
                 searchInScope: vi.fn(async () => []),
@@ -742,7 +1056,8 @@ describe('useChatStore workspace history flow', () => {
                 activePath: '/docs/guide.md',
                 activeDocument: {
                     path: '/docs/guide.md',
-                    content: '# Guide'
+                    mimeType: 'text/markdown',
+                    dataBase64: encodeTextDocument('# Guide')
                 },
                 contextProvider: expect.objectContaining({ id: 'workspace-context' }),
                 onFileChanged: expect.any(Function)
@@ -753,6 +1068,52 @@ describe('useChatStore workspace history flow', () => {
         });
         expect(store.currentConversation?.messages[1]?.content).toBe('agent-runtime:done');
         expect(store.currentConversation?.backendId).toBe('runtime-conversation');
+        expect(store.currentConversation?.messages[0]?.requestSnapshot).toEqual({
+            prompt: '让 runtime 发送',
+            attachments: [
+                {
+                    id: 'active-document:/docs/guide.md',
+                    type: 'file',
+                    name: 'guide.md',
+                    mimeType: 'text/markdown',
+                    size: 7,
+                    base64Data: encodeTextDocument('# Guide')
+                }
+            ],
+            activeDocumentMode: 'attachment'
+        });
+
+        await store.sendMessage('第二轮 runtime');
+
+        expect(run).toHaveBeenCalledTimes(2);
+        expect(run.mock.calls[1]?.[0]).toMatchObject({
+            prompt: '第二轮 runtime',
+            workspace: {
+                activePath: '/docs/guide.md',
+                activeDocument: null
+            },
+            history: [
+                {
+                    role: 'user',
+                    content: '让 runtime 发送',
+                    attachments: [
+                        {
+                            id: 'active-document:/docs/guide.md',
+                            type: 'file',
+                            name: 'guide.md',
+                            mimeType: 'text/markdown',
+                            size: 7,
+                            base64Data: encodeTextDocument('# Guide')
+                        }
+                    ]
+                },
+                {
+                    role: 'assistant',
+                    content: 'agent-runtime:done',
+                    attachments: undefined
+                }
+            ]
+        });
     });
 
     it('prioritizes the agent-specified provider and model during send', async () => {

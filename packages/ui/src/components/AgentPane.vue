@@ -1,42 +1,34 @@
 <template>
-  <aside class="knowledge-assistant-pane" data-testid="knowledge-assistant-pane">
-    <header class="agent-banner" data-testid="knowledge-agent-panel">
+  <aside class="knowledge-assistant-pane" data-testid="agent-pane">
+    <header class="agent-banner" data-testid="agent-panel">
       <div class="agent-banner-main">
-        <div v-if="activeAgent" class="agent-meta">
+        <div class="agent-meta">
           <div class="agent-title-row">
-            <div class="agent-name-group" data-testid="knowledge-agent-name">
-              <strong class="agent-name">{{ activeAgent.name }}</strong>
-              <span class="agent-name-path">（{{ resolveAgentConfigDirectory(activeAgent) }}）</span>
+            <div class="agent-name-group" data-testid="agent-name">
+              <strong class="agent-name">{{ resolveAgentName(activeAgent) }}</strong>
+              <span class="agent-name-path">（{{ resolveAgentDirectory(activeAgent) }}）</span>
             </div>
             <div class="agent-inline-meta">
-              <span class="agent-model" data-testid="knowledge-agent-model">{{ resolveAgentModelLabel(activeAgent) }}</span>
-            </div>
-          </div>
-        </div>
-        <div v-else class="agent-meta">
-          <div class="agent-title-row">
-            <strong class="agent-name">未解析到作用域 Agent</strong>
-            <div class="agent-inline-meta">
-              <span class="agent-model">跟随当前聊天模型选择</span>
+              <span class="agent-model" data-testid="agent-model">{{ resolveAgentModelLabel(activeAgent) }}</span>
             </div>
           </div>
         </div>
       </div>
 
-      <div v-if="isResolvingAgent" class="agent-loading" data-testid="knowledge-agent-loading">
+      <div v-if="isResolvingAgent" class="agent-loading" data-testid="agent-loading">
         正在解析 Agent...
       </div>
-      <div v-else-if="agentResolutionError" class="agent-error" data-testid="knowledge-agent-error">
+      <div v-else-if="agentResolutionError" class="agent-error" data-testid="agent-error">
         {{ agentResolutionError }}
       </div>
     </header>
 
-    <NormalChatView class="knowledge-assistant-chat" />
+    <NormalChatView class="agent-pane-chat" />
   </aside>
 </template>
 
 <script setup lang="ts">
-import type { ContextDocument, IContextProvider, ResolvedAgentConfig } from '@packages/core/src';
+import { DEFAULT_SCOPED_AGENT_CONFIG, type ContextDocument, type IContextProvider, type ResolvedAgentConfig } from '@packages/core/src';
 import { onBeforeUnmount, watch } from 'vue';
 import NormalChatView from '../views/NormalChatView.vue';
 import { useChatStore } from '../store/chat';
@@ -44,7 +36,7 @@ import { useChatStore } from '../store/chat';
 const props = defineProps<{
   activeAgent?: ResolvedAgentConfig | null;
   activePath?: string | null;
-  activeDocument?: Pick<ContextDocument, 'path' | 'content'> | null;
+  activeDocument?: ContextDocument | null;
   contextProvider?: IContextProvider | null;
   onFileChanged?: ((change: { path: string; beforeContent: string; afterContent: string }) => void | Promise<void>) | null;
   agentResolutionError?: string | null;
@@ -52,13 +44,13 @@ const props = defineProps<{
 }>();
 const chatStore = useChatStore();
 
-function resolveAgentModelLabel(agent: ResolvedAgentConfig): string {
-  if (!agent.modelProviderName && !agent.modelName) {
-    return '跟随当前聊天模型选择';
-  }
+function resolveAgentName(agent: ResolvedAgentConfig | null | undefined): string {
+  return agent?.name?.trim() || 'Default Knowledge Agent';
+}
 
-  const provider = agent.modelProviderName?.trim() || '未指定 Provider';
-  const model = agent.modelName?.trim() || '未指定模型';
+function resolveAgentModelLabel(agent: ResolvedAgentConfig | null | undefined): string {
+  const provider = agent?.modelProviderName?.trim() || DEFAULT_SCOPED_AGENT_CONFIG.modelProviderName?.trim() || '未指定 Provider';
+  const model = agent?.modelName?.trim() || DEFAULT_SCOPED_AGENT_CONFIG.modelName?.trim() || '未指定模型';
   return `${provider} / ${model}`;
 }
 
@@ -74,6 +66,14 @@ function resolveAgentConfigDirectory(agent: ResolvedAgentConfig): string {
   }
 
   return sourcePath.slice(0, lastSlashIndex);
+}
+
+function resolveAgentDirectory(agent: ResolvedAgentConfig | null | undefined): string {
+  if (!agent) {
+    return '/';
+  }
+
+  return resolveAgentConfigDirectory(agent);
 }
 
 watch(() => props.activeAgent ?? null, (agent) => {
@@ -202,7 +202,7 @@ onBeforeUnmount(() => {
   line-height: 1.5;
 }
 
-.knowledge-assistant-chat {
+.agent-pane-chat {
   flex: 1;
   min-width: 0;
   min-height: 0;

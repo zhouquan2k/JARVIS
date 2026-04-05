@@ -42,6 +42,40 @@ describe('DesktopProxyProvider', () => {
         }));
     });
 
+    it('proxies getDocumentCapability through the desktop bridge', async () => {
+        const listeners = new Set<(message: unknown) => void>();
+        const sendProxyRequest = vi.fn((message: { requestId: string; channelId: string; action: string; providerId: string }) => {
+            listeners.forEach((listener) => {
+                listener({
+                    type: 'DONE',
+                    requestId: message.requestId,
+                    channelId: message.channelId,
+                    result: {
+                        acceptedMimeTypes: ['text/plain', 'text/markdown', 'application/pdf']
+                    }
+                });
+            });
+        });
+
+        window.chatprismDesktop = {
+            sendProxyRequest,
+            onProxyResponse(listener) {
+                listeners.add(listener);
+                return () => listeners.delete(listener);
+            }
+        };
+
+        const provider = new DesktopProxyProvider('chatgpt-web', { channelId: 'desktop-capability-channel' });
+        await expect(provider.getDocumentCapability()).resolves.toEqual({
+            acceptedMimeTypes: ['text/plain', 'text/markdown', 'application/pdf']
+        });
+        expect(sendProxyRequest).toHaveBeenCalledWith(expect.objectContaining({
+            action: 'GET_DOCUMENT_CAPABILITY',
+            providerId: 'chatgpt-web',
+            channelId: 'desktop-capability-channel'
+        }));
+    });
+
     it('forwards structured updates and abort requests independently', async () => {
         const listeners = new Set<(message: unknown) => void>();
         const sendProxyRequest = vi.fn((message: { requestId: string; channelId: string; action: string; options?: unknown }) => {

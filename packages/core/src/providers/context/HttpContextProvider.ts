@@ -6,7 +6,9 @@ import type {
     ContextSearchMatch,
     ContextSearchRequest,
     CreateContextNodeInput,
-    IContextProvider
+    IContextProvider,
+    RenameContextNodeInput,
+    WriteContextDocumentInput
 } from '../../interfaces/IContextProvider';
 
 export const DEFAULT_CONTEXT_BASE_URL = 'http://127.0.0.1:8787/api/context';
@@ -86,12 +88,21 @@ export class HttpContextProvider implements IContextProvider {
         return (response as { document: ContextDocument }).document;
     }
 
-    async writeDocument(path: string, content: string): Promise<void> {
-        await this.post('/write-document', { path, content });
+    async writeDocument(input: WriteContextDocumentInput): Promise<void> {
+        await this.post('/write-document', { ...input });
     }
 
     async createNode(input: CreateContextNodeInput): Promise<ContextNode> {
         const response = await this.post('/create-node', { ...input });
+        return (response as { node: ContextNode }).node;
+    }
+
+    async deleteNode(path: string): Promise<void> {
+        await this.post('/delete-node', { path });
+    }
+
+    async renameNode(input: RenameContextNodeInput): Promise<ContextNode> {
+        const response = await this.post('/rename-node', { ...input });
         return (response as { node: ContextNode }).node;
     }
 

@@ -181,6 +181,19 @@ export const APP_CONFIG: { providers: ProviderConfig[]; analyzer: AnalyzerConfig
                     ]
                 },
                 {
+                    id: 'gemini-pro-latest',
+                    name: 'Gemini Pro Latest',
+                    options: [
+                        {
+                            key: 'deep_research',
+                            label: 'Deep Research',
+                            type: 'boolean',
+                            description: '切换到 Gemini 的研究型请求路径。',
+                            defaultValue: false
+                        }
+                    ]
+                },
+                {
                     id: 'gemini-2.5-pro',
                     name: 'Gemini 2.5 Pro',
                     options: [
@@ -194,14 +207,14 @@ export const APP_CONFIG: { providers: ProviderConfig[]; analyzer: AnalyzerConfig
                     ]
                 }
             ],
-            defaultModel: 'gemini-2.5-flash',
+            defaultModel: 'gemini-pro-latest',
             preferredDefaultModel: 'Gemini Pro Latest',
             supportedRuntimeModes: ['extension', 'web', 'desktop']
         }
     ],
     analyzer: {
         defaultProvider: 'gemini-api',
-        defaultModel: 'gemini-2.5-flash',
+        defaultModel: 'gemini-pro-latest',
         systemPrompt: DEFAULT_ANALYZER_PROMPT
     }
 };

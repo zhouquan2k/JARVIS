@@ -162,6 +162,12 @@ class MockStreamingProvider implements IAgentCapableProvider {
         return this.options.isAuthenticated;
     }
 
+    async getDocumentCapability() {
+        return {
+            acceptedMimeTypes: ['text/plain', 'text/markdown', 'application/pdf']
+        };
+    }
+
     async getAvailableModels(): Promise<ProviderModelCatalog> {
         return {
             models: this.modelCatalog.models.map((model) => ({
@@ -283,6 +289,20 @@ class MockStreamingProvider implements IAgentCapableProvider {
                         }
                     }
                 ]
+            };
+        }
+
+        if (request.prompt.includes('TRIGGER_ATTACHMENT_ECHO')) {
+            const finalText = buildAttachmentEchoText(
+                this.id,
+                request.modelId || request.agent.modelName,
+                request.attachments || []
+            );
+            onUpdate({ text: finalText });
+            return {
+                text: finalText,
+                conversationId: request.context?.conversationId || crypto.randomUUID(),
+                messageId: crypto.randomUUID()
             };
         }
 

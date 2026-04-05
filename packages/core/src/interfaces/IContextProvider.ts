@@ -11,15 +11,29 @@ export interface ContextNode {
 
 export interface ContextDocument {
     path: string;
-    content: string;
+    mimeType: string;
+    dataBase64: string;
     updatedAt?: number;
     version?: string;
+    canWrite?: boolean;
+}
+
+export interface WriteContextDocumentInput {
+    path: string;
+    mimeType: string;
+    dataBase64: string;
+    expectedVersion?: string;
 }
 
 export interface CreateContextNodeInput {
     parentPath?: string;
     name: string;
     kind: 'file' | 'directory';
+}
+
+export interface RenameContextNodeInput {
+    path: string;
+    name: string;
 }
 
 export interface ContextSearchRequest {
@@ -40,8 +54,10 @@ export interface IContextProvider {
     initializeAccess(): Promise<void>;
     listTree(parentPath?: string): Promise<ContextNode[]>;
     readDocument(path: string): Promise<ContextDocument>;
-    writeDocument(path: string, content: string): Promise<void>;
+    writeDocument(input: WriteContextDocumentInput): Promise<void>;
     createNode(input: CreateContextNodeInput): Promise<ContextNode>;
+    deleteNode(path: string): Promise<void>;
+    renameNode(input: RenameContextNodeInput): Promise<ContextNode>;
     searchInScope(request: ContextSearchRequest): Promise<ContextSearchMatch[]>;
     resolveScopedAgentConfig(targetPath: string): Promise<ResolvedAgentConfig>;
 }

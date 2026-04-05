@@ -32,6 +32,19 @@
 - **THEN** 后续读取该会话时，每条消息的 `questionId`、`starred`、`deleted` 与 `createdAt` MUST 保持不变
 - **AND** 系统 MUST 不丢失消息原有的 `content`、`attachments` 与 `annotations`
 
+### Requirement: Storage providers MUST persist the actual sent message content and attachments
+存储实现 MUST 以消息的实际发送正文与实际发送附件作为持久化对象，而不是把“原始输入”和“实际发送内容”视为两套并存的消息正文语义。对于系统自动加入且真实进入请求的当前文档，存储实现 MUST 将其与用户手工附件一样保留在 `attachments` 中。
+
+#### Scenario: Persist actual prompt text after request preparation
+- **WHEN** 系统在发送前对用户消息正文做了程序侧改写，例如为当前文本文件追加稳定提示
+- **THEN** 存储实现 MUST 持久化改写后的最终正文
+- **AND** 后续读取该消息时，`content` MUST 仍然等于这份实际发送正文
+
+#### Scenario: Persist auto-attached current documents alongside user attachments
+- **WHEN** 系统自动将当前工作区文档作为附件加入实际请求
+- **THEN** 存储实现 MUST 将该文档持久化到对应用户消息的 `attachments`
+- **AND** 后续读取该消息时，系统 MUST 能区分并恢复这份自动加入但实际发送过的文档附件
+
 ### Requirement: Storage providers MUST keep soft-deleted question pairs recoverable in raw conversation data
 存储实现 MUST 将问答对删除视为消息级软删除，而不是在保存时物理移除消息节点。这样系统才能在后续同步、审计或未来的撤销删除能力中继续访问原始消息顺序与内容。
 

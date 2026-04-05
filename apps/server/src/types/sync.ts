@@ -113,6 +113,15 @@ function readRequiredString(record: JsonRecord, key: string, fieldName: string):
     return value.trim();
 }
 
+function readRequiredText(record: JsonRecord, key: string, fieldName: string): string {
+    const value = record[key];
+    if (typeof value !== 'string') {
+        throw new Error(`${fieldName} 必须是字符串。`);
+    }
+
+    return value;
+}
+
 function readOptionalString(record: JsonRecord, key: string): string | undefined {
     const value = record[key];
     if (value === undefined || value === null || value === '') {
@@ -276,7 +285,7 @@ function normalizeMessage(value: unknown, index: number): ConversationMessage {
     return {
         id: readRequiredString(value, 'id', `messages[${index}].id`),
         role,
-        content: readRequiredString(value, 'content', `messages[${index}].content`),
+        content: readRequiredText(value, 'content', `messages[${index}].content`),
         createdAt: readOptionalNumber(value, 'createdAt'),
         questionId: readOptionalString(value, 'questionId'),
         starred: readOptionalBoolean(value, 'starred'),

@@ -232,6 +232,75 @@ describe('web sync bootstrap', () => {
         expect(conversations[0].updatedAt).toBe(300);
     });
 
+    it('hydrates startup conversations that contain an empty assistant placeholder without sync 400', async () => {
+        const app = createApp({
+            config: {
+                port: 8787,
+                dbPath: ':memory:',
+                isDevelopment: true,
+                corsAllowlist: []
+            }
+        });
+        const fetchImpl = createFetchImpl(app);
+        const env = {
+            VITE_E2E: '1',
+            VITE_USE_MOCK_SYNC: '0',
+            VITE_SYNC_KEY: 'web-placeholder',
+            VITE_SYNC_BASE_URL: 'http://sync.test/api/sync'
+        };
+
+        const startupProvider = createWebSyncStorageProvider({
+            env,
+            isDevelopment: true,
+            localStore: new MemoryStorageProvider([
+                createConversation('placeholder-1', 300, {
+                    messages: [
+                        {
+                            id: 'placeholder-1-user',
+                            role: 'user',
+                            content: 'hello'
+                        },
+                        {
+                            id: 'placeholder-1-assistant',
+                            role: 'assistant',
+                            content: ''
+                        }
+                    ]
+                })
+            ]),
+            fetchImpl,
+            stateStore: new MemorySyncStateStore(),
+            deletedConversationStore: new MemoryDeletedConversationStateStore()
+        });
+        const remoteReader = createWebSyncStorageProvider({
+            env,
+            isDevelopment: true,
+            localStore: new MemoryStorageProvider(),
+            fetchImpl,
+            stateStore: new MemorySyncStateStore(),
+            deletedConversationStore: new MemoryDeletedConversationStateStore()
+        });
+
+        await expect(startupProvider.hydrate()).resolves.toBeUndefined();
+        await remoteReader.hydrate();
+
+        const conversations = await remoteReader.getAllConversations();
+        expect(conversations.map((item) => item.id)).toEqual(['placeholder-1']);
+        expect(conversations[0].messages).toEqual([
+            {
+                id: 'placeholder-1-user',
+                role: 'user',
+                content: 'hello'
+            },
+            {
+                id: 'placeholder-1-assistant',
+                role: 'assistant',
+                content: ''
+            }
+        ]);
+        expect(conversations[0].sync?.dirty).toBe(false);
+    });
+
     it('propagates hard-deleted conversations through the real server', async () => {
         const app = createApp({
             config: {

@@ -6,7 +6,8 @@ import type {
     ContextSearchMatch,
     ContextSearchRequest,
     CreateContextNodeInput,
-    ResolvedAgentConfig
+    ResolvedAgentConfig,
+    WriteContextDocumentInput
 } from '@packages/core/src';
 import type { ProxyRequest, ProxyResponse } from '../shared/proxyProtocol';
 
@@ -23,8 +24,10 @@ declare global {
             initializeContextAccess(): Promise<void>;
             listContextTree(parentPath?: string): Promise<ContextNode[]>;
             readContextDocument(path: string): Promise<ContextDocument>;
-            writeContextDocument(path: string, content: string): Promise<void>;
+            writeContextDocument(input: WriteContextDocumentInput): Promise<void>;
             createContextNode(input: CreateContextNodeInput): Promise<ContextNode>;
+            deleteContextNode(path: string): Promise<void>;
+            renameContextNode(input: { path: string; name: string }): Promise<ContextNode>;
             searchContextInScope(request: ContextSearchRequest): Promise<ContextSearchMatch[]>;
             resolveScopedAgentConfig(targetPath: string): Promise<ResolvedAgentConfig>;
             sendProxyRequest(request: ProxyRequest): void;

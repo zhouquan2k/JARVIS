@@ -13,3 +13,4 @@ apps/extension/test-results
 apps/desktop/dist
 apps/desktop/playwright-report
 apps/desktop/test-results
+docs/.structurizr

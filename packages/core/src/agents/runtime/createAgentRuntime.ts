@@ -1,4 +1,4 @@
-import { augmentPromptWithAgentContext } from '../augmentPromptWithAgentContext';
+import { prepareRequestWithActiveDocument } from '../augmentPromptWithAgentContext';
 import { createBuiltinWorkspaceToolDefinitions } from '../tools/builtinWorkspaceTools';
 import { createAgentToolExecutor } from '../tools/createAgentToolExecutor';
 import type {
@@ -194,19 +194,29 @@ export function createAgentRuntime(options: CreateAgentRuntimeOptions): AgentRun
 
             const provider = options.providerRuntime.getProvider(providerId);
             activeProvider = provider;
-            const prompt = request.agent
-                ? augmentPromptWithAgentContext(request.prompt, {
-                    activeDocument: request.workspace?.activeDocument ?? null
-                })
-                : request.prompt;
+            const preparedRequest = request.agent
+                ? await prepareRequestWithActiveDocument(
+                    provider,
+                    request.prompt,
+                    {
+                        activeDocument: request.workspace?.activeDocument ?? null,
+                        attachments: request.attachments
+                    }
+                )
+                : {
+                    prompt: request.prompt,
+                    attachments: request.attachments || [],
+                    mode: 'none' as const
+                };
 
             try {
                 if (request.agent && isAgentCapableProvider(provider) && provider.getAgentCapabilities().nativeAgent) {
-                    return await runNativeAgentLoop(
+                    const result = await runNativeAgentLoop(
                         provider,
                         {
                             ...request,
-                            prompt
+                            prompt: preparedRequest.prompt,
+                            attachments: preparedRequest.attachments
                         },
                         onUpdate,
                         () => abortRequested,
@@ -224,23 +234,39 @@ export function createAgentRuntime(options: CreateAgentRuntimeOptions): AgentRun
                             });
                         }
                     );
+                    return {
+                        ...result,
+                        requestSnapshot: {
+                            prompt: preparedRequest.prompt,
+                            attachments: preparedRequest.attachments.map((attachment) => ({ ...attachment })),
+                            activeDocumentMode: preparedRequest.mode
+                        }
+                    };
                 }
 
                 if (abortRequested) {
                     throw createAbortError();
                 }
 
-                return await provider.sendMessage(
-                    prompt,
+                const result = await provider.sendMessage(
+                    preparedRequest.prompt,
                     {
                         context: request.context,
                         modelId: request.modelId,
-                        attachments: request.attachments,
+                        attachments: preparedRequest.attachments,
                         history: request.history,
                         modelOptions: request.modelOptions
                     },
                     onUpdate
                 );
+                return {
+                    ...result,
+                    requestSnapshot: {
+                        prompt: preparedRequest.prompt,
+                        attachments: preparedRequest.attachments.map((attachment) => ({ ...attachment })),
+                        activeDocumentMode: preparedRequest.mode
+                    }
+                };
             } finally {
                 activeProvider = null;
             }

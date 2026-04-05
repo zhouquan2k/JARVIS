@@ -1,4 +1,10 @@
-import { IModelProvider, type AnalysisResult, type ProviderSendResult, type ProviderStreamUpdate } from '@packages/core/src';
+import {
+    IModelProvider,
+    type AnalysisResult,
+    type ProviderDocumentCapability,
+    type ProviderSendResult,
+    type ProviderStreamUpdate
+} from '@packages/core/src';
 import type { ProviderModelCatalog } from '@packages/core/config';
 import type {
     AnalyzeComparisonRequest,
@@ -109,6 +115,15 @@ export class DesktopProxyProvider implements IModelProvider {
         };
 
         return this.createTrackedRequest<ProviderModelCatalog>(request);
+    }
+
+    getDocumentCapability(): Promise<ProviderDocumentCapability> {
+        return this.createTrackedRequest<ProviderDocumentCapability>({
+            action: 'GET_DOCUMENT_CAPABILITY',
+            requestId: this.nextRequestId('GET_DOCUMENT_CAPABILITY'),
+            channelId: this.channelId,
+            providerId: this.id
+        });
     }
 
     sendMessage(

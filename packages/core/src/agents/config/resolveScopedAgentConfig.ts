@@ -6,6 +6,7 @@ import type {
     AgentToolBinding,
     ResolvedAgentConfig
 } from '../../interfaces/IAgentConfig';
+import { decodeTextDocument } from '../../utils/documentData';
 
 type AgentBinding = AgentToolBinding | AgentSkillBinding;
 
@@ -18,6 +19,8 @@ interface ScopedAgentMatch {
 export const DEFAULT_SCOPED_AGENT_CONFIG: AgentConfig = Object.freeze({
     name: 'Default Knowledge Agent',
     description: 'General-purpose assistant for the knowledge workspace.',
+    modelProviderName: 'gemini-api',
+    modelName: 'Gemini Pro Latest',
     instructions: [
         'Treat the active file as the primary context for the current request when it is provided.',
         'Use workspace tools to gather additional relevant information from the current scope only when needed.',
@@ -143,7 +146,7 @@ function isMissingDocumentError(error: unknown): boolean {
 
 function isDirectoryReadError(error: unknown): boolean {
     const message = error instanceof Error ? error.message : String(error);
-    return /节点不是文件|not a file|is a directory/i.test(message);
+    return /节点不是文件|not a file|is a directory|eisdir|illegal operation on a directory, read/i.test(message);
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -273,7 +276,7 @@ async function readScopedAgentMatch(provider: IContextProvider, scopePath: strin
         return {
             scopePath,
             configPath,
-            config: parseAgentConfig(document.content, configPath)
+            config: parseAgentConfig(decodeTextDocument(document.dataBase64), configPath)
         };
     } catch (error) {
         if (isMissingDocumentError(error)) {

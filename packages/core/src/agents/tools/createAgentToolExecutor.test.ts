@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createBuiltinWorkspaceToolDefinitions } from './builtinWorkspaceTools';
 import { createAgentToolExecutor } from './createAgentToolExecutor';
 import { createMockContextProvider } from '../../testing/createMockContextProvider';
+import { decodeTextDocument } from '../../utils/documentData';
 
 const agent = {
     name: 'Docs Agent',
@@ -73,6 +74,7 @@ describe('createAgentToolExecutor', () => {
         expect(result.isError).toBeUndefined();
         expect(JSON.parse(result.result)).toEqual({
             path: '/docs/guide.md',
+            mimeType: 'text/markdown',
             content: '# Guide'
         });
     });
@@ -121,9 +123,9 @@ describe('createAgentToolExecutor', () => {
             beforeContent: '# Guide',
             afterContent: '# Updated Guide'
         });
-        await expect(provider.readDocument('/docs/guide.md')).resolves.toMatchObject({
-            content: '# Updated Guide'
-        });
+        const updatedDocument = await provider.readDocument('/docs/guide.md');
+        expect(updatedDocument.mimeType).toBe('text/markdown');
+        expect(decodeTextDocument(updatedDocument.dataBase64)).toBe('# Updated Guide');
 
         const failure = await executor.execute(
             {

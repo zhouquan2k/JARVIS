@@ -299,6 +299,77 @@ describe('sync api', () => {
         });
     });
 
+    it('accepts empty assistant placeholder messages during sync push', async () => {
+        const app = createApp({ config: createConfig({ isDevelopment: true }) });
+
+        const pushResponse = await app.request('/api/sync/push', {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                'x-sync-key': 'workspace-placeholder'
+            },
+            body: JSON.stringify({
+                conversations: [
+                    createConversationPayload('conv-placeholder', 100, {
+                        messages: [
+                            {
+                                id: 'conv-placeholder-m1',
+                                role: 'user',
+                                content: 'hello'
+                            },
+                            {
+                                id: 'conv-placeholder-m2',
+                                role: 'assistant',
+                                content: ''
+                            }
+                        ]
+                    })
+                ]
+            })
+        });
+
+        expect(pushResponse.status).toBe(200);
+        await expect(pushResponse.json()).resolves.toEqual({
+            processedIds: ['conv-placeholder'],
+            processedDeletedIds: [],
+            nextCursor: 1
+        });
+
+        const pullResponse = await app.request('/api/sync/pull', {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                'x-sync-key': 'workspace-placeholder'
+            },
+            body: JSON.stringify({ cursor: null })
+        });
+
+        expect(pullResponse.status).toBe(200);
+        await expect(pullResponse.json()).resolves.toEqual({
+            conversations: [
+                {
+                    id: 'conv-placeholder',
+                    title: 'Conversation conv-placeholder',
+                    updatedAt: 100,
+                    messages: [
+                        {
+                            id: 'conv-placeholder-m1',
+                            role: 'user',
+                            content: 'hello'
+                        },
+                        {
+                            id: 'conv-placeholder-m2',
+                            role: 'assistant',
+                            content: ''
+                        }
+                    ]
+                }
+            ],
+            deletedConversations: [],
+            nextCursor: 1
+        });
+    });
+
     it('propagates dedicated deleted conversation events through push and pull', async () => {
         const app = createApp({ config: createConfig({ isDevelopment: true }) });
 

@@ -48,6 +48,45 @@ describe('BackgroundProxyProvider', () => {
         }));
     });
 
+    it('proxies getDocumentCapability through the background channel', async () => {
+        let onMessage: ((message: unknown) => void) | undefined;
+        const postMessage = vi.fn((message: { requestId: string; channelId: string; action: string; providerId: string }) => {
+            onMessage?.({
+                type: 'DONE',
+                requestId: message.requestId,
+                channelId: message.channelId,
+                result: {
+                    acceptedMimeTypes: ['text/plain', 'text/markdown', 'application/pdf']
+                }
+            });
+        });
+
+        // @ts-expect-error simplified test double
+        globalThis.chrome = {
+            runtime: {
+                connect: () => ({
+                    postMessage,
+                    onDisconnect: { addListener: vi.fn() },
+                    onMessage: {
+                        addListener: (listener: (message: unknown) => void) => {
+                            onMessage = listener;
+                        }
+                    }
+                })
+            }
+        };
+
+        const provider = new BackgroundProxyProvider('chatgpt-web', { channelId: 'capability-channel' });
+        await expect(provider.getDocumentCapability()).resolves.toEqual({
+            acceptedMimeTypes: ['text/plain', 'text/markdown', 'application/pdf']
+        });
+        expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            action: 'GET_DOCUMENT_CAPABILITY',
+            providerId: 'chatgpt-web',
+            channelId: 'capability-channel'
+        }));
+    });
+
     it('forwards attachments and structured updates for sendMessage', async () => {
         let onMessage: ((message: unknown) => void) | undefined;
         const postMessage = vi.fn((message: { requestId: string; channelId: string; action: string; options?: unknown }) => {

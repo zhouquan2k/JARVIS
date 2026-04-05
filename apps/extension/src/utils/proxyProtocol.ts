@@ -5,6 +5,7 @@ import type {
     ExternalHistoryErrorCode,
     ExternalHistoryProviderId,
     HistoryListQueryOptions,
+    ProviderDocumentCapability,
     ProviderSendResult,
     ProviderStreamUpdate,
     SendMessageOptions
@@ -13,6 +14,7 @@ import type { ProviderModelCatalog } from '@packages/core/config';
 
 export type ProxyAction =
     | 'CHECK_AUTH'
+    | 'GET_DOCUMENT_CAPABILITY'
     | 'SEND_MESSAGE'
     | 'ANALYZE_COMPARISON'
     | 'GET_AVAILABLE_MODELS'
@@ -38,6 +40,11 @@ export interface SendMessageRequest extends ProxyRequestBase {
     providerId: string;
     prompt: string;
     options?: ProviderSendOptions;
+}
+
+export interface GetDocumentCapabilityRequest extends ProxyRequestBase {
+    action: 'GET_DOCUMENT_CAPABILITY';
+    providerId: string;
 }
 
 export interface AnalyzeComparisonRequest extends ProxyRequestBase {
@@ -73,6 +80,7 @@ export interface GetHistoryDetailRequest extends ProxyRequestBase {
 
 export type ProxyRequest =
     | CheckAuthRequest
+    | GetDocumentCapabilityRequest
     | SendMessageRequest
     | AnalyzeComparisonRequest
     | GetAvailableModelsRequest
@@ -101,6 +109,7 @@ export interface DoneResponse extends ProxyResponseBase {
         | ProviderSendResult
         | AnalysisResult
         | ProviderModelCatalog
+        | ProviderDocumentCapability
         | ConversationHistorySummary[]
         | Conversation
         | null;

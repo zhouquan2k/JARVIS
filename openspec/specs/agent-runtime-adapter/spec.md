@@ -43,10 +43,18 @@
 - **THEN** `AgentRuntime` MUST 将当前 `activePath` 与 `contextProvider` 传入工具执行上下文
 - **AND** 文件工具 MUST 能基于这些上下文访问当前工作区内容
 
-### Requirement: Agent runtime adapter MUST inject the active file as primary request context when available
-系统 MUST 在知识工作区当前节点为文件时，将该文件内容作为本次请求的主要上下文注入到模型请求中；该职责属于程序侧上下文增强，而不是默认 Agent instruction 的实现细节。
+### Requirement: Agent runtime adapter MUST attach the active file with a stable prompt hint when available
+系统 MUST 在知识工作区当前节点为文件时，以程序侧方式将该文件纳入本次模型请求：若该文件的 `mimeType` 被当前 provider 接受，则系统 MUST 将该文件作为附件发送；若该文件是文本文件，系统 MUST 同时在正文前追加一段稳定提示，说明当前文档已经作为附件提供，而不是把全文直接注入 prompt。该职责属于程序侧上下文增强，而不是默认 Agent instruction 的实现细节。
 
-#### Scenario: Include the current file in both native and fallback request paths
+#### Scenario: Include the current text file as attachment plus stable prompt hint
 - **WHEN** 右栏 Agent 请求对应的当前节点是一个文件
-- **THEN** `AgentRuntime` MUST 将该文件路径与内容加入本次模型请求的上下文增强结果
+- **AND** 当前 provider 接受该文件的 `mimeType`
+- **THEN** `AgentRuntime` MUST 将该文件作为附件加入本次模型请求
+- **AND** 若该文件是文本文件，`AgentRuntime` MUST 在最终 prompt 中追加一段稳定提示，说明当前文档已作为附件提供
 - **AND** 该规则 MUST 同时适用于 native agent 路径与 fallback 聊天路径
+
+#### Scenario: Omit the active file when the provider rejects its MIME type
+- **WHEN** 右栏 Agent 请求对应的当前节点是一个文件
+- **AND** 当前 provider 不接受该文件的 `mimeType`
+- **THEN** `AgentRuntime` MUST NOT 将该文件作为附件自动发送
+- **AND** 系统 MAY 继续发送原始用户提示词，但 MUST NOT 伪造该文件已被纳入实际请求

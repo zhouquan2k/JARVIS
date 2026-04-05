@@ -64,6 +64,6 @@ export async function destroyMarkdownEditor(editor: MarkdownEditor | null | unde
 export function attachEditorTestIds(root: HTMLElement) {
     const editable = root.querySelector<HTMLElement>('[contenteditable="true"]');
     if (editable) {
-        editable.dataset.testid = 'knowledge-editor-input';
+        editable.dataset.testid = 'document-editor-input';
     }
 }

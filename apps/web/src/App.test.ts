@@ -46,9 +46,9 @@ vi.mock('@packages/ui', () => ({
         props: ['isCompareMode', 'showHistorySourceSwitch'],
         template: '<div data-testid="conversation-workspace-stub" />'
     },
-    KnowledgeWorkspaceView: {
+    DocumentWorkspaceView: {
         props: ['contextProvider'],
-        template: '<div data-testid="knowledge-workspace-stub" />'
+        template: '<div data-testid="document-workspace-stub" />'
     },
     openConversationImportDialog: mockOpenConversationImportDialog,
     useChatStore: () => chatStore,

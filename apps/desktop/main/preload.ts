@@ -1,9 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import {
     DESKTOP_CONTEXT_CREATE_NODE_CHANNEL,
+    DESKTOP_CONTEXT_DELETE_NODE_CHANNEL,
     DESKTOP_CONTEXT_INITIALIZE_CHANNEL,
     DESKTOP_CONTEXT_LIST_TREE_CHANNEL,
     DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL,
+    DESKTOP_CONTEXT_RENAME_NODE_CHANNEL,
     DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL,
     DESKTOP_CONTEXT_RESOLVE_AGENT_CHANNEL,
     DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL
@@ -32,11 +34,17 @@ contextBridge.exposeInMainWorld('chatprismDesktop', {
     readContextDocument(path: string) {
         return ipcRenderer.invoke(DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL, path);
     },
-    writeContextDocument(path: string, content: string) {
-        return ipcRenderer.invoke(DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL, path, content);
+    writeContextDocument(input: { path: string; mimeType: string; dataBase64: string; expectedVersion?: string }) {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL, input);
     },
     createContextNode(input: { parentPath?: string; name: string; kind: 'file' | 'directory' }) {
         return ipcRenderer.invoke(DESKTOP_CONTEXT_CREATE_NODE_CHANNEL, input);
+    },
+    deleteContextNode(path: string) {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_DELETE_NODE_CHANNEL, path);
+    },
+    renameContextNode(input: { path: string; name: string }) {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_RENAME_NODE_CHANNEL, input);
     },
     searchContextInScope(request: { query: string; scopePath?: string; maxResults?: number }) {
         return ipcRenderer.invoke(DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL, request);

@@ -1,5 +1,5 @@
 <template>
-  <section class="editor-pane" data-testid="knowledge-editor">
+  <section class="editor-pane" data-testid="document-editor">
     <header class="editor-header">
       <div class="editor-meta">
         <span class="editor-path">{{ activePathLabel }}</span>
@@ -7,10 +7,10 @@
       <button
         type="button"
         class="save-button"
-        data-testid="knowledge-save"
+        data-testid="document-save"
         :title="saveButtonLabel"
         :aria-label="saveButtonLabel"
-        :disabled="!activePath || isSaving"
+        :disabled="!canSave || isSaving"
         @mouseenter="showTooltip($event, saveButtonLabel)"
         @mouseleave="hideTooltip"
         @focus="showTooltip($event, saveButtonLabel)"
@@ -31,14 +31,50 @@
       </div>
     </Teleport>
 
-    <div v-if="!activePath" class="empty-state" data-testid="knowledge-editor-empty">
-      从左侧文件树选择一个 Markdown 文件开始编辑。
+    <div v-if="activePaneMode === 'empty'" class="empty-state" data-testid="document-editor-empty">
+      从左侧文件树选择一个文档开始查看。
     </div>
-    <div v-else ref="editorRoot" class="editor-input" data-testid="knowledge-editor-surface" />
+    <div
+      v-else-if="activeViewerId === 'text'"
+      ref="editorRoot"
+      class="editor-input"
+      data-testid="document-editor-surface"
+    />
+    <div
+      v-else-if="activeViewerId === 'pdf'"
+      class="pdf-viewer-shell"
+      data-testid="document-pdf-viewer"
+    >
+      <iframe
+        v-if="pdfBlobUrl"
+        :src="pdfBlobUrl"
+        class="pdf-frame"
+        title="PDF preview"
+      />
+      <div v-else class="unsupported-state" data-testid="document-pdf-fallback">
+        <p>当前环境不支持内嵌 PDF 预览。</p>
+        <a
+          v-if="pdfOpenHref"
+          :href="pdfOpenHref"
+          target="_blank"
+          rel="noopener noreferrer"
+          data-testid="document-pdf-open-link"
+        >
+          在新标签页打开 PDF
+        </a>
+      </div>
+    </div>
+    <div
+      v-else
+      class="unsupported-state"
+      data-testid="document-unsupported-viewer"
+    >
+      当前文档类型暂不支持预览：{{ activeDocument?.mimeType ?? 'unknown' }}
+    </div>
     <section
-      v-if="activePath && latestFileChange"
+      v-if="activeViewerId === 'text' && activePath && latestFileChange"
       class="file-change-panel"
-      data-testid="knowledge-file-change"
+      data-testid="document-file-change"
     >
       <div class="file-change-header">
         <div class="file-change-meta">
@@ -49,7 +85,7 @@
           <button
             type="button"
             class="change-action-button"
-            data-testid="knowledge-file-change-undo"
+            data-testid="document-file-change-undo"
             :disabled="!canUndo"
             @click="emit('undo-change')"
           >
@@ -58,7 +94,7 @@
           <button
             type="button"
             class="change-action-button"
-            data-testid="knowledge-file-change-redo"
+            data-testid="document-file-change-redo"
             :disabled="!canRedo"
             @click="emit('redo-change')"
           >
@@ -66,13 +102,13 @@
           </button>
         </div>
       </div>
-      <div class="file-change-diff" data-testid="knowledge-file-diff">
+      <div class="file-change-diff" data-testid="document-file-diff">
         <div
           v-for="(entry, index) in diffEntries"
           :key="`${index}-${entry.kind}-${entry.oldLineNumber ?? 'n'}-${entry.newLineNumber ?? 'n'}`"
           class="diff-row"
           :class="`diff-row--${entry.kind}`"
-          data-testid="knowledge-file-diff-row"
+          data-testid="document-file-diff-row"
         >
           <span class="diff-line">{{ entry.oldLineNumber ?? '' }}</span>
           <span class="diff-line">{{ entry.newLineNumber ?? '' }}</span>
@@ -85,6 +121,7 @@
 
 <script setup lang="ts">
 import '@milkdown/crepe/theme/nord-dark.css';
+import { decodeBase64, type ContextDocument } from '@packages/core/src';
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { Save } from 'lucide-vue-next';
 import type { FileChangeRecord, LineDiffEntry } from '../services/FileChangeService';
@@ -98,6 +135,9 @@ import {
 
 const props = defineProps<{
   activePath: string | null;
+  activeDocument: ContextDocument | null;
+  activeViewerId: string | null;
+  activePaneMode: 'empty' | 'viewer' | 'unsupported';
   modelValue: string;
   isSaving: boolean;
   latestFileChange: FileChangeRecord | null;
@@ -121,8 +161,28 @@ const activePathLabel = computed(() => {
   const segments = props.activePath.split('/').filter(Boolean);
   return segments[segments.length - 1] ?? props.activePath;
 });
-const saveButtonLabel = computed(() => props.isSaving ? '保存中' : '保存');
+const canSave = computed(() => {
+  return props.activeViewerId === 'text'
+    && !!props.activePath
+    && props.activeDocument?.canWrite !== false;
+});
+const saveButtonLabel = computed(() => {
+  if (!canSave.value) {
+    return '当前文档不可保存';
+  }
+
+  return props.isSaving ? '保存中' : '保存';
+});
 const editorRoot = ref<HTMLElement | null>(null);
+const pdfBlobUrl = ref<string | null>(null);
+const pdfOpenHref = computed(() => {
+  const document = props.activeDocument;
+  if (document?.mimeType !== 'application/pdf') {
+    return null;
+  }
+
+  return pdfBlobUrl.value || `data:${document.mimeType};base64,${document.dataBase64}`;
+});
 const tooltipState = reactive({
   text: '',
   top: 0,
@@ -135,9 +195,10 @@ let creationToken = 0;
 let isApplyingExternalSync = false;
 let lastKnownMarkdown = '';
 
-watch(() => [props.activePath, props.modelValue] as const, async ([activePath, modelValue], previousValue) => {
+watch(() => [props.activePath, props.activeViewerId, props.modelValue] as const, async ([activePath, activeViewerId, modelValue], previousValue) => {
   const previousPath = previousValue?.[0] ?? null;
-  if (!activePath) {
+  const previousViewerId = previousValue?.[1] ?? null;
+  if (!activePath || activeViewerId !== 'text') {
     await teardownEditor();
     return;
   }
@@ -149,12 +210,31 @@ watch(() => [props.activePath, props.modelValue] as const, async ([activePath, m
     return;
   }
 
-  if (activePath !== previousPath || modelValue !== lastKnownMarkdown) {
+  if (activePath !== previousPath || activeViewerId !== previousViewerId || modelValue !== lastKnownMarkdown) {
     syncEditorContent(modelValue);
   }
 }, { immediate: true, flush: 'post' });
 
+watch(
+  () => props.activeDocument,
+  (document) => {
+    if (document?.mimeType !== 'application/pdf') {
+      revokePdfBlobUrl();
+      return;
+    }
+
+    revokePdfBlobUrl();
+    const bytes = decodeBase64(document.dataBase64);
+    const blobBytes = new Uint8Array(bytes.byteLength);
+    blobBytes.set(bytes);
+    const blob = new Blob([blobBytes], { type: document.mimeType });
+    pdfBlobUrl.value = URL.createObjectURL(blob);
+  },
+  { immediate: true }
+);
+
 onBeforeUnmount(async () => {
+  revokePdfBlobUrl();
   await teardownEditor();
 });
 
@@ -226,6 +306,15 @@ function showTooltip(event: MouseEvent | FocusEvent, text: string) {
 
 function hideTooltip() {
   tooltipState.visible = false;
+}
+
+function revokePdfBlobUrl() {
+  if (!pdfBlobUrl.value) {
+    return;
+  }
+
+  URL.revokeObjectURL(pdfBlobUrl.value);
+  pdfBlobUrl.value = null;
 }
 </script>
 
@@ -318,6 +407,22 @@ function hideTooltip() {
   overflow: auto;
   box-sizing: border-box;
   padding: 22px 24px 30px;
+}
+
+.pdf-viewer-shell,
+.unsupported-state {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.pdf-frame {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: rgba(15, 23, 42, 0.72);
 }
 
 .editor-input :deep(.milkdown) {
@@ -516,6 +621,14 @@ function hideTooltip() {
 .empty-state {
   display: flex;
   flex: 1;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  color: #94a3b8;
+  text-align: center;
+}
+
+.unsupported-state {
   align-items: center;
   justify-content: center;
   padding: 24px;

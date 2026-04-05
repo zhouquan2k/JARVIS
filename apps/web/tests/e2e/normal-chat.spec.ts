@@ -40,7 +40,7 @@ test('normal chat can send message and recover local history after reload', asyn
   await page.goto('/#/chat');
   await expect(page.getByTestId('conversation-workspace')).toBeVisible();
   await expect(page.getByTestId('normal-chat-view')).toBeVisible();
-  await expect(page.getByTestId('normal-model')).toHaveValue('gemini-2.5-flash');
+  await expect(page.getByTestId('normal-model')).toHaveValue('gemini-pro-latest');
 
   const input = page.getByTestId('normal-input');
   const sendButton = page.getByTestId('normal-send');
@@ -119,23 +119,23 @@ test('web host initializes sync storage with configured syncKey', async ({ page 
 test('local history supports switching between conversations from sidebar', async ({ page }) => {
   await page.goto('/#/chat');
   await expect(page.getByTestId('normal-chat-view')).toBeVisible();
-  await expect(page.getByTestId('normal-model')).toHaveValue('gemini-2.5-flash');
+  await expect(page.getByTestId('normal-model')).toHaveValue('gemini-pro-latest');
 
   await page.getByTestId('normal-input').fill('WEB_LOCAL_ALPHA');
   await page.getByTestId('normal-send').click();
-  await expect(page.getByTestId('normal-messages')).toContainText('gemini-api/gemini-2.5-flash => WEB_LOCAL_ALPHA');
+  await expect(page.getByTestId('normal-messages')).toContainText('gemini-api/gemini-2.5-pro => WEB_LOCAL_ALPHA');
 
   await page.getByTestId('sidebar-new-chat').click();
   await page.getByTestId('normal-input').fill('WEB_LOCAL_BETA');
   await page.getByTestId('normal-send').click();
-  await expect(page.getByTestId('normal-messages')).toContainText('gemini-api/gemini-2.5-flash => WEB_LOCAL_BETA');
+  await expect(page.getByTestId('normal-messages')).toContainText('gemini-api/gemini-2.5-pro => WEB_LOCAL_BETA');
 
   const localHistoryItems = page.getByTestId('local-history-item');
   await expect(localHistoryItems).toHaveCount(2);
   await localHistoryItems.nth(1).click();
 
   await expect(page.getByTestId('normal-messages')).toContainText('WEB_LOCAL_ALPHA');
-  await expect(page.getByTestId('normal-messages')).toContainText('gemini-api/gemini-2.5-flash => WEB_LOCAL_ALPHA');
+  await expect(page.getByTestId('normal-messages')).toContainText('gemini-api/gemini-2.5-pro => WEB_LOCAL_ALPHA');
 });
 
 test('local history deletes the active conversation with hover-only controls and falls back cleanly', async ({ page }) => {
@@ -186,14 +186,14 @@ test('workspace sidebar persists while switching between normal and compare view
   await page.goto('/#/chat');
   await expect(page.getByTestId('workspace-sidebar')).toBeVisible();
   await expect(page.getByTestId('normal-chat-view')).toBeVisible();
-  await expect(page.getByTestId('normal-model')).toHaveValue('gemini-2.5-flash');
+  await expect(page.getByTestId('normal-model')).toHaveValue('gemini-pro-latest');
 
   await page.getByTestId('sidebar-new-chat-menu').click();
   await page.getByTestId('sidebar-new-chat-compare').click();
   await expect(page.getByTestId('compare-chat-view')).toBeVisible();
   await expect(page.getByTestId('workspace-sidebar')).toBeVisible();
   await expect(page.getByTestId('history-source-local')).toHaveCount(0);
-  await expect(page.getByTestId('compare-model-a')).toHaveValue('gemini-2.5-flash');
+  await expect(page.getByTestId('compare-model-a')).toHaveValue('gemini-pro-latest');
 
   await page.getByTestId('sidebar-new-chat').click();
   await expect(page.getByTestId('normal-chat-view')).toBeVisible();
@@ -203,7 +203,7 @@ test('workspace sidebar persists while switching between normal and compare view
 test('normal chat renders markdown from assistant output', async ({ page }) => {
   await page.goto('/#/chat');
   await expect(page.getByTestId('normal-chat-view')).toBeVisible();
-  await expect(page.getByTestId('normal-model')).toHaveValue('gemini-2.5-flash');
+  await expect(page.getByTestId('normal-model')).toHaveValue('gemini-pro-latest');
 
   await page.getByTestId('normal-input').fill('TRIGGER_MARKDOWN_NATIVE');
   await page.getByTestId('normal-send').click();
@@ -217,15 +217,15 @@ test('provider selectors use runtime model catalogs instead of static defaults',
   await page.goto('/#/chat');
   await expect(page.getByTestId('normal-provider')).toHaveValue('gemini-api');
   await expect(page.getByTestId('normal-provider').locator('option:checked')).toHaveText('Gemini (API) (Mock)');
-  await expect(page.getByTestId('normal-model')).toHaveValue('gemini-2.5-flash');
-  await expect(page.getByTestId('normal-model').locator('option:checked')).toHaveText('Gemini 2.5 Flash');
+  await expect(page.getByTestId('normal-model')).toHaveValue('gemini-pro-latest');
+  await expect(page.getByTestId('normal-model').locator('option:checked')).toHaveText('Gemini Pro Latest');
   await expect(page.getByTestId('normal-model').locator('option')).toContainText(['Gemini 2.5 Flash', 'Gemini Pro Latest']);
 
   await page.getByTestId('sidebar-new-chat-menu').click();
   await page.getByTestId('sidebar-new-chat-compare').click();
   await expect(page.getByTestId('compare-chat-view')).toBeVisible();
-  await expect(page.getByTestId('compare-model-a')).toHaveValue('gemini-2.5-flash');
-  await expect(page.getByTestId('compare-model-b')).toHaveValue('gemini-2.5-flash');
+  await expect(page.getByTestId('compare-model-a')).toHaveValue('gemini-pro-latest');
+  await expect(page.getByTestId('compare-model-b')).toHaveValue('gemini-pro-latest');
 });
 
 test('normal and compare views stay bounded to the viewport', async ({ page }) => {

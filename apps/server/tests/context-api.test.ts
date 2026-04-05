@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { encodeBase64, encodeTextDocument } from '@packages/core/src';
 import { createApp } from '../src/app.js';
 import type { ServerConfig } from '../src/config.js';
 import type { ContextProvider } from '../src/types/context.js';
@@ -72,7 +73,8 @@ describe('context api', () => {
         await expect(readDocumentResponse.json()).resolves.toMatchObject({
             document: expect.objectContaining({
                 path: '/welcome.md',
-                content: '# Welcome\n'
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('# Welcome\n')
             })
         });
 
@@ -81,7 +83,8 @@ describe('context api', () => {
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({
                 path: '/welcome.md',
-                content: '# Updated\n'
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('# Updated\n')
             })
         });
         expect(writeDocumentResponse.status).toBe(200);
@@ -106,6 +109,28 @@ describe('context api', () => {
         });
         await expect(readFile(path.join(rootPath, 'notes', 'draft.md'), 'utf8')).resolves.toBe('');
 
+        const deleteNodeResponse = await app.request('/api/context/delete-node', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ path: '/notes/draft.md' })
+        });
+        expect(deleteNodeResponse.status).toBe(200);
+        await expect(deleteNodeResponse.json()).resolves.toEqual({ ok: true });
+
+        const renameNodeResponse = await app.request('/api/context/rename-node', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ path: '/welcome.md', name: 'welcome-renamed.md' })
+        });
+        expect(renameNodeResponse.status).toBe(200);
+        await expect(renameNodeResponse.json()).resolves.toMatchObject({
+            node: expect.objectContaining({
+                path: '/welcome-renamed.md',
+                name: 'welcome-renamed.md',
+                kind: 'file'
+            })
+        });
+
         const resolveAgentResponse = await app.request('/api/context/resolve-scoped-agent-config', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -117,6 +142,36 @@ describe('context api', () => {
                 name: 'Default Knowledge Agent',
                 scopePath: '/'
             })
+        });
+    });
+
+    it('reads pdf documents through /api/context/read-document with binary payload and read-only metadata', async () => {
+        const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-context-'));
+        tempRoots.push(rootPath);
+        const pdfBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34]);
+        await writeFile(path.join(rootPath, 'guide.pdf'), pdfBytes);
+
+        const app = createApp({
+            config: createConfig({
+                isDevelopment: true,
+                knowledgeRoot: rootPath
+            })
+        });
+
+        const readDocumentResponse = await app.request('/api/context/read-document', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ path: '/guide.pdf' })
+        });
+
+        expect(readDocumentResponse.status).toBe(200);
+        await expect(readDocumentResponse.json()).resolves.toMatchObject({
+            document: {
+                path: '/guide.pdf',
+                mimeType: 'application/pdf',
+                dataBase64: encodeBase64(pdfBytes),
+                canWrite: false
+            }
         });
     });
 
@@ -160,12 +215,23 @@ describe('context api', () => {
             id: 'fake-context',
             initializeAccess: vi.fn(async () => undefined),
             listTree: vi.fn(async () => [{ path: '/virtual.md', name: 'virtual.md', kind: 'file' }]),
-            readDocument: vi.fn(async (filePath: string) => ({ path: filePath, content: 'virtual' })),
+            readDocument: vi.fn(async (filePath: string) => ({
+                path: filePath,
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('virtual'),
+                canWrite: true
+            })),
             writeDocument: vi.fn(async () => undefined),
             createNode: vi.fn(async (input) => ({
                 path: `/${input.name}`,
                 name: input.name,
                 kind: input.kind
+            })),
+            deleteNode: vi.fn(async () => undefined),
+            renameNode: vi.fn(async (input) => ({
+                path: `/${input.name}`,
+                name: input.name,
+                kind: 'file'
             })),
             searchInScope: vi.fn(async () => []),
             resolveScopedAgentConfig: vi.fn(async (targetPath: string) => ({

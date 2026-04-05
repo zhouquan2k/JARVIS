@@ -14,6 +14,12 @@ export interface MessageAttachment {
     previewBase64?: string;
 }
 
+export interface MessageRequestSnapshot {
+    prompt: string;
+    attachments?: MessageAttachment[];
+    activeDocumentMode?: 'none' | 'primary-context' | 'attachment' | 'omitted';
+}
+
 export interface AnnotationRange {
     start: number;
     end: number;
@@ -59,6 +65,7 @@ export interface ConversationMessage {
     starred?: boolean;
     deleted?: boolean;
     attachments?: MessageAttachment[];
+    requestSnapshot?: MessageRequestSnapshot;
     annotations?: MessageAnnotation[];
 }
 
@@ -101,6 +108,13 @@ function cloneAttachment(attachment: MessageAttachment): MessageAttachment {
     return { ...attachment };
 }
 
+function cloneRequestSnapshot(snapshot: MessageRequestSnapshot): MessageRequestSnapshot {
+    return {
+        ...snapshot,
+        attachments: snapshot.attachments?.map(cloneAttachment)
+    };
+}
+
 function cloneAnnotation(annotation: MessageAnnotation): MessageAnnotation {
     if (annotation.kind === 'image_group') {
         return {
@@ -124,6 +138,7 @@ export function cloneConversationMessage(message: ConversationMessage): Conversa
     return {
         ...message,
         attachments: message.attachments?.map(cloneAttachment),
+        requestSnapshot: message.requestSnapshot ? cloneRequestSnapshot(message.requestSnapshot) : undefined,
         annotations: message.annotations?.map(cloneAnnotation)
     };
 }
@@ -255,6 +270,11 @@ export function normalizeConversationMessage(value: unknown, index = 0): Convers
     const createdAt = typeof message.createdAt === 'number' && Number.isFinite(message.createdAt)
         ? message.createdAt
         : undefined;
+    const requestSnapshot = message.requestSnapshot
+        && typeof message.requestSnapshot === 'object'
+        && !Array.isArray(message.requestSnapshot)
+        ? message.requestSnapshot as Partial<MessageRequestSnapshot>
+        : undefined;
 
     return {
         id: typeof message.id === 'string' && message.id ? message.id : `message-${index}`,
@@ -268,6 +288,25 @@ export function normalizeConversationMessage(value: unknown, index = 0): Convers
             ? message.attachments
                 .map((attachment, attachmentIndex) => normalizeAttachment(attachment, `attachment-${index}-${attachmentIndex}`))
                 .filter((attachment): attachment is MessageAttachment => !!attachment)
+            : undefined,
+        requestSnapshot: typeof requestSnapshot?.prompt === 'string'
+            ? {
+                prompt: requestSnapshot.prompt,
+                attachments: Array.isArray(requestSnapshot.attachments)
+                    ? requestSnapshot.attachments
+                        .map((attachment, attachmentIndex) => normalizeAttachment(
+                            attachment,
+                            `request-snapshot-attachment-${index}-${attachmentIndex}`
+                        ))
+                        .filter((attachment): attachment is MessageAttachment => !!attachment)
+                    : undefined,
+                activeDocumentMode: requestSnapshot.activeDocumentMode === 'none'
+                    || requestSnapshot.activeDocumentMode === 'primary-context'
+                    || requestSnapshot.activeDocumentMode === 'attachment'
+                    || requestSnapshot.activeDocumentMode === 'omitted'
+                    ? requestSnapshot.activeDocumentMode
+                    : undefined
+            }
             : undefined,
         annotations: Array.isArray(message.annotations)
             ? message.annotations

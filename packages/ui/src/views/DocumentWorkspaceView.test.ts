@@ -4,15 +4,15 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createMockContextProvider } from '@packages/core/src';
-import KnowledgeWorkspaceView from './KnowledgeWorkspaceView.vue';
+import DocumentWorkspaceView from './DocumentWorkspaceView.vue';
 
-describe('KnowledgeWorkspaceView', () => {
+describe('DocumentWorkspaceView', () => {
     beforeEach(() => {
         setActivePinia(createPinia());
     });
 
-    it('renders the three-pane knowledge workspace shell', async () => {
-        const wrapper = mount(KnowledgeWorkspaceView, {
+    it('renders the three-pane document workspace shell', async () => {
+        const wrapper = mount(DocumentWorkspaceView, {
             props: {
                 contextProvider: createMockContextProvider({
                     nodes: [
@@ -30,19 +30,19 @@ describe('KnowledgeWorkspaceView', () => {
             },
             global: {
                 stubs: {
-                    KnowledgeAssistantPane: {
+                    AgentPane: {
                         props: ['activeAgent', 'agentResolutionError', 'isResolvingAgent'],
                         template: `
                           <div
-                            data-testid="knowledge-assistant-pane"
+                            data-testid="agent-pane"
                             :data-agent-name="activeAgent?.name ?? ''"
                             :data-agent-error="agentResolutionError ?? ''"
                             :data-agent-loading="isResolvingAgent === true"
                           />
                         `
                     },
-                    KnowledgeEditorPane: {
-                        template: '<div data-testid="knowledge-editor" />'
+                    DocumentEditorPane: {
+                        template: '<div data-testid="document-editor" />'
                     }
                 }
             }
@@ -51,27 +51,27 @@ describe('KnowledgeWorkspaceView', () => {
         await flushPromises();
         await wrapper.vm.$nextTick();
 
-        expect(wrapper.get('[data-testid="knowledge-workspace"]').exists()).toBe(true);
-        expect(wrapper.get('[data-testid="knowledge-file-tree"]').exists()).toBe(true);
-        expect(wrapper.get('[data-testid="knowledge-editor"]').exists()).toBe(true);
-        expect(wrapper.get('[data-testid="knowledge-assistant-pane"]').exists()).toBe(true);
-        expect(wrapper.get('[data-testid="knowledge-assistant-pane"]').attributes('data-agent-name')).toBe('Root Agent');
+        expect(wrapper.get('[data-testid="document-workspace"]').exists()).toBe(true);
+        expect(wrapper.get('[data-testid="document-file-tree"]').exists()).toBe(true);
+        expect(wrapper.get('[data-testid="document-editor"]').exists()).toBe(true);
+        expect(wrapper.get('[data-testid="agent-pane"]').exists()).toBe(true);
+        expect(wrapper.get('[data-testid="agent-pane"]').attributes('data-agent-name')).toBe('Root Agent');
         expect(wrapper.get('.knowledge-grid').attributes('style')).toContain('100% - 8px');
         expect(wrapper.findAll('.grid-pane')).toHaveLength(3);
     });
 
     it('allows the host to override the default assistant pane through the slot', async () => {
-        const wrapper = mount(KnowledgeWorkspaceView, {
+        const wrapper = mount(DocumentWorkspaceView, {
             props: {
                 contextProvider: createMockContextProvider()
             },
             global: {
                 stubs: {
-                    KnowledgeAssistantPane: {
-                        template: '<div data-testid="knowledge-assistant-pane" />'
+                    AgentPane: {
+                        template: '<div data-testid="agent-pane" />'
                     },
-                    KnowledgeEditorPane: {
-                        template: '<div data-testid="knowledge-editor" />'
+                    DocumentEditorPane: {
+                        template: '<div data-testid="document-editor" />'
                     }
                 }
             },
@@ -83,7 +83,7 @@ describe('KnowledgeWorkspaceView', () => {
         await flushPromises();
         await wrapper.vm.$nextTick();
 
-        expect(wrapper.find('[data-testid="knowledge-assistant-pane"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid="agent-pane"]').exists()).toBe(false);
         expect(wrapper.get('[data-testid="assistant-slot"]').text()).toContain('custom pane');
     });
 });

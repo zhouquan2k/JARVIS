@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentConfig, StoredWorkspaceSnapshot } from '../../index';
 import { createMockContextProvider, resolveScopedAgentConfig } from '../../index';
+import type { IContextProvider } from '../../interfaces/IContextProvider';
 
 function createSnapshot(
     nodes: StoredWorkspaceSnapshot['nodes'],
@@ -17,7 +18,7 @@ const fallbackAgent: AgentConfig = {
     description: 'Fallback knowledge assistant',
     instructions: 'Help the user with the current workspace.',
     modelProviderName: 'gemini-api',
-    modelName: 'gemini-2.5-flash',
+    modelName: 'Gemini Pro Latest',
     tools: [{ id: 'read_document' }]
 };
 
@@ -184,5 +185,56 @@ describe('resolveScopedAgentConfig', () => {
         await expect(resolveScopedAgentConfig(provider, '/broken/note.md', fallbackAgent)).rejects.toThrow(
             'Failed to parse /broken/.agent.json'
         );
+    });
+
+    it('treats EISDIR read failures as directory scopes', async () => {
+        const provider: IContextProvider = {
+            id: 'eisdir-provider',
+            async initializeAccess() {
+                return undefined;
+            },
+            async listTree() {
+                return [];
+            },
+            async readDocument(path) {
+                if (path === '/workspace/archive') {
+                    throw new Error('EISDIR: illegal operation on a directory, read');
+                }
+
+                if (path === '/workspace/archive/.agent.json') {
+                    return {
+                        path,
+                        mimeType: 'application/json',
+                        dataBase64: Buffer.from(JSON.stringify({
+                            name: 'Archive Agent',
+                            instructions: 'Only use archive files.'
+                        }), 'utf8').toString('base64')
+                    };
+                }
+
+                throw new Error(`节点不存在: ${path}`);
+            },
+            async writeDocument() {
+                return undefined;
+            },
+            async createNode() {
+                throw new Error('Not implemented');
+            },
+            async searchInScope() {
+                return [];
+            },
+            async resolveScopedAgentConfig(targetPath: string) {
+                return resolveScopedAgentConfig(this, targetPath, fallbackAgent);
+            }
+        };
+
+        const resolved = await resolveScopedAgentConfig(provider, '/workspace/archive', fallbackAgent);
+
+        expect(resolved).toMatchObject({
+            name: 'Archive Agent',
+            scopePath: '/workspace/archive',
+            sourcePaths: ['/workspace/archive/.agent.json'],
+            effectiveInstructions: 'Only use archive files.'
+        });
     });
 });

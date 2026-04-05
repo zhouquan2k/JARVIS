@@ -212,12 +212,17 @@ describe('createProviderRuntime', () => {
                     options: [expect.objectContaining({ key: 'deep_research', type: 'boolean' })]
                 },
                 {
+                    id: 'gemini-pro-latest',
+                    name: 'Gemini Pro Latest',
+                    options: [expect.objectContaining({ key: 'deep_research', type: 'boolean' })]
+                },
+                {
                     id: 'gemini-2.5-pro',
                     name: 'Gemini 2.5 Pro',
                     options: [expect.objectContaining({ key: 'deep_research', type: 'boolean' })]
                 }
             ],
-            defaultModel: 'gemini-2.5-flash'
+            defaultModel: 'gemini-pro-latest'
         });
     });
 

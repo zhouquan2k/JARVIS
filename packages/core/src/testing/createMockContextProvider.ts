@@ -5,9 +5,17 @@ import type {
     ContextSearchMatch,
     ContextSearchRequest,
     CreateContextNodeInput,
-    IContextProvider
+    IContextProvider,
+    RenameContextNodeInput,
+    WriteContextDocumentInput
 } from '../interfaces/IContextProvider';
 import { searchInScopedFiles } from '../providers/context/fileSearch';
+import {
+    decodeTextDocument,
+    encodeTextDocument,
+    inferDocumentMimeType,
+    isTextDocumentMimeType
+} from '../utils/documentData';
 
 export interface StoredContextNode {
     path: string;
@@ -19,13 +27,18 @@ export interface StoredContextNode {
 
 export interface StoredWorkspaceSnapshot {
     nodes: StoredContextNode[];
-    documents: Record<string, string>;
+    documents: Record<string, string | Partial<ContextDocument>>;
 }
 
 function cloneSnapshot(snapshot: StoredWorkspaceSnapshot): StoredWorkspaceSnapshot {
     return {
         nodes: snapshot.nodes.map((node) => ({ ...node })),
-        documents: { ...snapshot.documents }
+        documents: Object.fromEntries(
+            Object.entries(snapshot.documents).map(([path, value]) => [
+                path,
+                typeof value === 'string' ? value : { ...value }
+            ])
+        )
     };
 }
 
@@ -64,6 +77,26 @@ function ensureNode(snapshot: StoredWorkspaceSnapshot, path: string): StoredCont
         throw new Error(`节点不存在: ${path}`);
     }
     return matched;
+}
+
+function readStoredDocument(snapshot: StoredWorkspaceSnapshot, path: string): ContextDocument {
+    const stored = snapshot.documents[path];
+    if (typeof stored === 'string') {
+        return {
+            path,
+            mimeType: inferDocumentMimeType(path),
+            dataBase64: encodeTextDocument(stored)
+        };
+    }
+
+    return {
+        path,
+        mimeType: stored?.mimeType ?? inferDocumentMimeType(path),
+        dataBase64: stored?.dataBase64 ?? encodeTextDocument(''),
+        updatedAt: stored?.updatedAt,
+        version: stored?.version,
+        canWrite: stored?.canWrite
+    };
 }
 
 export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): IContextProvider {
@@ -114,13 +147,12 @@ export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): I
             }
 
             return {
-                path: normalizedPath,
-                content: currentSnapshot.documents[normalizedPath] ?? '',
+                ...readStoredDocument(currentSnapshot, normalizedPath),
                 updatedAt: node.updatedAt
             };
         },
-        async writeDocument(path: string, content: string): Promise<void> {
-            const normalizedPath = normalizePath(path);
+        async writeDocument(input: WriteContextDocumentInput): Promise<void> {
+            const normalizedPath = normalizePath(input.path);
             if (!normalizedPath) {
                 throw new Error('文档路径不能为空');
             }
@@ -130,8 +162,22 @@ export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): I
                 throw new Error(`节点不是文件: ${normalizedPath}`);
             }
 
+            const previous = readStoredDocument(currentSnapshot, normalizedPath);
+            if (input.expectedVersion && previous.version && input.expectedVersion !== previous.version) {
+                throw new Error('文档版本已变更，请重新读取后再试。');
+            }
+
             node.updatedAt = Date.now();
-            currentSnapshot.documents[normalizedPath] = content;
+            const mimeType = input.mimeType || previous.mimeType;
+            const nextDocument: ContextDocument = {
+                path: normalizedPath,
+                mimeType,
+                dataBase64: input.dataBase64,
+                updatedAt: node.updatedAt,
+                version: `${node.updatedAt}`,
+                canWrite: previous.canWrite ?? isTextDocumentMimeType(mimeType)
+            };
+            currentSnapshot.documents[normalizedPath] = nextDocument;
         },
         async createNode(input: CreateContextNodeInput): Promise<ContextNode> {
             const parentPath = normalizePath(input.parentPath);
@@ -165,6 +211,75 @@ export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): I
                 hasChildren: false
             };
         },
+        async deleteNode(path: string): Promise<void> {
+            const normalizedPath = normalizePath(path);
+            if (!normalizedPath) {
+                throw new Error('不允许删除根目录。');
+            }
+
+            const node = ensureNode(currentSnapshot, normalizedPath);
+            const descendantPaths = currentSnapshot.nodes
+                .filter((candidate) => candidate.path === normalizedPath || candidate.path.startsWith(`${normalizedPath}/`))
+                .map((candidate) => candidate.path);
+
+            currentSnapshot.nodes = currentSnapshot.nodes.filter((candidate) => !descendantPaths.includes(candidate.path));
+            descendantPaths.forEach((candidatePath) => {
+                delete currentSnapshot.documents[candidatePath];
+            });
+
+            if (node.kind === 'file') {
+                delete currentSnapshot.documents[normalizedPath];
+            }
+        },
+        async renameNode(input: RenameContextNodeInput): Promise<ContextNode> {
+            const normalizedPath = normalizePath(input.path);
+            if (!normalizedPath) {
+                throw new Error('不允许重命名根目录。');
+            }
+
+            const node = ensureNode(currentSnapshot, normalizedPath);
+            const parentPath = normalizePath(node.parentPath);
+            const targetPath = getChildPath(parentPath, input.name);
+            if (currentSnapshot.nodes.some((candidate) => candidate.path === targetPath && candidate.path !== normalizedPath)) {
+                throw new Error(`节点已存在: ${targetPath}`);
+            }
+
+            const descendants = currentSnapshot.nodes
+                .filter((candidate) => candidate.path === normalizedPath || candidate.path.startsWith(`${normalizedPath}/`))
+                .sort((left, right) => left.path.length - right.path.length);
+
+            descendants.forEach((candidate) => {
+                const suffix = candidate.path.slice(normalizedPath.length);
+                candidate.path = `${targetPath}${suffix}`;
+                candidate.name = candidate.path.split('/').pop() || candidate.name;
+                if (candidate.parentPath) {
+                    candidate.parentPath = normalizePath(candidate.parentPath === normalizedPath
+                        ? targetPath
+                        : candidate.parentPath.replace(normalizedPath, targetPath));
+                }
+                candidate.updatedAt = Date.now();
+            });
+
+            Object.entries(currentSnapshot.documents).forEach(([documentPath, value]) => {
+                if (documentPath === normalizedPath || documentPath.startsWith(`${normalizedPath}/`)) {
+                    const suffix = documentPath.slice(normalizedPath.length);
+                    const nextPath = `${targetPath}${suffix}`;
+                    currentSnapshot.documents[nextPath] = typeof value === 'string'
+                        ? value
+                        : { ...value, path: nextPath };
+                    delete currentSnapshot.documents[documentPath];
+                }
+            });
+
+            return {
+                path: targetPath,
+                name: input.name.trim(),
+                kind: node.kind,
+                parentPath,
+                hasChildren: node.kind === 'directory' ? nodeHasChildren(currentSnapshot.nodes, targetPath) : false,
+                updatedAt: node.updatedAt
+            };
+        },
         async searchInScope(request: ContextSearchRequest): Promise<ContextSearchMatch[]> {
             return searchInScopedFiles({
                 query: request.query,
@@ -174,7 +289,14 @@ export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): I
                     .filter((node) => node.kind === 'file')
                     .map((node) => ({
                         path: node.path,
-                        readContent: async () => currentSnapshot.documents[node.path] ?? ''
+                        readContent: async () => {
+                            const document = readStoredDocument(currentSnapshot, node.path);
+                            if (!isTextDocumentMimeType(document.mimeType)) {
+                                return '';
+                            }
+
+                            return decodeTextDocument(document.dataBase64);
+                        }
                     }))
             });
         },

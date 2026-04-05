@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { encodeTextDocument } from '@packages/core/src';
 import { createWebContextProvider, resolveContextBaseUrl } from './createWebContextProvider';
 import { createApp } from '../../../server/src/app';
 
@@ -42,17 +43,35 @@ describe('createWebContextProvider', () => {
       if (url.endsWith('/read-document')) {
         expect(body).toEqual({ path: '/notes/today.md' });
         return new Response(JSON.stringify({
-          document: { path: '/notes/today.md', content: '# Today' }
+          document: {
+            path: '/notes/today.md',
+            mimeType: 'text/markdown',
+            dataBase64: encodeTextDocument('# Today')
+          }
         }), { status: 200 });
       }
       if (url.endsWith('/write-document')) {
-        expect(body).toEqual({ path: '/notes/today.md', content: '# Updated' });
+        expect(body).toEqual({
+          path: '/notes/today.md',
+          mimeType: 'text/markdown',
+          dataBase64: encodeTextDocument('# Updated')
+        });
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
       }
       if (url.endsWith('/create-node')) {
         expect(body).toEqual({ parentPath: '/notes', name: 'draft.md', kind: 'file' });
         return new Response(JSON.stringify({
           node: { path: '/notes/draft.md', name: 'draft.md', kind: 'file', parentPath: '/notes' }
+        }), { status: 200 });
+      }
+      if (url.endsWith('/delete-node')) {
+        expect(body).toEqual({ path: '/notes/draft.md' });
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      if (url.endsWith('/rename-node')) {
+        expect(body).toEqual({ path: '/notes/today.md', name: 'renamed.md' });
+        return new Response(JSON.stringify({
+          node: { path: '/notes/renamed.md', name: 'renamed.md', kind: 'file', parentPath: '/notes' }
         }), { status: 200 });
       }
       if (url.endsWith('/search-in-scope')) {
@@ -89,9 +108,14 @@ describe('createWebContextProvider', () => {
     ]);
     await expect(provider.readDocument('/notes/today.md')).resolves.toEqual({
       path: '/notes/today.md',
-      content: '# Today'
+      mimeType: 'text/markdown',
+      dataBase64: encodeTextDocument('# Today')
     });
-    await expect(provider.writeDocument('/notes/today.md', '# Updated')).resolves.toBeUndefined();
+    await expect(provider.writeDocument({
+      path: '/notes/today.md',
+      mimeType: 'text/markdown',
+      dataBase64: encodeTextDocument('# Updated')
+    })).resolves.toBeUndefined();
     await expect(provider.createNode({
       parentPath: '/notes',
       name: 'draft.md',
@@ -99,6 +123,16 @@ describe('createWebContextProvider', () => {
     })).resolves.toEqual({
       path: '/notes/draft.md',
       name: 'draft.md',
+      kind: 'file',
+      parentPath: '/notes'
+    });
+    await expect(provider.deleteNode('/notes/draft.md')).resolves.toBeUndefined();
+    await expect(provider.renameNode({
+      path: '/notes/today.md',
+      name: 'renamed.md'
+    })).resolves.toEqual({
+      path: '/notes/renamed.md',
+      name: 'renamed.md',
       kind: 'file',
       parentPath: '/notes'
     });
@@ -118,7 +152,7 @@ describe('createWebContextProvider', () => {
       modelName: 'gemini-2.5-flash'
     });
 
-    expect(fetchImpl).toHaveBeenCalledTimes(7);
+    expect(fetchImpl).toHaveBeenCalledTimes(9);
   });
 
   it('surfaces server-side context errors', async () => {
@@ -164,15 +198,29 @@ describe('createWebContextProvider', () => {
     ]));
     await expect(provider.readDocument('/welcome.md')).resolves.toMatchObject({
       path: '/welcome.md',
-      content: '# Welcome\n'
+      mimeType: 'text/markdown',
+      dataBase64: encodeTextDocument('# Welcome\n')
     });
-    await expect(provider.writeDocument('/welcome.md', '# Updated\n')).resolves.toBeUndefined();
+    await expect(provider.writeDocument({
+      path: '/welcome.md',
+      mimeType: 'text/markdown',
+      dataBase64: encodeTextDocument('# Updated\n')
+    })).resolves.toBeUndefined();
     await expect(provider.createNode({
       parentPath: '/notes',
       name: 'draft.md',
       kind: 'file'
     })).resolves.toMatchObject({
       path: '/notes/draft.md',
+      kind: 'file'
+    });
+    await expect(provider.deleteNode('/notes/draft.md')).resolves.toBeUndefined();
+    await expect(provider.renameNode({
+      path: '/welcome.md',
+      name: 'welcome-renamed.md'
+    })).resolves.toMatchObject({
+      path: '/welcome-renamed.md',
+      name: 'welcome-renamed.md',
       kind: 'file'
     });
     await expect(provider.searchInScope({
@@ -185,6 +233,38 @@ describe('createWebContextProvider', () => {
       scopePath: '/',
       name: 'Default Knowledge Agent'
     });
+  });
+
+  it('reads pdf documents through the web adapter using the shared document payload', async () => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-web-context-pdf-'));
+    tempRoots.push(rootPath);
+    const pdfBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+    await writeFile(path.join(rootPath, 'report.pdf'), pdfBytes);
+
+    const serverApp = createApp({
+      config: {
+        port: 8787,
+        dbPath: ':memory:',
+        isDevelopment: true,
+        corsAllowlist: [],
+        knowledgeRoot: rootPath,
+        contextBackend: 'local-file'
+      }
+    });
+
+    const provider = createWebContextProvider({
+      baseUrl: 'http://context.test/api/context',
+      fetchImpl: async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input));
+        return serverApp.request(url.pathname, init);
+      }
+    });
+
+    await expect(provider.readDocument('/report.pdf')).resolves.toEqual(expect.objectContaining({
+      path: '/report.pdf',
+      mimeType: 'application/pdf',
+      canWrite: false
+    }));
   });
 
   it('returns root scope for the default agent through the real server context route', async () => {

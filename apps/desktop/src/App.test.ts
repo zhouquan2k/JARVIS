@@ -99,9 +99,9 @@ vi.mock('@packages/ui', () => ({
           </div>
         `
     },
-    KnowledgeWorkspaceView: {
+    DocumentWorkspaceView: {
         props: ['contextProvider'],
-        template: '<div data-testid="knowledge-workspace-stub" />'
+        template: '<div data-testid="document-workspace-stub" />'
     },
     openConversationImportDialog: mockOpenConversationImportDialog,
     useChatStore: () => chatStore,
@@ -295,7 +295,7 @@ describe('Desktop App auth recovery', () => {
         await flushPromises();
 
         expect(wrapper.find('[data-testid="workspace-auth-stub"]').exists()).toBe(false);
-        expect(wrapper.get('[data-testid="knowledge-workspace-stub"]').exists()).toBe(true);
+        expect(wrapper.get('[data-testid="document-workspace-stub"]').exists()).toBe(true);
 
         mockCurrentRoute.value = { path: '/chat' };
     });

@@ -31,6 +31,12 @@ class StreamingProvider implements IModelProvider {
         };
     }
 
+    async getDocumentCapability() {
+        return {
+            acceptedMimeTypes: ['text/plain', 'text/markdown', 'application/pdf']
+        };
+    }
+
     async sendMessage(
         prompt: string,
         options: SendMessageOptions,
@@ -237,6 +243,31 @@ describe('createProviderHost', () => {
                 error: 'Gemini 页面当前未登录。',
                 historyErrorCode: 'AUTH_REQUIRED',
                 historyProviderId: 'gemini-web'
+            })
+        ]);
+    });
+
+    it('returns provider document capability through the host bridge', async () => {
+        const responses: ProxyResponse[] = [];
+        const host = createProviderHost({
+            runtime: createRuntime(() => new StreamingProvider('provider'))
+        });
+
+        await host.handleRequest({
+            action: 'GET_DOCUMENT_CAPABILITY',
+            requestId: 'doc-capability',
+            channelId: 'provider-channel',
+            providerId: 'chatgpt-web'
+        }, (response) => responses.push(response));
+
+        expect(responses).toEqual([
+            expect.objectContaining({
+                type: 'DONE',
+                requestId: 'doc-capability',
+                channelId: 'provider-channel',
+                result: {
+                    acceptedMimeTypes: ['text/plain', 'text/markdown', 'application/pdf']
+                }
             })
         ]);
     });

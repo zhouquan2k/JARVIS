@@ -8,7 +8,7 @@ export interface AgentRuntimeRequest {
     agent: ResolvedAgentConfig | null;
     workspace?: {
         activePath: string | null;
-        activeDocument?: Pick<ContextDocument, 'path' | 'content'> | null;
+        activeDocument?: ContextDocument | null;
         contextProvider: IContextProvider | null;
         onFileChanged?: (change: {
             path: string;

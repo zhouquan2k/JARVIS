@@ -27,7 +27,10 @@
                 :data-question-id="isQuestionRoot(msg) ? getMessageQuestionKey(msg) : undefined"
               >
                 <div v-if="msg.role === 'user'" class="content user-content">{{ msg.content || '已发送附件' }}</div>
-                <MessageAttachmentStrip v-if="msg.attachments?.length" :attachments="msg.attachments" />
+                <MessageAttachmentStrip
+                  v-if="resolveMessageAttachments(msg).length > 0"
+                  :attachments="resolveMessageAttachments(msg)"
+                />
                 <MarkdownContent
                   v-if="msg.role === 'assistant'"
                   class="content markdown-body"
@@ -83,7 +86,7 @@
       <template v-if="!isPreviewing">
         <div class="toolbar-stack">
           <div
-            v-if="!isTopToolbarCollapsed"
+            v-if="showSelectorRow"
             class="selector-row"
             data-testid="selector-row"
           >
@@ -288,6 +291,8 @@ const isPreviewing = computed(() => chatStore.isPreviewing);
 const renderedMessages = computed(() => isPreviewing.value ? displayConversation.value?.messages || [] : chatStore.visibleMessages);
 const modelOptionDefinitions = computed(() => chatStore.currentModelOptionDefinitions);
 const isAgentMode = computed(() => chatStore.activeAgentContext !== null);
+const hasDraftAttachments = computed(() => chatStore.draftAttachments.length > 0);
+const showSelectorRow = computed(() => !isTopToolbarCollapsed.value || hasDraftAttachments.value);
 const draftPrompt = computed({
   get: () => chatStore.draftPrompt,
   set: (value: string) => chatStore.setDraftPrompt(value)
@@ -434,6 +439,14 @@ watch(isAgentMode, (value) => {
   isTopToolbarCollapsed.value = value;
 }, { immediate: true });
 
+watch(hasDraftAttachments, (value) => {
+  if (value) {
+    isTopToolbarCollapsed.value = false;
+  } else if (isAgentMode.value) {
+    isTopToolbarCollapsed.value = true;
+  }
+});
+
 watch(() => chatStore.draftFocusRequestKey, () => {
   nextTick(() => {
     syncInputHeight();
@@ -496,6 +509,14 @@ function isStarredMessage(message: ConversationMessage): boolean {
 function isActiveQuestion(message: ConversationMessage): boolean {
   const questionKey = getMessageQuestionKey(message);
   return !!questionKey && questionKey === chatStore.activeQuestionId;
+}
+
+function resolveMessageAttachments(message: ConversationMessage) {
+  if (message.attachments?.length) {
+    return message.attachments;
+  }
+
+  return message.requestSnapshot?.attachments || [];
 }
 
 function syncActiveQuestionFromScroll() {
