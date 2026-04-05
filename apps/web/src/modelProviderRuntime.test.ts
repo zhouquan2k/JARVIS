@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { createWebHistoryProvider, providerRuntime } from './providerRuntime';
+import { createWebHistoryProvider, modelProviderRuntime } from './modelProviderRuntime';
 
-describe('web providerRuntime', () => {
+describe('web modelProviderRuntime', () => {
     it('falls back to the mock history provider when the requested provider is unavailable in web mode', async () => {
-        expect(providerRuntime.getProviderCatalog().some((provider) => provider.id === 'chatgpt-web')).toBe(false);
+        expect(modelProviderRuntime.getProviderCatalog().some((provider) => provider.id === 'chatgpt-web')).toBe(false);
 
         const historyProvider = createWebHistoryProvider('chatgpt-web');
         await expect(historyProvider.getHistoryList()).resolves.toHaveLength(2);

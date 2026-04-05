@@ -4,7 +4,7 @@ import type {
     SyncPullResult,
     SyncPushResult
 } from '../interfaces/ISyncTransport';
-import { cloneConversation, type Conversation } from '../interfaces/IStorageProvider';
+import { cloneConversation, type Conversation } from '../interfaces/Conversation';
 
 export const MOCK_SYNC_EVENTS_STORAGE_KEY = 'chatprism:mock-sync-events';
 

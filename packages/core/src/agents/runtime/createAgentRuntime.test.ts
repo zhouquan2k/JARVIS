@@ -230,7 +230,7 @@ describe('createAgentRuntime', () => {
     it('routes agent requests to native providers when capability is available', async () => {
         const provider = new AgentProvider();
         const runtime = createAgentRuntime({
-            providerRuntime: createRuntime(provider)
+            modelProviderRuntime: createRuntime(provider)
         });
         const updates: string[] = [];
         const contextProvider = createMockContextProvider({
@@ -277,7 +277,7 @@ describe('createAgentRuntime', () => {
     it('falls back to prompt envelope when the provider does not support native agents', async () => {
         const provider = new BasicProvider();
         const runtime = createAgentRuntime({
-            providerRuntime: createRuntime(provider)
+            modelProviderRuntime: createRuntime(provider)
         });
 
         const result = await runtime.run(
@@ -331,7 +331,7 @@ describe('createAgentRuntime', () => {
     it('reuses the standard stream/update contracts for non-agent requests', async () => {
         const provider = new BasicProvider();
         const runtime = createAgentRuntime({
-            providerRuntime: createRuntime(provider)
+            modelProviderRuntime: createRuntime(provider)
         });
         const updates: ProviderStreamUpdate[] = [];
 
@@ -361,7 +361,7 @@ describe('createAgentRuntime', () => {
     it('renders a grouped tool round summary when a single turn emits multiple function calls', async () => {
         const provider = new MultiToolAgentProvider();
         const runtime = createAgentRuntime({
-            providerRuntime: createRuntime(provider)
+            modelProviderRuntime: createRuntime(provider)
         });
         const contextProvider = createMockContextProvider({
             nodes: [
@@ -408,7 +408,7 @@ describe('createAgentRuntime', () => {
     it('passes the active file context into native agent requests', async () => {
         const provider = new AgentProvider();
         const runtime = createAgentRuntime({
-            providerRuntime: createRuntime(provider)
+            modelProviderRuntime: createRuntime(provider)
         });
 
         await runtime.run(
@@ -447,7 +447,7 @@ describe('createAgentRuntime', () => {
     it('attaches active pdf documents for providers that accept application/pdf', async () => {
         const provider = new BasicProvider();
         const runtime = createAgentRuntime({
-            providerRuntime: createRuntime(provider)
+            modelProviderRuntime: createRuntime(provider)
         });
 
         const result = await runtime.run(
@@ -496,7 +496,7 @@ describe('createAgentRuntime', () => {
         const provider = new BasicProvider();
         provider.acceptedMimeTypes = ['text/plain', 'text/markdown'];
         const runtime = createAgentRuntime({
-            providerRuntime: createRuntime(provider)
+            modelProviderRuntime: createRuntime(provider)
         });
 
         const result = await runtime.run(

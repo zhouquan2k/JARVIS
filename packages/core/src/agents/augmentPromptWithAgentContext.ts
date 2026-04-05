@@ -1,5 +1,5 @@
 import type { IModelProvider } from '../interfaces/IModelProvider';
-import type { MessageAttachment } from '../interfaces/IStorageProvider';
+import type { MessageAttachment } from '../interfaces/Conversation';
 import { decodeBase64, isTextDocumentMimeType } from '../utils/documentData';
 
 type ActiveDocumentContext = {

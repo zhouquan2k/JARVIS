@@ -1,6 +1,6 @@
 import type { ResolvedAgentConfig } from '../../interfaces/IAgentConfig';
 import type { ContextDocument, IContextProvider } from '../../interfaces/IContextProvider';
-import type { MessageAttachment } from '../../interfaces/IStorageProvider';
+import type { MessageAttachment } from '../../interfaces/Conversation';
 import type { ProviderContextMessage, ProviderSendResult, ProviderStreamUpdate } from '../../interfaces/IModelProvider';
 
 export interface AgentRuntimeRequest {

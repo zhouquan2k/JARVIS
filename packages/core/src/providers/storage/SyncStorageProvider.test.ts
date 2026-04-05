@@ -5,7 +5,7 @@ import type {
     SyncPullResult,
     SyncPushResult
 } from '../../interfaces/ISyncTransport';
-import { cloneConversationMessage, type Conversation } from '../../interfaces/IStorageProvider';
+import { cloneConversationMessage, type Conversation } from '../../interfaces/Conversation';
 import type { IConversationPersistProvider } from '../../interfaces/IConversationPersistProvider';
 import {
     SyncStorageProvider,

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Conversation } from '../../interfaces/IStorageProvider';
+import type { Conversation } from '../../interfaces/Conversation';
 import { IndexedDBStorageProvider } from './IndexedDBStorageProvider';
 
 type StoredValue = Record<string, Conversation>;

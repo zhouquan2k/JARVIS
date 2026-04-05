@@ -64,10 +64,10 @@ vi.mock('./context/createWebContextProvider', () => ({
     createWebContextProvider: vi.fn(() => ({ id: 'web-context' }))
 }));
 
-vi.mock('./providerRuntime', () => ({
+vi.mock('./modelProviderRuntime', () => ({
     agentRuntime: { run: vi.fn(), abort: vi.fn() },
     createWebHistoryProviders: vi.fn(() => []),
-    providerRuntime: {
+    modelProviderRuntime: {
         getProviderCatalog: vi.fn(() => []),
         getProvider: vi.fn(),
         getProviderModels: vi.fn()

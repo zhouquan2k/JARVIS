@@ -1,6 +1,5 @@
 import type { AnalysisResult } from '../workflows/compare/types';
 import type { ConversationOrigin } from './IExternalConversationProvider';
-import type { IConversationPersistProvider } from './IConversationPersistProvider';
 
 export type ConversationRole = 'user' | 'assistant';
 export type MessageAttachmentType = 'image' | 'file';
@@ -373,9 +372,3 @@ export function normalizeConversation(conversation: Conversation): Conversation 
             : []
     };
 }
-
-export interface IStorageProvider extends IConversationPersistProvider {}
-
-export type { IConversationPersistProvider } from './IConversationPersistProvider';
-
-export type { IConversationStorageProvider } from './IConversationStorageProvider';

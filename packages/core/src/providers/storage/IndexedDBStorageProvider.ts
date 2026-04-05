@@ -1,5 +1,5 @@
 import localforage from 'localforage';
-import { type Conversation, normalizeConversation } from '../../interfaces/IStorageProvider';
+import { type Conversation, normalizeConversation } from '../../interfaces/Conversation';
 import type { IConversationPersistProvider } from '../../interfaces/IConversationPersistProvider';
 
 export class IndexedDBStorageProvider implements IConversationPersistProvider {

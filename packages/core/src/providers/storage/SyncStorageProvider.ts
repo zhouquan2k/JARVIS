@@ -9,7 +9,7 @@ import {
     normalizeConversation,
     type Conversation,
     type ConversationSyncState,
-} from '../../interfaces/IStorageProvider';
+} from '../../interfaces/Conversation';
 import type { IConversationPersistProvider } from '../../interfaces/IConversationPersistProvider';
 
 export interface SyncStateStore {

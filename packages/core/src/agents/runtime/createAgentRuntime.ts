@@ -13,7 +13,7 @@ import type { ModelProviderRuntime } from '../../runtime/modelProviderRuntime.ty
 import type { AgentRuntime, AgentRuntimeRequest } from './types';
 
 export interface CreateAgentRuntimeOptions {
-    providerRuntime: ModelProviderRuntime;
+    modelProviderRuntime: ModelProviderRuntime;
     maxToolIterations?: number;
 }
 
@@ -192,7 +192,7 @@ export function createAgentRuntime(options: CreateAgentRuntimeOptions): AgentRun
                 throw new Error('No active model provider selected.');
             }
 
-            const provider = options.providerRuntime.getProvider(providerId);
+            const provider = options.modelProviderRuntime.getProvider(providerId);
             activeProvider = provider;
             const preparedRequest = request.agent
                 ? await prepareRequestWithActiveDocument(

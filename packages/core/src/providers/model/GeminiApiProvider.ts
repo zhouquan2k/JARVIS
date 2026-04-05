@@ -8,7 +8,7 @@ import type {
     AgentToolCall,
     IAgentCapableProvider
 } from '../../interfaces/IAgentCapableProvider';
-import type { MessageAttachment } from '../../interfaces/IStorageProvider';
+import type { MessageAttachment } from '../../interfaces/Conversation';
 import {
     IModelProvider,
     type ProviderContextMessage,

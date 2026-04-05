@@ -1,4 +1,4 @@
-import type { Conversation } from './IStorageProvider';
+import type { Conversation } from './Conversation';
 
 export interface IConversationPersistProvider {
     id: string;

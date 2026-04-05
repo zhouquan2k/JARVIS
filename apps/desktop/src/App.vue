@@ -46,7 +46,7 @@ import {
 } from '@packages/ui';
 import { currentRoute, navigateTo } from './router';
 import { createDesktopContextProvider } from './context/createDesktopContextProvider';
-import { agentRuntime, createDesktopHistoryProviders, providerRuntime } from './providerRuntime';
+import { agentRuntime, createDesktopHistoryProviders, modelProviderRuntime } from './modelProviderRuntime';
 import { createDesktopSyncStorageProvider } from './sync';
 
 const chatStore = useChatStore();
@@ -262,7 +262,7 @@ async function refreshGeminiHistoryAfterLogin(trigger: 'completed' | 'closed'): 
 
 onMounted(() => {
   void (async () => {
-    const providerCatalog = providerRuntime.getProviderCatalog();
+    const providerCatalog = modelProviderRuntime.getProviderCatalog();
 
     try {
       if (providerCatalog.length === 0) {
@@ -275,10 +275,10 @@ onMounted(() => {
           isDevelopment: import.meta.env.DEV
         });
 
-        chatStore.setModelProviderResolver((providerId: string) => providerRuntime.getProvider(providerId));
-        chatStore.setProviderModelsResolver((providerId: string) => providerRuntime.getProviderModels(providerId));
+        chatStore.setModelProviderResolver((providerId: string) => modelProviderRuntime.getProvider(providerId));
+        chatStore.setProviderModelsResolver((providerId: string) => modelProviderRuntime.getProviderModels(providerId));
         chatStore.setProviders(
-          providerRuntime.getProvider(providerCatalog[0].id),
+          modelProviderRuntime.getProvider(providerCatalog[0].id),
           storageProvider
         );
         chatStore.setHistoryProviders(historyProviders);
@@ -299,7 +299,7 @@ onMounted(() => {
     }
 
     try {
-      await compareStore.setRuntime(providerRuntime);
+      await compareStore.setRuntime(modelProviderRuntime);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       compareStore.analysisError = message;

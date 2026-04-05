@@ -25,10 +25,10 @@ export function createExtensionProxyRuntime(): ModelProviderRuntime {
 
 const useMockRuntime = import.meta.env.WXT_E2E === '1';
 
-export const providerRuntime = createExtensionProxyRuntime();
+export const modelProviderRuntime = createExtensionProxyRuntime();
 
 export const agentRuntime = createAgentRuntime({
-    providerRuntime
+    modelProviderRuntime
 });
 
 export function createExtensionHistoryProvider(

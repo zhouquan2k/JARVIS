@@ -4,7 +4,7 @@ import type {
     SyncPullResult,
     SyncPushResult
 } from '../../interfaces/ISyncTransport';
-import type { Conversation } from '../../interfaces/IStorageProvider';
+import type { Conversation } from '../../interfaces/Conversation';
 
 export interface FetchSyncTransportOptions {
     syncKey: string;

@@ -1,4 +1,4 @@
-import type { Conversation } from './IStorageProvider';
+import type { Conversation } from './Conversation';
 
 export type ExternalHistoryProviderId = 'chatgpt-web' | 'gemini-web' | 'external-file';
 export type ConversationOrigin = 'local' | ExternalHistoryProviderId;
@@ -68,5 +68,3 @@ export class ExternalHistoryError extends Error {
         this.cause = options.cause;
     }
 }
-
-export interface IHistoryProvider extends IExternalConversationProvider {}

@@ -1,4 +1,4 @@
-import type { Conversation } from './IStorageProvider';
+import type { Conversation } from './Conversation';
 
 export interface SyncDeletedConversation {
     id: string;

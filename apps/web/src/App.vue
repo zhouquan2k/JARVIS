@@ -37,7 +37,7 @@ import {
 } from '@packages/ui';
 import { currentRoute, navigateTo } from './router';
 import { createWebContextProvider } from './context/createWebContextProvider';
-import { agentRuntime, createWebHistoryProviders, providerRuntime } from './providerRuntime';
+import { agentRuntime, createWebHistoryProviders, modelProviderRuntime } from './modelProviderRuntime';
 import { createWebSyncStorageProvider } from './sync';
 
 const chatStore = useChatStore();
@@ -65,8 +65,8 @@ function onNavigateWorkspace(path: ChatRoutePath) {
 onMounted(() => {
   void (async () => {
     try {
-      const providerCatalog = providerRuntime.getProviderCatalog();
-      await compareStore.setRuntime(providerRuntime);
+      const providerCatalog = modelProviderRuntime.getProviderCatalog();
+      await compareStore.setRuntime(modelProviderRuntime);
 
       if (providerCatalog.length === 0) {
         chatStore.setProviderCatalog([]);
@@ -80,10 +80,10 @@ onMounted(() => {
         isDevelopment: import.meta.env.DEV
       });
 
-      chatStore.setModelProviderResolver((providerId: string) => providerRuntime.getProvider(providerId));
-      chatStore.setProviderModelsResolver((providerId: string) => providerRuntime.getProviderModels(providerId));
+      chatStore.setModelProviderResolver((providerId: string) => modelProviderRuntime.getProvider(providerId));
+      chatStore.setProviderModelsResolver((providerId: string) => modelProviderRuntime.getProviderModels(providerId));
       chatStore.setProviders(
-        providerRuntime.getProvider(providerCatalog[0].id),
+        modelProviderRuntime.getProvider(providerCatalog[0].id),
         syncStorageProvider
       );
       chatStore.setHistoryProviders(historyProviders);

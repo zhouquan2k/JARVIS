@@ -1,4 +1,4 @@
-import type { ExternalHistoryErrorCode } from '../../../interfaces/IHistoryProvider';
+import type { ExternalHistoryErrorCode } from '../../../interfaces/IExternalConversationProvider';
 import type { GeminiHistoryRemoteConfig } from '../../../interfaces/ProviderRemoteConfig';
 import { extractGeminiMessageText } from './geminiMessageSerializer';
 import { extractHistoryItemTitle } from './geminiHistoryListTitle';

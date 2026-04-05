@@ -6,7 +6,7 @@ import {
 } from '../../../interfaces/IExternalConversationProvider';
 import type { GeminiHistoryBridge } from './GeminiHistoryBridge';
 import type { GeminiHistoryConfigLoader } from './GeminiHistoryConfigLoader';
-import type { Conversation } from '../../../interfaces/IStorageProvider';
+import type { Conversation } from '../../../interfaces/Conversation';
 
 function normalizeTitle(value: string | undefined): string {
     const trimmed = value?.trim();

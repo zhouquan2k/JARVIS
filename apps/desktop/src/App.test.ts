@@ -10,7 +10,7 @@ const mockAgentRuntime = {
     run: vi.fn(),
     abort: vi.fn()
 };
-const mockProviderRuntime = {
+const mockModelProviderRuntime = {
     getProviderCatalog: vi.fn(() => [
         { id: 'chatgpt-web', name: 'ChatGPT (Web)' }
     ]),
@@ -108,9 +108,9 @@ vi.mock('@packages/ui', () => ({
     useCompareStore: () => compareStore
 }));
 
-vi.mock('./providerRuntime', () => ({
+vi.mock('./modelProviderRuntime', () => ({
     createDesktopHistoryProviders: vi.fn(() => []),
-    providerRuntime: mockProviderRuntime,
+    modelProviderRuntime: mockModelProviderRuntime,
     agentRuntime: mockAgentRuntime
 }));
 

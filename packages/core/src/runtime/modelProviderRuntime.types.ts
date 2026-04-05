@@ -27,5 +27,3 @@ export interface ModelProviderRuntime {
 
 export type RuntimeProviderFactory = ModelProviderFactory;
 export type RuntimeProviderOptionsResolver = ModelProviderOptionsResolver;
-export interface ProviderRuntimeOptions extends ModelProviderRuntimeOptions {}
-export interface ProviderRuntime extends ModelProviderRuntime {}

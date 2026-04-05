@@ -6,7 +6,7 @@ import type {
     IAgentCapableProvider
 } from '../interfaces/IAgentCapableProvider';
 import type { IModelProvider, ProviderSendResult, ProviderStreamUpdate, SendMessageOptions } from '../interfaces/IModelProvider';
-import type { MessageAnnotation, MessageAttachment } from '../interfaces/IStorageProvider';
+import type { MessageAnnotation, MessageAttachment } from '../interfaces/Conversation';
 import type { ModelProviderRuntime } from '../runtime/modelProviderRuntime.types';
 
 export interface CreateMockRuntimeOptions {

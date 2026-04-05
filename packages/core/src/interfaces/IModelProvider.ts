@@ -1,6 +1,6 @@
 import type { ProviderModelCatalog } from '../../config';
 import type { AgentModelTurn, AgentToolCall } from './IAgentCapableProvider';
-import type { ConversationRole, MessageAnnotation, MessageAttachment, MessageRequestSnapshot } from './IStorageProvider';
+import type { ConversationRole, MessageAnnotation, MessageAttachment, MessageRequestSnapshot } from './Conversation';
 
 export interface ProviderContextMessage {
   role: ConversationRole;

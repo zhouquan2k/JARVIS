@@ -12,7 +12,7 @@ import type {
     ConversationMessage,
     MessageAnnotation,
     MessageAttachment
-} from '../../interfaces/IStorageProvider';
+} from '../../interfaces/Conversation';
 import { IModelProvider, type ProviderSendResult, type ProviderStreamUpdate, type SendMessageOptions } from '../../interfaces/IModelProvider';
 import { sha3_512 } from 'js-sha3';
 import type { ChatGPTWebProviderOptions, ProviderCookieStore, ProviderRequestClient } from './providerHostTypes';

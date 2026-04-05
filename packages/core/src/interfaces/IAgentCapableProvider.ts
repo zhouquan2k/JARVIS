@@ -6,7 +6,7 @@ import type {
     ProviderSendResult,
     ProviderStreamUpdate
 } from './IModelProvider';
-import type { MessageAttachment } from './IStorageProvider';
+import type { MessageAttachment } from './Conversation';
 
 export interface AgentCapabilities {
     nativeAgent: true;

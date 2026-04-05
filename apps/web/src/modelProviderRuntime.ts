@@ -10,7 +10,7 @@ import { createMockHistoryProvider } from './testing/createMockHistoryProvider';
 
 const useMockRuntime = import.meta.env.VITE_E2E === '1';
 
-export const providerRuntime = useMockRuntime
+export const modelProviderRuntime = useMockRuntime
   ? createMockRuntime()
   : createModelProviderRuntime({
       runtimeMode: 'web',
@@ -20,7 +20,7 @@ export const providerRuntime = useMockRuntime
     });
 
 export const agentRuntime = createAgentRuntime({
-  providerRuntime
+  modelProviderRuntime
 });
 
 export function createWebHistoryProvider(
@@ -30,12 +30,12 @@ export function createWebHistoryProvider(
     return createMockHistoryProvider(providerId);
   }
 
-  const providerConfig = providerRuntime.getProviderCatalog().find((provider) => provider.id === providerId);
+  const providerConfig = modelProviderRuntime.getProviderCatalog().find((provider) => provider.id === providerId);
   if (!providerConfig) {
     return createMockHistoryProvider(providerId);
   }
 
-  const provider = providerRuntime.getProvider(providerId, { fresh: true }) as Partial<IExternalConversationProvider>;
+  const provider = modelProviderRuntime.getProvider(providerId, { fresh: true }) as Partial<IExternalConversationProvider>;
   if (typeof provider.getHistoryList !== 'function' || typeof provider.getHistoryDetail !== 'function') {
     return createMockHistoryProvider(providerId);
   }

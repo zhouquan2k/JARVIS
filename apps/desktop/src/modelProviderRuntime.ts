@@ -25,12 +25,12 @@ export function createDesktopProxyRuntime(): ModelProviderRuntime {
 
 const useMockRuntime = import.meta.env.VITE_DESKTOP_USE_MOCK_RUNTIME === '1';
 
-export const providerRuntime = useMockRuntime
+export const modelProviderRuntime = useMockRuntime
     ? createMockRuntime()
     : createDesktopProxyRuntime();
 
 export const agentRuntime = createAgentRuntime({
-    providerRuntime
+    modelProviderRuntime
 });
 
 export function createDesktopHistoryProvider(
