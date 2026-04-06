@@ -272,6 +272,138 @@ describe('GeminiApiProvider', () => {
         vi.unstubAllGlobals();
     });
 
+    it('keeps gemini-pro-latest as the request id when the dynamic catalog exposes that id', async () => {
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    models: [
+                        {
+                            name: 'models/gemini-pro-latest',
+                            baseModelId: 'gemini-pro-latest',
+                            displayName: 'Gemini Pro Latest',
+                            supportedGenerationMethods: ['generateContent', 'streamGenerateContent']
+                        }
+                    ]
+                })
+            })
+            .mockResolvedValueOnce(
+                createGeminiSseResponse([
+                    {
+                        candidates: [
+                            {
+                                content: {
+                                    parts: [{ text: '已发送' }]
+                                }
+                            }
+                        ]
+                    }
+                ])
+            );
+        vi.stubGlobal('fetch', fetchMock);
+
+        const provider = new GeminiApiProvider({ apiKey: 'test-key' });
+        await provider.sendMessage(
+            '分析附件',
+            {
+                modelId: 'gemini-pro-latest'
+            },
+            () => undefined
+        );
+
+        expect(String(fetchMock.mock.calls[1]?.[0])).toContain('/models/gemini-pro-latest:streamGenerateContent');
+
+        vi.unstubAllGlobals();
+    });
+
+    it('resolves Gemini Pro Latest display name to gemini-pro-latest when the dynamic catalog exposes that id', async () => {
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    models: [
+                        {
+                            name: 'models/gemini-pro-latest',
+                            baseModelId: 'gemini-pro-latest',
+                            displayName: 'Gemini Pro Latest',
+                            supportedGenerationMethods: ['generateContent', 'streamGenerateContent']
+                        }
+                    ]
+                })
+            })
+            .mockResolvedValueOnce(
+                createGeminiSseResponse([
+                    {
+                        candidates: [
+                            {
+                                content: {
+                                    parts: [{ text: '已发送' }]
+                                }
+                            }
+                        ]
+                    }
+                ])
+            );
+        vi.stubGlobal('fetch', fetchMock);
+
+        const provider = new GeminiApiProvider({ apiKey: 'test-key' });
+        await provider.sendMessage(
+            '分析附件',
+            {
+                modelId: 'Gemini Pro Latest'
+            },
+            () => undefined
+        );
+
+        expect(String(fetchMock.mock.calls[1]?.[0])).toContain('/models/gemini-pro-latest:streamGenerateContent');
+
+        vi.unstubAllGlobals();
+    });
+
+    it('falls back to a concrete Gemini Pro model only when the dynamic catalog does not expose Gemini Pro Latest', async () => {
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    models: [
+                        {
+                            name: 'models/gemini-2.5-pro',
+                            baseModelId: 'gemini-2.5-pro',
+                            displayName: 'Gemini 2.5 Pro',
+                            supportedGenerationMethods: ['generateContent', 'streamGenerateContent']
+                        }
+                    ]
+                })
+            })
+            .mockResolvedValueOnce(
+                createGeminiSseResponse([
+                    {
+                        candidates: [
+                            {
+                                content: {
+                                    parts: [{ text: '已发送' }]
+                                }
+                            }
+                        ]
+                    }
+                ])
+            );
+        vi.stubGlobal('fetch', fetchMock);
+
+        const provider = new GeminiApiProvider({ apiKey: 'test-key' });
+        await provider.sendMessage(
+            '分析附件',
+            {
+                modelId: 'Gemini Pro Latest'
+            },
+            () => undefined
+        );
+
+        expect(String(fetchMock.mock.calls[1]?.[0])).toContain('/models/gemini-2.5-pro:streamGenerateContent');
+
+        vi.unstubAllGlobals();
+    });
+
     it('replays prior conversation history in Gemini contents', async () => {
         const fetchMock = vi.fn().mockResolvedValue(
             createGeminiSseResponse([

@@ -134,6 +134,18 @@ function normalizedModelToken(value: string): string {
     return value.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
+function isGeminiProLatestAlias(value: string | undefined): boolean {
+    if (!value?.trim()) {
+        return false;
+    }
+
+    const normalizedValue = normalizedModelToken(value);
+    const normalizedPreferred = normalizedModelToken(
+        APP_CONFIG.providers.find((provider) => provider.id === 'gemini-api')?.preferredDefaultModel || 'Gemini Pro Latest'
+    );
+    return normalizedValue === normalizedModelToken('gemini-pro-latest') || normalizedValue === normalizedPreferred;
+}
+
 function isGeminiChatModel(model: GeminiModelListItem): boolean {
     const baseModelId = model.baseModelId || model.name?.replace(/^models\//, '');
     if (!baseModelId?.startsWith('gemini-')) {
@@ -458,16 +470,11 @@ export class GeminiApiProvider implements IAgentCapableProvider {
         const fallbackCatalog = getGeminiModelCatalog();
         const normalizedRequested = requestedModel?.trim();
         if (!normalizedRequested) {
-            return fallbackCatalog.defaultModel === 'gemini-pro-latest'
-                ? 'gemini-2.5-pro'
-                : fallbackCatalog.defaultModel;
+            return fallbackCatalog.defaultModel;
         }
 
         const matchedStaticModel = findGeminiModelMatch(fallbackCatalog.models, normalizedRequested);
         if (matchedStaticModel) {
-            if (matchedStaticModel.id === 'gemini-pro-latest') {
-                return 'gemini-2.5-pro';
-            }
             return matchedStaticModel.id;
         }
 
@@ -480,12 +487,17 @@ export class GeminiApiProvider implements IAgentCapableProvider {
         try {
             const catalog = await this.getAvailableModels();
             if (!normalizedRequested) {
-                return catalog.defaultModel === 'gemini-pro-latest' ? this.resolveStaticGeminiModelId(catalog.defaultModel) : catalog.defaultModel;
+                return catalog.defaultModel;
             }
 
             const matchedModel = findGeminiModelMatch(catalog.models, normalizedRequested);
             if (matchedModel) {
-                return matchedModel.id === 'gemini-pro-latest' ? this.resolveStaticGeminiModelId(matchedModel.id) : matchedModel.id;
+                return matchedModel.id;
+            }
+
+            const staticModelId = this.resolveStaticGeminiModelId(normalizedRequested);
+            if (isGeminiProLatestAlias(normalizedRequested) || staticModelId === 'gemini-pro-latest') {
+                return normalizeGeminiFallbackDefault(catalog.models, 'gemini-pro-latest');
             }
         } catch {
             return this.resolveStaticGeminiModelId(normalizedRequested);

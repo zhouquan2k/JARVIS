@@ -12,6 +12,7 @@ context: |
   write all documents in Chinese
   对于浏览器插件extension的e2e测试用例，因为codex沙盒的限制，请申请提权运行。注意：MV3 扩展测试需要走 channel: 'chromium'，否则 Playwright 默认的 headless shell 拉不起扩展 service worker。
   extension e2e测试通过后，请运行pnpm --filter extension build
+  在归档时，应该design中的类图合并到全局类图中
   
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.
@@ -23,5 +24,7 @@ context: |
 #     tasks:
 #       - Break tasks into chunks of max 2 hours
 rules:
+  design:
+    - 使用mermaid画出类图，描述本次设计相关类及其关系，描述类的重要职责分配。
   tasks:
     - generate e2e testcases. use playwright as the testing framework.
