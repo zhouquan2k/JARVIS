@@ -15,10 +15,7 @@
         </div>
       </div>
 
-      <div v-if="isResolvingAgent" class="agent-loading" data-testid="agent-loading">
-        正在解析 Agent...
-      </div>
-      <div v-else-if="agentResolutionError" class="agent-error" data-testid="agent-error">
+      <div v-if="agentResolutionError" class="agent-error" data-testid="agent-error">
         {{ agentResolutionError }}
       </div>
     </header>
@@ -35,12 +32,12 @@ import { useChatStore } from '../store/chat';
 
 const props = defineProps<{
   activeAgent?: ResolvedAgentConfig | null;
+  activeAgentKey?: string | null;
   activePath?: string | null;
   activeDocument?: ContextDocument | null;
   contextProvider?: IContextProvider | null;
   onFileChanged?: ((change: { path: string; beforeContent: string; afterContent: string }) => void | Promise<void>) | null;
   agentResolutionError?: string | null;
-  isResolvingAgent?: boolean;
 }>();
 const chatStore = useChatStore();
 
@@ -78,24 +75,26 @@ function resolveAgentDirectory(agent: ResolvedAgentConfig | null | undefined): s
 
 watch(() => props.activeAgent ?? null, (agent) => {
   chatStore.setActiveAgentContext(agent);
-}, { immediate: true });
+}, { immediate: true, flush: 'sync' });
 
 watch(
-  () => [props.activePath ?? null, props.activeDocument ?? null, props.contextProvider ?? null, props.onFileChanged ?? null] as const,
-  ([activePath, activeDocument, contextProvider, onFileChanged]) => {
+  () => [props.activeAgentKey ?? null, props.activePath ?? null, props.activeDocument ?? null, props.contextProvider ?? null, props.onFileChanged ?? null] as const,
+  ([activeAgentKey, activePath, activeDocument, contextProvider, onFileChanged]) => {
     chatStore.setWorkspaceContext({
+      activeAgentKey,
       activePath,
       activeDocument,
       contextProvider,
       onFileChanged
     });
   },
-  { immediate: true }
+  { immediate: true, flush: 'sync' }
 );
 
 onBeforeUnmount(() => {
   chatStore.setActiveAgentContext(null);
   chatStore.setWorkspaceContext({
+    activeAgentKey: null,
     activePath: null,
     activeDocument: null,
     contextProvider: null,

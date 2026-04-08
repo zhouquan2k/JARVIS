@@ -1,13 +1,22 @@
-import type { ContextSearchRequest, CreateContextNodeInput, WriteContextDocumentInput } from '@packages/core/src';
+import type {
+    ContextSearchRequest,
+    CreateContextNodeInput,
+    IContextProvider,
+    WriteContextDocumentInput
+} from '@packages/core/src';
 
-export function createDesktopContextProvider() {
+export function createDesktopContextProvider(): IContextProvider {
     return {
         id: 'desktop-context',
         async initializeAccess() {
             await window.chatprismDesktop?.initializeContextAccess();
         },
-        async listTree(parentPath?: string) {
-            return window.chatprismDesktop?.listContextTree(parentPath) ?? [];
+        async getContext() {
+            if (!window.chatprismDesktop) {
+                throw new Error('Desktop context bridge is unavailable');
+            }
+
+            return window.chatprismDesktop.getContext();
         },
         async readDocument(path: string) {
             if (!window.chatprismDesktop) {
@@ -50,13 +59,6 @@ export function createDesktopContextProvider() {
             }
 
             return window.chatprismDesktop.searchContextInScope(request);
-        },
-        async resolveScopedAgentConfig(targetPath: string) {
-            if (!window.chatprismDesktop) {
-                throw new Error('Desktop context bridge is unavailable');
-            }
-
-            return window.chatprismDesktop.resolveScopedAgentConfig(targetPath);
         }
     };
 }

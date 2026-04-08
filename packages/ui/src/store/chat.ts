@@ -83,6 +83,7 @@ export interface ChatState {
     draftAttachments: MessageAttachment[];
     attachmentError: string | null;
     activeAgentContext: ResolvedAgentConfig | null;
+    activeWorkspaceAgentKey: string | null;
     activeWorkspacePath: string | null;
     activeWorkspaceDocument: ContextDocument | null;
     activeWorkspaceContextProvider: IContextProvider | null;
@@ -215,7 +216,16 @@ function resolveProviderLabel(providerId: ExternalHistoryProviderId): string {
 }
 
 function normalizeStoredConversation(conversation: Conversation): Conversation {
-    return cloneConversation(conversation);
+    const cloned = cloneConversation(conversation);
+    if (cloned.origin === 'local') {
+        if (!cloned.agentKey || cloned.agentKey === '__default__') {
+            cloned.agentKey = '/';
+        } else if (cloned.agentKey.endsWith('.agent.json')) {
+            const dir = cloned.agentKey.slice(0, -11);
+            cloned.agentKey = dir.endsWith('/') ? dir : `${dir}/`;
+        }
+    }
+    return cloned;
 }
 
 function resolveModelConfig(provider: ProviderConfig | undefined, modelId: string): ModelConfig | undefined {
@@ -541,6 +551,7 @@ export const useChatStore = defineStore('chat', {
         draftAttachments: [],
         attachmentError: null,
         activeAgentContext: null,
+        activeWorkspaceAgentKey: null,
         activeWorkspacePath: null,
         activeWorkspaceDocument: null,
         activeWorkspaceContextProvider: null,
@@ -967,15 +978,56 @@ export const useChatStore = defineStore('chat', {
         },
 
         setWorkspaceContext(input: {
+            activeAgentKey?: string | null;
             activePath: string | null;
             activeDocument?: ContextDocument | null;
             contextProvider: IContextProvider | null;
             onFileChanged?: ((change: { path: string; beforeContent: string; afterContent: string }) => Promise<void> | void) | null;
         }) {
+            this.activeWorkspaceAgentKey = input.activeAgentKey ?? null;
             this.activeWorkspacePath = input.activePath;
             this.activeWorkspaceDocument = cloneActiveWorkspaceDocument(input.activeDocument);
             this.activeWorkspaceContextProvider = input.contextProvider ? markRaw(input.contextProvider) : null;
             this.onWorkspaceFileChanged = input.onFileChanged ? markRaw(input.onFileChanged) : null;
+        },
+
+        resolveConversationAgentKey(agentKey: string | null): string | undefined {
+            return typeof agentKey === 'string' && agentKey.trim() ? agentKey : undefined;
+        },
+
+        applyConversationAgentKey(conversation: Conversation, agentKey: string | null): void {
+            if (conversation.agentKey) {
+                return;
+            }
+
+            const resolvedAgentKey = this.resolveConversationAgentKey(agentKey);
+            if (resolvedAgentKey) {
+                conversation.agentKey = resolvedAgentKey;
+            }
+        },
+
+        getConversationsByAgent(agentKey: string): Conversation[] {
+            const persistedConversations = this.conversations.filter((conversation) => {
+                return (
+                    !conversation.compare
+                    && !conversation.sync?.deleted
+                    && conversation.agentKey === agentKey
+                );
+            });
+
+            const activeConversation = this.currentConversation;
+            if (
+                !activeConversation
+                || activeConversation.compare
+                || activeConversation.sync?.deleted
+                || activeConversation.origin !== 'local'
+                || activeConversation.agentKey !== agentKey
+                || persistedConversations.some((conversation) => conversation.id === activeConversation.id)
+            ) {
+                return persistedConversations;
+            }
+
+            return [activeConversation, ...persistedConversations];
         },
 
         async resolveSendTarget() {
@@ -1605,10 +1657,12 @@ export const useChatStore = defineStore('chat', {
                     this.currentConversation!.title = seedTitle.substring(0, 30) + (seedTitle.length > 30 ? '...' : '');
                 }
 
+                this.applyConversationAgentKey(this.currentConversation!, this.activeWorkspaceAgentKey);
                 await this.persistCurrentConversation();
             } catch (err: unknown) {
                 if (this.isAbortRequested || isAbortError(err)) {
                     this.currentError = null;
+                    this.applyConversationAgentKey(this.currentConversation!, this.activeWorkspaceAgentKey);
                     await this.persistCurrentConversation();
                 } else {
                     this.currentError = err instanceof Error ? err.message : 'Error sending message';

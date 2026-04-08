@@ -31,8 +31,8 @@ const compareStore = reactive({
 
 vi.mock('@packages/ui', () => ({
     PRIMARY_WORKSPACE_ROUTES: [
-        { path: '/', name: 'knowledge-workspace', label: '知识工作区' },
-        { path: '/chat', name: 'normal-chat', label: '普通聊天' }
+        { path: '/', name: 'knowledge-workspace', label: '工作区' },
+        { path: '/chat', name: 'normal-chat', label: '对话' }
     ],
     AppTopBar: {
         template: `

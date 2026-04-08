@@ -163,12 +163,11 @@ class AgentPane {
 class DesktopContextProvider {
   <<implements IContextProvider>>
   + initializeAccess()
-  + listTree(parentPath)
+  + getContext()
   + readDocument(path)
   + writeDocument(input)
   + createNode(input)
   + searchInScope(request)
-  + resolveScopedAgentConfig(targetPath)
 }
 
 class DesktopBridge {

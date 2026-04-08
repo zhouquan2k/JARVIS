@@ -66,3 +66,35 @@ test('web knowledge workspace negotiates text pdf and unsupported document reque
   await page.getByTestId('normal-send').click();
   await expect(page.getByTestId('normal-messages')).not.toContainText('archive.bin [application/octet-stream]');
 });
+
+test('web knowledge workspace shows AgentView for owner directories and links documents plus conversations', async ({ page }) => {
+  await page.goto('/#/');
+
+  const docsNode = page.locator('[data-path="/docs"]');
+  await expect(docsNode).toBeVisible();
+  await expect(docsNode.getByTestId('document-node-agent-owner')).toBeVisible();
+
+  await docsNode.click();
+  await expect(page.getByTestId('agent-view')).toBeVisible();
+  await expect(page.getByTestId('agent-view-scope')).toContainText('/docs');
+  await expect(page.getByTestId('agent-name')).toContainText('Docs Agent');
+  const overviewDocument = page.getByTestId('agent-view-document').filter({ hasText: 'overview.md' });
+  await expect(overviewDocument).toHaveCount(1);
+
+  await page.getByTestId('normal-input').fill('Docs owner conversation');
+  await page.getByTestId('normal-send').click();
+  const docsConversation = page.getByTestId('agent-view-conversation').filter({ hasText: 'Docs owner conversation' });
+  await expect(docsConversation).toHaveCount(1);
+
+  await overviewDocument.click();
+  await expect(page.getByTestId('document-editor-input')).toBeVisible();
+  await expect(page.getByTestId('agent-view')).toHaveCount(0);
+
+  await docsNode.click();
+  await expect(page.getByTestId('agent-view')).toBeVisible();
+  await docsConversation.click();
+  await expect(page.getByTestId('normal-messages')).toContainText('Docs owner conversation');
+
+  await page.getByTestId('document-node-file').filter({ hasText: 'guide.md' }).click();
+  await expect(page.getByTestId('agent-view')).toHaveCount(0);
+});

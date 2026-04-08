@@ -154,30 +154,7 @@ describe('useDocumentWorkspaceStore', () => {
         expect(store.activePaneMode).toBe('unsupported');
     });
 
-    it('filters dot-prefixed files and directories from the visible tree', async () => {
-        const store = useDocumentWorkspaceStore();
-        store.setContextProvider(createMockContextProvider({
-            nodes: [
-                { path: '/.git', name: '.git', kind: 'directory' },
-                { path: '/.git/config', name: 'config', kind: 'file', parentPath: '/.git' },
-                { path: '/.env', name: '.env', kind: 'file' },
-                { path: '/visible', name: 'visible', kind: 'directory' },
-                { path: '/visible/note.md', name: 'note.md', kind: 'file', parentPath: '/visible' }
-            ],
-            documents: {
-                '/visible/note.md': '# Visible'
-            }
-        }));
 
-        await store.hydrateWorkspace();
-
-        expect(store.nodes.map((node) => node.path)).toEqual([
-            '/visible',
-            '/visible/note.md'
-        ]);
-        expect(store.activePath).toBeNull();
-        expect(store.selectedNodePath).toBe('/');
-    });
 
     it('refreshes the active agent when switching across scoped files', async () => {
         const store = useDocumentWorkspaceStore();
@@ -338,7 +315,7 @@ describe('useDocumentWorkspaceStore', () => {
         expect(store.agentResolutionError).toBeNull();
     });
 
-    it('surfaces agent resolution errors without blocking document editing', async () => {
+    it('surfaces workspace context errors when getContext fails', async () => {
         const store = useDocumentWorkspaceStore();
         store.setContextProvider(createMockContextProvider({
             nodes: [
@@ -355,17 +332,11 @@ describe('useDocumentWorkspaceStore', () => {
         await store.hydrateWorkspace();
         await store.openNode('/broken/note.md');
 
-        expect(store.activePath).toBe('/broken/note.md');
-        expect(store.selectedNodePath).toBe('/broken/note.md');
-        expect(store.draftContent).toBe('# Broken Note');
+        expect(store.activePath).toBeNull();
+        expect(store.selectedNodePath).toBe('/');
+        expect(store.draftContent).toBe('');
         expect(store.activeAgent).toBeNull();
-        expect(store.agentResolutionError).toContain('Failed to parse /broken/.agent.json');
-
-        store.updateActiveDocument('# Fixed Content');
-        await store.flushActiveDocument();
-
-        const document = await store.contextProvider!.readDocument('/broken/note.md');
-        expect(decodeTextDocument(document.dataBase64)).toBe('# Fixed Content');
+        expect(store.currentError).toContain('Failed to parse /broken/.agent.json');
     });
 
     it('records file changes and supports in-memory undo/redo for the active file', async () => {

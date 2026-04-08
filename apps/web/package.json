@@ -4,8 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build:icons": "node scripts/build-web-icons.mjs",
     "dev": "vite",
-    "build": "vite build",
+    "build": "pnpm build:icons && vite build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:e2e": "playwright test",

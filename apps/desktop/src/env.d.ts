@@ -6,7 +6,7 @@ import type {
     ContextSearchMatch,
     ContextSearchRequest,
     CreateContextNodeInput,
-    ResolvedAgentConfig,
+    WorkspaceContext,
     WriteContextDocumentInput
 } from '@packages/core/src';
 import type { ProxyRequest, ProxyResponse } from '../shared/proxyProtocol';
@@ -22,14 +22,13 @@ declare global {
     interface Window {
         chatprismDesktop?: {
             initializeContextAccess(): Promise<void>;
-            listContextTree(parentPath?: string): Promise<ContextNode[]>;
+            getContext(): Promise<WorkspaceContext>;
             readContextDocument(path: string): Promise<ContextDocument>;
             writeContextDocument(input: WriteContextDocumentInput): Promise<void>;
             createContextNode(input: CreateContextNodeInput): Promise<ContextNode>;
             deleteContextNode(path: string): Promise<void>;
             renameContextNode(input: { path: string; name: string }): Promise<ContextNode>;
             searchContextInScope(request: ContextSearchRequest): Promise<ContextSearchMatch[]>;
-            resolveScopedAgentConfig(targetPath: string): Promise<ResolvedAgentConfig>;
             sendProxyRequest(request: ProxyRequest): void;
             onProxyResponse(listener: (response: ProxyResponse) => void): () => void;
             openProviderLoginWindow(providerId: string): Promise<void>;

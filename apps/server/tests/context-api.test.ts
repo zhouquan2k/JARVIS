@@ -51,7 +51,7 @@ describe('context api', () => {
         expect(initialized.status).toBe(200);
         await expect(initialized.json()).resolves.toEqual({ ok: true });
 
-        const listRoot = await app.request('/api/context/list-tree', {
+        const listRoot = await app.request('/api/context/get-context', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: '{}'
@@ -61,7 +61,8 @@ describe('context api', () => {
             nodes: expect.arrayContaining([
                 expect.objectContaining({ path: '/notes', kind: 'directory' }),
                 expect.objectContaining({ path: '/welcome.md', kind: 'file' })
-            ])
+            ]),
+            agentConfigs: expect.any(Object)
         });
 
         const readDocumentResponse = await app.request('/api/context/read-document', {
@@ -131,18 +132,12 @@ describe('context api', () => {
             })
         });
 
-        const resolveAgentResponse = await app.request('/api/context/resolve-scoped-agent-config', {
+        const refreshedContextResponse = await app.request('/api/context/get-context', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ path: '/notes/today.md' })
+            body: '{}'
         });
-        expect(resolveAgentResponse.status).toBe(200);
-        await expect(resolveAgentResponse.json()).resolves.toMatchObject({
-            agent: expect.objectContaining({
-                name: 'Default Knowledge Agent',
-                scopePath: '/'
-            })
-        });
+        expect(refreshedContextResponse.status).toBe(200);
     });
 
     it('reads pdf documents through /api/context/read-document with binary payload and read-only metadata', async () => {
@@ -214,7 +209,10 @@ describe('context api', () => {
         const provider: ContextProvider = {
             id: 'fake-context',
             initializeAccess: vi.fn(async () => undefined),
-            listTree: vi.fn(async () => [{ path: '/virtual.md', name: 'virtual.md', kind: 'file' }]),
+            getContext: vi.fn(async () => ({
+                nodes: [{ path: '/virtual.md', name: 'virtual.md', kind: 'file', agentKey: '/' }],
+                agentConfigs: {}
+            })),
             readDocument: vi.fn(async (filePath: string) => ({
                 path: filePath,
                 mimeType: 'text/markdown',
@@ -225,21 +223,17 @@ describe('context api', () => {
             createNode: vi.fn(async (input) => ({
                 path: `/${input.name}`,
                 name: input.name,
-                kind: input.kind
+                kind: input.kind,
+                agentKey: '/'
             })),
             deleteNode: vi.fn(async () => undefined),
             renameNode: vi.fn(async (input) => ({
                 path: `/${input.name}`,
                 name: input.name,
-                kind: 'file'
+                kind: 'file',
+                agentKey: '/'
             })),
-            searchInScope: vi.fn(async () => []),
-            resolveScopedAgentConfig: vi.fn(async (targetPath: string) => ({
-                name: 'Injected Agent',
-                scopePath: targetPath,
-                sourcePaths: [],
-                effectiveInstructions: 'Injected.'
-            }))
+            searchInScope: vi.fn(async () => [])
         };
 
         const app = createApp({
@@ -247,7 +241,7 @@ describe('context api', () => {
             contextProvider: provider
         });
 
-        const response = await app.request('/api/context/list-tree', {
+        const response = await app.request('/api/context/get-context', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: '{}'
@@ -255,8 +249,9 @@ describe('context api', () => {
 
         expect(response.status).toBe(200);
         await expect(response.json()).resolves.toEqual({
-            nodes: [{ path: '/virtual.md', name: 'virtual.md', kind: 'file' }]
+            nodes: [{ path: '/virtual.md', name: 'virtual.md', kind: 'file', agentKey: '/' }],
+            agentConfigs: {}
         });
-        expect(provider.listTree).toHaveBeenCalledWith(undefined);
+        expect(provider.getContext).toHaveBeenCalledTimes(1);
     });
 });

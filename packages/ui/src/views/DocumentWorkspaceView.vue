@@ -12,6 +12,7 @@
           :active-path="documentStore.selectedNodePath"
           :current-error="documentStore.currentError"
           @open="documentStore.openNode"
+          @toggle-expand="documentStore.toggleExpanded"
           @create="documentStore.createNode"
           @delete="documentStore.deleteNode"
           @rename="documentStore.renameNode"
@@ -24,7 +25,18 @@
         @pointerdown="startResize(0, $event)"
       />
       <div class="grid-pane">
+        <AgentView
+          v-if="selectedOwnerNode && documentStore.activeAgent && documentStore.activeAgentKey"
+          :agent-key="documentStore.activeAgentKey"
+          :agent="documentStore.activeAgent"
+          :owner-node="selectedOwnerNode"
+          :documents="agentViewDocuments"
+          :conversations="agentViewConversations"
+          @open-document="documentStore.openNode"
+          @open-conversation="chatStore.selectLocalConversation"
+        />
         <DocumentEditorPane
+          v-else
           :active-path="documentStore.activePath"
           :active-document="documentStore.activeDocument"
           :active-viewer-id="documentStore.activeViewerId"
@@ -50,12 +62,12 @@
         <slot name="assistant-pane">
           <AgentPane
             :active-agent="documentStore.activeAgent"
+            :active-agent-key="documentStore.activeAgentKey"
             :active-path="documentStore.activePath"
             :active-document="activeAssistantDocument"
             :context-provider="props.contextProvider"
             :on-file-changed="handleAssistantFileChanged"
             :agent-resolution-error="documentStore.agentResolutionError"
-            :is-resolving-agent="documentStore.isResolvingAgent"
           />
         </slot>
       </div>
@@ -66,9 +78,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { encodeTextDocument, type IContextProvider } from '@packages/core/src';
+import AgentView from '../components/AgentView.vue';
 import AgentPane from '../components/AgentPane.vue';
 import DocumentEditorPane from '../components/DocumentEditorPane.vue';
 import DocumentFileTree from '../components/DocumentFileTree.vue';
+import { useChatStore } from '../store/chat';
 import { useDocumentWorkspaceStore } from '../store/documentWorkspace';
 
 const props = withDefaults(defineProps<{
@@ -79,9 +93,24 @@ const props = withDefaults(defineProps<{
 });
 
 const documentStore = useDocumentWorkspaceStore();
+const chatStore = useChatStore();
 const shellRef = ref<HTMLElement | null>(null);
 const panelSizes = computed(() => documentStore.panelSizes);
 const draftContent = computed(() => documentStore.draftContent);
+const selectedOwnerNode = computed(() => {
+  const activeNode = documentStore.activeNode;
+  return activeNode?.kind === 'directory' && activeNode.isAgentOwner ? activeNode : null;
+});
+const agentViewDocuments = computed(() => {
+  return selectedOwnerNode.value
+    ? documentStore.collectMarkdownDocuments(selectedOwnerNode.value.path)
+    : [];
+});
+const agentViewConversations = computed(() => {
+  return documentStore.activeAgentKey
+    ? chatStore.getConversationsByAgent(documentStore.activeAgentKey)
+    : [];
+});
 const activeAssistantDocument = computed(() => {
   if (!documentStore.activeDocument) {
     return null;
@@ -105,6 +134,20 @@ watch(() => props.contextProvider, async (provider) => {
   documentStore.setContextProvider(provider);
   await documentStore.hydrateWorkspace();
 }, { immediate: true });
+
+watch(
+  () => [documentStore.activeAgentKey, documentStore.activePath, activeAssistantDocument.value, props.contextProvider] as const,
+  ([activeAgentKey, activePath, activeDocument, contextProvider]) => {
+    chatStore.setWorkspaceContext({
+      activeAgentKey,
+      activePath,
+      activeDocument,
+      contextProvider,
+      onFileChanged: handleAssistantFileChanged
+    });
+  },
+  { immediate: true, flush: 'sync' }
+);
 
 let cleanupResize: (() => void) | null = null;
 

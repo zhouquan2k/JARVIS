@@ -1,4 +1,5 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, nativeImage } from 'electron';
+import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_GEMINI_HISTORY_PAGE_URL } from '@packages/core/config';
@@ -26,6 +27,35 @@ const __dirname = dirname(__filename);
 const rendererDistDir = join(__dirname, '../../renderer');
 const preloadPath = join(__dirname, 'preload.cjs');
 const geminiHistoryPreloadPath = join(__dirname, 'gemini-history.preload.cjs');
+
+function resolveDesktopBrandIconPath(): string {
+    const bundledPngIconPath = join(rendererDistDir, 'jarvis.png');
+    if (existsSync(bundledPngIconPath)) {
+        return bundledPngIconPath;
+    }
+
+    const publicPngIconPath = join(__dirname, '../public/jarvis.png');
+    if (existsSync(publicPngIconPath)) {
+        return publicPngIconPath;
+    }
+
+    return publicPngIconPath;
+}
+
+function applyDesktopBranding(): void {
+    if (process.platform !== 'darwin' || typeof app.dock?.setIcon !== 'function') {
+        return;
+    }
+
+    const iconPath = resolveDesktopBrandIconPath();
+    const icon = nativeImage.createFromPath(iconPath);
+    if (icon.isEmpty()) {
+        console.warn('Failed to load desktop brand icon for macOS dock.', iconPath);
+        return;
+    }
+
+    app.dock.setIcon(icon);
+}
 
 const controlledPageManager = createControlledPageManager();
 const useMockRuntime = process.env.VITE_E2E === '1';
@@ -144,11 +174,13 @@ function getRendererEntryUrl(): string {
 
 async function createMainWindow() {
     const window = new BrowserWindow({
+        title: 'JARVIS.app',
         width: 1440,
         height: 960,
         minWidth: 1100,
         minHeight: 720,
         autoHideMenuBar: true,
+        icon: resolveDesktopBrandIconPath(),
         webPreferences: {
             preload: preloadPath,
             contextIsolation: true,
@@ -177,12 +209,18 @@ function wireIpc() {
         authWindowManager
     });
     disposeContextIpc = registerContextIpc({
-        workspaceRoot: process.env.CHATPRISM_KNOWLEDGE_ROOT
+        workspaceRoot: process.env.CHATPRISM_KNOWLEDGE_ROOT,
+        contextBaseUrl: process.env.CHATPRISM_CONTEXT_BASE_URL
     });
 }
 
 app.whenReady().then(async () => {
+    app.setName('JARVIS.app');
+    app.setAboutPanelOptions({
+        applicationName: 'JARVIS.app'
+    });
     wireIpc();
+    applyDesktopBranding();
     await createMainWindow();
 
     app.on('activate', async () => {

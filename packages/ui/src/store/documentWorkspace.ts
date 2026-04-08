@@ -1,11 +1,13 @@
 import { defineStore } from 'pinia';
 import { markRaw } from 'vue';
 import {
+    DEFAULT_WORKSPACE_AGENT_KEY,
     type ContextDocument,
     type ContextNode,
     type CreateContextNodeInput,
     type IContextProvider,
     type ResolvedAgentConfig,
+    type WorkspaceContext,
     decodeTextDocument,
     encodeTextDocument,
     isTextDocumentMimeType
@@ -20,6 +22,7 @@ type ActiveViewerCapabilities = {
 
 export interface DocumentWorkspaceState {
     contextProvider: IContextProvider | null;
+    context: WorkspaceContext | null;
     nodes: ContextNode[];
     expandedPaths: string[];
     selectedNodePath: string | null;
@@ -33,10 +36,11 @@ export interface DocumentWorkspaceState {
     panelSizes: [number, number, number];
     isHydrating: boolean;
     isSaving: boolean;
-    isResolvingAgent: boolean;
     accessInitialized: boolean;
     currentError: string | null;
+    activeAgentKey: string | null;
     activeAgent: ResolvedAgentConfig | null;
+    isAgentOwnerSelected: boolean;
     agentResolutionError: string | null;
     fileChangeService: FileChangeService;
     latestFileChange: FileChangeRecord | null;
@@ -46,19 +50,65 @@ export interface DocumentWorkspaceState {
 }
 
 const AUTO_SAVE_DELAY_MS = 400;
-function isVisibleNode(node: ContextNode): boolean {
-    return !node.name.startsWith('.');
+function flattenVisibleNodes(nodes: ContextNode[]): ContextNode[] {
+    const flattened: ContextNode[] = [];
+
+    nodes.forEach((node) => {
+        flattened.push({
+            ...node,
+            children: undefined
+        });
+        if (node.children?.length) {
+            flattened.push(...flattenVisibleNodes(node.children));
+        }
+    });
+
+    return flattened;
 }
 
-async function loadTree(provider: IContextProvider, parentPath?: string): Promise<ContextNode[]> {
-    const children = (await provider.listTree(parentPath)).filter(isVisibleNode);
-    const nested = await Promise.all(
-        children
-            .filter((node) => node.kind === 'directory')
-            .map((node) => loadTree(provider, node.path))
-    );
+function flattenAllNodes(nodes: ContextNode[]): ContextNode[] {
+    const flattened: ContextNode[] = [];
 
-    return [...children, ...nested.flat()];
+    nodes.forEach((node) => {
+        flattened.push(node);
+        if (node.children?.length) {
+            flattened.push(...flattenAllNodes(node.children));
+        }
+    });
+
+    return flattened;
+}
+
+function findNodeByPath(nodes: ContextNode[], targetPath: string): ContextNode | null {
+    for (const node of nodes) {
+        if (node.path === targetPath) {
+            return node;
+        }
+
+        if (node.children?.length) {
+            const nested = findNodeByPath(node.children, targetPath);
+            if (nested) {
+                return nested;
+            }
+        }
+    }
+
+    return null;
+}
+
+function resolveRootAgentKey(context: WorkspaceContext | null): string | null {
+    if (!context) {
+        return null;
+    }
+
+    const rootAgentNode = findNodeByPath(context.nodes, '/.agent.json');
+    if (rootAgentNode?.agentKey) {
+        return rootAgentNode.agentKey;
+    }
+
+    return context.agentConfigs[DEFAULT_WORKSPACE_AGENT_KEY]
+        ? DEFAULT_WORKSPACE_AGENT_KEY
+        : Object.keys(context.agentConfigs)[0] ?? null;
 }
 
 function ensureRootExpanded(expandedPaths: string[]): string[] {
@@ -137,6 +187,7 @@ function clearActiveDocumentState(store: {
 export const useDocumentWorkspaceStore = defineStore('document-workspace', {
     state: (): DocumentWorkspaceState => ({
         contextProvider: null,
+        context: null,
         nodes: [],
         expandedPaths: [],
         selectedNodePath: null,
@@ -150,10 +201,11 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
         panelSizes: [20, 50, 30],
         isHydrating: false,
         isSaving: false,
-        isResolvingAgent: false,
         accessInitialized: false,
         currentError: null,
+        activeAgentKey: null,
         activeAgent: null,
+        isAgentOwnerSelected: false,
         agentResolutionError: null,
         fileChangeService: markRaw(new FileChangeService()),
         latestFileChange: null,
@@ -164,10 +216,43 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
     getters: {
         activeNode(state): ContextNode | null {
             const targetPath = state.selectedNodePath ?? state.activePath;
-            return targetPath ? state.nodes.find((node) => node.path === targetPath) ?? null : null;
+            return targetPath && state.context
+                ? findNodeByPath(state.context.nodes, targetPath) ?? null
+                : null;
         }
     },
     actions: {
+        findNodeByPath(path: string): ContextNode | null {
+            return this.context ? findNodeByPath(this.context.nodes, path) : null;
+        },
+
+        findChildrenByPath(path: string): ContextNode[] {
+            if (!this.context) {
+                return [];
+            }
+
+            if (path === '/') {
+                return this.context.nodes;
+            }
+
+            const node = this.findNodeByPath(path);
+            return node?.kind === 'directory' ? (node.children ?? []) : [];
+        },
+
+        collectMarkdownDocuments(path: string): ContextNode[] {
+            const ownerNode = this.findNodeByPath(path);
+            if (!ownerNode || ownerNode.kind !== 'directory') {
+                return [];
+            }
+
+            const descendants = flattenAllNodes(ownerNode.children ?? []);
+            return descendants.filter((node) => (
+                node.kind === 'file'
+                && !node.name.startsWith('.')
+                && (node.name.endsWith('.md') || node.name.endsWith('.markdown'))
+            ));
+        },
+
         syncActiveFileChange(path?: string | null) {
             const targetPath = path ?? this.activePath;
             if (!targetPath) {
@@ -225,6 +310,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
 
         setContextProvider(provider: IContextProvider | null) {
             this.contextProvider = provider ? markRaw(provider) : null;
+            this.context = null;
             this.nodes = [];
             this.expandedPaths = ['/'];
             this.selectedNodePath = '/';
@@ -232,9 +318,10 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             this.dirtyPaths = {};
             this.accessInitialized = false;
             this.currentError = null;
+            this.activeAgentKey = null;
             this.activeAgent = null;
+            this.isAgentOwnerSelected = false;
             this.agentResolutionError = null;
-            this.isResolvingAgent = false;
             this.latestFileChange = null;
             this.activeDiffEntries = [];
             this.canUndoActiveFile = false;
@@ -252,15 +339,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             try {
                 await this.contextProvider.initializeAccess();
                 this.accessInitialized = true;
-                this.nodes = await loadTree(this.contextProvider);
-                this.expandedPaths = ensureRootExpanded(this.expandedPaths);
-
-                if (!this.activePath) {
-                    this.selectedNodePath = '/';
-                    clearActiveDocumentState(this);
-                    this.syncActiveFileChange(null);
-                    await this.resolveActiveAgent('/');
-                }
+                await this.refreshContext();
             } catch (error) {
                 this.currentError = error instanceof Error ? error.message : String(error);
             } finally {
@@ -268,16 +347,21 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             }
         },
 
-        async refreshTree() {
+        async refreshContext() {
             if (!this.contextProvider) {
                 return;
             }
 
-            const nextNodes = await loadTree(this.contextProvider);
+            const context = await this.contextProvider.getContext();
+            const nextNodes = flattenVisibleNodes(context.nodes);
+            this.context = context;
             this.nodes = nextNodes;
             this.expandedPaths = filterExpandedPaths(nextNodes, this.expandedPaths);
 
-            const hasPath = (path: string | null) => !!path && nextNodes.some((node) => node.path === path);
+            const hasPath = (path: string | null) => !!path && (
+                path === '/'
+                || nextNodes.some((node) => node.path === path)
+            );
 
             if (this.activePath && !hasPath(this.activePath)) {
                 clearActiveDocumentState(this);
@@ -287,6 +371,39 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             if (this.selectedNodePath && this.selectedNodePath !== '/' && !hasPath(this.selectedNodePath)) {
                 this.selectedNodePath = this.activePath && hasPath(this.activePath) ? this.activePath : '/';
             }
+
+            if (!this.activePath) {
+                this.selectedNodePath = this.selectedNodePath || '/';
+                clearActiveDocumentState(this);
+                this.syncActiveFileChange(null);
+            }
+
+            this.syncActiveAgent(this.activePath ?? this.selectedNodePath ?? '/');
+        },
+
+        async refreshTree() {
+            await this.refreshContext();
+        },
+
+        syncActiveAgent(path: string) {
+            if (!this.context) {
+                this.activeAgentKey = null;
+                this.activeAgent = null;
+                this.isAgentOwnerSelected = false;
+                this.agentResolutionError = null;
+                return;
+            }
+
+            const agentKey = path === '/'
+                ? resolveRootAgentKey(this.context)
+                : this.findNodeByPath(path)?.agentKey ?? null;
+            const activeNode = path === '/' ? null : this.findNodeByPath(path);
+            this.activeAgentKey = agentKey;
+            this.activeAgent = agentKey ? this.context.agentConfigs[agentKey] ?? null : null;
+            this.isAgentOwnerSelected = activeNode?.kind === 'directory' && activeNode.isAgentOwner === true;
+            this.agentResolutionError = agentKey && !this.activeAgent
+                ? `未找到 agentConfigs['${agentKey}'] 对应的 Agent 配置。`
+                : null;
         },
 
         toggleExpanded(path: string) {
@@ -308,21 +425,20 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
                 this.expandedPaths = ensureRootExpanded(this.expandedPaths);
                 clearActiveDocumentState(this);
                 this.syncActiveFileChange(null);
-                await this.resolveActiveAgent('/');
+                this.syncActiveAgent('/');
                 return;
             }
 
-            const node = this.nodes.find((item) => item.path === path);
+            const node = this.findNodeByPath(path);
             if (!node) {
                 return;
             }
 
             if (node.kind === 'directory') {
                 this.selectedNodePath = path;
-                this.toggleExpanded(path);
                 clearActiveDocumentState(this);
                 this.syncActiveFileChange(null);
-                await this.resolveActiveAgent(path);
+                this.syncActiveAgent(path);
                 return;
             }
 
@@ -343,7 +459,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
                 [path]: false
             };
             this.syncActiveFileChange(path);
-            await this.resolveActiveAgent(path);
+            this.syncActiveAgent(path);
         },
 
         updateActiveDocument(content: string) {
@@ -387,27 +503,6 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             }
         },
 
-        async resolveActiveAgent(path: string) {
-            if (!this.contextProvider) {
-                this.activeAgent = null;
-                this.agentResolutionError = null;
-                this.isResolvingAgent = false;
-                return;
-            }
-
-            this.isResolvingAgent = true;
-            this.agentResolutionError = null;
-
-            try {
-                this.activeAgent = await this.contextProvider.resolveScopedAgentConfig(path);
-            } catch (error) {
-                this.activeAgent = null;
-                this.agentResolutionError = error instanceof Error ? error.message : String(error);
-            } finally {
-                this.isResolvingAgent = false;
-            }
-        },
-
         async createNode(input: CreateContextNodeInput) {
             if (!this.contextProvider) {
                 return;
@@ -433,7 +528,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             );
             clearActiveDocumentState(this);
             this.syncActiveFileChange(null);
-            await this.resolveActiveAgent(createdNode.path);
+            this.syncActiveAgent(createdNode.path);
         },
 
         async deleteNode(path: string) {
@@ -465,7 +560,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             this.selectedNodePath = fallbackPath;
             clearActiveDocumentState(this);
             this.syncActiveFileChange(null);
-            await this.resolveActiveAgent(fallbackPath);
+            this.syncActiveAgent(fallbackPath);
         },
 
         async renameNode(input: { path: string; name: string }) {
@@ -506,7 +601,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
 
             clearActiveDocumentState(this);
             this.syncActiveFileChange(null);
-            await this.resolveActiveAgent(nextSelectedPath || '/');
+            this.syncActiveAgent(nextSelectedPath || '/');
         },
 
         async undoActiveFileChange() {

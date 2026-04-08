@@ -14,6 +14,7 @@ export default defineConfig({
     resolve: {
         alias: {
             '@packages/core': resolve(__dirname, '../../packages/core'),
+            '@packages/node': resolve(__dirname, '../../packages/node'),
             '@packages/ui': resolve(__dirname, '../../packages/ui'),
             '@vue/test-utils': resolve(__dirname, 'node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs')
         }

@@ -169,4 +169,23 @@ describe('IndexedDBStorageProvider', () => {
             }
         ]);
     });
+
+    it('persists conversation agent keys across save and read', async () => {
+        const provider = new IndexedDBStorageProvider();
+        const conversation: Conversation = {
+            id: 'agent-key-conversation',
+            title: 'Agent key',
+            origin: 'local',
+            agentKey: '/workspace/.agent.json',
+            messages: [],
+            updatedAt: 789
+        };
+
+        await provider.saveConversation(conversation);
+
+        await expect(provider.getConversation(conversation.id)).resolves.toMatchObject({
+            id: 'agent-key-conversation',
+            agentKey: '/workspace/.agent.json'
+        });
+    });
 });

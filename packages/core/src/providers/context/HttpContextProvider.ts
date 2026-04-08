@@ -1,5 +1,4 @@
 import { DEFAULT_SYNC_BASE_URL, resolveSyncBaseUrl } from '../../../config';
-import type { ResolvedAgentConfig } from '../../interfaces/IAgentConfig';
 import type {
     ContextDocument,
     ContextNode,
@@ -8,6 +7,7 @@ import type {
     CreateContextNodeInput,
     IContextProvider,
     RenameContextNodeInput,
+    WorkspaceContext,
     WriteContextDocumentInput
 } from '../../interfaces/IContextProvider';
 
@@ -78,9 +78,9 @@ export class HttpContextProvider implements IContextProvider {
         await this.post('/initialize-access', {});
     }
 
-    async listTree(parentPath?: string): Promise<ContextNode[]> {
-        const response = await this.post('/list-tree', parentPath ? { parentPath } : {});
-        return (response as { nodes: ContextNode[] }).nodes;
+    async getContext(): Promise<WorkspaceContext> {
+        const response = await this.post('/get-context', {});
+        return response as WorkspaceContext;
     }
 
     async readDocument(path: string): Promise<ContextDocument> {
@@ -109,11 +109,6 @@ export class HttpContextProvider implements IContextProvider {
     async searchInScope(request: ContextSearchRequest): Promise<ContextSearchMatch[]> {
         const response = await this.post('/search-in-scope', { ...request });
         return (response as { matches: ContextSearchMatch[] }).matches;
-    }
-
-    async resolveScopedAgentConfig(targetPath: string): Promise<ResolvedAgentConfig> {
-        const response = await this.post('/resolve-scoped-agent-config', { path: targetPath });
-        return (response as { agent: ResolvedAgentConfig }).agent;
     }
 
     private async post(path: string, body: Record<string, unknown>): Promise<unknown> {

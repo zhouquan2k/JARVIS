@@ -87,6 +87,7 @@ export interface Conversation {
     title: string;
     origin?: ConversationOrigin;
     externalId?: string;
+    agentKey?: string;
     messages: ConversationMessage[];
     updatedAt: number;
     sync?: ConversationSyncState;
@@ -319,6 +320,7 @@ export function normalizeConversationMessage(value: unknown, index = 0): Convers
 export function cloneConversation(conversation: Conversation): Conversation {
     return {
         ...conversation,
+        agentKey: conversation.agentKey,
         sync: conversation.sync ? { ...conversation.sync } : undefined,
         modelSelection: conversation.modelSelection
             ? {
@@ -345,6 +347,9 @@ export function normalizeConversation(conversation: Conversation): Conversation 
     return {
         ...conversation,
         origin: conversation.origin ?? 'local',
+        agentKey: typeof conversation.agentKey === 'string' && conversation.agentKey.trim()
+            ? conversation.agentKey
+            : undefined,
         sync: conversation.sync ? { ...conversation.sync } : undefined,
         modelSelection: modelSelection
             && typeof modelSelection.providerId === 'string'

@@ -6,7 +6,7 @@ import type {
     ContextProvider,
     CreateContextNodeInput,
     RenameContextNodeInput,
-    ResolvedAgentConfig,
+    WorkspaceContext,
     WriteContextDocumentInput
 } from '../types/context.js';
 
@@ -17,8 +17,8 @@ export class HttpContextService {
         await this.provider.initializeAccess();
     }
 
-    async listTree(parentPath?: string): Promise<ContextNode[]> {
-        return this.provider.listTree(parentPath);
+    async getContext(): Promise<WorkspaceContext> {
+        return this.provider.getContext();
     }
 
     async readDocument(path: string): Promise<ContextDocument> {
@@ -43,9 +43,5 @@ export class HttpContextService {
 
     async searchInScope(request: ContextSearchRequest): Promise<ContextSearchMatch[]> {
         return this.provider.searchInScope(request);
-    }
-
-    async resolveScopedAgentConfig(targetPath: string): Promise<ResolvedAgentConfig> {
-        return this.provider.resolveScopedAgentConfig(targetPath);
     }
 }

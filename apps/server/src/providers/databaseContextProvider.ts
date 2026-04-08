@@ -6,7 +6,7 @@ import type {
     ContextProvider,
     CreateContextNodeInput,
     RenameContextNodeInput,
-    ResolvedAgentConfig
+    WorkspaceContext
 } from '../types/context.js';
 
 function notImplemented(): never {
@@ -20,7 +20,7 @@ export class DatabaseContextProvider implements ContextProvider {
         notImplemented();
     }
 
-    async listTree(_parentPath?: string): Promise<ContextNode[]> {
+    async getContext(): Promise<WorkspaceContext> {
         notImplemented();
     }
 
@@ -46,9 +46,5 @@ export class DatabaseContextProvider implements ContextProvider {
 
     async searchInScope(_request: ContextSearchRequest): Promise<ContextSearchMatch[]> {
         throw new Error('DatabaseContextProvider 暂不支持 searchInScope。');
-    }
-
-    async resolveScopedAgentConfig(_targetPath: string): Promise<ResolvedAgentConfig> {
-        notImplemented();
     }
 }

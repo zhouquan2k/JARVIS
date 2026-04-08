@@ -1,4 +1,5 @@
 import { DEFAULT_SCOPED_AGENT_CONFIG, resolveScopedAgentConfig } from '../agents/config/resolveScopedAgentConfig';
+import { DEFAULT_WORKSPACE_AGENT_KEY } from '../interfaces/IContextProvider';
 import type {
     ContextDocument,
     ContextNode,
@@ -7,6 +8,7 @@ import type {
     CreateContextNodeInput,
     IContextProvider,
     RenameContextNodeInput,
+    WorkspaceContext,
     WriteContextDocumentInput
 } from '../interfaces/IContextProvider';
 import { searchInScopedFiles } from '../providers/context/fileSearch';
@@ -71,6 +73,11 @@ function nodeHasChildren(nodes: StoredContextNode[], path: string): boolean {
     return nodes.some((node) => normalizePath(node.parentPath) === path);
 }
 
+function getAgentScopePath(agentKey: string): string {
+    if (agentKey === '/') return '/';
+    return agentKey.endsWith('/') ? agentKey.slice(0, -1) : agentKey;
+}
+
 function ensureNode(snapshot: StoredWorkspaceSnapshot, path: string): StoredContextNode {
     const matched = snapshot.nodes.find((node) => node.path === path);
     if (!matched) {
@@ -113,27 +120,86 @@ export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): I
         }
     });
 
-    return {
+    const provider: IContextProvider = {
         id: 'mock-context',
         async initializeAccess(): Promise<void> {
             return undefined;
         },
-        async listTree(parentPath?: string): Promise<ContextNode[]> {
-            const normalizedParent = normalizePath(parentPath);
+        async getContext(): Promise<WorkspaceContext> {
+            const agentConfigs = new Map<string, WorkspaceContext['agentConfigs'][string]>();
+            agentConfigs.set(DEFAULT_WORKSPACE_AGENT_KEY, {
+                ...DEFAULT_SCOPED_AGENT_CONFIG,
+                scopePath: '/',
+                sourcePaths: [],
+                effectiveInstructions: DEFAULT_SCOPED_AGENT_CONFIG.instructions ?? '',
+                instructions: DEFAULT_SCOPED_AGENT_CONFIG.instructions ?? undefined
+            });
 
-            return currentSnapshot.nodes
-                .filter((node) => normalizePath(node.parentPath) === normalizedParent)
-                .sort((left, right) => {
-                    if (left.kind !== right.kind) {
-                        return left.kind === 'directory' ? -1 : 1;
+            const ensureAgentConfig = async (targetPath: string): Promise<string> => {
+                const resolved = await resolveScopedAgentConfig(provider, targetPath, DEFAULT_SCOPED_AGENT_CONFIG);
+                const agentKey = resolved.scopePath.endsWith('/') ? resolved.scopePath : `${resolved.scopePath}/`;
+                if (!agentConfigs.has(agentKey)) {
+                    if (agentKey === DEFAULT_WORKSPACE_AGENT_KEY) {
+                        agentConfigs.set(agentKey, {
+                            ...resolved,
+                            scopePath: '/',
+                            sourcePaths: []
+                        });
+                    } else {
+                        const ownerScopePath = getAgentScopePath(agentKey);
+                        const ownerResolved = await resolveScopedAgentConfig(provider, ownerScopePath, DEFAULT_SCOPED_AGENT_CONFIG);
+                        agentConfigs.set(agentKey, {
+                            ...ownerResolved,
+                            scopePath: ownerScopePath
+                        });
                     }
-                    return left.name.localeCompare(right.name, 'zh-Hans-CN');
-                })
-                .map((node) => ({
-                    ...node,
-                    parentPath: normalizePath(node.parentPath),
-                    hasChildren: node.kind === 'directory' ? nodeHasChildren(currentSnapshot.nodes, node.path) : false
+                }
+
+                return agentKey;
+            };
+
+            const buildNodes = async (parentPath?: string): Promise<ContextNode[]> => {
+                const normalizedParent = normalizePath(parentPath);
+                const siblings = currentSnapshot.nodes
+                    .filter((node) => normalizePath(node.parentPath) === normalizedParent)
+                    .sort((left, right) => {
+                        if (left.kind !== right.kind) {
+                            return left.kind === 'directory' ? -1 : 1;
+                        }
+                        return left.name.localeCompare(right.name, 'zh-Hans-CN');
+                    });
+
+                return Promise.all(siblings.map(async (node) => {
+                    const agentKey = await ensureAgentConfig(node.path);
+                    if (node.kind === 'directory') {
+                        const children = await buildNodes(node.path);
+                        return {
+                            ...node,
+                            parentPath: normalizePath(node.parentPath),
+                            hasChildren: children.length > 0,
+                            children,
+                            isAgentOwner: currentSnapshot.nodes.some((candidate) => (
+                                candidate.kind === 'file'
+                                && normalizePath(candidate.parentPath) === node.path
+                                && candidate.name === '.agent.json'
+                            )),
+                            agentKey
+                        };
+                    }
+
+                    return {
+                        ...node,
+                        parentPath: normalizePath(node.parentPath),
+                        hasChildren: false,
+                        agentKey
+                    };
                 }));
+            };
+
+            return {
+                nodes: await buildNodes(),
+                agentConfigs: Object.fromEntries(agentConfigs.entries())
+            };
         },
         async readDocument(path: string): Promise<ContextDocument> {
             const normalizedPath = normalizePath(path);
@@ -206,9 +272,12 @@ export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): I
                 currentSnapshot.documents[path] = '';
             }
 
+            const resolved = await resolveScopedAgentConfig(provider, path, DEFAULT_SCOPED_AGENT_CONFIG);
             return {
                 ...node,
-                hasChildren: false
+                hasChildren: false,
+                isAgentOwner: false,
+                agentKey: resolved.scopePath.endsWith('/') ? resolved.scopePath : `${resolved.scopePath}/`
             };
         },
         async deleteNode(path: string): Promise<void> {
@@ -271,13 +340,16 @@ export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): I
                 }
             });
 
+            const resolved = await resolveScopedAgentConfig(provider, targetPath, DEFAULT_SCOPED_AGENT_CONFIG);
             return {
                 path: targetPath,
                 name: input.name.trim(),
                 kind: node.kind,
                 parentPath,
                 hasChildren: node.kind === 'directory' ? nodeHasChildren(currentSnapshot.nodes, targetPath) : false,
-                updatedAt: node.updatedAt
+                updatedAt: node.updatedAt,
+                isAgentOwner: false,
+                agentKey: resolved.scopePath.endsWith('/') ? resolved.scopePath : `${resolved.scopePath}/`
             };
         },
         async searchInScope(request: ContextSearchRequest): Promise<ContextSearchMatch[]> {
@@ -299,9 +371,8 @@ export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): I
                         }
                     }))
             });
-        },
-        async resolveScopedAgentConfig(targetPath: string) {
-            return resolveScopedAgentConfig(this, targetPath, DEFAULT_SCOPED_AGENT_CONFIG);
         }
     };
+
+    return provider;
 }

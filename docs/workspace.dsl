@@ -13,6 +13,11 @@ workspace "ChatPrism" "Context and Container views for current codebase" {
             webApp = container "Web App" "Web 宿主；提供聊天、对比、知识工作区" "TypeScript, Vue, Vite"
             desktopApp = container "Desktop App" "Electron 桌面宿主；提供聊天、对比、历史导入、知识工作区，并通过桌面宿主承载代理与文件能力" "TypeScript, Vue, Electron"
             syncServer = container "Sync Server" "提供会话同步、知识上下文 API 与 provider 配置 API" "TypeScript, Hono, Node.js"
+            sharedPackages = container "Shared Packages" "packages 目录下按运行时边界拆分的共享包：core 负责跨宿主契约，ui 负责共享界面，node 负责 Node-only 适配与基础设施实现" "TypeScript workspace packages" {
+                corePackage = component "packages/core" "跨宿主共享接口、领域模型、运行时抽象与通用 provider/client 实现；面向 Web、Extension、Desktop、Server 复用" "Workspace package"
+                uiPackage = component "packages/ui" "跨宿主共享 UI 组件、视图与 store；主要供 Web、Extension、Desktop renderer 复用" "Workspace package"
+                nodePackage = component "packages/node" "Node-only 共享适配层与基础设施实现；当前承载 FileSystemContextProvider，供 Desktop main 与 Sync Server 复用" "Workspace package"
+            }
             coreAbstractions = container "Core Abstractions" "用于表达共享核心接口、运行时契约与领域对象之间的关系" "TypeScript interfaces and domain abstractions" {
                 modelProviderRuntime = component "ModelProviderRuntime" "统一解析并提供可用的模型 provider 与模型目录。典型实现/工厂：createProviderRuntime, createDesktopHostRuntime" "Interface"
                 modelProvider = component "IModelProvider" "统一模型调用契约。典型实现：ChatGPTWebProvider, GeminiApiProvider, DesktopProxyProvider" "Interface"
@@ -39,6 +44,11 @@ workspace "ChatPrism" "Context and Container views for current codebase" {
         user -> webApp "使用" "Browser"
         user -> desktopApp "使用" "Desktop UI"
 
+        webApp -> sharedPackages "复用共享 UI、接口与工作流" "Workspace Package Imports"
+        extensionApp -> sharedPackages "复用共享 UI、接口与工作流" "Workspace Package Imports"
+        desktopApp -> sharedPackages "复用共享 UI、接口，并在 main 进程复用 Node 适配" "Workspace Package Imports"
+        syncServer -> sharedPackages "复用共享接口与 Node 适配实现" "Workspace Package Imports"
+
         webApp -> syncServer "同步会话、通过服务端读取知识上下文、获取 provider 配置" "HTTP"
         webApp -> geminiApi "发送消息、获取模型列表、执行对比分析" "HTTPS"
 
@@ -54,6 +64,9 @@ workspace "ChatPrism" "Context and Container views for current codebase" {
         desktopApp -> knowledgeRepo "读取、写入、搜索知识文档" "Filesystem"
 
         syncServer -> knowledgeRepo "读取、写入、搜索知识文档" "Filesystem / Database"
+
+        nodePackage -> corePackage "复用 core 契约并提供 Node-only 实现"
+        uiPackage -> corePackage "复用共享领域模型与接口"
 
         modelProviderRuntime -> modelProvider "解析并提供"
         agentCapableProvider -> modelProvider "扩展"
@@ -81,11 +94,16 @@ workspace "ChatPrism" "Context and Container views for current codebase" {
             include webApp
             include desktopApp
             include syncServer
+            include sharedPackages
             include user
             include chatgptWeb
             include geminiApi
             include geminiWeb
             include knowledgeRepo
+        }
+
+        component sharedPackages "shared-packages" {
+            include *
         }
 
         component coreAbstractions "core-abstractions" {

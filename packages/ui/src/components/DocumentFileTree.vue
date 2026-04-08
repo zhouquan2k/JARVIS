@@ -1,9 +1,6 @@
 <template>
   <aside class="file-tree" data-testid="document-file-tree">
     <header class="tree-header">
-      <div>
-        <div class="tree-title">Knowledge</div>
-      </div>
       <div class="tree-actions">
         <button
           type="button"
@@ -100,7 +97,7 @@
         @click="onNodeClick(item.node)"
         @dblclick="beginRename(item.node)"
       >
-        <span class="tree-toggle">
+        <span class="tree-toggle" @click.stop="onToggleClick(item.node)">
           <template v-if="!item.isInlineEditing && item.node.kind === 'directory'">
             {{ expandedPaths.includes(item.node.path) ? '▾' : '▸' }}
           </template>
@@ -117,7 +114,16 @@
           @keydown.esc.prevent="cancelInlineEdit"
           @blur="handleInlineInputBlur"
         >
-        <span v-else class="tree-label">{{ item.node.name }}</span>
+        <span v-else class="tree-label-group">
+          <Bot
+            v-if="item.node.kind === 'directory' && item.node.isAgentOwner"
+            class="tree-agent-icon"
+            :size="14"
+            aria-hidden="true"
+            data-testid="document-node-agent-owner"
+          />
+          <span class="tree-label">{{ item.node.name }}</span>
+        </span>
       </button>
     </div>
   </aside>
@@ -135,7 +141,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref } from 'vue';
-import { FilePlus, FolderPlus, RefreshCw, Trash2 } from 'lucide-vue-next';
+import { Bot, FilePlus, FolderPlus, RefreshCw, Trash2 } from 'lucide-vue-next';
 import type { ContextNode } from '@packages/core/src';
 
 const props = defineProps<{
@@ -147,6 +153,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (event: 'open', path: string): void;
+  (event: 'toggle-expand', path: string): void;
   (event: 'create', input: { parentPath?: string; name: string; kind: 'file' | 'directory' }): void;
   (event: 'delete', path: string): void;
   (event: 'rename', input: { path: string; name: string }): void;
@@ -223,7 +230,8 @@ const visibleNodes = computed(() => {
     path: '/',
     name: '根目录',
     kind: 'directory',
-    hasChildren: true
+    hasChildren: true,
+    agentKey: '__default__'
   };
   const rows: Array<{ node: ContextNode; depth: number; isRoot?: boolean; isInlineEditing?: boolean }> = [
     { node: rootNode, depth: 0, isRoot: true }
@@ -246,7 +254,8 @@ const visibleNodes = computed(() => {
         node: {
           path: '__pending__',
           name: inlineEdit.name,
-          kind: inlineEdit.kind
+          kind: inlineEdit.kind,
+          agentKey: inlineEdit.parentPath ?? '__default__'
         },
         depth,
         isInlineEditing: true
@@ -262,6 +271,12 @@ const visibleNodes = computed(() => {
 
 function onNodeClick(node: ContextNode) {
   emit('open', node.path);
+}
+
+function onToggleClick(node: ContextNode) {
+  if (node.kind === 'directory') {
+    emit('toggle-expand', node.path);
+  }
 }
 
 function resolveCreationParentPath(): string | undefined {
@@ -431,15 +446,10 @@ function hideTooltip() {
 .tree-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 12px;
   padding: 10px 12px 8px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.14);
-}
-
-.tree-title {
-  color: #e2e8f0;
-  font-weight: 700;
 }
 
 .tree-actions {
@@ -580,6 +590,18 @@ function hideTooltip() {
   color: #f8fafc;
   background: rgba(15, 23, 42, 0.92);
   outline: none;
+}
+
+.tree-label-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tree-agent-icon {
+  color: #38bdf8;
+  flex: 0 0 auto;
 }
 
 .tree-inline-input:focus {

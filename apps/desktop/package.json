@@ -5,20 +5,22 @@
   "type": "module",
   "main": "dist/main/main/index.js",
   "scripts": {
+    "build:icon:mac": "node scripts/build-macos-icon.mjs",
     "dev:renderer": "vite --config vite.config.ts --host 127.0.0.1 --port 4174",
-    "dev:host": "pnpm build:main && CHATPRISM_DESKTOP_DEV_SERVER_URL=http://127.0.0.1:4174 electron dist/main/main/index.js",
+    "dev:host": "pnpm build:icon:mac && pnpm build:main && CHATPRISM_DESKTOP_DEV_SERVER_URL=http://127.0.0.1:4174 electron dist/main/main/index.js",
     "build:renderer": "vite build --config vite.config.ts",
-    "build:main:index": "esbuild main/index.ts --bundle --platform=node --format=esm --target=node18 --outfile=dist/main/main/index.js --external:electron --alias:@packages/core=../../packages/core --alias:@packages/ui=../../packages/ui",
+    "build:main:index": "esbuild main/index.ts --bundle --platform=node --format=esm --target=node18 --outfile=dist/main/main/index.js --external:electron --alias:@packages/core=../../packages/core --alias:@packages/node=../../packages/node --alias:@packages/ui=../../packages/ui",
     "build:main:preload": "esbuild main/preload.ts --bundle --platform=node --format=cjs --target=node18 --outfile=dist/main/main/preload.cjs --external:electron --alias:@packages/core=../../packages/core --alias:@packages/ui=../../packages/ui",
     "build:main:gemini-preload": "esbuild main/gemini-history.preload.ts --bundle --platform=node --format=cjs --target=node18 --outfile=dist/main/main/gemini-history.preload.cjs --external:electron --alias:@packages/core=../../packages/core --alias:@packages/ui=../../packages/ui",
     "build:main": "pnpm build:main:index && pnpm build:main:preload && pnpm build:main:gemini-preload",
-    "build": "pnpm build:renderer && pnpm build:main",
+    "build": "pnpm build:icon:mac && pnpm build:renderer && pnpm build:main",
     "test": "vitest run",
     "test:e2e": "CHATPRISM_SYNC_KEY=desktop-e2e VITE_SYNC_KEY=desktop-e2e VITE_E2E=1 pnpm build && playwright test",
     "test:e2e:headed": "CHATPRISM_SYNC_KEY=desktop-e2e VITE_SYNC_KEY=desktop-e2e VITE_E2E=1 pnpm build && playwright test --headed"
   },
   "dependencies": {
     "@packages/core": "workspace:*",
+    "@packages/node": "workspace:*",
     "@packages/ui": "workspace:*",
     "pinia": "^3.0.4",
     "vue": "^3.5.29"

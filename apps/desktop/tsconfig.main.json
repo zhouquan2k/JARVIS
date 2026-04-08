@@ -11,6 +11,8 @@
     "paths": {
       "@packages/core": ["../../packages/core"],
       "@packages/core/*": ["../../packages/core/*"],
+      "@packages/node": ["../../packages/node"],
+      "@packages/node/*": ["../../packages/node/*"],
       "@packages/ui": ["../../packages/ui"],
       "@packages/ui/*": ["../../packages/ui/*"]
     },

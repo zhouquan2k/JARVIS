@@ -22,6 +22,7 @@ function createConversation(
     return {
         id,
         title: overrides.title ?? `Conversation ${id}`,
+        agentKey: overrides.agentKey,
         updatedAt,
         messages: overrides.messages ?? [
             {
@@ -192,5 +193,86 @@ describe('SyncRepository', () => {
         expect(payload.messages[0].questionId).toBe('question-rich');
         expect(payload.messages[1].deleted).toBe(true);
         expect(payload.messages[1].annotations).toEqual(messages[1].annotations);
+    });
+
+    it('stores agentKey in both the dedicated column and payload json', () => {
+        const database = createDatabase(createConfig());
+        const repository = new SyncRepository(database);
+
+        repository.runInTransaction(() => {
+            const cursor = repository.allocateNextCursor('alpha', 100);
+            repository.saveConversation({
+                syncKey: 'alpha',
+                conversation: createConversation('conv-agent', 100, false, {
+                    agentKey: '/workspace/archive/.agent.json'
+                }),
+                serverCursor: cursor,
+                receivedAt: 100,
+                createdAt: 100
+            });
+        });
+
+        const rawRow = database
+            .prepare('SELECT agent_key, payload_json FROM synced_conversations WHERE sync_key = ? AND conversation_id = ?')
+            .get('alpha', 'conv-agent') as { agent_key: string | null; payload_json: string } | undefined;
+
+        expect(rawRow).toBeDefined();
+        expect(rawRow?.agent_key).toBe('/workspace/archive/.agent.json');
+        expect(JSON.parse(rawRow!.payload_json)).toEqual(expect.objectContaining({
+            agentKey: '/workspace/archive/.agent.json'
+        }));
+    });
+
+    it('falls back to the dedicated agent_key column when payload_json omits agentKey', () => {
+        const database = createDatabase(createConfig());
+        const repository = new SyncRepository(database);
+
+        database
+            .prepare(`
+                INSERT INTO synced_conversations (
+                    sync_key,
+                    conversation_id,
+                    title,
+                    agent_key,
+                    backend_id,
+                    source_type,
+                    external_id,
+                    messages_json,
+                    updated_at,
+                    deleted,
+                    synced_at,
+                    server_cursor,
+                    payload_json,
+                    created_at,
+                    last_seen_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `)
+            .run(
+                'alpha',
+                'conv-legacy',
+                'Legacy',
+                '/workspace/docs/.agent.json',
+                null,
+                null,
+                null,
+                JSON.stringify([{ id: 'm1', role: 'user', content: 'hello' }]),
+                100,
+                0,
+                100,
+                1,
+                JSON.stringify({
+                    id: 'conv-legacy',
+                    title: 'Legacy',
+                    updatedAt: 100,
+                    messages: [{ id: 'm1', role: 'user', content: 'hello' }]
+                }),
+                100,
+                100
+            );
+
+        expect(repository.getConversation('alpha', 'conv-legacy')?.conversation).toEqual(expect.objectContaining({
+            id: 'conv-legacy',
+            agentKey: '/workspace/docs/.agent.json'
+        }));
     });
 });

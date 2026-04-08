@@ -548,7 +548,7 @@ describe('normalizeChatGPTConversationDetail', () => {
         expect(fetchMock).toHaveBeenCalledTimes(2);
         const requestBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
         expect(requestBody.model).toBe('gpt-4o');
-        expect(requestBody.conversation_mode).toEqual({ kind: 'search' });
+        expect(requestBody.conversation_mode).toEqual({ kind: 'primary_assistant' });
         expect(requestBody.client_contextual_info).toEqual({ use_search: true });
         expect(requestBody.messages[0]?.content?.content_type).toBe('multimodal_text');
         expect(requestBody.messages[0]?.content?.parts[1]).toMatchObject({

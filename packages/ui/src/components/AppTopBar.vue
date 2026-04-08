@@ -1,6 +1,9 @@
 <template>
   <header class="top-nav">
-    <h1 class="brand">{{ title }}</h1>
+    <div class="brand">
+      <img class="brand-icon" :src="brandIconSrc" alt="" aria-hidden="true">
+      <h1 class="brand-title">{{ title }}</h1>
+    </div>
     <nav
       v-if="workspaceOptions.length > 0"
       class="workspace-switcher"
@@ -40,7 +43,7 @@ const props = withDefaults(defineProps<{
   activeWorkspacePath?: ChatRoutePath;
   workspaceOptions?: ReadonlyArray<Pick<ChatRoute, 'path' | 'name' | 'label'>>;
 }>(), {
-  title: 'ChatPrism',
+  title: 'JARVIS',
   activeWorkspacePath: '/',
   workspaceOptions: () => []
 });
@@ -63,6 +66,8 @@ const compareStageLabel = computed(() => {
       return '待开始';
   }
 });
+
+const brandIconSrc = '/jarvis.png';
 </script>
 
 <style scoped>
@@ -81,6 +86,21 @@ const compareStageLabel = computed(() => {
 }
 
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.brand-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  object-fit: cover;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+}
+
+.brand-title {
   margin: 0;
   font-size: 22px;
   line-height: 1;
@@ -154,6 +174,15 @@ const compareStageLabel = computed(() => {
   }
 
   .brand {
+    gap: 8px;
+  }
+
+  .brand-icon {
+    width: 30px;
+    height: 30px;
+  }
+
+  .brand-title {
     font-size: 20px;
   }
 

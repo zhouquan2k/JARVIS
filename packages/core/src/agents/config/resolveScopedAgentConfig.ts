@@ -1,7 +1,6 @@
 import type { IContextProvider } from '../../interfaces/IContextProvider';
 import type {
     AgentConfig,
-    AgentInheritanceMode,
     AgentSkillBinding,
     AgentToolBinding,
     ResolvedAgentConfig
@@ -79,8 +78,7 @@ function cloneAgentConfig(config: AgentConfig): AgentConfig {
         modelProviderName: config.modelProviderName,
         modelName: config.modelName,
         tools: cloneBindings(config.tools),
-        skills: cloneBindings(config.skills),
-        inheritance: config.inheritance
+        skills: cloneBindings(config.skills)
     };
 }
 
@@ -118,8 +116,7 @@ function mergeAgentConfigs(parent: AgentConfig, child: AgentConfig): AgentConfig
         modelProviderName: child.modelProviderName ?? parent.modelProviderName,
         modelName: child.modelName ?? parent.modelName,
         tools: mergeBindings(parent.tools, child.tools),
-        skills: mergeBindings(parent.skills, child.skills),
-        inheritance: child.inheritance ?? parent.inheritance ?? 'merge'
+        skills: mergeBindings(parent.skills, child.skills)
     };
 }
 
@@ -153,17 +150,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function parseInheritance(value: unknown, configPath: string): AgentInheritanceMode | undefined {
-    if (value === undefined) {
-        return undefined;
-    }
 
-    if (value === 'merge' || value === 'override') {
-        return value;
-    }
-
-    throw new Error(`Invalid inheritance in ${configPath}: expected "merge" or "override".`);
-}
 
 function parseBindings<T extends AgentBinding>(
     value: unknown,
@@ -241,8 +228,7 @@ function parseAgentConfig(content: string, configPath: string): AgentConfig {
         modelProviderName: parsed.modelProviderName,
         modelName: parsed.modelName,
         tools: parseBindings<AgentToolBinding>(parsed.tools, configPath, 'tools'),
-        skills: parseBindings<AgentSkillBinding>(parsed.skills, configPath, 'skills'),
-        inheritance: parseInheritance(parsed.inheritance, configPath)
+        skills: parseBindings<AgentSkillBinding>(parsed.skills, configPath, 'skills')
     };
 }
 
@@ -300,26 +286,15 @@ export async function resolveScopedAgentConfig(
         const match = await readScopedAgentMatch(provider, cursor);
         if (match) {
             matches.push(match);
-            if (match.config.inheritance === 'override') {
-                break;
-            }
         }
 
         cursor = getParentScopePath(cursor);
     }
 
-    if (matches.length === 0) {
-        return createResolvedAgentConfig('/', [], fallback);
-    }
-
     const orderedMatches = [...matches].reverse();
     const merged = orderedMatches.reduce<AgentConfig>((current, match) => {
-        if (!current) {
-            return cloneAgentConfig(match.config);
-        }
-
         return mergeAgentConfigs(current, match.config);
-    }, null as unknown as AgentConfig);
+    }, cloneAgentConfig(fallback));
 
     return createResolvedAgentConfig(
         scopePath,

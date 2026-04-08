@@ -263,6 +263,44 @@ test('extension knowledge workspace negotiates text pdf and unsupported document
   }
 });
 
+test('extension knowledge workspace shows AgentView for owner directories and links documents plus conversations', async () => {
+  const session = await launchExtensionPage({ routeHash: '#/' });
+  try {
+    const { page } = session;
+    const docsNode = page.locator('[data-path="/docs"]');
+
+    await expect(page.getByTestId('document-workspace')).toBeVisible();
+    await expect(docsNode).toBeVisible();
+    await expect(docsNode.getByTestId('document-node-agent-owner')).toBeVisible();
+
+    await docsNode.click();
+    await expect(page.getByTestId('agent-view')).toBeVisible();
+    await expect(page.getByTestId('agent-view-scope')).toContainText('/docs');
+    await expect(page.getByTestId('agent-name')).toContainText('Docs Agent');
+    const overviewDocument = page.getByTestId('agent-view-document').filter({ hasText: 'overview.md' });
+    await expect(overviewDocument).toHaveCount(1);
+
+    await page.getByTestId('normal-input').fill('Extension docs owner');
+    await page.getByTestId('normal-send').click();
+    const docsConversation = page.getByTestId('agent-view-conversation').filter({ hasText: 'Extension docs owner' });
+    await expect(docsConversation).toHaveCount(1);
+
+    await overviewDocument.click();
+    await expect(page.getByTestId('document-editor-input')).toBeVisible();
+    await expect(page.getByTestId('agent-view')).toHaveCount(0);
+
+    await docsNode.click();
+    await expect(page.getByTestId('agent-view')).toBeVisible();
+    await docsConversation.click();
+    await expect(page.getByTestId('normal-messages')).toContainText('Extension docs owner');
+
+    await page.getByTestId('document-node-file').filter({ hasText: 'guide.md' }).click();
+    await expect(page.getByTestId('agent-view')).toHaveCount(0);
+  } finally {
+    await session.close();
+  }
+});
+
 test('extension host keeps compare history local-only when sync is enabled', async () => {
   const session = await launchExtensionPage({ routeHash: '#/compare' });
   try {

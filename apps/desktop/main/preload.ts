@@ -2,12 +2,11 @@ import { contextBridge, ipcRenderer } from 'electron';
 import {
     DESKTOP_CONTEXT_CREATE_NODE_CHANNEL,
     DESKTOP_CONTEXT_DELETE_NODE_CHANNEL,
+    DESKTOP_CONTEXT_GET_CONTEXT_CHANNEL,
     DESKTOP_CONTEXT_INITIALIZE_CHANNEL,
-    DESKTOP_CONTEXT_LIST_TREE_CHANNEL,
     DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL,
     DESKTOP_CONTEXT_RENAME_NODE_CHANNEL,
     DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL,
-    DESKTOP_CONTEXT_RESOLVE_AGENT_CHANNEL,
     DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL
 } from '../shared/contextBridge';
 import {
@@ -28,8 +27,8 @@ contextBridge.exposeInMainWorld('chatprismDesktop', {
     initializeContextAccess() {
         return ipcRenderer.invoke(DESKTOP_CONTEXT_INITIALIZE_CHANNEL);
     },
-    listContextTree(parentPath?: string) {
-        return ipcRenderer.invoke(DESKTOP_CONTEXT_LIST_TREE_CHANNEL, parentPath);
+    getContext() {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_GET_CONTEXT_CHANNEL);
     },
     readContextDocument(path: string) {
         return ipcRenderer.invoke(DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL, path);
@@ -48,9 +47,6 @@ contextBridge.exposeInMainWorld('chatprismDesktop', {
     },
     searchContextInScope(request: { query: string; scopePath?: string; maxResults?: number }) {
         return ipcRenderer.invoke(DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL, request);
-    },
-    resolveScopedAgentConfig(targetPath: string) {
-        return ipcRenderer.invoke(DESKTOP_CONTEXT_RESOLVE_AGENT_CHANNEL, targetPath);
     },
     sendProxyRequest(request: ProxyRequest) {
         ipcRenderer.send(DESKTOP_PROXY_REQUEST_CHANNEL, request);

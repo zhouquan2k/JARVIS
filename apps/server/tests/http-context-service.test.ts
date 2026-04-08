@@ -7,28 +7,27 @@ function createProvider(): ContextProvider {
     return {
         id: 'test-context',
         initializeAccess: vi.fn(async () => undefined),
-        listTree: vi.fn(async () => [{ path: '/welcome.md', name: 'welcome.md', kind: 'file' }]),
+        getContext: vi.fn(async () => ({
+            nodes: [{ path: '/welcome.md', name: 'welcome.md', kind: 'file', agentKey: '/' }],
+            agentConfigs: {}
+        })),
         readDocument: vi.fn(async (path: string) => ({ path, mimeType: 'text/markdown', dataBase64: encodeTextDocument('# hello') })),
         writeDocument: vi.fn(async () => undefined),
         createNode: vi.fn(async (input) => ({
             path: `${input.parentPath ?? ''}/${input.name}`.replace(/^$/, '/'),
             name: input.name,
             kind: input.kind,
-            parentPath: input.parentPath
+            parentPath: input.parentPath,
+            agentKey: '/'
         })),
         deleteNode: vi.fn(async () => undefined),
         renameNode: vi.fn(async (input) => ({
             path: input.path.replace(/[^/]+$/, input.name),
             name: input.name,
-            kind: 'file'
+            kind: 'file',
+            agentKey: '/'
         })),
-        searchInScope: vi.fn(async () => [{ path: '/welcome.md', line: 1, column: 3, preview: '# hello' }]),
-        resolveScopedAgentConfig: vi.fn(async (targetPath: string) => ({
-            name: 'Default Knowledge Agent',
-            scopePath: '/',
-            sourcePaths: [],
-            effectiveInstructions: 'Help with the workspace.'
-        }))
+        searchInScope: vi.fn(async () => [{ path: '/welcome.md', line: 1, column: 3, preview: '# hello' }])
     };
 }
 
@@ -38,9 +37,10 @@ describe('http context service', () => {
         const service = new HttpContextService(provider);
 
         await service.initializeAccess();
-        await expect(service.listTree('/notes')).resolves.toEqual([
-            { path: '/welcome.md', name: 'welcome.md', kind: 'file' }
-        ]);
+        await expect(service.getContext()).resolves.toEqual({
+            nodes: [{ path: '/welcome.md', name: 'welcome.md', kind: 'file', agentKey: '/' }],
+            agentConfigs: {}
+        });
         await expect(service.readDocument('/welcome.md')).resolves.toEqual({
             path: '/welcome.md',
             mimeType: 'text/markdown',
@@ -74,13 +74,8 @@ describe('http context service', () => {
         })).resolves.toEqual([
             { path: '/welcome.md', line: 1, column: 3, preview: '# hello' }
         ]);
-        await expect(service.resolveScopedAgentConfig('/notes/draft.md')).resolves.toMatchObject({
-            name: 'Default Knowledge Agent',
-            scopePath: '/'
-        });
-
         expect(provider.initializeAccess).toHaveBeenCalledTimes(1);
-        expect(provider.listTree).toHaveBeenCalledWith('/notes');
+        expect(provider.getContext).toHaveBeenCalledTimes(1);
         expect(provider.readDocument).toHaveBeenCalledWith('/welcome.md');
         expect(provider.writeDocument).toHaveBeenCalledWith({
             path: '/welcome.md',
@@ -102,6 +97,5 @@ describe('http context service', () => {
             scopePath: '/',
             maxResults: 5
         });
-        expect(provider.resolveScopedAgentConfig).toHaveBeenCalledWith('/notes/draft.md');
     });
 });

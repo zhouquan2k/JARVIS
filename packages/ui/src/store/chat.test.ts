@@ -700,6 +700,71 @@ describe('useChatStore workspace history flow', () => {
         expect(provider.promptsUsed[1]).toBe('第二条消息');
     });
 
+    it('applies and groups local conversations by agentKey without overwriting an existing binding', async () => {
+        const store = useChatStore();
+        const conversation: Conversation = {
+            id: 'conversation-1',
+            title: 'Archive notes',
+            origin: 'local',
+            messages: [],
+            updatedAt: 100
+        };
+
+        store.applyConversationAgentKey(conversation, '/workspace/archive/.agent.json');
+        expect(conversation.agentKey).toBe('/workspace/archive/.agent.json');
+
+        store.applyConversationAgentKey(conversation, '/workspace/.agent.json');
+        expect(conversation.agentKey).toBe('/workspace/archive/.agent.json');
+
+        store.conversations = [
+            conversation,
+            {
+                id: 'conversation-2',
+                title: 'Workspace notes',
+                origin: 'local',
+                agentKey: '/workspace/.agent.json',
+                messages: [],
+                updatedAt: 101
+            },
+            {
+                id: 'conversation-3',
+                title: 'Normal chat',
+                origin: 'local',
+                messages: [],
+                updatedAt: 102
+            }
+        ];
+
+        expect(store.getConversationsByAgent('/workspace/archive/.agent.json').map((item) => item.id)).toEqual(['conversation-1']);
+        expect(store.resolveConversationAgentKey('')).toBeUndefined();
+        expect(store.resolveConversationAgentKey('/workspace/.agent.json')).toBe('/workspace/.agent.json');
+    });
+
+    it('includes the active local conversation in agent grouping before persistence refresh completes', async () => {
+        const store = useChatStore();
+        store.conversations = [
+            {
+                id: 'conversation-1',
+                title: 'Archive notes',
+                origin: 'local',
+                agentKey: '/workspace/archive/.agent.json',
+                messages: [],
+                updatedAt: 100
+            }
+        ];
+        store.currentConversation = {
+            id: 'conversation-active',
+            title: 'Docs owner conversation',
+            origin: 'local',
+            agentKey: '/workspace/docs/.agent.json',
+            messages: [],
+            updatedAt: 101
+        };
+
+        expect(store.getConversationsByAgent('/workspace/docs/.agent.json').map((item) => item.id)).toEqual(['conversation-active']);
+        expect(store.getConversationsByAgent('/workspace/archive/.agent.json').map((item) => item.id)).toEqual(['conversation-1']);
+    });
+
     it('attaches active pdf documents when the provider accepts application/pdf', async () => {
         const provider = new MockModelProvider();
         const storage = new MockStorageProvider([]);

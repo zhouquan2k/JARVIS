@@ -713,7 +713,7 @@ function buildChatGPTModePayload(modelOptions: Record<string, boolean> | undefin
 
     if (modelOptions?.web_search === true) {
         return {
-            conversation_mode: { kind: 'search' },
+            conversation_mode: { kind: 'primary_assistant' },
             client_contextual_info: {
                 use_search: true
             }

@@ -10,12 +10,12 @@ export const CHAT_ROUTES: ChatRoute[] = [
   {
     path: '/',
     name: 'knowledge-workspace',
-    label: '知识工作区'
+    label: '工作区'
   },
   {
     path: '/chat',
     name: 'normal-chat',
-    label: '普通聊天'
+    label: '对话'
   },
   {
     path: '/compare',

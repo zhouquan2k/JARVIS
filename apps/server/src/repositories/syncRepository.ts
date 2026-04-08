@@ -6,6 +6,7 @@ interface CursorRow {
 }
 
 interface ConversationRow {
+    agent_key: string | null;
     payload_json: string;
     server_cursor: number;
     created_at: number;
@@ -86,7 +87,7 @@ export class SyncRepository {
     getConversation(syncKey: string, conversationId: string): PersistedConversation | null {
         const row = this.database
             .prepare(`
-                SELECT payload_json, server_cursor, created_at, last_seen_at
+                SELECT agent_key, payload_json, server_cursor, created_at, last_seen_at
                 FROM synced_conversations
                 WHERE sync_key = ? AND conversation_id = ?
             `)
@@ -97,7 +98,7 @@ export class SyncRepository {
         }
 
         return {
-            conversation: JSON.parse(row.payload_json) as SyncConversation,
+            conversation: this.hydrateConversation(row),
             serverCursor: row.server_cursor,
             createdAt: row.created_at,
             lastSeenAt: row.last_seen_at
@@ -108,7 +109,7 @@ export class SyncRepository {
         const minCursor = cursor ?? 0;
         const rows = this.database
             .prepare(`
-                SELECT payload_json, server_cursor, created_at, last_seen_at
+                SELECT agent_key, payload_json, server_cursor, created_at, last_seen_at
                 FROM synced_conversations
                 WHERE sync_key = ? AND server_cursor > ?
                 ORDER BY server_cursor ASC
@@ -116,7 +117,7 @@ export class SyncRepository {
             .all(syncKey, minCursor) as ConversationRow[];
 
         return rows.map((row) => ({
-            conversation: JSON.parse(row.payload_json) as SyncConversation,
+            conversation: this.hydrateConversation(row),
             serverCursor: row.server_cursor,
             createdAt: row.created_at,
             lastSeenAt: row.last_seen_at
@@ -171,6 +172,7 @@ export class SyncRepository {
                     sync_key,
                     conversation_id,
                     title,
+                    agent_key,
                     backend_id,
                     source_type,
                     external_id,
@@ -187,6 +189,7 @@ export class SyncRepository {
                     @syncKey,
                     @conversationId,
                     @title,
+                    @agentKey,
                     @backendId,
                     @origin,
                     @externalId,
@@ -201,6 +204,7 @@ export class SyncRepository {
                 )
                 ON CONFLICT(sync_key, conversation_id) DO UPDATE SET
                     title = excluded.title,
+                    agent_key = excluded.agent_key,
                     backend_id = excluded.backend_id,
                     source_type = excluded.source_type,
                     external_id = excluded.external_id,
@@ -216,6 +220,7 @@ export class SyncRepository {
                 syncKey,
                 conversationId: conversation.id,
                 title: conversation.title,
+                agentKey: conversation.agentKey ?? null,
                 backendId: conversation.backendId ?? null,
                 origin: conversation.origin ?? null,
                 externalId: conversation.externalId ?? null,
@@ -228,6 +233,25 @@ export class SyncRepository {
                 createdAt,
                 lastSeenAt: receivedAt
             });
+    }
+
+    private hydrateConversation(row: ConversationRow): SyncConversation {
+        const conversation = JSON.parse(row.payload_json) as SyncConversation;
+
+        // Prefer the actual column value. This allows manual DB patches to the agent_key column 
+        // to take effect without having to parse and re-stringify the entire payload_json.
+        if (typeof row.agent_key === 'string' && row.agent_key.trim()) {
+            return {
+                ...conversation,
+                agentKey: row.agent_key
+            };
+        }
+
+        if (typeof conversation.agentKey === 'string' && conversation.agentKey.trim()) {
+            return conversation;
+        }
+
+        return conversation;
     }
 
     saveDeletedConversation(input: SaveDeletedConversationInput): void {

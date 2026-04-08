@@ -50,7 +50,7 @@ describe('resolveScopedAgentConfig', () => {
             description: 'Focus on docs',
             scopePath: '/workspace/docs',
             sourcePaths: ['/workspace/docs/.agent.json'],
-            effectiveInstructions: 'Answer with documentation context.',
+            effectiveInstructions: 'Help the user with the current workspace.\n\nAnswer with documentation context.',
             modelProviderName: 'gemini-api',
             modelName: 'gemini-2.5-pro'
         });
@@ -81,7 +81,6 @@ describe('resolveScopedAgentConfig', () => {
                 '/project/docs/.agent.json': JSON.stringify({
                     name: 'Docs Agent',
                     instructions: 'Child rule',
-                    inheritance: 'merge',
                     tools: [
                         { id: 'search_workspace', description: 'Search doc subtree' },
                         { id: 'cite_sources', description: 'Cite the source files' }
@@ -98,7 +97,9 @@ describe('resolveScopedAgentConfig', () => {
 
         expect(resolved.name).toBe('Docs Agent');
         expect(resolved.description).toBe('Parent description');
-        expect(resolved.effectiveInstructions).toBe('Parent rule\n\nChild rule');
+        expect(resolved.effectiveInstructions).toBe('Help the user with the current workspace.\n\nParent rule\n\nChild rule');
+        expect(resolved.modelProviderName).toBe('gemini-api');
+        expect(resolved.modelName).toBe('Gemini Pro Latest');
         expect(resolved.sourcePaths).toEqual([
             '/project/.agent.json',
             '/project/docs/.agent.json'
@@ -114,37 +115,31 @@ describe('resolveScopedAgentConfig', () => {
         ]);
     });
 
-    it('stops on override configs and ignores higher parents', async () => {
+    it('inherits missing array configs from fallback automatically', async () => {
         const provider = createMockContextProvider(createSnapshot(
             [
                 { path: '/project', name: 'project', kind: 'directory' },
-                { path: '/project/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/project' },
-                { path: '/project/docs', name: 'docs', kind: 'directory', parentPath: '/project' },
-                { path: '/project/docs/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/project/docs' },
-                { path: '/project/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/project/docs' }
+                { path: '/project/sub', name: 'sub', kind: 'directory', parentPath: '/project' },
+                { path: '/project/sub/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/project/sub' },
+                { path: '/project/sub/guide.md', name: 'guide.md', kind: 'file', parentPath: '/project/sub' }
             ],
             {
-                '/project/.agent.json': JSON.stringify({
-                    name: 'Workspace Agent',
-                    instructions: 'Parent rule',
-                    tools: [{ id: 'read_document' }]
+                '/project/sub/.agent.json': JSON.stringify({
+                    name: 'Sub Agent',
+                    modelName: 'gemini-2.5-pro'
                 }),
-                '/project/docs/.agent.json': JSON.stringify({
-                    name: 'Docs Override Agent',
-                    inheritance: 'override',
-                    instructions: 'Only use docs context.',
-                    tools: [{ id: 'cite_sources' }]
-                }),
-                '/project/docs/guide.md': '# Guide'
+                '/project/sub/guide.md': '# Guide'
             }
         ));
 
-        const resolved = await resolveScopedAgentConfig(provider, '/project/docs/guide.md', fallbackAgent);
+        const resolved = await resolveScopedAgentConfig(provider, '/project/sub/guide.md', fallbackAgent);
 
-        expect(resolved.name).toBe('Docs Override Agent');
-        expect(resolved.sourcePaths).toEqual(['/project/docs/.agent.json']);
-        expect(resolved.effectiveInstructions).toBe('Only use docs context.');
-        expect(resolved.tools).toEqual([{ id: 'cite_sources' }]);
+        expect(resolved.name).toBe('Sub Agent');
+        expect(resolved.modelName).toBe('gemini-2.5-pro');
+        // fallbacks naturally applied
+        expect(resolved.modelProviderName).toBe('gemini-api');
+        expect(resolved.effectiveInstructions).toBe('Help the user with the current workspace.');
+        expect(resolved.tools).toEqual([{ id: 'read_document' }]);
     });
 
     it('falls back to the default agent when no scoped config exists', async () => {
@@ -162,7 +157,7 @@ describe('resolveScopedAgentConfig', () => {
 
         expect(resolved).toMatchObject({
             name: 'Default Knowledge Agent',
-            scopePath: '/',
+            scopePath: '/notes',
             sourcePaths: [],
             effectiveInstructions: 'Help the user with the current workspace.'
         });
@@ -193,8 +188,11 @@ describe('resolveScopedAgentConfig', () => {
             async initializeAccess() {
                 return undefined;
             },
-            async listTree() {
-                return [];
+            async getContext() {
+                return {
+                    nodes: [],
+                    agentConfigs: {}
+                };
             },
             async readDocument(path) {
                 if (path === '/workspace/archive') {
@@ -220,11 +218,14 @@ describe('resolveScopedAgentConfig', () => {
             async createNode() {
                 throw new Error('Not implemented');
             },
+            async deleteNode() {
+                throw new Error('Not implemented');
+            },
+            async renameNode() {
+                throw new Error('Not implemented');
+            },
             async searchInScope() {
                 return [];
-            },
-            async resolveScopedAgentConfig(targetPath: string) {
-                return resolveScopedAgentConfig(this, targetPath, fallbackAgent);
             }
         };
 
@@ -234,7 +235,7 @@ describe('resolveScopedAgentConfig', () => {
             name: 'Archive Agent',
             scopePath: '/workspace/archive',
             sourcePaths: ['/workspace/archive/.agent.json'],
-            effectiveInstructions: 'Only use archive files.'
+            effectiveInstructions: 'Help the user with the current workspace.\n\nOnly use archive files.'
         });
     });
 });

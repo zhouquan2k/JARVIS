@@ -55,7 +55,7 @@ describe('DocumentWorkspaceView', () => {
         expect(wrapper.get('[data-testid="document-file-tree"]').exists()).toBe(true);
         expect(wrapper.get('[data-testid="document-editor"]').exists()).toBe(true);
         expect(wrapper.get('[data-testid="agent-pane"]').exists()).toBe(true);
-        expect(wrapper.get('[data-testid="agent-pane"]').attributes('data-agent-name')).toBe('Root Agent');
+        expect(wrapper.get('[data-testid="agent-pane"]').attributes('data-agent-name')).toBe('Default Knowledge Agent');
         expect(wrapper.get('.knowledge-grid').attributes('style')).toContain('100% - 8px');
         expect(wrapper.findAll('.grid-pane')).toHaveLength(3);
     });
@@ -85,5 +85,46 @@ describe('DocumentWorkspaceView', () => {
 
         expect(wrapper.find('[data-testid="agent-pane"]').exists()).toBe(false);
         expect(wrapper.get('[data-testid="assistant-slot"]').text()).toContain('custom pane');
+    });
+
+    it('mounts AgentView in the middle pane only for selected owner directories', async () => {
+        const wrapper = mount(DocumentWorkspaceView, {
+            props: {
+                contextProvider: createMockContextProvider({
+                    nodes: [
+                        { path: '/docs', name: 'docs', kind: 'directory' },
+                        { path: '/docs/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/docs' },
+                        { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' },
+                        { path: '/notes', name: 'notes', kind: 'directory' },
+                        { path: '/notes/today.md', name: 'today.md', kind: 'file', parentPath: '/notes' }
+                    ],
+                    documents: {
+                        '/docs/.agent.json': JSON.stringify({
+                            name: 'Docs Agent',
+                            instructions: 'Handle docs.'
+                        }),
+                        '/docs/guide.md': '# Guide',
+                        '/notes/today.md': '# Today'
+                    }
+                })
+            },
+            global: {
+                stubs: {
+                    AgentPane: { template: '<div data-testid="agent-pane" />' },
+                    AgentView: { template: '<div data-testid="agent-view-stub" />' },
+                    DocumentEditorPane: { template: '<div data-testid="document-editor" />' }
+                }
+            }
+        });
+
+        await flushPromises();
+        await wrapper.get('[data-path="/docs"]').trigger('click');
+        await flushPromises();
+        expect(wrapper.find('[data-testid="agent-view-stub"]').exists()).toBe(true);
+
+        await wrapper.get('[data-path="/notes"]').trigger('click');
+        await flushPromises();
+        expect(wrapper.find('[data-testid="agent-view-stub"]').exists()).toBe(false);
+        expect(wrapper.get('[data-testid="document-editor"]').exists()).toBe(true);
     });
 });

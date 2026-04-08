@@ -11,6 +11,7 @@ export const SCHEMA_STATEMENTS = [
         sync_key TEXT NOT NULL,
         conversation_id TEXT NOT NULL,
         title TEXT NOT NULL,
+        agent_key TEXT,
         backend_id TEXT,
         source_type TEXT,
         external_id TEXT,
@@ -52,5 +53,19 @@ export const SCHEMA_STATEMENTS = [
     `
     CREATE INDEX IF NOT EXISTS idx_sync_deleted_conversations_updated_at
     ON sync_deleted_conversations (sync_key, updated_at)
+    `
+] as const;
+
+export const MIGRATION_STATEMENTS = [
+    `
+    ALTER TABLE synced_conversations
+    ADD COLUMN agent_key TEXT
+    `
+] as const;
+
+export const POST_MIGRATION_STATEMENTS = [
+    `
+    CREATE INDEX IF NOT EXISTS idx_synced_conversations_sync_key_agent_key
+    ON synced_conversations (sync_key, agent_key)
     `
 ] as const;

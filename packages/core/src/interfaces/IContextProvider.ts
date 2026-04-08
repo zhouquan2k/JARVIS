@@ -1,5 +1,7 @@
 import type { ResolvedAgentConfig } from './IAgentConfig';
 
+export const DEFAULT_WORKSPACE_AGENT_KEY = '/';
+
 export interface ContextNode {
     path: string;
     name: string;
@@ -7,6 +9,14 @@ export interface ContextNode {
     parentPath?: string;
     hasChildren?: boolean;
     updatedAt?: number;
+    children?: ContextNode[];
+    isAgentOwner?: boolean;
+    agentKey: string;
+}
+
+export interface WorkspaceContext {
+    nodes: ContextNode[];
+    agentConfigs: Record<string, ResolvedAgentConfig>;
 }
 
 export interface ContextDocument {
@@ -52,12 +62,11 @@ export interface ContextSearchMatch {
 export interface IContextProvider {
     id: string;
     initializeAccess(): Promise<void>;
-    listTree(parentPath?: string): Promise<ContextNode[]>;
+    getContext(): Promise<WorkspaceContext>;
     readDocument(path: string): Promise<ContextDocument>;
     writeDocument(input: WriteContextDocumentInput): Promise<void>;
     createNode(input: CreateContextNodeInput): Promise<ContextNode>;
     deleteNode(path: string): Promise<void>;
     renameNode(input: RenameContextNodeInput): Promise<ContextNode>;
     searchInScope(request: ContextSearchRequest): Promise<ContextSearchMatch[]>;
-    resolveScopedAgentConfig(targetPath: string): Promise<ResolvedAgentConfig>;
 }

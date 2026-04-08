@@ -164,12 +164,12 @@ export function createContextRouter(options: { service: HttpContextService; conf
         }
     });
 
-    app.post('/list-tree', async (c) => {
+    app.post('/get-context', async (c) => {
         try {
-            const body = normalizeObjectBody(await readJsonBody(c));
-            return c.json({ nodes: await service.listTree(normalizeOptionalPath(body)) });
+            normalizeObjectBody(await readJsonBody(c));
+            return c.json(await service.getContext());
         } catch (error) {
-            const message = error instanceof Error ? error.message : '读取目录树失败。';
+            const message = error instanceof Error ? error.message : '读取工作区上下文失败。';
             return c.json({ error: message }, 400);
         }
     });
@@ -232,16 +232,6 @@ export function createContextRouter(options: { service: HttpContextService; conf
             return c.json({ matches: await service.searchInScope(normalizeSearchRequest(body)) });
         } catch (error) {
             const message = error instanceof Error ? error.message : '搜索作用域失败。';
-            return c.json({ error: message }, 400);
-        }
-    });
-
-    app.post('/resolve-scoped-agent-config', async (c) => {
-        try {
-            const body = normalizeObjectBody(await readJsonBody(c));
-            return c.json({ agent: await service.resolveScopedAgentConfig(normalizeRequiredPath(body)) });
-        } catch (error) {
-            const message = error instanceof Error ? error.message : '解析作用域 Agent 失败。';
             return c.json({ error: message }, 400);
         }
     });

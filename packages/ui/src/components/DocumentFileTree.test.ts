@@ -39,7 +39,7 @@ describe('DocumentFileTree', () => {
         const wrapper = mount(DocumentFileTree, {
             props: {
                 nodes: [
-                    { path: '/docs', name: 'docs', kind: 'directory' },
+                    { path: '/docs', name: 'docs', kind: 'directory', isAgentOwner: true, agentKey: '/docs/.agent.json' },
                     { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' }
                 ],
                 expandedPaths: ['/', '/docs'],
@@ -47,6 +47,8 @@ describe('DocumentFileTree', () => {
                 currentError: null
             }
         });
+
+        expect(wrapper.get('[data-path="/docs"]').find('[data-testid="document-node-agent-owner"]').exists()).toBe(true);
 
         await wrapper.get('[data-testid="document-new-file"]').trigger('click');
         await wrapper.get('[data-testid="document-pending-node-input"]').setValue('note.md');

@@ -71,6 +71,7 @@ export interface SyncConversation {
     id: string;
     backendId?: string;
     title: string;
+    agentKey?: string;
     origin?: string;
     externalId?: string;
     messages: ConversationMessage[];
@@ -335,6 +336,7 @@ export function normalizeConversation(value: unknown): SyncConversation {
         id: readRequiredString(value, 'id', 'conversation.id'),
         backendId: readOptionalString(value, 'backendId'),
         title: readRequiredString(value, 'title', 'conversation.title'),
+        agentKey: readOptionalString(value, 'agentKey'),
         origin: readOptionalString(value, 'origin'),
         externalId: readOptionalString(value, 'externalId'),
         messages: value.messages.map((message, index) => normalizeMessage(message, index)),

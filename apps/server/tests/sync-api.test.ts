@@ -113,6 +113,7 @@ describe('sync api', () => {
             body: JSON.stringify({
                 conversations: [
                     createConversationPayload('conv-1', 100, {
+                        agentKey: '/workspace/.agent.json',
                         origin: 'chatgpt-web',
                         externalId: 'import-1',
                         compare: {
@@ -155,6 +156,7 @@ describe('sync api', () => {
                 {
                     id: 'conv-1',
                     title: 'Conversation conv-1',
+                    agentKey: '/workspace/.agent.json',
                     updatedAt: 100,
                     origin: 'chatgpt-web',
                     externalId: 'import-1',
@@ -182,6 +184,57 @@ describe('sync api', () => {
         expect(incrementalPull.status).toBe(200);
         await expect(incrementalPull.json()).resolves.toEqual({
             conversations: [],
+            deletedConversations: [],
+            nextCursor: 1
+        });
+    });
+
+    it('preserves agentKey across push and pull', async () => {
+        const app = createApp({ config: createConfig({ isDevelopment: true }) });
+
+        const pushResponse = await app.request('/api/sync/push', {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                'x-sync-key': 'workspace-agent'
+            },
+            body: JSON.stringify({
+                conversations: [
+                    createConversationPayload('conv-agent', 100, {
+                        agentKey: '/workspace/archive/.agent.json'
+                    })
+                ]
+            })
+        });
+
+        expect(pushResponse.status).toBe(200);
+
+        const pullResponse = await app.request('/api/sync/pull', {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                'x-sync-key': 'workspace-agent'
+            },
+            body: JSON.stringify({ cursor: null })
+        });
+
+        expect(pullResponse.status).toBe(200);
+        await expect(pullResponse.json()).resolves.toEqual({
+            conversations: [
+                {
+                    id: 'conv-agent',
+                    title: 'Conversation conv-agent',
+                    agentKey: '/workspace/archive/.agent.json',
+                    updatedAt: 100,
+                    messages: [
+                        {
+                            id: 'conv-agent-m1',
+                            role: 'user',
+                            content: 'message:conv-agent'
+                        }
+                    ]
+                }
+            ],
             deletedConversations: [],
             nextCursor: 1
         });

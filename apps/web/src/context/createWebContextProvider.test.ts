@@ -34,10 +34,11 @@ describe('createWebContextProvider', () => {
       if (url.endsWith('/initialize-access')) {
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
       }
-      if (url.endsWith('/list-tree')) {
-        expect(body).toEqual({ parentPath: '/notes' });
+      if (url.endsWith('/get-context')) {
+        expect(body).toEqual({});
         return new Response(JSON.stringify({
-          nodes: [{ path: '/notes/today.md', name: 'today.md', kind: 'file', parentPath: '/notes' }]
+          nodes: [{ path: '/notes/today.md', name: 'today.md', kind: 'file', parentPath: '/notes', agentKey: '/' }],
+          agentConfigs: {}
         }), { status: 200 });
       }
       if (url.endsWith('/read-document')) {
@@ -61,7 +62,7 @@ describe('createWebContextProvider', () => {
       if (url.endsWith('/create-node')) {
         expect(body).toEqual({ parentPath: '/notes', name: 'draft.md', kind: 'file' });
         return new Response(JSON.stringify({
-          node: { path: '/notes/draft.md', name: 'draft.md', kind: 'file', parentPath: '/notes' }
+          node: { path: '/notes/draft.md', name: 'draft.md', kind: 'file', parentPath: '/notes', agentKey: '/' }
         }), { status: 200 });
       }
       if (url.endsWith('/delete-node')) {
@@ -71,7 +72,7 @@ describe('createWebContextProvider', () => {
       if (url.endsWith('/rename-node')) {
         expect(body).toEqual({ path: '/notes/today.md', name: 'renamed.md' });
         return new Response(JSON.stringify({
-          node: { path: '/notes/renamed.md', name: 'renamed.md', kind: 'file', parentPath: '/notes' }
+          node: { path: '/notes/renamed.md', name: 'renamed.md', kind: 'file', parentPath: '/notes', agentKey: '/' }
         }), { status: 200 });
       }
       if (url.endsWith('/search-in-scope')) {
@@ -80,20 +81,6 @@ describe('createWebContextProvider', () => {
           matches: [{ path: '/notes/today.md', line: 1, column: 3, preview: '# Today' }]
         }), { status: 200 });
       }
-      if (url.endsWith('/resolve-scoped-agent-config')) {
-        expect(body).toEqual({ path: '/notes/today.md' });
-        return new Response(JSON.stringify({
-          agent: {
-            name: 'Notes Agent',
-            scopePath: '/notes',
-            sourcePaths: ['/notes/.agent.json'],
-            effectiveInstructions: 'Focus on notes.',
-            modelProviderName: 'gemini-api',
-            modelName: 'gemini-2.5-flash'
-          }
-        }), { status: 200 });
-      }
-
       return new Response(JSON.stringify({ error: 'not found' }), { status: 404 });
     });
 
@@ -103,9 +90,10 @@ describe('createWebContextProvider', () => {
     });
 
     await expect(provider.initializeAccess()).resolves.toBeUndefined();
-    await expect(provider.listTree('/notes')).resolves.toEqual([
-      { path: '/notes/today.md', name: 'today.md', kind: 'file', parentPath: '/notes' }
-    ]);
+    await expect(provider.getContext()).resolves.toEqual({
+      nodes: [{ path: '/notes/today.md', name: 'today.md', kind: 'file', parentPath: '/notes', agentKey: '/' }],
+      agentConfigs: {}
+    });
     await expect(provider.readDocument('/notes/today.md')).resolves.toEqual({
       path: '/notes/today.md',
       mimeType: 'text/markdown',
@@ -124,7 +112,8 @@ describe('createWebContextProvider', () => {
       path: '/notes/draft.md',
       name: 'draft.md',
       kind: 'file',
-      parentPath: '/notes'
+      parentPath: '/notes',
+      agentKey: '/'
     });
     await expect(provider.deleteNode('/notes/draft.md')).resolves.toBeUndefined();
     await expect(provider.renameNode({
@@ -134,7 +123,8 @@ describe('createWebContextProvider', () => {
       path: '/notes/renamed.md',
       name: 'renamed.md',
       kind: 'file',
-      parentPath: '/notes'
+      parentPath: '/notes',
+      agentKey: '/'
     });
     await expect(provider.searchInScope({
       query: 'Today',
@@ -143,16 +133,7 @@ describe('createWebContextProvider', () => {
     })).resolves.toEqual([
       { path: '/notes/today.md', line: 1, column: 3, preview: '# Today' }
     ]);
-    await expect(provider.resolveScopedAgentConfig('/notes/today.md')).resolves.toEqual({
-      name: 'Notes Agent',
-      scopePath: '/notes',
-      sourcePaths: ['/notes/.agent.json'],
-      effectiveInstructions: 'Focus on notes.',
-      modelProviderName: 'gemini-api',
-      modelName: 'gemini-2.5-flash'
-    });
-
-    expect(fetchImpl).toHaveBeenCalledTimes(9);
+    expect(fetchImpl).toHaveBeenCalledTimes(8);
   });
 
   it('surfaces server-side context errors', async () => {
@@ -192,10 +173,12 @@ describe('createWebContextProvider', () => {
     });
 
     await expect(provider.initializeAccess()).resolves.toBeUndefined();
-    await expect(provider.listTree()).resolves.toEqual(expect.arrayContaining([
-      expect.objectContaining({ path: '/notes', kind: 'directory' }),
-      expect.objectContaining({ path: '/welcome.md', kind: 'file' })
-    ]));
+    await expect(provider.getContext()).resolves.toMatchObject({
+      nodes: expect.arrayContaining([
+        expect.objectContaining({ path: '/notes', kind: 'directory' }),
+        expect.objectContaining({ path: '/welcome.md', kind: 'file' })
+      ])
+    });
     await expect(provider.readDocument('/welcome.md')).resolves.toMatchObject({
       path: '/welcome.md',
       mimeType: 'text/markdown',
@@ -229,9 +212,13 @@ describe('createWebContextProvider', () => {
     })).resolves.toEqual([
       expect.objectContaining({ path: '/notes/today.md', line: 1, column: 3 })
     ]);
-    await expect(provider.resolveScopedAgentConfig('/notes/today.md')).resolves.toMatchObject({
-      scopePath: '/',
-      name: 'Default Knowledge Agent'
+    await expect(provider.getContext()).resolves.toMatchObject({
+      agentConfigs: {
+        '/': expect.objectContaining({
+          scopePath: '/',
+          name: 'Default Knowledge Agent'
+        })
+      }
     });
   });
 
@@ -293,10 +280,14 @@ describe('createWebContextProvider', () => {
     });
 
     await expect(provider.initializeAccess()).resolves.toBeUndefined();
-    await expect(provider.resolveScopedAgentConfig('/My-Life/today.md')).resolves.toMatchObject({
-      name: 'Default Knowledge Agent',
-      scopePath: '/',
-      sourcePaths: []
+    await expect(provider.getContext()).resolves.toMatchObject({
+      agentConfigs: {
+        '/': expect.objectContaining({
+          name: 'Default Knowledge Agent',
+          scopePath: '/',
+          sourcePaths: []
+        })
+      }
     });
   });
 });

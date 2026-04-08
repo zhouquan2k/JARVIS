@@ -125,6 +125,7 @@ function createConversation(
         id: overrides.id,
         title: overrides.title ?? `Conversation ${overrides.id}`,
         origin: overrides.origin ?? 'local',
+        agentKey: overrides.agentKey,
         messages: overrides.messages ?? [],
         updatedAt: overrides.updatedAt,
         backendId: overrides.backendId,
@@ -188,6 +189,32 @@ describe('SyncStorageProvider', () => {
                 web_search: true
             }
         });
+    });
+
+    it('preserves conversation agent keys across save load and sync push', async () => {
+        const transport = new MockSyncTransport();
+        transport.pushResult = { processedIds: ['sync-agent'], processedDeletedIds: [], nextCursor: 3 };
+        const provider = new SyncStorageProvider({
+            localStore: new MemoryStorageProvider(),
+            transport,
+            syncKey: 'workspace-agent',
+            stateStore: new MemorySyncStateStore(),
+            deletedConversationStore: new MemoryDeletedConversationStateStore()
+        });
+
+        await provider.saveConversation(createConversation({
+            id: 'sync-agent',
+            updatedAt: 200,
+            agentKey: '/workspace/.agent.json'
+        }));
+
+        await expect(provider.getConversation('sync-agent')).resolves.toMatchObject({
+            id: 'sync-agent',
+            agentKey: '/workspace/.agent.json'
+        });
+
+        await provider.syncNow();
+        expect(transport.pushes[0]?.[0]?.agentKey).toBe('/workspace/.agent.json');
     });
 
     it('pushes dirty conversations and keeps compare-only conversations local', async () => {

@@ -94,6 +94,37 @@ async function readDocumentForEdit(
     };
 }
 
+function findContextNodeByPath(nodes: ContextNode[], targetPath: string): ContextNode | null {
+    for (const node of nodes) {
+        if (node.path === targetPath) {
+            return node;
+        }
+
+        if (node.children?.length) {
+            const nested = findContextNodeByPath(node.children, targetPath);
+            if (nested) {
+                return nested;
+            }
+        }
+    }
+
+    return null;
+}
+
+async function listDirectoryEntries(provider: IContextProvider, directoryPath: string): Promise<ContextNode[]> {
+    const context = await provider.getContext();
+    if (directoryPath === '/') {
+        return context.nodes;
+    }
+
+    const node = findContextNodeByPath(context.nodes, directoryPath);
+    if (!node || node.kind !== 'directory') {
+        throw new Error(`Directory does not exist: ${directoryPath}`);
+    }
+
+    return node.children ?? [];
+}
+
 function asObject(value: unknown, label: string): ToolArgs {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
         throw new Error(`${label} must be an object.`);
@@ -205,7 +236,7 @@ async function ensureDirectoryExists(provider: IContextProvider, path: string): 
     const lastSlashIndex = path.lastIndexOf('/');
     const parentPath = lastSlashIndex <= 0 ? undefined : path.slice(0, lastSlashIndex);
     const name = path.slice(lastSlashIndex + 1);
-    const siblings = await provider.listTree(parentPath);
+    const siblings = await listDirectoryEntries(provider, parentPath ?? '/');
     const directoryNode = siblings.find((node) => node.path === path && node.kind === 'directory' && node.name === name);
     if (!directoryNode) {
         throw new Error(`Directory does not exist: ${path}`);
@@ -341,7 +372,7 @@ export function createBuiltinWorkspaceToolDefinitions(): AgentToolDefinition[] {
                     ? context.agent.scopePath
                     : normalizeWorkspacePath(args.path, 'path', { allowRoot: true });
                 assertPathWithinScope(path, context);
-                const entries = await provider.listTree(path === '/' ? undefined : path);
+                const entries = await listDirectoryEntries(provider, path);
                 return serializeDirectoryEntries(path, entries);
             }
         },

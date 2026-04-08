@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { FileSystemContextProvider } from '../../../packages/node/src/context/FileSystemContextProvider.ts';
 import { createDatabase, type SyncDatabase } from './db.js';
 import { resolveServerConfig, type ServerConfig } from './config.js';
 import { createContextRouter } from './routes/context.js';
@@ -6,7 +7,6 @@ import { createHealthRouter } from './routes/health.js';
 import { createProviderConfigRouter } from './routes/providerConfigs.js';
 import { createSyncRouter } from './routes/sync.js';
 import { DatabaseContextProvider } from './providers/databaseContextProvider.js';
-import { LocalFileContextProvider } from './providers/localFileContextProvider.js';
 import { SyncRepository } from './repositories/syncRepository.js';
 import { HttpContextService } from './services/httpContextService.js';
 import { SyncService } from './services/syncService.js';
@@ -23,7 +23,7 @@ function createContextProvider(config: ServerConfig): ContextProvider {
         return new DatabaseContextProvider();
     }
 
-    return new LocalFileContextProvider({
+    return new FileSystemContextProvider({
         rootPath: config.knowledgeRoot
     });
 }

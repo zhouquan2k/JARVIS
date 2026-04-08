@@ -12,6 +12,8 @@
     "paths": {
       "@packages/core": ["../../packages/core/src/index.ts"],
       "@packages/core/*": ["../../packages/core/*"],
+      "@packages/node": ["../../packages/node/src/index.ts"],
+      "@packages/node/*": ["../../packages/node/*"],
       "@packages/core/src": ["../../packages/core/src/index.ts"],
       "@packages/core/config": ["../../packages/core/config.ts"]
     },
