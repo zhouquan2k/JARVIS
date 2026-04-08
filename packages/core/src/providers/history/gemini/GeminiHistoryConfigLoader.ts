@@ -17,7 +17,7 @@ export interface ConfigStorage {
 
 const BUILTIN_GEMINI_HISTORY_CONFIG: GeminiHistoryRemoteConfig = {
     providerId: 'gemini-web',
-    version: 'builtin-2026-04-01.3',
+    version: 'builtin-2026-04-08.2',
     matchOrigins: ['https://gemini.google.com'],
     selectors: {
         historyListContainer: 'conversations-list[data-test-id="all-conversations"], nav[aria-label="Chat history"], [data-test-id="conversation-list"]',
@@ -26,7 +26,8 @@ const BUILTIN_GEMINI_HISTORY_CONFIG: GeminiHistoryRemoteConfig = {
         historyLink: 'a[data-test-id="conversation"], a[href*="/app/"]',
         historySearchInput: 'input[type="search"], input[aria-label*="Search" i], input[placeholder*="Search" i], input[aria-label*="搜索" i], input[placeholder*="搜索" i], textarea[aria-label*="Search" i], textarea[placeholder*="Search" i], [role="searchbox"], [contenteditable="true"][aria-label*="Search" i], [contenteditable="true"][aria-label*="搜索" i]',
         historySearchResultContainer: 'search-window',
-        historySearchResultItem: '[data-test-id="conversation"], [data-test-id="search-result"], [ng-reflect-router-link*="/app/"], [routerlink*="/app/"], [href*="/app/"]',
+        historySearchResultItem: 'search-snippet [role="button"], .snippet-container[role="button"], article, [data-test-id="conversation"], [data-test-id="search-result"], [role="option"], [ng-reflect-router-link*="/app/"], [routerlink*="/app/"], a[href*="/app/"], li',
+        historySearchResultCount: 'search-window [data-test-id="result-count"], search-window [data-test-id="results-count"], search-window [class*="result-count" i], search-window [class*="results-count" i], search-window [aria-label*="result" i], search-window [aria-label*="结果" i], search-window [aria-live="polite"], search-window [role="status"]',
         historySearchEmptyState: 'search-window [data-test-id="empty-state"], search-window [data-test-id="no-results"], search-window [role="status"], search-window [aria-live="polite"]',
         conversationRoot: 'main, [data-test-id="conversation-root"]',
         userBubble: '[data-test-id="user-query"], user-query, [data-message-author="user"]',

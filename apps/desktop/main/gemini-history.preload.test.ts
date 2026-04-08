@@ -28,6 +28,7 @@ const CONFIG: GeminiHistoryRemoteConfig = {
         historyListItem: 'a[data-test-id="conversation"]',
         historyTitle: '.conversation-title',
         historyLink: 'a[data-test-id="conversation"]',
+        historySearchResultCount: '[data-test-id="result-count"]',
         conversationRoot: 'main',
         userBubble: 'user-query',
         assistantBubble: 'model-response',
@@ -504,6 +505,7 @@ describe('gemini-history.preload auth detection', () => {
     it('waits for the final full-query result set instead of returning the initial default search rows', async () => {
         const locationSpy = mockGeminiLocation('/search');
         document.body.innerHTML = `
+            <conversations-list data-test-id="all-conversations" hidden></conversations-list>
             <input type="text" aria-label="搜索对话" value="" />
             <main>
                 <search-window>
@@ -616,9 +618,305 @@ describe('gemini-history.preload auth detection', () => {
         locationSpy.mockRestore();
     });
 
+    it('waits until the rendered search result count matches the Gemini count badge', async () => {
+        const locationSpy = mockGeminiLocation('/search');
+        document.body.innerHTML = `
+            <input type="text" aria-label="搜索对话" value="" />
+            <main>
+                <conversations-list data-test-id="all-conversations" hidden></conversations-list>
+                <search-window>
+                    <div data-test-id="result-count">共 6 条结果</div>
+                    <div class="search-window-container">
+                        <article ng-reflect-router-link="/app/search-6">
+                            <span class="conversation-title">最后 1 条</span>
+                        </article>
+                    </div>
+                    <button data-test-id="history-load-more" type="button">加载更多</button>
+                </search-window>
+            </main>
+        `;
+
+        const loadMore = document.querySelector('[data-test-id="history-load-more"]') as HTMLButtonElement;
+        let loadMoreClicks = 0;
+        loadMore.addEventListener('click', () => {
+            loadMoreClicks += 1;
+            const container = document.querySelector('search-window .search-window-container');
+            if (container && loadMoreClicks === 1) {
+                setTimeout(() => {
+                    container.innerHTML = `
+                        <article ng-reflect-router-link="/app/search-1"><span class="conversation-title">结果 1</span></article>
+                        <article ng-reflect-router-link="/app/search-2"><span class="conversation-title">结果 2</span></article>
+                        <article ng-reflect-router-link="/app/search-3"><span class="conversation-title">结果 3</span></article>
+                        <article ng-reflect-router-link="/app/search-4"><span class="conversation-title">结果 4</span></article>
+                        <article ng-reflect-router-link="/app/search-5"><span class="conversation-title">结果 5</span></article>
+                        <article ng-reflect-router-link="/app/search-6"><span class="conversation-title">结果 6</span></article>
+                    `;
+                }, 60);
+            }
+        });
+
+        const searchConfig: GeminiHistoryRemoteConfig = {
+            ...CONFIG,
+            selectors: {
+                ...CONFIG.selectors,
+                historySearchInput: 'input[aria-label="搜索对话"]',
+                historySearchResultContainer: 'search-window',
+                historySearchResultItem: '[ng-reflect-router-link*="/app/"]',
+                historySearchResultCount: '[data-test-id="result-count"]',
+                lazyLoadSentinel: '[data-test-id="history-load-more"]'
+            }
+        };
+
+        const response = await handleGeminiHistoryRequestForTest({
+            action: 'GET_HISTORY_LIST',
+            config: searchConfig,
+            query: '计数'
+        });
+
+        expect(response).toEqual({
+            ok: true,
+            data: [
+            { id: 'search-1', title: '结果 1', updatedAt: expect.any(Number) },
+            { id: 'search-2', title: '结果 2', updatedAt: expect.any(Number) },
+            { id: 'search-3', title: '结果 3', updatedAt: expect.any(Number) },
+            { id: 'search-4', title: '结果 4', updatedAt: expect.any(Number) },
+            { id: 'search-5', title: '结果 5', updatedAt: expect.any(Number) },
+            { id: 'search-6', title: '结果 6', updatedAt: expect.any(Number) }
+            ]
+        });
+        locationSpy.mockRestore();
+    });
+
+    it('extracts Gemini search-snippet button rows instead of treating the outer li as one result', () => {
+        const locationSpy = mockGeminiLocation('/search');
+        document.body.innerHTML = `
+            <input type="text" aria-label="搜索对话" value="简历" />
+            <main>
+                <search-window>
+                    <div class="search-window-container">
+                        <h3 class="search-results-message">6 条与“简历”相符的搜索结果</h3>
+                        <div class="results-scroll-container">
+                            <infinite-scroller class="results-list">
+                                <ul role="list" class="search-results-list">
+                                    <li class="ng-star-inserted">
+                                        <search-snippet tabindex="0">
+                                            <div role="button" tabindex="0" class="snippet-container ng-star-inserted">
+                                                <div class="snippet-content">
+                                                    <div class="result">
+                                                        <div class="title gds-title-m">简历重构：AI 集成专家定位</div>
+                                                        <div class="text gds-body-m">你好！这份新的职业形象策略制定得非常精准。</div>
+                                                    </div>
+                                                    <div class="date gds-body-m">3月26日</div>
+                                                </div>
+                                            </div>
+                                        </search-snippet>
+                                    </li>
+                                    <li class="ng-star-inserted">
+                                        <search-snippet tabindex="0">
+                                            <div role="button" tabindex="0" class="snippet-container ng-star-inserted">
+                                                <div class="snippet-content">
+                                                    <div class="result">
+                                                        <div class="title gds-title-m">AI 时代下的职业发展策略</div>
+                                                        <div class="text gds-body-m">你的思路非常清晰，目标明确。</div>
+                                                    </div>
+                                                    <div class="date gds-body-m">3月17日</div>
+                                                </div>
+                                            </div>
+                                        </search-snippet>
+                                    </li>
+                                    <li class="ng-star-inserted">
+                                        <search-snippet tabindex="0">
+                                            <div role="button" tabindex="0" class="snippet-container ng-star-inserted">
+                                                <div class="snippet-content">
+                                                    <div class="result">
+                                                        <div class="title gds-title-m">PDF 转 Markdown 简历</div>
+                                                        <div class="text gds-body-m">这份是根据您提供的 PDF 内容整理而成的 Markdown 格式简历。</div>
+                                                    </div>
+                                                    <div class="date gds-body-m">3月19日</div>
+                                                </div>
+                                            </div>
+                                        </search-snippet>
+                                    </li>
+                                    <li class="ng-star-inserted">
+                                        <search-snippet tabindex="0">
+                                            <div role="button" tabindex="0" class="snippet-container ng-star-inserted">
+                                                <div class="snippet-content">
+                                                    <div class="result">
+                                                        <div class="title gds-title-m">AI 时代职业发展与品牌建设</div>
+                                                        <div class="text gds-body-m">我现在在蒙特利尔市从事 developer 的工作。</div>
+                                                    </div>
+                                                    <div class="date gds-body-m">3月16日</div>
+                                                </div>
+                                            </div>
+                                        </search-snippet>
+                                    </li>
+                                    <li class="ng-star-inserted">
+                                        <search-snippet tabindex="0">
+                                            <div role="button" tabindex="0" class="snippet-container ng-star-inserted">
+                                                <div class="snippet-content">
+                                                    <div class="result">
+                                                        <div class="title gds-title-m">ChatPrizm 功能增强策略</div>
+                                                        <div class="text gds-body-m">这是我传递给 gemini 的请求。</div>
+                                                    </div>
+                                                    <div class="date gds-body-m">3月28日</div>
+                                                </div>
+                                            </div>
+                                        </search-snippet>
+                                    </li>
+                                    <li class="ng-star-inserted">
+                                        <search-snippet tabindex="0">
+                                            <div role="button" tabindex="0" class="snippet-container ng-star-inserted">
+                                                <div class="snippet-content">
+                                                    <div class="result">
+                                                        <div class="title gds-title-m">蒙特利尔卖房流程与注意事项</div>
+                                                        <div class="text gds-body-m">这个经纪人相关图片里面包含了哪些有用的信息。</div>
+                                                    </div>
+                                                    <div class="date gds-body-m">2月22日</div>
+                                                </div>
+                                            </div>
+                                        </search-snippet>
+                                    </li>
+                                </ul>
+                            </infinite-scroller>
+                        </div>
+                    </div>
+                </search-window>
+            </main>
+        `;
+
+        const searchConfig: GeminiHistoryRemoteConfig = {
+            ...CONFIG,
+            selectors: {
+                ...CONFIG.selectors,
+                historySearchInput: 'input[aria-label="搜索对话"]',
+                historySearchResultContainer: 'search-window',
+                historySearchResultItem: 'search-snippet [role="button"], .snippet-container[role="button"], article, [ng-reflect-router-link*="/app/"], [role="option"], li'
+            }
+        };
+
+        expect(extractHistoryList(searchConfig, '简历')).toEqual([
+            { id: 'gemini-search-result:%E7%AE%80%E5%8E%86:0', title: '简历重构：AI 集成专家定位', updatedAt: expect.any(Number) },
+            { id: 'gemini-search-result:%E7%AE%80%E5%8E%86:1', title: 'AI 时代下的职业发展策略', updatedAt: expect.any(Number) },
+            { id: 'gemini-search-result:%E7%AE%80%E5%8E%86:2', title: 'PDF 转 Markdown 简历', updatedAt: expect.any(Number) },
+            { id: 'gemini-search-result:%E7%AE%80%E5%8E%86:3', title: 'AI 时代职业发展与品牌建设', updatedAt: expect.any(Number) },
+            { id: 'gemini-search-result:%E7%AE%80%E5%8E%86:4', title: 'ChatPrizm 功能增强策略', updatedAt: expect.any(Number) },
+            { id: 'gemini-search-result:%E7%AE%80%E5%8E%86:5', title: '蒙特利尔卖房流程与注意事项', updatedAt: expect.any(Number) }
+        ]);
+
+        locationSpy.mockRestore();
+    });
+
+    it('reads the Gemini result count from class-based count nodes', async () => {
+        const locationSpy = mockGeminiLocation('/search');
+        document.body.innerHTML = `
+            <input type="text" aria-label="搜索对话" value="" />
+            <button type="button" aria-label="搜索">搜索</button>
+            <main>
+                <conversations-list data-test-id="all-conversations" hidden></conversations-list>
+                <search-window>
+                    <div class="search-results-count">共 3 条结果</div>
+                    <div class="search-window-container"></div>
+                </search-window>
+            </main>
+        `;
+
+        const submit = document.querySelector('button[aria-label="搜索"]') as HTMLButtonElement;
+        submit.addEventListener('click', () => {
+            const container = document.querySelector('search-window .search-window-container');
+            if (!container) {
+                return;
+            }
+
+            setTimeout(() => {
+                container.innerHTML = `
+                    <article ng-reflect-router-link="/app/search-1">
+                        <span class="conversation-title">简历优化建议</span>
+                    </article>
+                    <article ng-reflect-router-link="/app/search-2">
+                        <span class="conversation-title">简历项目经历改写</span>
+                    </article>
+                    <article ng-reflect-router-link="/app/search-3">
+                        <span class="conversation-title">英文简历润色</span>
+                    </article>
+                `;
+            }, 60);
+        });
+
+        const searchConfig: GeminiHistoryRemoteConfig = {
+            ...CONFIG,
+            selectors: {
+                ...CONFIG.selectors,
+                historySearchInput: 'input[aria-label="搜索对话"]',
+                historySearchSubmit: 'button[aria-label="搜索"]',
+                historySearchResultContainer: 'search-window',
+                historySearchResultItem: 'article, [ng-reflect-router-link*="/app/"], [role="option"]',
+                historySearchResultCount: '[class*="result-count" i], [class*="results-count" i]'
+            }
+        };
+
+        const response = await handleGeminiHistoryRequestForTest({
+            action: 'GET_HISTORY_LIST',
+            config: searchConfig,
+            query: '简历'
+        });
+
+        expect(response).toEqual({
+            ok: true,
+            data: [
+                { id: 'search-1', title: '简历优化建议', updatedAt: expect.any(Number) },
+                { id: 'search-2', title: '简历项目经历改写', updatedAt: expect.any(Number) },
+                { id: 'search-3', title: '英文简历润色', updatedAt: expect.any(Number) }
+            ]
+        });
+        locationSpy.mockRestore();
+    });
+
+    it('excludes clear-search controls and keeps only visible result rows', () => {
+        const locationSpy = mockGeminiLocation('/search');
+        document.body.innerHTML = `
+            <input type="text" aria-label="搜索对话" value="简历" />
+            <main>
+                <search-window>
+                    <search-bar>
+                        <button data-test-id="clear-button" aria-label="清除搜索内容"></button>
+                    </search-bar>
+                    <div class="search-results-count">6 条与“简历”相符的搜索结果</div>
+                    <div class="results-body">
+                        <div class="result-row">
+                            <div class="title">简历重构：AI 集成专家定位</div>
+                            <div class="summary">你好！这份新的职业形象策略制定得非常精准。</div>
+                            <div class="date">3月26日</div>
+                        </div>
+                        <div class="result-row">
+                            <div class="title">PDF 转 Markdown 简历</div>
+                            <div class="summary">这份是根据您提供的 PDF 内容整理而成的 Markdown 格式简历。</div>
+                            <div class="date">3月19日</div>
+                        </div>
+                    </div>
+                </search-window>
+            </main>
+        `;
+
+        const searchConfig: GeminiHistoryRemoteConfig = {
+            ...CONFIG,
+            selectors: {
+                ...CONFIG.selectors,
+                historySearchInput: 'input[aria-label="搜索对话"]',
+                historySearchResultContainer: 'search-window',
+                historySearchResultItem: 'article, [role="option"], .result-row'
+            }
+        };
+
+        expect(extractHistoryList(searchConfig, '简历')).toEqual([
+            { id: 'gemini-search-result:%E7%AE%80%E5%8E%86:0', title: '简历重构：AI 集成专家定位', updatedAt: expect.any(Number) },
+            { id: 'gemini-search-result:%E7%AE%80%E5%8E%86:1', title: 'PDF 转 Markdown 简历', updatedAt: expect.any(Number) }
+        ]);
+
+        locationSpy.mockRestore();
+    });
+
     it('returns temporary ids for search-window rows without extractable history links', async () => {
         const locationSpy = mockGeminiLocation('/search');
-        const consoleSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
         document.body.innerHTML = `
             <input type="text" aria-label="搜索对话" value="" />
             <main>
@@ -651,12 +949,6 @@ describe('gemini-history.preload auth detection', () => {
                 updatedAt: expect.any(Number)
             }
         ]);
-        const diagnosticLog = consoleSpy.mock.calls
-            .map((call) => String(call[0]))
-            .find((line) => line.includes('search-window-diagnostics'));
-        expect(diagnosticLog).toBeUndefined();
-
-        consoleSpy.mockRestore();
         locationSpy.mockRestore();
     });
 

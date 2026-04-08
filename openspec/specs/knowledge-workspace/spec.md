@@ -1,37 +1,52 @@
 ## MODIFIED Requirements
 
 ### Requirement: Knowledge workspace MUST provide a default assistant pane that is bound to the active scope agent
-知识工作区的右栏 MUST 默认渲染真实的 AI 对话 pane，并将其绑定到当前激活文件或目录解析得到的生效 Agent 上下文，而不是始终以全局固定的通用聊天身份运行。该 pane MUST 继续复用现有聊天视图，但其发送链路 MUST 感知当前作用域 Agent 的名称、目标模型、指令和能力边界，并在第一阶段通过 `AgentRuntime` 驱动 Gemini 原生 Agent 或普通聊天 fallback。
+知识工作区的右栏 MUST 默认渲染真实的 AI 对话 pane，并将其绑定到当前激活文件或目录解析得到的生效 Agent 上下文，而不是始终以全局固定的通用聊天身份运行。该 pane MUST 继续复用现有聊天详情视图，但在当前选中节点为文档时，右栏 MUST 先进入该文档的关联会话列表，在当前选中节点为绑定 Agent 的目录时，右栏 MUST 先进入该 Agent 的本地会话列表，再由用户切换到具体会话详情。文档关联会话列表 MUST 通过 `IContextProvider` 提供的通用会话查询能力获取，而目录级 Agent 会话列表 MUST 复用当前 `agentKey` 作用域下的本地会话聚合结果，而不是另起一套列表实现。
 
 #### Scenario: Render the default assistant pane with the active scope agent
 - **WHEN** 宿主进入知识工作区且当前激活节点已经解析出一个生效 Agent
 - **THEN** 系统 MUST 在右栏渲染默认的 `AgentPane`
-- **AND** 该 pane MUST 继续复用现有聊天视图并通过 `AgentRuntime` 发送当前 Agent 上下文请求，而不是忽略文件树作用域
+- **AND** 该 pane MUST 继续复用现有聊天详情视图并通过 `AgentRuntime` 发送当前 Agent 上下文请求，而不是忽略文件树作用域
 
 #### Scenario: Pass workspace context with assistant requests
 - **WHEN** 知识工作区右栏 Agent 发送一次请求
 - **THEN** 系统 MUST 将当前 `activePath`、`contextProvider` 以及可用的 `activeDocument` 一并传给 `AgentRuntime`
 - **AND** 后续文件工具执行 MUST 能使用这组工作区上下文
 
-#### Scenario: Inject the active text document on the first turn only when the provider accepts its MIME type
-- **WHEN** 当前选中的知识工作区节点是文本文件，且右栏 Agent 在当前会话首轮发送请求
-- **THEN** 系统 MUST 先根据当前模型 provider 声明的可接受 `mimeType` 判断该文档是否可进入请求
-- **AND** 仅当 provider 接受该 `mimeType` 时，系统 MUST 将该文档内容作为首轮请求的 primary context 注入模型输入
+#### Scenario: Default to a document-scoped conversation list when a document is selected
+- **WHEN** 用户在知识工作区当前选中一个文档节点
+- **THEN** 右侧 `AgentPane` MUST 默认显示该文档的关联会话列表，而不是直接进入某条会话详情
+- **AND** 该列表 MUST 保持当前生效 `agentKey` 作用域，不得混入其他 Agent 的会话
 
-#### Scenario: Attach the active binary document on the first turn only when the provider accepts its MIME type
-- **WHEN** 当前选中的知识工作区节点是 PDF 等二进制文档，且右栏 Agent 在当前会话首轮发送请求
-- **THEN** 系统 MUST 先根据当前模型 provider 声明的可接受 `mimeType` 判断该文档是否可进入请求
-- **AND** 仅当 provider 接受该 `mimeType` 时，系统 MUST 将该文档作为首轮请求的标准附件加入请求，而不是把 `dataBase64` 当作正文文本注入
+#### Scenario: Load document-scoped conversations through the context provider
+- **WHEN** 右侧 `AgentPane` 需要展示当前文档的关联会话列表
+- **THEN** 系统 MUST 通过 `IContextProvider.getConversations({ documentPath })` 读取该列表
+- **AND** UI MUST NOT 直接以本地 `chatStore.conversations` 作为唯一数据源拼装结果
 
-#### Scenario: Omit unsupported document content from the model request
-- **WHEN** 当前模型 provider 未声明接受当前激活文档的 `mimeType`
-- **THEN** 系统 MUST NOT 把该文档正文或附件直接注入模型请求
-- **AND** 系统 MUST 继续保留 `activePath`、`contextProvider` 与作用域 Agent 上下文供后续工具使用
+#### Scenario: Keep assistant detail mode for directory selections
+- **WHEN** 用户当前选中的是目录节点而不是文档节点
+- **THEN** 右侧 `AgentPane` MUST 继续显示聊天详情视图
+- **AND** 系统 MUST NOT 因目录选中态强制进入文档会话列表
 
-#### Scenario: Persist the actual first-turn document input into history
-- **WHEN** 首轮请求真实采纳了当前文本文件或二进制文档作为模型输入
+#### Scenario: Default to an agent-scoped conversation list when an agent-bound directory is selected
+- **WHEN** 用户在知识工作区当前选中一个绑定了 Agent 的目录节点
+- **THEN** 右侧 `AgentPane` MUST 默认显示属于当前 `agentKey` 的本地会话列表
+- **AND** 该列表 MUST NOT 混入其他 Agent 作用域的会话
+
+#### Scenario: Reuse the existing conversation list component for agent-bound directories
+- **WHEN** 系统在右侧 `AgentPane` 中展示绑定 Agent 的目录级会话列表
+- **THEN** 系统 MUST 复用当前列表/详情双态面板中的现有会话列表组件
+- **AND** 系统 MUST NOT 为目录级 Agent 会话再创建一套独立的右侧列表交互
+
+#### Scenario: Include the active document only when the provider accepts its MIME type
+- **WHEN** 当前知识工作区节点是一个文件且右栏 Agent 发起请求
+- **THEN** Agent 运行时请求契约 MUST 允许程序侧根据模型 provider 声明的文档能力决定是否附带该 `activeDocument`
+- **AND** 当 provider 未声明接受当前 `mimeType` 时，系统 MUST NOT 把该文档内容作为正文或附件直接注入模型输入
+
+#### Scenario: Expose the actual first-turn document input for document association
+- **WHEN** 首轮请求真实采纳了当前文档作为模型输入附件
 - **THEN** 系统 MUST 将该文档作为真实请求的一部分写回当前 user message 的历史记录
-- **AND** 该历史记录 MUST 能完整还原该轮真实发送的 prompt 与 attachments，而不区分该文档来自手动上传还是自动采纳
+- **AND** 后续文档关联关系 MUST 基于这份真实请求快照建立，而不是仅凭 UI 选中态推断
 
 #### Scenario: Follow-up turns replay prior document context from history only
 - **WHEN** 同一会话进入后续 follow-up 提问

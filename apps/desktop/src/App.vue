@@ -1,48 +1,28 @@
 <template>
-  <div class="app-shell">
-    <AppTopBar
-      :is-compare-mode="isCompareMode"
-      :compare-stage="compareStore.stage"
-      :active-workspace-path="activeWorkspacePath"
-      :workspace-options="PRIMARY_WORKSPACE_ROUTES"
-      @navigate-workspace="onNavigateWorkspace"
-    />
-    <main class="view-host">
-      <DocumentWorkspaceView
-        v-if="isKnowledgeMode"
-        :context-provider="contextProvider"
-      />
-      <ConversationWorkspaceView
-        v-else
-        :is-compare-mode="isCompareMode"
-        :show-history-source-switch="true"
-        :auth-status-override="chatgptAuthStatusOverride"
-        :auth-unavailable-message="chatgptAuthMessage"
-        :auth-recovery-action-label="chatgptAuthRecoveryLabel"
-        :auth-recovery-action-disabled="isLoginActionDisabled('chatgpt-web')"
-        :host-recovery-message="hostRecoveryMessage"
-        :host-recovery-action-label="hostRecoveryActionLabel"
-        :host-recovery-action-disabled="hostRecoveryActionDisabled"
-        @request-normal-mode="navigateTo('/chat')"
-        @request-compare-mode="openCompareMode"
-        @request-auth-recovery="requestChatGPTLogin"
-        @request-host-recovery="requestGeminiHistoryLogin"
-      />
-    </main>
-  </div>
+  <WorkspaceHostApp
+    :current-route-path="currentRoute.path"
+    :navigate-to="navigateTo"
+    :context-provider="contextProvider"
+    :show-history-source-switch="true"
+    :auth-status-override="chatgptAuthStatusOverride"
+    :auth-unavailable-message="chatgptAuthMessage"
+    :auth-recovery-action-label="chatgptAuthRecoveryLabel"
+    :auth-recovery-action-disabled="isLoginActionDisabled('chatgpt-web')"
+    :host-recovery-message="hostRecoveryMessage"
+    :host-recovery-action-label="hostRecoveryActionLabel"
+    :host-recovery-action-disabled="hostRecoveryActionDisabled"
+    @request-auth-recovery="requestChatGPTLogin"
+    @request-host-recovery="requestGeminiHistoryLogin"
+  />
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import {
-  AppTopBar,
-  ConversationWorkspaceView,
-  DocumentWorkspaceView,
-  PRIMARY_WORKSPACE_ROUTES,
   openConversationImportDialog,
-  type ChatRoutePath,
   useChatStore,
-  useCompareStore
+  useCompareStore,
+  WorkspaceHostApp
 } from '@packages/ui';
 import { currentRoute, navigateTo } from './router';
 import { createDesktopContextProvider } from './context/createDesktopContextProvider';
@@ -53,9 +33,6 @@ const chatStore = useChatStore();
 const compareStore = useCompareStore();
 const historyProviders = createDesktopHistoryProviders();
 type LoginProviderId = 'chatgpt-web' | 'gemini-web';
-const isCompareMode = computed(() => currentRoute.value.path === '/compare');
-const isKnowledgeMode = computed(() => currentRoute.value.path === '/');
-const activeWorkspacePath = computed<ChatRoutePath>(() => currentRoute.value.path === '/compare' ? '/chat' : currentRoute.value.path);
 const contextProvider = createDesktopContextProvider();
 const chatgptAuthStatus = ref<boolean | null>(null);
 const openingProviderLoginId = ref<LoginProviderId | null>(null);
@@ -138,15 +115,6 @@ const hostRecoveryActionLabel = computed(() => {
   return '登录 Gemini';
 });
 const hostRecoveryActionDisabled = computed(() => isLoginActionDisabled('gemini-web'));
-
-function openCompareMode() {
-  compareStore.startNewCompare();
-  navigateTo('/compare');
-}
-
-function onNavigateWorkspace(path: ChatRoutePath) {
-  navigateTo(path);
-}
 
 async function refreshChatGPTAuthStatus(): Promise<boolean | null> {
   if (chatStore.currentProviderId !== 'chatgpt-web') {

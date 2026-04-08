@@ -21,6 +21,7 @@ export interface GeminiHistorySelectors {
     historySearchClear?: string;
     historySearchResultContainer?: string;
     historySearchResultItem?: string;
+    historySearchResultCount?: string;
     historySearchEmptyState?: string;
     conversationRoot: string;
     userBubble: string;

@@ -1,4 +1,5 @@
 import type {
+    Conversation,
     ContextDocument,
     ContextNode,
     ContextSearchMatch,
@@ -22,6 +23,10 @@ export class DatabaseContextProvider implements ContextProvider {
 
     async getContext(): Promise<WorkspaceContext> {
         notImplemented();
+    }
+
+    async getConversations(_query: { documentPath?: string }): Promise<Conversation[]> {
+        return [];
     }
 
     async readDocument(_path: string): Promise<ContextDocument> {

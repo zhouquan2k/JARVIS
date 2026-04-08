@@ -1,4 +1,6 @@
 import { DEFAULT_SCOPED_AGENT_CONFIG, resolveScopedAgentConfig } from '../agents/config/resolveScopedAgentConfig';
+import type { Conversation } from '../interfaces/Conversation';
+import type { ConversationQuery } from '../interfaces/IConversationPersistProvider';
 import { DEFAULT_WORKSPACE_AGENT_KEY } from '../interfaces/IContextProvider';
 import type {
     ContextDocument,
@@ -30,6 +32,7 @@ export interface StoredContextNode {
 export interface StoredWorkspaceSnapshot {
     nodes: StoredContextNode[];
     documents: Record<string, string | Partial<ContextDocument>>;
+    conversations?: Conversation[];
 }
 
 function cloneSnapshot(snapshot: StoredWorkspaceSnapshot): StoredWorkspaceSnapshot {
@@ -40,7 +43,22 @@ function cloneSnapshot(snapshot: StoredWorkspaceSnapshot): StoredWorkspaceSnapsh
                 path,
                 typeof value === 'string' ? value : { ...value }
             ])
-        )
+        ),
+        conversations: snapshot.conversations?.map((conversation) => ({
+            ...conversation,
+            documentPaths: conversation.documentPaths ? [...conversation.documentPaths] : undefined,
+            messages: conversation.messages.map((message) => ({
+                ...message,
+                attachments: message.attachments?.map((attachment) => ({ ...attachment })),
+                requestSnapshot: message.requestSnapshot
+                    ? {
+                        ...message.requestSnapshot,
+                        attachments: message.requestSnapshot.attachments?.map((attachment) => ({ ...attachment }))
+                    }
+                    : undefined,
+                annotations: message.annotations?.map((annotation) => ({ ...annotation }))
+            }))
+        }))
     };
 }
 
@@ -117,7 +135,8 @@ export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): I
         ],
         documents: {
             '/welcome.md': '# Welcome\n\nMock context provider'
-        }
+        },
+        conversations: []
     });
 
     const provider: IContextProvider = {
@@ -200,6 +219,36 @@ export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): I
                 nodes: await buildNodes(),
                 agentConfigs: Object.fromEntries(agentConfigs.entries())
             };
+        },
+        async getConversations(query: ConversationQuery): Promise<Conversation[]> {
+            const normalizedPath = normalizePath(query.documentPath);
+            if (query.documentPath !== undefined && !normalizedPath) {
+                throw new Error('文档路径不能为空');
+            }
+
+            return (currentSnapshot.conversations ?? [])
+                .filter((conversation) => {
+                    if (normalizedPath) {
+                        return conversation.documentPaths?.includes(normalizedPath);
+                    }
+                    return true;
+                })
+                .map((conversation) => ({
+                    ...conversation,
+                    documentPaths: conversation.documentPaths ? [...conversation.documentPaths] : undefined,
+                    messages: conversation.messages.map((message) => ({
+                        ...message,
+                        attachments: message.attachments?.map((attachment) => ({ ...attachment })),
+                        requestSnapshot: message.requestSnapshot
+                            ? {
+                                ...message.requestSnapshot,
+                                attachments: message.requestSnapshot.attachments?.map((attachment) => ({ ...attachment }))
+                            }
+                            : undefined,
+                        annotations: message.annotations?.map((annotation) => ({ ...annotation }))
+                    }))
+                }))
+                .sort((left, right) => right.updatedAt - left.updatedAt);
         },
         async readDocument(path: string): Promise<ContextDocument> {
             const normalizedPath = normalizePath(path);

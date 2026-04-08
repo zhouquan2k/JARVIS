@@ -18,21 +18,22 @@ export interface CreateAppOptions {
     contextProvider?: ContextProvider;
 }
 
-function createContextProvider(config: ServerConfig): ContextProvider {
+function createContextProvider(config: ServerConfig, repository: SyncRepository): ContextProvider {
     if (config.contextBackend === 'database') {
         return new DatabaseContextProvider();
     }
 
     return new FileSystemContextProvider({
-        rootPath: config.knowledgeRoot
+        rootPath: config.knowledgeRoot,
+        conversationQueryProvider: repository
     });
 }
 
 export function createApp(options: CreateAppOptions = {}) {
     const config = options.config ?? resolveServerConfig();
     const database = options.database ?? createDatabase(config);
-    const contextProvider = options.contextProvider ?? createContextProvider(config);
     const repository = new SyncRepository(database);
+    const contextProvider = options.contextProvider ?? createContextProvider(config, repository);
     const service = new SyncService(repository);
     const contextService = new HttpContextService(contextProvider);
     const app = new Hono();

@@ -1,39 +1,19 @@
 <template>
-  <div class="app-shell">
-    <AppTopBar
-      :is-compare-mode="isCompareMode"
-      :compare-stage="compareStore.stage"
-      :active-workspace-path="activeWorkspacePath"
-      :workspace-options="PRIMARY_WORKSPACE_ROUTES"
-      @navigate-workspace="onNavigateWorkspace"
-    />
-    <main class="view-host">
-      <DocumentWorkspaceView
-        v-if="isKnowledgeMode"
-        :context-provider="contextProvider"
-      />
-      <ConversationWorkspaceView
-        v-else
-        :is-compare-mode="isCompareMode"
-        :show-history-source-switch="true"
-        @request-normal-mode="navigateTo('/chat')"
-        @request-compare-mode="openCompareMode"
-      />
-    </main>
-  </div>
+  <WorkspaceHostApp
+    :current-route-path="currentRoute.path"
+    :navigate-to="navigateTo"
+    :context-provider="contextProvider"
+    :show-history-source-switch="true"
+  />
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, toRaw, watchEffect } from 'vue';
+import { onMounted, onUnmounted, ref, toRaw, watchEffect } from 'vue';
 import {
-  AppTopBar,
-  ConversationWorkspaceView,
-  DocumentWorkspaceView,
-  PRIMARY_WORKSPACE_ROUTES,
   openConversationImportDialog,
-  type ChatRoutePath,
   useChatStore,
-  useCompareStore
+  useCompareStore,
+  WorkspaceHostApp
 } from '@packages/ui';
 import { type SyncStorageProvider } from '@packages/core/src';
 import { currentRoute, navigateTo } from './router';
@@ -45,9 +25,6 @@ import { createExtensionSyncStorageProvider } from './sync';
 const chatStore = useChatStore();
 const compareStore = useCompareStore();
 const historyProviders = createExtensionHistoryProviders();
-const isCompareMode = computed(() => currentRoute.value.path === '/compare');
-const isKnowledgeMode = computed(() => currentRoute.value.path === '/');
-const activeWorkspacePath = computed<ChatRoutePath>(() => currentRoute.value.path === '/compare' ? '/chat' : currentRoute.value.path);
 const contextProvider = createExtensionContextProvider({
   env: import.meta.env as Record<string, string | undefined>
 });
@@ -57,15 +34,6 @@ let storageProvider: SyncStorageProvider | null = null;
 let syncIntervalId: number | null = null;
 let onlineHandler: (() => void) | null = null;
 let visibilityHandler: (() => void) | null = null;
-
-function openCompareMode() {
-  compareStore.startNewCompare();
-  navigateTo('/compare');
-}
-
-function onNavigateWorkspace(path: ChatRoutePath) {
-  navigateTo(path);
-}
 
 function triggerSync() {
   if (!storageProvider) {

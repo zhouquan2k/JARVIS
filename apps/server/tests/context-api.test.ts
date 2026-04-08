@@ -138,6 +138,14 @@ describe('context api', () => {
             body: '{}'
         });
         expect(refreshedContextResponse.status).toBe(200);
+
+        const listDocumentConversationsResponse = await app.request('/api/context/get-conversations', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ documentPath: '/welcome-renamed.md' })
+        });
+        expect(listDocumentConversationsResponse.status).toBe(200);
+        await expect(listDocumentConversationsResponse.json()).resolves.toEqual({ conversations: [] });
     });
 
     it('reads pdf documents through /api/context/read-document with binary payload and read-only metadata', async () => {
@@ -213,6 +221,14 @@ describe('context api', () => {
                 nodes: [{ path: '/virtual.md', name: 'virtual.md', kind: 'file', agentKey: '/' }],
                 agentConfigs: {}
             })),
+            getConversations: vi.fn(async (query: { documentPath?: string }) => [{
+                id: 'conversation-1',
+                title: 'Virtual conversation',
+                origin: 'local',
+                documentPaths: query.documentPath ? [query.documentPath] : undefined,
+                messages: [],
+                updatedAt: 100
+            }]),
             readDocument: vi.fn(async (filePath: string) => ({
                 path: filePath,
                 mimeType: 'text/markdown',
@@ -253,5 +269,22 @@ describe('context api', () => {
             agentConfigs: {}
         });
         expect(provider.getContext).toHaveBeenCalledTimes(1);
+
+        const listDocumentConversationsResponse = await app.request('/api/context/get-conversations', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ documentPath: '/virtual.md' })
+        });
+
+        expect(listDocumentConversationsResponse.status).toBe(200);
+        await expect(listDocumentConversationsResponse.json()).resolves.toEqual({
+            conversations: [
+                expect.objectContaining({
+                    id: 'conversation-1',
+                    documentPaths: ['/virtual.md']
+                })
+            ]
+        });
+        expect(provider.getConversations).toHaveBeenCalledWith({ documentPath: '/virtual.md' });
     });
 });

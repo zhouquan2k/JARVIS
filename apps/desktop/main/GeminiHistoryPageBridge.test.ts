@@ -52,6 +52,7 @@ describe('GeminiHistoryPageBridge', () => {
     });
 
     it('forwards the search query through the hidden-page request payload', async () => {
+        const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
         const executeJavaScript = vi.fn().mockResolvedValue({
             ok: true,
             data: []
@@ -72,6 +73,22 @@ describe('GeminiHistoryPageBridge', () => {
         await bridge.getHistoryList(CONFIG as any, { query: 'incident' });
 
         expect(executeJavaScript.mock.calls[0]?.[0]).toContain('"query":"incident"');
+        expect(executeJavaScript.mock.calls[0]?.[0]).toContain('"debugTraceId":"gemini-history_load-');
+        expect(logSpy.mock.calls.some((call) => {
+            const line = String(call[0] ?? '');
+            const payload = String(call[1] ?? '');
+            return line.includes('[GeminiHistoryBridge]')
+                && payload.includes('"stage":"history-request-dispatch"')
+                && payload.includes('"query":"incident"');
+        })).toBe(true);
+        expect(logSpy.mock.calls.some((call) => {
+            const line = String(call[0] ?? '');
+            const payload = String(call[1] ?? '');
+            return line.includes('[GeminiHistoryBridge]')
+                && payload.includes('"stage":"history-request-response"')
+                && payload.includes('"query":"incident"');
+        })).toBe(true);
+        logSpy.mockRestore();
     });
 
     it('navigates to the target conversation page when requesting detail', async () => {

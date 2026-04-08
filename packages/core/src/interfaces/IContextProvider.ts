@@ -1,3 +1,5 @@
+import type { Conversation } from './Conversation';
+import type { ConversationQuery } from './IConversationPersistProvider';
 import type { ResolvedAgentConfig } from './IAgentConfig';
 
 export const DEFAULT_WORKSPACE_AGENT_KEY = '/';
@@ -63,6 +65,7 @@ export interface IContextProvider {
     id: string;
     initializeAccess(): Promise<void>;
     getContext(): Promise<WorkspaceContext>;
+    getConversations(query: ConversationQuery): Promise<Conversation[]>;
     readDocument(path: string): Promise<ContextDocument>;
     writeDocument(input: WriteContextDocumentInput): Promise<void>;
     createNode(input: CreateContextNodeInput): Promise<ContextNode>;

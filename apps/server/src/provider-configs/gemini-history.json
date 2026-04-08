@@ -1,6 +1,6 @@
 {
   "providerId": "gemini-web",
-  "version": "2026-04-01.3",
+  "version": "2026-04-08.2",
   "matchOrigins": [
     "https://gemini.google.com"
   ],
@@ -13,7 +13,8 @@
     "historySearchSubmit": "button[aria-label*=\"Search\" i], button[title*=\"Search\" i], button[aria-label*=\"搜索\" i], button[title*=\"搜索\" i], [data-test-id=\"history-search-submit\"]",
     "historySearchClear": "button[aria-label*=\"Clear\" i], button[title*=\"Clear\" i], button[aria-label*=\"关闭\" i], button[title*=\"关闭\" i], button[aria-label*=\"清除\" i], button[title*=\"清除\" i], [data-test-id=\"history-search-clear\"]",
     "historySearchResultContainer": "search-window",
-    "historySearchResultItem": "[data-test-id=\"conversation\"], [data-test-id=\"search-result\"], [ng-reflect-router-link*=\"/app/\"], [routerlink*=\"/app/\"], [href*=\"/app/\"]",
+    "historySearchResultItem": "search-snippet [role=\"button\"], .snippet-container[role=\"button\"], article, [data-test-id=\"conversation\"], [data-test-id=\"search-result\"], [role=\"option\"], [ng-reflect-router-link*=\"/app/\"], [routerlink*=\"/app/\"], a[href*=\"/app/\"], li",
+    "historySearchResultCount": "search-window [data-test-id=\"result-count\"], search-window [data-test-id=\"results-count\"], search-window [class*=\"result-count\" i], search-window [class*=\"results-count\" i], search-window [aria-label*=\"result\" i], search-window [aria-label*=\"结果\" i], search-window [aria-live=\"polite\"], search-window [role=\"status\"]",
     "historySearchEmptyState": "search-window [data-test-id=\"empty-state\"], search-window [data-test-id=\"no-results\"], search-window [role=\"status\"], search-window [aria-live=\"polite\"]",
     "conversationRoot": "main, [data-test-id=\"conversation-root\"]",
     "userBubble": "[data-test-id=\"user-query\"], user-query, [data-message-author=\"user\"]",

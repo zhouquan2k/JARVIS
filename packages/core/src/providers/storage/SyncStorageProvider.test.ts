@@ -126,6 +126,7 @@ function createConversation(
         title: overrides.title ?? `Conversation ${overrides.id}`,
         origin: overrides.origin ?? 'local',
         agentKey: overrides.agentKey,
+        starred: overrides.starred,
         messages: overrides.messages ?? [],
         updatedAt: overrides.updatedAt,
         backendId: overrides.backendId,
@@ -205,16 +206,19 @@ describe('SyncStorageProvider', () => {
         await provider.saveConversation(createConversation({
             id: 'sync-agent',
             updatedAt: 200,
-            agentKey: '/workspace/.agent.json'
+            agentKey: '/workspace/.agent.json',
+            starred: true
         }));
 
         await expect(provider.getConversation('sync-agent')).resolves.toMatchObject({
             id: 'sync-agent',
-            agentKey: '/workspace/.agent.json'
+            agentKey: '/workspace/.agent.json',
+            starred: true
         });
 
         await provider.syncNow();
         expect(transport.pushes[0]?.[0]?.agentKey).toBe('/workspace/.agent.json');
+        expect(transport.pushes[0]?.[0]?.starred).toBe(true);
     });
 
     it('pushes dirty conversations and keeps compare-only conversations local', async () => {

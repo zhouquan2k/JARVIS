@@ -1,4 +1,6 @@
 import { DEFAULT_SYNC_BASE_URL, resolveSyncBaseUrl } from '../../../config';
+import type { Conversation } from '../../interfaces/Conversation';
+import type { ConversationQuery } from '../../interfaces/IConversationPersistProvider';
 import type {
     ContextDocument,
     ContextNode,
@@ -81,6 +83,11 @@ export class HttpContextProvider implements IContextProvider {
     async getContext(): Promise<WorkspaceContext> {
         const response = await this.post('/get-context', {});
         return response as WorkspaceContext;
+    }
+
+    async getConversations(query: ConversationQuery): Promise<Conversation[]> {
+        const response = await this.post('/get-conversations', { ...query });
+        return (response as { conversations: Conversation[] }).conversations;
     }
 
     async readDocument(path: string): Promise<ContextDocument> {

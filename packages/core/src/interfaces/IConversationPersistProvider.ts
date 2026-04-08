@@ -1,5 +1,13 @@
 import type { Conversation } from './Conversation';
 
+export interface ConversationQuery {
+    documentPath?: string;
+}
+
+export interface IConversationQueryProvider {
+    getConversations(query: ConversationQuery): Promise<Conversation[]>;
+}
+
 export interface IConversationPersistProvider {
     id: string;
     saveConversation(chat: Conversation): Promise<void>;

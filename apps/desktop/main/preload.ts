@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import {
     DESKTOP_CONTEXT_CREATE_NODE_CHANNEL,
     DESKTOP_CONTEXT_DELETE_NODE_CHANNEL,
+    DESKTOP_CONTEXT_GET_CONVERSATIONS_CHANNEL,
     DESKTOP_CONTEXT_GET_CONTEXT_CHANNEL,
     DESKTOP_CONTEXT_INITIALIZE_CHANNEL,
     DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL,
@@ -29,6 +30,9 @@ contextBridge.exposeInMainWorld('chatprismDesktop', {
     },
     getContext() {
         return ipcRenderer.invoke(DESKTOP_CONTEXT_GET_CONTEXT_CHANNEL);
+    },
+    getConversations(query: { documentPath?: string }) {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_GET_CONVERSATIONS_CHANNEL, query);
     },
     readContextDocument(path: string) {
         return ipcRenderer.invoke(DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL, path);

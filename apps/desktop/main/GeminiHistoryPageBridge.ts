@@ -90,6 +90,20 @@ export class GeminiHistoryPageBridge implements GeminiHistoryBridge {
         const traceId = `gemini-${source}-${Date.now()}-${++geminiHistoryTraceCounter}`;
         const targetUrl = getTargetUrl(this.pageUrl, externalId);
         const forceReload = options.forceReload === true || source === 'history_load';
+        const requestWithTrace = {
+            ...request,
+            debugTraceId: traceId
+        } satisfies GeminiContentRequest;
+        if (request.action === 'GET_HISTORY_LIST') {
+            console.log('[GeminiHistoryBridge]', JSON.stringify({
+                stage: 'history-request-dispatch',
+                traceId,
+                source,
+                query: request.query ?? '',
+                targetUrl,
+                forceReload
+            }));
+        }
         if (request.action === 'GET_HISTORY_DETAIL') {
             console.log('[GeminiHistoryBridge]', JSON.stringify({
                 stage: 'detail-request-dispatch',
@@ -107,6 +121,16 @@ export class GeminiHistoryPageBridge implements GeminiHistoryBridge {
             forceReload
         });
         this.forwardPageConsole(page);
+        if (request.action === 'GET_HISTORY_LIST') {
+            console.log('[GeminiHistoryBridge]', JSON.stringify({
+                stage: 'history-request-page-ready',
+                traceId,
+                source,
+                query: request.query ?? '',
+                targetUrl,
+                pageUrl: page.getURL()
+            }));
+        }
         if (request.action === 'GET_HISTORY_DETAIL') {
             console.log('[GeminiHistoryBridge]', JSON.stringify({
                 stage: 'detail-request-page-ready',
@@ -127,7 +151,7 @@ export class GeminiHistoryPageBridge implements GeminiHistoryBridge {
                 settleDelayMs: GEMINI_HISTORY_DETAIL_PAGE_SETTLE_MS
             }));
         }
-        const requestJson = JSON.stringify(request);
+        const requestJson = JSON.stringify(requestWithTrace);
 
         const response = await page.executeJavaScript(`
             (() => {
@@ -139,6 +163,17 @@ export class GeminiHistoryPageBridge implements GeminiHistoryBridge {
                 return bridge.request(${requestJson});
             })()
         `, true);
+        if (request.action === 'GET_HISTORY_LIST') {
+            console.log('[GeminiHistoryBridge]', JSON.stringify({
+                stage: 'history-request-response',
+                traceId,
+                source,
+                query: request.query ?? '',
+                targetUrl,
+                pageUrl: page.getURL(),
+                ok: typeof response === 'object' && response !== null && 'ok' in response ? (response as { ok?: unknown }).ok === true : null
+            }));
+        }
         if (request.action === 'GET_HISTORY_DETAIL') {
             console.log('[GeminiHistoryBridge]', JSON.stringify({
                 stage: 'detail-request-response',

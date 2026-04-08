@@ -5,12 +5,10 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { reactive, ref } from 'vue';
 
 const mockOpenConversationImportDialog = vi.fn();
-const mockNavigateTo = vi.fn();
 const mockCurrentRoute = ref({ path: '/chat' });
 
 const chatStore = reactive({
     currentError: null as string | null,
-    resetWorkspaceConversationState: vi.fn(),
     setProviderCatalog: vi.fn(),
     setAgentRuntime: vi.fn(),
     setModelProviderResolver: vi.fn(),
@@ -28,27 +26,18 @@ const compareStore = reactive({
     setRuntime: vi.fn().mockResolvedValue(undefined),
     startNewCompare: vi.fn()
 });
+const workspaceHostProps = vi.fn();
 
 vi.mock('@packages/ui', () => ({
-    PRIMARY_WORKSPACE_ROUTES: [
-        { path: '/', name: 'knowledge-workspace', label: '工作区' },
-        { path: '/chat', name: 'normal-chat', label: '对话' }
-    ],
-    AppTopBar: {
+    WorkspaceHostApp: {
+        props: ['currentRoutePath', 'navigateTo', 'contextProvider'],
         template: `
-          <div data-testid="topbar-stub">
-            <button data-testid="topbar-knowledge" @click="$emit('navigate-workspace', '/')">知识</button>
-            <button data-testid="topbar-chat" @click="$emit('navigate-workspace', '/chat')">聊天</button>
-          </div>
+          <div
+            data-testid="workspace-host-stub"
+            :data-route-path="currentRoutePath"
+            :data-context-id="contextProvider?.id || ''"
+          />
         `
-    },
-    ConversationWorkspaceView: {
-        props: ['isCompareMode', 'showHistorySourceSwitch'],
-        template: '<div data-testid="conversation-workspace-stub" />'
-    },
-    DocumentWorkspaceView: {
-        props: ['contextProvider'],
-        template: '<div data-testid="document-workspace-stub" />'
     },
     openConversationImportDialog: mockOpenConversationImportDialog,
     useChatStore: () => chatStore,
@@ -57,7 +46,9 @@ vi.mock('@packages/ui', () => ({
 
 vi.mock('./router', () => ({
     currentRoute: mockCurrentRoute,
-    navigateTo: mockNavigateTo
+    navigateTo: vi.fn((path: string) => {
+        workspaceHostProps(path);
+    })
 }));
 
 vi.mock('./context/createWebContextProvider', () => ({
@@ -87,25 +78,12 @@ describe('Web App workspace navigation', () => {
         chatStore.currentError = null;
     });
 
-    it('resets the chat workspace state before navigating to another workspace', async () => {
+    it('renders the shared workspace host with web route and context props', async () => {
         const { default: App } = await import('./App.vue');
         const wrapper = mount(App);
         await flushPromises();
 
-        await wrapper.get('[data-testid="topbar-knowledge"]').trigger('click');
-
-        expect(chatStore.resetWorkspaceConversationState).toHaveBeenCalledTimes(1);
-        expect(mockNavigateTo).toHaveBeenCalledWith('/');
-    });
-
-    it('does not reset the chat workspace state when navigating to the current workspace', async () => {
-        const { default: App } = await import('./App.vue');
-        const wrapper = mount(App);
-        await flushPromises();
-
-        await wrapper.get('[data-testid="topbar-chat"]').trigger('click');
-
-        expect(chatStore.resetWorkspaceConversationState).not.toHaveBeenCalled();
-        expect(mockNavigateTo).toHaveBeenCalledWith('/chat');
+        expect(wrapper.get('[data-testid="workspace-host-stub"]').attributes('data-route-path')).toBe('/chat');
+        expect(wrapper.get('[data-testid="workspace-host-stub"]').attributes('data-context-id')).toBe('web-context');
     });
 });

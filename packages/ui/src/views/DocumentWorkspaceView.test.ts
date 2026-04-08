@@ -127,4 +127,48 @@ describe('DocumentWorkspaceView', () => {
         expect(wrapper.find('[data-testid="agent-view-stub"]').exists()).toBe(false);
         expect(wrapper.get('[data-testid="document-editor"]').exists()).toBe(true);
     });
+
+    it('tells the assistant pane to show the agent conversation list for selected owner directories', async () => {
+        const wrapper = mount(DocumentWorkspaceView, {
+            props: {
+                contextProvider: createMockContextProvider({
+                    nodes: [
+                        { path: '/docs', name: 'docs', kind: 'directory' },
+                        { path: '/docs/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/docs' },
+                        { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' }
+                    ],
+                    documents: {
+                        '/docs/.agent.json': JSON.stringify({
+                            name: 'Docs Agent',
+                            instructions: 'Handle docs.'
+                        }),
+                        '/docs/guide.md': '# Guide'
+                    }
+                })
+            },
+            global: {
+                stubs: {
+                    AgentPane: {
+                        props: ['showAgentConversationList', 'activeAgentKey'],
+                        template: `
+                          <div
+                            data-testid="agent-pane"
+                            :data-show-agent-conversation-list="showAgentConversationList === true"
+                            :data-agent-key="activeAgentKey ?? ''"
+                          />
+                        `
+                    },
+                    AgentView: { template: '<div data-testid="agent-view-stub" />' },
+                    DocumentEditorPane: { template: '<div data-testid="document-editor" />' }
+                }
+            }
+        });
+
+        await flushPromises();
+        await wrapper.get('[data-path="/docs"]').trigger('click');
+        await flushPromises();
+
+        expect(wrapper.get('[data-testid="agent-pane"]').attributes('data-show-agent-conversation-list')).toBe('true');
+        expect(wrapper.get('[data-testid="agent-pane"]').attributes('data-agent-key')).toBe('/docs/');
+    });
 });

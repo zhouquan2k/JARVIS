@@ -4,6 +4,8 @@ import path from 'node:path';
 import { FileSystemContextProvider } from '@packages/node';
 import {
     HttpContextProvider,
+    type ConversationQuery,
+    type IConversationQueryProvider,
     type ContextSearchRequest,
     type IContextProvider,
     type WriteContextDocumentInput
@@ -11,6 +13,7 @@ import {
 import {
     DESKTOP_CONTEXT_CREATE_NODE_CHANNEL,
     DESKTOP_CONTEXT_DELETE_NODE_CHANNEL,
+    DESKTOP_CONTEXT_GET_CONVERSATIONS_CHANNEL,
     DESKTOP_CONTEXT_GET_CONTEXT_CHANNEL,
     DESKTOP_CONTEXT_INITIALIZE_CHANNEL,
     DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL,
@@ -28,6 +31,7 @@ interface RegisterContextIpcOptions {
     ipc?: IpcHandlerRegistry;
     workspaceRoot?: string;
     contextBaseUrl?: string;
+    conversationQueryProvider?: IConversationQueryProvider | null;
     fetchImpl?: typeof fetch;
 }
 
@@ -55,6 +59,7 @@ export async function resolveDesktopWorkspaceRoot(configuredRoot = process.env.C
 function createDesktopMainContextProvider(options: {
     workspaceRoot?: string;
     contextBaseUrl?: string;
+    conversationQueryProvider?: IConversationQueryProvider | null;
     fetchImpl?: typeof fetch;
 }): IContextProvider {
     const contextBaseUrl = options.contextBaseUrl?.trim();
@@ -68,7 +73,8 @@ function createDesktopMainContextProvider(options: {
 
     console.warn('[desktop-context] falling back to local file context provider');
     return new FileSystemContextProvider({
-        rootPath: options.workspaceRoot
+        rootPath: options.workspaceRoot,
+        conversationQueryProvider: options.conversationQueryProvider
     });
 }
 
@@ -77,6 +83,7 @@ export function registerContextIpc(options: RegisterContextIpcOptions = {}) {
     const provider = createDesktopMainContextProvider({
         workspaceRoot: options.workspaceRoot,
         contextBaseUrl: options.contextBaseUrl,
+        conversationQueryProvider: options.conversationQueryProvider,
         fetchImpl: options.fetchImpl
     });
 
@@ -85,6 +92,9 @@ export function registerContextIpc(options: RegisterContextIpcOptions = {}) {
     });
     ipc.handle(DESKTOP_CONTEXT_GET_CONTEXT_CHANNEL, async () => {
         return provider.getContext();
+    });
+    ipc.handle(DESKTOP_CONTEXT_GET_CONVERSATIONS_CHANNEL, async (_event, query: ConversationQuery) => {
+        return provider.getConversations(query);
     });
     ipc.handle(DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL, async (_event, targetPath: string) => {
         return provider.readDocument(targetPath);
@@ -108,6 +118,7 @@ export function registerContextIpc(options: RegisterContextIpcOptions = {}) {
     return () => {
         ipc.removeHandler(DESKTOP_CONTEXT_INITIALIZE_CHANNEL);
         ipc.removeHandler(DESKTOP_CONTEXT_GET_CONTEXT_CHANNEL);
+        ipc.removeHandler(DESKTOP_CONTEXT_GET_CONVERSATIONS_CHANNEL);
         ipc.removeHandler(DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL);
         ipc.removeHandler(DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL);
         ipc.removeHandler(DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL);

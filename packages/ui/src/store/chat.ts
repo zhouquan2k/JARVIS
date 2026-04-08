@@ -28,6 +28,7 @@ export type WorkspaceHistorySource = 'local' | 'external';
 export type WorkspaceMode = 'active' | 'preview';
 export type ExternalFileImportHandler = () => Promise<Conversation | Conversation[] | null>;
 export type QuestionIndexFilter = 'all' | 'starred';
+export type LocalConversationFilter = 'all' | 'starred';
 
 type ProviderModelLoadState = {
     loading: boolean;
@@ -66,6 +67,7 @@ export interface ChatState {
     historySource: WorkspaceHistorySource;
     workspaceMode: WorkspaceMode;
     sidebarCollapsed: boolean;
+    localConversationFilter: LocalConversationFilter;
     isGenerating: boolean;
     isAbortRequested: boolean;
     currentError: string | null;
@@ -218,14 +220,27 @@ function resolveProviderLabel(providerId: ExternalHistoryProviderId): string {
 function normalizeStoredConversation(conversation: Conversation): Conversation {
     const cloned = cloneConversation(conversation);
     if (cloned.origin === 'local') {
-        if (!cloned.agentKey || cloned.agentKey === '__default__') {
-            cloned.agentKey = '/';
-        } else if (cloned.agentKey.endsWith('.agent.json')) {
-            const dir = cloned.agentKey.slice(0, -11);
-            cloned.agentKey = dir.endsWith('/') ? dir : `${dir}/`;
-        }
+        cloned.agentKey = normalizeAgentScopeKey(cloned.agentKey);
     }
     return cloned;
+}
+
+function normalizeAgentScopeKey(agentKey: string | null | undefined): string | undefined {
+    if (!agentKey || !agentKey.trim()) {
+        return undefined;
+    }
+
+    const trimmed = agentKey.trim();
+    if (trimmed === '__default__') {
+        return '/';
+    }
+
+    if (!trimmed.endsWith('.agent.json')) {
+        return trimmed;
+    }
+
+    const dir = trimmed.slice(0, -11);
+    return dir.endsWith('/') ? dir : `${dir}/`;
 }
 
 function resolveModelConfig(provider: ProviderConfig | undefined, modelId: string): ModelConfig | undefined {
@@ -534,6 +549,7 @@ export const useChatStore = defineStore('chat', {
         historySource: 'local',
         workspaceMode: 'active',
         sidebarCollapsed: false,
+        localConversationFilter: 'all',
         isGenerating: false,
         isAbortRequested: false,
         currentError: null,
@@ -578,6 +594,12 @@ export const useChatStore = defineStore('chat', {
 
         activeExternalProvider(state): ExternalHistoryProviderEntry | null {
             return state.historyProviders.find((entry) => entry.id === state.activeExternalProviderId) || null;
+        },
+
+        filteredLocalConversations(state): Conversation[] {
+            return state.conversations.filter((conversation) => (
+                state.localConversationFilter === 'all' || conversation.starred === true
+            ));
         },
 
         questionIndexItems(state): QuestionIndexItem[] {
@@ -992,7 +1014,7 @@ export const useChatStore = defineStore('chat', {
         },
 
         resolveConversationAgentKey(agentKey: string | null): string | undefined {
-            return typeof agentKey === 'string' && agentKey.trim() ? agentKey : undefined;
+            return normalizeAgentScopeKey(agentKey);
         },
 
         applyConversationAgentKey(conversation: Conversation, agentKey: string | null): void {
@@ -1006,12 +1028,58 @@ export const useChatStore = defineStore('chat', {
             }
         },
 
+        resolveConversationDocumentPath(path: string | null, document: ContextDocument | null): string | undefined {
+            if (document?.path?.trim()) {
+                return document.path.trim();
+            }
+
+            return typeof path === 'string' && path.trim() ? path.trim() : undefined;
+        },
+
+        applyConversationDocumentRelation(
+            conversation: Conversation,
+            input: {
+                documentPath: string | null;
+                activeDocument?: ContextDocument | null;
+                requestSnapshot?: ConversationMessage['requestSnapshot'];
+                isFirstTurn: boolean;
+            }
+        ): void {
+            if (conversation.origin !== 'local' || !input.isFirstTurn) {
+                return;
+            }
+
+            const normalizedDocumentPath = this.resolveConversationDocumentPath(
+                input.documentPath,
+                input.activeDocument ?? null
+            );
+            if (!normalizedDocumentPath) {
+                return;
+            }
+
+            const hasActiveDocumentAttachment = input.requestSnapshot?.attachments?.some((attachment) => {
+                return attachment.id === `active-document:${normalizedDocumentPath}`;
+            }) === true;
+            if (!hasActiveDocumentAttachment) {
+                return;
+            }
+
+            const nextDocumentPaths = new Set(conversation.documentPaths ?? []);
+            nextDocumentPaths.add(normalizedDocumentPath);
+            conversation.documentPaths = Array.from(nextDocumentPaths);
+        },
+
         getConversationsByAgent(agentKey: string): Conversation[] {
+            const normalizedAgentKey = normalizeAgentScopeKey(agentKey);
+            if (!normalizedAgentKey) {
+                return [];
+            }
+
             const persistedConversations = this.conversations.filter((conversation) => {
                 return (
                     !conversation.compare
                     && !conversation.sync?.deleted
-                    && conversation.agentKey === agentKey
+                    && normalizeAgentScopeKey(conversation.agentKey) === normalizedAgentKey
                 );
             });
 
@@ -1021,7 +1089,7 @@ export const useChatStore = defineStore('chat', {
                 || activeConversation.compare
                 || activeConversation.sync?.deleted
                 || activeConversation.origin !== 'local'
-                || activeConversation.agentKey !== agentKey
+                || normalizeAgentScopeKey(activeConversation.agentKey) !== normalizedAgentKey
                 || persistedConversations.some((conversation) => conversation.id === activeConversation.id)
             ) {
                 return persistedConversations;
@@ -1082,6 +1150,10 @@ export const useChatStore = defineStore('chat', {
 
         setQuestionIndexFilter(filter: QuestionIndexFilter) {
             this.questionIndexFilter = filter;
+        },
+
+        setLocalConversationFilter(filter: LocalConversationFilter) {
+            this.localConversationFilter = filter;
         },
 
         setQuestionIndexPanelOpen(open: boolean) {
@@ -1170,6 +1242,31 @@ export const useChatStore = defineStore('chat', {
             }
 
             await this.startNewConversation();
+        },
+
+        async toggleConversationStar(id: string) {
+            if (!this.storageProvider) {
+                return;
+            }
+
+            const targetConversation = this.conversations.find((conversation) => conversation.id === id)
+                ?? (this.currentConversation?.id === id ? this.currentConversation : null);
+            if (!targetConversation) {
+                return;
+            }
+
+            const nextConversation = normalizeStoredConversation({
+                ...cloneConversation(targetConversation),
+                starred: targetConversation.starred === true ? undefined : true,
+                updatedAt: Date.now()
+            });
+
+            await this.storageProvider.saveConversation(toRaw(nextConversation));
+            await this.loadLocalConversations();
+
+            if (this.currentConversation?.id === id) {
+                this.currentConversation = nextConversation;
+            }
         },
 
         async startNewConversation() {
@@ -1491,10 +1588,12 @@ export const useChatStore = defineStore('chat', {
             const history = this.currentConversation
                 ? buildProviderHistory(this.currentConversation.messages)
                 : [];
+            const isFirstTurn = history.length === 0;
             const shouldAutoAttachActiveDocument = !!this.activeAgentContext && history.length === 0;
             const activeDocumentForRequest = shouldAutoAttachActiveDocument
                 ? this.activeWorkspaceDocument
                 : null;
+            const requestDocumentPath = this.resolveConversationDocumentPath(this.activeWorkspacePath, activeDocumentForRequest);
             const requestProviderId = this.activeAgentContext?.modelProviderName?.trim() || this.currentProviderId;
             const requestProvider = requestProviderId
                 ? this.resolveModelProvider(requestProviderId)
@@ -1658,6 +1757,12 @@ export const useChatStore = defineStore('chat', {
                 }
 
                 this.applyConversationAgentKey(this.currentConversation!, this.activeWorkspaceAgentKey);
+                this.applyConversationDocumentRelation(this.currentConversation!, {
+                    documentPath: requestDocumentPath ?? null,
+                    activeDocument: activeDocumentForRequest,
+                    requestSnapshot: userMsg?.requestSnapshot,
+                    isFirstTurn
+                });
                 await this.persistCurrentConversation();
             } catch (err: unknown) {
                 if (this.isAbortRequested || isAbortError(err)) {

@@ -1,4 +1,5 @@
 import { Hono, type Context } from 'hono';
+import type { ConversationQuery } from '@packages/core';
 import type { ServerConfig } from '../config.js';
 import { HttpContextService } from '../services/httpContextService.js';
 import type { ContextSearchRequest, CreateContextNodeInput, RenameContextNodeInput, WriteContextDocumentInput } from '../types/context.js';
@@ -57,6 +58,16 @@ function normalizeRequiredPath(body: Record<string, unknown>): string {
         throw new Error('path 不能为空。');
     }
     return value;
+}
+
+function normalizeConversationQuery(body: Record<string, unknown>): ConversationQuery {
+    if (body.documentPath !== undefined && body.documentPath !== null && typeof body.documentPath !== 'string') {
+        throw new Error('documentPath 必须是字符串。');
+    }
+
+    return {
+        documentPath: typeof body.documentPath === 'string' ? body.documentPath : undefined
+    };
 }
 
 function normalizeWriteDocumentInput(body: Record<string, unknown>): WriteContextDocumentInput {
@@ -170,6 +181,16 @@ export function createContextRouter(options: { service: HttpContextService; conf
             return c.json(await service.getContext());
         } catch (error) {
             const message = error instanceof Error ? error.message : '读取工作区上下文失败。';
+            return c.json({ error: message }, 400);
+        }
+    });
+
+    app.post('/get-conversations', async (c) => {
+        try {
+            const body = normalizeObjectBody(await readJsonBody(c));
+            return c.json({ conversations: await service.getConversations(normalizeConversationQuery(body)) });
+        } catch (error) {
+            const message = error instanceof Error ? error.message : '读取文档会话失败。';
             return c.json({ error: message }, 400);
         }
     });

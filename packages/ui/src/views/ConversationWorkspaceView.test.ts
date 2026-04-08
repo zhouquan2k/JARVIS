@@ -131,4 +131,54 @@ describe('ConversationWorkspaceView', () => {
         await wrapper.get('[data-testid="sidebar-delete-stub"]').trigger('click');
         expect(store.deleteLocalConversation).toHaveBeenCalledWith('conversation-1');
     });
+
+    it('passes local starred filter state and routes sidebar star events through the chat store', async () => {
+        const store = useChatStore();
+        store.localConversationFilter = 'starred';
+        store.conversations = [{
+            ...createConversation(),
+            starred: true
+        }];
+        store.toggleConversationStar = vi.fn().mockResolvedValue(undefined);
+
+        const wrapper = mount(ConversationWorkspaceView, {
+            props: {
+                isCompareMode: false
+            },
+            global: {
+                stubs: {
+                    ConversationSidebar: {
+                        props: ['localItems', 'localConversationFilter'],
+                        template: `
+                          <button
+                            data-testid="sidebar-star-stub"
+                            :data-local-count="localItems.length"
+                            :data-filter="localConversationFilter"
+                            @click="$emit('toggle-local-star', 'conversation-1')"
+                          />
+                        `
+                    },
+                    NormalChatView: {
+                        props: [
+                            'showQuestionIndex',
+                            'authStatusOverride',
+                            'authUnavailableMessage',
+                            'authRecoveryActionLabel',
+                            'authRecoveryActionDisabled'
+                        ],
+                        template: '<div data-testid="thread-stub" :data-show-question-index="String(showQuestionIndex)" />'
+                    },
+                    CompareChatView: {
+                        template: '<div data-testid="compare-stub" />'
+                    }
+                }
+            }
+        });
+
+        expect(wrapper.get('[data-testid="sidebar-star-stub"]').attributes('data-filter')).toBe('starred');
+        expect(wrapper.get('[data-testid="sidebar-star-stub"]').attributes('data-local-count')).toBe('1');
+
+        await wrapper.get('[data-testid="sidebar-star-stub"]').trigger('click');
+        expect(store.toggleConversationStar).toHaveBeenCalledWith('conversation-1');
+    });
 });

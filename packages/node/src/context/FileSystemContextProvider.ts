@@ -1,5 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import type { Conversation } from '../../../core/src/interfaces/Conversation.ts';
+import type { ConversationQuery, IConversationQueryProvider } from '../../../core/src/interfaces/IConversationPersistProvider.ts';
 import {
     type AgentConfig,
     type AgentSkillBinding,
@@ -63,6 +65,7 @@ interface SearchableScopedFile {
 
 export interface FileSystemContextProviderOptions {
     rootPath?: string;
+    conversationQueryProvider?: IConversationQueryProvider | null;
 }
 
 type AgentInheritanceMode = 'merge' | 'override';
@@ -475,9 +478,11 @@ function resolveEffectiveAgentBinding(
 export class FileSystemContextProvider implements IContextProvider {
     readonly id = 'local-file-context';
     private readonly rootPath?: string;
+    private readonly conversationQueryProvider: IConversationQueryProvider | null;
 
     constructor(options: FileSystemContextProviderOptions = {}) {
         this.rootPath = options.rootPath?.trim() || undefined;
+        this.conversationQueryProvider = options.conversationQueryProvider ?? null;
     }
 
     async initializeAccess(): Promise<void> {
@@ -501,6 +506,24 @@ export class FileSystemContextProvider implements IContextProvider {
             nodes,
             agentConfigs: Object.fromEntries(agentConfigs.entries())
         };
+    }
+
+    async getConversations(query: ConversationQuery): Promise<Conversation[]> {
+        if (!this.conversationQueryProvider) {
+            return [];
+        }
+
+        const normalizedDocumentPath = query.documentPath === undefined
+            ? undefined
+            : normalizeVirtualPath(query.documentPath, { allowRoot: false });
+        if (query.documentPath !== undefined && !normalizedDocumentPath) {
+            throw new Error('文档路径不能为空。');
+        }
+
+        return this.conversationQueryProvider.getConversations({
+            ...query,
+            documentPath: normalizedDocumentPath
+        });
     }
 
     async readDocument(filePath: string): Promise<ContextDocument> {

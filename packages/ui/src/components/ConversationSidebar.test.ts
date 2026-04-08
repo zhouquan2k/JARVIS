@@ -77,7 +77,76 @@ describe('ConversationSidebar', () => {
         });
 
         expect(wrapper.find('[data-testid="local-history-delete"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid="local-history-star"]').exists()).toBe(false);
         expect(wrapper.findAll('[data-testid="external-history-item"]')).toHaveLength(1);
+    });
+
+    it('emits toggle-local-star for local conversations and shows starred filter toggle', async () => {
+        const wrapper = mount(ConversationSidebar, {
+            props: {
+                collapsed: false,
+                historySource: 'local',
+                localItems: [
+                    {
+                        ...createLocalConversation('local-1', '第一条会话'),
+                        starred: true
+                    }
+                ],
+                localConversationFilter: 'all',
+                externalProviders,
+                externalItems: [],
+                externalHistoryLoading: false,
+                externalHistoryQuery: '',
+                activeExternalProviderId: 'chatgpt-web',
+                isCompareMode: false
+            }
+        });
+
+        expect(wrapper.find('[data-testid="local-history-filter-toggle"]').exists()).toBe(true);
+        expect(wrapper.text()).toContain('★');
+
+        await wrapper.get('[data-testid="local-history-star"]').trigger('click');
+        expect(wrapper.emitted('toggle-local-star')).toEqual([['local-1']]);
+    });
+
+    it('emits set-local-filter when toggling starred-only filter', async () => {
+        const wrapper = mount(ConversationSidebar, {
+            props: {
+                collapsed: false,
+                historySource: 'local',
+                localItems: [createLocalConversation('local-1', '第一条会话')],
+                localConversationFilter: 'all',
+                externalProviders,
+                externalItems: [],
+                externalHistoryLoading: false,
+                externalHistoryQuery: '',
+                activeExternalProviderId: 'chatgpt-web',
+                isCompareMode: false
+            }
+        });
+
+        await wrapper.get('[data-testid="local-history-filter-toggle"]').trigger('click');
+        expect(wrapper.emitted('set-local-filter')).toEqual([['starred']]);
+    });
+
+    it('emits set-local-filter back to all when starred-only filter is active', async () => {
+        const wrapper = mount(ConversationSidebar, {
+            props: {
+                collapsed: false,
+                historySource: 'local',
+                localItems: [createLocalConversation('local-1', '第一条会话')],
+                localConversationFilter: 'starred',
+                externalProviders,
+                externalItems: [],
+                externalHistoryLoading: false,
+                externalHistoryQuery: '',
+                activeExternalProviderId: 'chatgpt-web',
+                isCompareMode: false
+            }
+        });
+
+        await wrapper.get('[data-testid="local-history-filter-toggle"]').trigger('click');
+        expect(wrapper.emitted('set-local-filter')).toEqual([['all']]);
     });
 
     it('renders the shared external history search box only for searchable providers', () => {

@@ -24,6 +24,22 @@ type SearchStabilizationState = {
     baselineSignature: string;
     acceptCurrentSignature?: boolean;
 };
+type SearchResultCountSnapshot = {
+    selector: string;
+    text: string;
+    count: number | null;
+    candidates?: Array<{
+        text: string;
+        signature: ReturnType<typeof describeElementSignature>;
+        path: string[];
+    }>;
+};
+type SearchLoadMoreSnapshot = {
+    beforeCount: number;
+    afterCount: number;
+    targetCount: number | null;
+    sentinelFound: boolean;
+};
 
 export interface GeminiDomScraperOptions {
     debug?: (stage: string, payload?: unknown) => void;
@@ -141,6 +157,37 @@ function buildTemporarySearchResultId(query: string, index: number): string {
     return `${GEMINI_TEMP_SEARCH_RESULT_PREFIX}${encodeURIComponent(query)}:${index}`;
 }
 
+function parseSearchResultCount(text: string): number | null {
+    const normalized = text.replace(/,/g, '');
+    const matches = Array.from(normalized.matchAll(/\d+/g));
+    if (matches.length === 0) {
+        return null;
+    }
+
+    const values = matches
+        .map((match) => Number(match[0]))
+        .filter((value) => Number.isFinite(value) && value >= 0);
+    if (values.length === 0) {
+        return null;
+    }
+
+    return Math.max(...values);
+}
+
+function isSearchResultCountText(text: string, query?: string): boolean {
+    const normalized = summarizeText(text, 200);
+    if (!normalized) {
+        return false;
+    }
+
+    const includesCountKeyword = /搜索结果|相符|匹配|results?|matches?/iu.test(normalized);
+    const includesQuery = Boolean(query && normalized.includes(query));
+    const includesAmount = /\d+/u.test(normalized) && /条|results?|matches?/iu.test(normalized);
+    const compactCountText = /^共?\s*\d+\s*条结果/iu.test(normalized);
+
+    return compactCountText || (includesCountKeyword && includesAmount) || (includesQuery && includesAmount);
+}
+
 function parseTemporarySearchResultId(externalId?: string): { query: string; index: number } | null {
     const value = externalId?.trim();
     if (!value?.startsWith(GEMINI_TEMP_SEARCH_RESULT_PREFIX)) {
@@ -202,10 +249,15 @@ function locationLooksLikeLogin(location: LocationLike): boolean {
 
 export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
     let lastSearchStabilizationState: SearchStabilizationState | null = null;
+    let currentDebugTraceId = '';
+    let lastSearchLoadMoreSnapshots: SearchLoadMoreSnapshot[] = [];
     const debug = options.debug ?? (() => {});
 
     function debugHistory(stage: string, payload?: unknown) {
-        debug(stage, payload);
+        debug(stage, {
+            traceId: currentDebugTraceId || undefined,
+            ...(payload && typeof payload === 'object' ? payload as Record<string, unknown> : { value: payload ?? null })
+        });
     }
 
     function getSearchWindowSummary(config: GeminiHistoryRemoteConfig) {
@@ -246,6 +298,44 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
         };
     }
 
+    function getSearchResultCountSnapshot(config: GeminiHistoryRemoteConfig, query?: string): SearchResultCountSnapshot | null {
+        const selector = config.selectors.historySearchResultCount?.trim();
+        const candidates: SearchResultCountSnapshot['candidates'] = [];
+        const pushCandidate = (element: Element) => {
+            const text = summarizeText(element.textContent, 160);
+            if (!text || parseSearchResultCount(text) === null || !isSearchResultCountText(text, query)) {
+                return;
+            }
+
+            candidates?.push({
+                text,
+                signature: describeElementSignature(element),
+                path: describeElementPath(element, 5)
+            });
+        };
+
+        if (selector) {
+            Array.from(document.querySelectorAll(selector)).forEach(pushCandidate);
+        }
+
+        if (candidates.length === 0) {
+            const searchContainerSelector = config.selectors.historySearchResultContainer?.trim();
+            if (searchContainerSelector) {
+                Array.from(document.querySelectorAll(searchContainerSelector))
+                    .flatMap((container) => Array.from(container.querySelectorAll('div, span, p, h2, h3, h4')))
+                    .forEach(pushCandidate);
+            }
+        }
+
+        const winner = candidates?.sort((left, right) => left.text.length - right.text.length)[0];
+        return {
+            selector: selector || config.selectors.historySearchResultContainer || '',
+            text: winner?.text || '',
+            count: winner ? parseSearchResultCount(winner.text) : null,
+            candidates: candidates?.slice(0, 6)
+        };
+    }
+
     function getDetailDomSnapshot(config: GeminiHistoryRemoteConfig) {
         const conversationRoot = document.querySelector(config.selectors.conversationRoot);
         const userBubbleCount = document.querySelectorAll(config.selectors.userBubble).length;
@@ -269,6 +359,7 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
             })
         };
     }
+
 
     function hasHistoryAttribute(element: Element | null): boolean {
         if (!element) {
@@ -334,6 +425,7 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
     }
 
     function getHistoryDomSnapshot(config: GeminiHistoryRemoteConfig, query?: string) {
+        const countSnapshot = getSearchResultCountSnapshot(config, query);
         return {
             query,
             activeItemSelector: getHistoryItemSelector(config, query),
@@ -341,6 +433,8 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
             searchSubmitMatches: countSelectorMatches(config.selectors.historySearchSubmit),
             searchResultContainerMatches: countSelectorMatches(config.selectors.historySearchResultContainer),
             searchResultMatches: countSelectorMatches(config.selectors.historySearchResultItem),
+            searchResultCountText: countSnapshot?.text || '',
+            searchResultCountValue: countSnapshot?.count ?? null,
             searchEmptyStateMatches: countSelectorMatches(config.selectors.historySearchEmptyState),
             recentListMatches: countSelectorMatches(config.selectors.historyListItem),
             visibleItemMatches: queryHistoryItemElements(config, query).length
@@ -502,6 +596,15 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
             return linkLikeElement;
         }
 
+        const nestedSnippetButton = item.querySelector<HTMLElement>('search-snippet [role="button"], .snippet-container[role="button"]');
+        if (nestedSnippetButton) {
+            return nestedSnippetButton;
+        }
+
+        if (item instanceof HTMLElement && looksLikeSearchResultRow(item)) {
+            return item;
+        }
+
         if (
             item instanceof HTMLElement
             && item.matches('a, button, [role="option"], [role="button"], [role="link"], [tabindex]')
@@ -511,6 +614,51 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
 
         const interactiveDescendant = item.querySelector<HTMLElement>('button, a, [role="option"], [role="button"], [role="link"]');
         return interactiveDescendant ?? null;
+    }
+
+    function isSearchControlElement(element: Element, config: GeminiHistoryRemoteConfig): boolean {
+        const searchInputSelector = config.selectors.historySearchInput?.trim();
+        const searchSubmitSelector = config.selectors.historySearchSubmit?.trim();
+        const searchClearSelector = config.selectors.historySearchClear?.trim();
+        if (searchInputSelector && element.matches(searchInputSelector)) {
+            return true;
+        }
+        if (searchSubmitSelector && element.matches(searchSubmitSelector)) {
+            return true;
+        }
+        if (searchClearSelector && element.matches(searchClearSelector)) {
+            return true;
+        }
+
+        const dataTestId = element.getAttribute('data-test-id') || '';
+        const ariaLabel = element.getAttribute('aria-label') || '';
+        const text = summarizeText(element.textContent, 80);
+        const controlLabel = `${dataTestId} ${ariaLabel} ${text}`.trim();
+
+        if (/clear-button|清除搜索内容|clear search|清除/u.test(controlLabel)) {
+            return true;
+        }
+
+        return element instanceof HTMLElement
+            && element.matches('button, [role="button"]')
+            && /搜索|search/u.test(controlLabel);
+    }
+
+    function looksLikeSearchResultRow(element: Element): boolean {
+        const text = summarizeText(element.textContent, 240);
+        if (text.length < 6) {
+            return false;
+        }
+
+        if (isSearchResultCountText(text)) {
+            return false;
+        }
+
+        const directChildren = Array.from(element.children);
+        const substantialChildren = directChildren.filter((child) => summarizeText(child.textContent, 120).length >= 6);
+        const hasDateLikeText = /\d{1,2}月\d{1,2}日/u.test(text);
+
+        return substantialChildren.length >= 2 || hasDateLikeText;
     }
 
     function dispatchSyntheticClick(target: HTMLElement) {
@@ -532,6 +680,15 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
             return true;
         }
 
+        if (isSearchControlElement(element, config)) {
+            return true;
+        }
+
+        const sentinelSelector = config.selectors.lazyLoadSentinel;
+        if (sentinelSelector?.trim() && element.matches(sentinelSelector)) {
+            return true;
+        }
+
         const htmlElement = element instanceof HTMLElement ? element : null;
         const className = htmlElement?.className || '';
         if (SEARCH_WINDOW_STRUCTURAL_CLASS_PATTERNS.some((pattern) => pattern.test(className))) {
@@ -539,7 +696,10 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
         }
 
         const searchInputSelector = config.selectors.historySearchInput;
-        return Boolean(searchInputSelector?.trim() && element.querySelector(searchInputSelector));
+        return Boolean(
+            (searchInputSelector?.trim() && element.querySelector(searchInputSelector))
+            || (searchInputSelector?.trim() && element.closest('search-bar'))
+        );
     }
 
     function getSearchWindowRowCandidates(config: GeminiHistoryRemoteConfig): Element[] {
@@ -549,6 +709,8 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
         }
 
         const semanticSelector = [
+            'search-snippet',
+            '.snippet-container',
             'article',
             'li',
             '[role="button"]',
@@ -575,7 +737,8 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
                 if (element.tagName.toLowerCase() === 'div') {
                     return hasHistoryAttribute(element)
                         || Boolean(element.querySelector('button, [role="button"], [role="link"]'))
-                        || Boolean(element.querySelector('[ng-reflect-router-link], [routerlink], [href]'));
+                        || Boolean(element.querySelector('[ng-reflect-router-link], [routerlink], [href]'))
+                        || looksLikeSearchResultRow(element);
                 }
 
                 return true;
@@ -640,6 +803,9 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
         linkElement: HTMLAnchorElement | null
     ): string {
         const selectorCandidates = [
+            '.title',
+            '.result .title',
+            '.snippet-content .title',
             config.selectors.historyTitle,
             '.conversation-title',
             '[data-test-id="conversation-title"]',
@@ -671,8 +837,14 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
                 if (/title|heading/i.test(marker)) {
                     score += 100;
                 }
+                if (/^title\b|result.*title|snippet.*title/i.test(marker)) {
+                    score += 140;
+                }
                 if (/summary|snippet|preview|content|description/i.test(marker)) {
                     score -= 80;
+                }
+                if (/date|time|timestamp/i.test(marker) || /\d{1,2}月\d{1,2}日/u.test(text)) {
+                    score -= 120;
                 }
                 if (/^h[1-6]$/i.test(element.tagName) || element.getAttribute('role') === 'heading') {
                     score += 60;
@@ -688,20 +860,24 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
 
     function getSearchWindowResultSignature(config: GeminiHistoryRemoteConfig): string {
         const linkSelector = config.selectors.historyLink;
+        const count = getSearchResultCountSnapshot(config)?.count;
 
-        return getSearchWindowRowCandidates(config)
-            .slice(0, GEMINI_HISTORY_DEBUG_ROW_LIMIT)
+        return querySearchWindowHistoryItemElements(config)
             .map((element) => {
                 const linkElement = resolveHistoryLinkLikeElement(element, linkSelector);
+                const href = extractHistoryHrefFromOwnAttributes(linkElement);
                 return extractSearchResultRowTitle(
                     element,
                     config,
                     linkElement instanceof HTMLAnchorElement ? linkElement : null
                 )
-                    || summarizeText(element.textContent, GEMINI_HISTORY_DEBUG_TITLE_MAX);
+                    || summarizeText(element.textContent, GEMINI_HISTORY_DEBUG_TITLE_MAX)
+                    || href;
             })
             .filter((value) => value.length > 0)
-            .join(' | ');
+            .map((value) => summarizeText(value, 80))
+            .join(' | ')
+            .concat(` ::count=${count ?? 'unknown'}`);
     }
 
     function isCurrentSearchResultStillBaseline(config: GeminiHistoryRemoteConfig, query?: string): boolean {
@@ -722,6 +898,110 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
         );
     }
 
+    function buildSearchItemCollectionKey(config: GeminiHistoryRemoteConfig, item: Element): string {
+        const linkElement = resolveHistoryLinkLikeElement(item, config.selectors.historyLink);
+        const href = extractHistoryHrefFromOwnAttributes(linkElement);
+        if (href) {
+            return `href:${href}`;
+        }
+
+        const title = extractSearchResultRowTitle(
+            item,
+            config,
+            linkElement instanceof HTMLAnchorElement ? linkElement : null
+        );
+        if (title) {
+            return `title:${title.toLowerCase()}`;
+        }
+
+        return `path:${describeElementPath(item, 5).join('>')}`;
+    }
+
+    function collectNestedSearchResultCandidates(item: Element, config: GeminiHistoryRemoteConfig): Element[] {
+        const explicitSelector = config.selectors.historySearchResultItem?.trim();
+        const selectorCandidates = [
+            explicitSelector,
+            'search-snippet [role="button"]',
+            '.snippet-container[role="button"]',
+            'article',
+            '[data-test-id="conversation"]',
+            '[data-test-id="search-result"]',
+            '[role="option"]',
+            '[ng-reflect-router-link*="/app/"]',
+            '[routerlink*="/app/"]',
+            'a[href*="/app/"]'
+        ]
+            .filter((value): value is string => typeof value === 'string' && value.length > 0)
+            .join(', ');
+        if (!selectorCandidates) {
+            return [];
+        }
+
+        return Array.from(item.querySelectorAll(selectorCandidates))
+            .filter((candidate) => candidate !== item)
+            .filter((candidate) => !isStructuralSearchWindowElement(candidate, config));
+    }
+
+    function isAggregateSearchResultCandidate(item: Element, config: GeminiHistoryRemoteConfig): boolean {
+        const nestedCandidates = collectNestedSearchResultCandidates(item, config)
+            .filter((candidate) => {
+                if (candidate.contains(item)) {
+                    return false;
+                }
+
+                const clickable = resolveHistoryClickableElement(candidate, config.selectors.historyLink);
+                if (!clickable) {
+                    return false;
+                }
+
+                const text = extractSearchResultRowTitle(
+                    candidate,
+                    config,
+                    clickable instanceof HTMLAnchorElement ? clickable : null
+                ) || summarizeText(candidate.textContent, 120);
+
+                return text.length >= 6;
+            });
+
+        const uniqueNestedKeys = new Set(
+            nestedCandidates.map((candidate) => buildSearchItemCollectionKey(config, candidate))
+        );
+
+        return uniqueNestedKeys.size >= 2;
+    }
+
+    function appendUniqueSearchItems(
+        target: Element[],
+        config: GeminiHistoryRemoteConfig,
+        items: Element[],
+        seenKeys: Set<string>
+    ) {
+        for (const item of items) {
+            if (isAggregateSearchResultCandidate(item, config)) {
+                appendUniqueSearchItems(
+                    target,
+                    config,
+                    collectNestedSearchResultCandidates(item, config),
+                    seenKeys
+                );
+                continue;
+            }
+
+            const clickable = resolveHistoryClickableElement(item, config.selectors.historyLink);
+            if (!clickable) {
+                continue;
+            }
+
+            const key = buildSearchItemCollectionKey(config, item);
+            if (seenKeys.has(key)) {
+                continue;
+            }
+
+            seenKeys.add(key);
+            target.push(item);
+        }
+    }
+
     function querySearchWindowHistoryItemElements(config: GeminiHistoryRemoteConfig): Element[] {
         const containerSelector = config.selectors.historySearchResultContainer;
         if (!containerSelector?.trim()) {
@@ -729,30 +1009,20 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
         }
 
         const linkSelector = config.selectors.historyLink;
+        const results: Element[] = [];
+        const seenKeys = new Set<string>();
         const explicitSelector = config.selectors.historySearchResultItem?.trim();
         if (explicitSelector) {
-            const explicitMatches = queryItemsWithinContainers(containerSelector, explicitSelector)
-                .filter((item) => Boolean(resolveHistoryClickableElement(item, linkSelector)));
-            if (explicitMatches.length > 0) {
-                return explicitMatches;
-            }
+            const explicitMatches = queryItemsWithinContainers(containerSelector, explicitSelector);
+            appendUniqueSearchItems(results, config, explicitMatches, seenKeys);
         }
 
-        const rowCandidates = getSearchWindowRowCandidates(config)
-            .filter((item) => Boolean(resolveHistoryClickableElement(item, linkSelector)));
-        if (rowCandidates.length > 0) {
-            return rowCandidates;
+        const rowCandidates = getSearchWindowRowCandidates(config);
+        appendUniqueSearchItems(results, config, rowCandidates, seenKeys);
+        if (results.length > 0) {
+            return results;
         }
 
-        if (document.querySelector(containerSelector)) {
-            debugHistory('search-window-diagnostics', {
-                selector: containerSelector,
-                explicitSelector,
-                rows: collectSearchWindowRowDiagnostics(config)
-            });
-        }
-
-        const results: Element[] = [];
         const seenHref = new Set<string>();
         for (const container of Array.from(document.querySelectorAll(containerSelector))) {
             const nodes = [container, ...Array.from(container.querySelectorAll('*'))];
@@ -768,11 +1038,57 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
                 }
 
                 seenHref.add(href);
-                results.push(node);
+                appendUniqueSearchItems(results, config, [node], seenKeys);
             }
         }
 
         return results;
+    }
+
+    async function maybeLoadMoreSearchResults(config: GeminiHistoryRemoteConfig): Promise<boolean> {
+        const beforeItems = querySearchWindowHistoryItemElements(config);
+        const beforeCount = beforeItems.length;
+        const targetCount = getSearchResultCountSnapshot(config)?.count;
+        if (!targetCount || beforeCount >= targetCount) {
+            return false;
+        }
+
+        const sentinelSelector = config.selectors.lazyLoadSentinel;
+        const sentinel = sentinelSelector ? document.querySelector(sentinelSelector) : null;
+        if (sentinel instanceof HTMLElement) {
+            sentinel.scrollIntoView({ block: 'end' });
+            if (
+                sentinel.matches('button, [role="button"], a, [role="link"]')
+                || typeof sentinel.onclick === 'function'
+            ) {
+                dispatchSyntheticClick(sentinel);
+                sentinel.click();
+            }
+        } else {
+            const lastItem = beforeItems[beforeItems.length - 1];
+            if (lastItem instanceof HTMLElement) {
+                lastItem.scrollIntoView({ block: 'end' });
+            } else {
+                const container = config.selectors.historySearchResultContainer
+                    ? document.querySelector(config.selectors.historySearchResultContainer)
+                    : null;
+                if (container instanceof HTMLElement) {
+                    container.scrollTop = container.scrollHeight;
+                }
+            }
+        }
+
+        await sleep(250);
+        const afterCount = querySearchWindowHistoryItemElements(config).length;
+        const snapshot = {
+            beforeCount,
+            afterCount,
+            targetCount,
+            sentinelFound: sentinel instanceof HTMLElement
+        };
+        lastSearchLoadMoreSnapshots.push(snapshot);
+        debugHistory('search-load-more-attempt', snapshot);
+        return afterCount > beforeCount;
     }
 
     function queryHistoryItemElements(config: GeminiHistoryRemoteConfig, query?: string): Element[] {
@@ -918,6 +1234,9 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
 
         const titleSelector = config.selectors.historyTitle;
         const linkSelector = config.selectors.historyLink;
+        const expectedCount = normalizedQuery && isGeminiSearchPath(window.location)
+            ? getSearchResultCountSnapshot(config, normalizedQuery)?.count ?? null
+            : null;
         const seenIds = new Set<string>();
         const seenSearchKeys = new Set<string>();
         let fallbackIndex = 0;
@@ -1105,6 +1424,7 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
 
         const startedAt = Date.now();
         try {
+            let lastLoadMoreAt = 0;
             while (Date.now() - startedAt < GEMINI_HISTORY_SEARCH_TIMEOUT_MS) {
                 const snapshot = getHistoryDomSnapshot(config, normalizedQuery);
                 const onSearchPage = Boolean(normalizedQuery) && isGeminiSearchPath(window.location);
@@ -1112,6 +1432,8 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
                 const currentInput = resolveSearchInput(config) ?? input;
                 const inputMatchesQuery = readSearchInputValue(currentInput) === normalizedQuery;
                 const currentSearchSignature = onSearchPage ? getSearchWindowResultSignature(config) : '';
+                const expectedCount = onSearchPage ? getSearchResultCountSnapshot(config, normalizedQuery)?.count ?? null : null;
+                const actualCount = onSearchPage ? querySearchWindowHistoryItemElements(config).length : 0;
                 const signatureChangedFromBaseline = onSearchPage
                     && Boolean(
                         lastSearchStabilizationState
@@ -1126,9 +1448,26 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
                         && lastSearchStabilizationState.acceptCurrentSignature
                         && currentSearchSignature.length > 0
                     );
+                if (
+                    onSearchPage
+                    && expectedCount !== null
+                    && actualCount < expectedCount
+                    && Date.now() - lastLoadMoreAt >= 300
+                ) {
+                    const didLoadMore = await maybeLoadMoreSearchResults(config);
+                    if (didLoadMore) {
+                        lastLoadMoreAt = Date.now();
+                        continue;
+                    }
+                    lastLoadMoreAt = Date.now();
+                }
                 const settledBySearchPage = onSearchPage
                     && (
-                        (snapshot.visibleItemMatches > 0 && (signatureChangedFromBaseline || canAcceptCurrentSignature))
+                        (
+                            snapshot.visibleItemMatches > 0
+                            && (signatureChangedFromBaseline || canAcceptCurrentSignature)
+                            && (expectedCount === null || actualCount >= expectedCount)
+                        )
                         || snapshot.searchEmptyStateMatches > 0
                     );
                 if (
@@ -1143,7 +1482,9 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
                         query: normalizedQuery,
                         input: describeSearchInput(input),
                         snapshot,
-                        searchWindow: searchWindowSummary
+                        searchWindow: searchWindowSummary,
+                        expectedCount,
+                        actualCount
                     });
                     return;
                 }
@@ -1154,13 +1495,6 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
             observer.disconnect();
         }
 
-        debugHistory('search-timeout', {
-            query: normalizedQuery,
-            input: describeSearchInput(input),
-            snapshot: getHistoryDomSnapshot(config, normalizedQuery),
-            searchWindow: getSearchWindowSummary(config),
-            rowDiagnostics: collectSearchWindowRowDiagnostics(config)
-        });
     }
 
     async function maybeLoadMore(config: GeminiHistoryRemoteConfig): Promise<void> {
@@ -1361,6 +1695,8 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
     }
 
     async function handleRequest(request: GeminiContentRequest): Promise<GeminiContentResponse> {
+        currentDebugTraceId = request.debugTraceId ?? '';
+        lastSearchLoadMoreSnapshots = [];
         if (request.action === 'PING') {
             return {
                 ok: true,
@@ -1382,6 +1718,7 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
                     historySearchInput: request.config.selectors.historySearchInput,
                     historySearchSubmit: request.config.selectors.historySearchSubmit,
                     historySearchResultContainer: request.config.selectors.historySearchResultContainer,
+                    historySearchResultCount: request.config.selectors.historySearchResultCount,
                     historySearchResultItem: request.config.selectors.historySearchResultItem,
                     historySearchEmptyState: request.config.selectors.historySearchEmptyState
                 }
@@ -1444,9 +1781,10 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
             if (request.action === 'GET_HISTORY_LIST') {
                 await applyHistorySearchQuery(request.config, request.query);
                 await waitForHistorySearchSettled(request.config, request.query);
+                const extractedItems = extractHistoryList(request.config, request.query);
                 return {
                     ok: true,
-                    data: extractHistoryList(request.config, request.query)
+                    data: extractedItems
                 };
             }
 

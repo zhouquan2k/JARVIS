@@ -41,6 +41,20 @@ describe('createWebContextProvider', () => {
           agentConfigs: {}
         }), { status: 200 });
       }
+      if (url.endsWith('/get-conversations')) {
+        expect(body).toEqual({ documentPath: '/notes/today.md' });
+        return new Response(JSON.stringify({
+          conversations: [{
+            id: 'conversation-1',
+            title: 'Today notes',
+            origin: 'local',
+            agentKey: '/',
+            documentPaths: ['/notes/today.md'],
+            messages: [],
+            updatedAt: 100
+          }]
+        }), { status: 200 });
+      }
       if (url.endsWith('/read-document')) {
         expect(body).toEqual({ path: '/notes/today.md' });
         return new Response(JSON.stringify({
@@ -94,6 +108,12 @@ describe('createWebContextProvider', () => {
       nodes: [{ path: '/notes/today.md', name: 'today.md', kind: 'file', parentPath: '/notes', agentKey: '/' }],
       agentConfigs: {}
     });
+    await expect(provider.getConversations({ documentPath: '/notes/today.md' })).resolves.toEqual([
+      expect.objectContaining({
+        id: 'conversation-1',
+        documentPaths: ['/notes/today.md']
+      })
+    ]);
     await expect(provider.readDocument('/notes/today.md')).resolves.toEqual({
       path: '/notes/today.md',
       mimeType: 'text/markdown',
@@ -133,7 +153,7 @@ describe('createWebContextProvider', () => {
     })).resolves.toEqual([
       { path: '/notes/today.md', line: 1, column: 3, preview: '# Today' }
     ]);
-    expect(fetchImpl).toHaveBeenCalledTimes(8);
+    expect(fetchImpl).toHaveBeenCalledTimes(9);
   });
 
   it('surfaces server-side context errors', async () => {

@@ -1,6 +1,8 @@
 /// <reference types="vite/client" />
 
 import type {
+    Conversation,
+    ConversationQuery,
     ContextDocument,
     ContextNode,
     ContextSearchMatch,
@@ -23,6 +25,7 @@ declare global {
         chatprismDesktop?: {
             initializeContextAccess(): Promise<void>;
             getContext(): Promise<WorkspaceContext>;
+            getConversations(query: ConversationQuery): Promise<Conversation[]>;
             readContextDocument(path: string): Promise<ContextDocument>;
             writeContextDocument(input: WriteContextDocumentInput): Promise<void>;
             createContextNode(input: CreateContextNodeInput): Promise<ContextNode>;

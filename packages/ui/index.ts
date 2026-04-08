@@ -3,6 +3,7 @@ export { default as ConversationWorkspaceView } from './src/views/ConversationWo
 export { default as DocumentWorkspaceView } from './src/views/DocumentWorkspaceView.vue';
 export { default as NormalChatView } from './src/views/NormalChatView.vue';
 export { default as CompareChatView } from './src/views/CompareChatView.vue';
+export { default as WorkspaceHostApp } from './src/views/WorkspaceHostApp.vue';
 export { default as AppTopBar } from './src/components/AppTopBar.vue';
 export { default as AttachmentComposer } from './src/components/AttachmentComposer.vue';
 export { default as ConversationSidebar } from './src/components/ConversationSidebar.vue';

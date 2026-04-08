@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { HttpContextService } from '../src/services/httpContextService.js';
 import type { ContextProvider } from '../src/types/context.js';
-import { encodeTextDocument } from '@packages/core/src';
+import { encodeTextDocument, type Conversation } from '@packages/core/src';
 
 function createProvider(): ContextProvider {
     return {
@@ -11,6 +11,15 @@ function createProvider(): ContextProvider {
             nodes: [{ path: '/welcome.md', name: 'welcome.md', kind: 'file', agentKey: '/' }],
             agentConfigs: {}
         })),
+        getConversations: vi.fn(async (query: { documentPath?: string }): Promise<Conversation[]> => [{
+            id: 'conversation-1',
+            title: 'Welcome conversation',
+            origin: 'local',
+            agentKey: '/',
+            documentPaths: query.documentPath ? [query.documentPath] : undefined,
+            messages: [],
+            updatedAt: 100
+        }]),
         readDocument: vi.fn(async (path: string) => ({ path, mimeType: 'text/markdown', dataBase64: encodeTextDocument('# hello') })),
         writeDocument: vi.fn(async () => undefined),
         createNode: vi.fn(async (input) => ({
@@ -41,6 +50,12 @@ describe('http context service', () => {
             nodes: [{ path: '/welcome.md', name: 'welcome.md', kind: 'file', agentKey: '/' }],
             agentConfigs: {}
         });
+        await expect(service.getConversations({ documentPath: '/welcome.md' })).resolves.toEqual([
+            expect.objectContaining({
+                id: 'conversation-1',
+                documentPaths: ['/welcome.md']
+            })
+        ]);
         await expect(service.readDocument('/welcome.md')).resolves.toEqual({
             path: '/welcome.md',
             mimeType: 'text/markdown',
@@ -76,6 +91,7 @@ describe('http context service', () => {
         ]);
         expect(provider.initializeAccess).toHaveBeenCalledTimes(1);
         expect(provider.getContext).toHaveBeenCalledTimes(1);
+        expect(provider.getConversations).toHaveBeenCalledWith({ documentPath: '/welcome.md' });
         expect(provider.readDocument).toHaveBeenCalledWith('/welcome.md');
         expect(provider.writeDocument).toHaveBeenCalledWith({
             path: '/welcome.md',

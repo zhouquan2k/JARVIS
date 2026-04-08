@@ -2,6 +2,7 @@ export type {
     AgentConfig,
     AgentSkillBinding,
     AgentToolBinding,
+    Conversation,
     ContextDocument,
     ContextNode,
     ContextSearchMatch,

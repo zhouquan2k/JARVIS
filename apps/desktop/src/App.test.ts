@@ -23,8 +23,8 @@ const mockModelProviderRuntime = {
 const mockCreateDesktopSyncStorageProvider = vi.fn(() => ({
     hydrate: vi.fn().mockResolvedValue(undefined)
 }));
-const mockNavigateTo = vi.fn();
 const mockCurrentRoute = ref({ path: '/chat' });
+const workspaceHostCalls = vi.fn();
 
 const chatStore = reactive({
     currentProviderId: 'chatgpt-web',
@@ -55,21 +55,11 @@ const compareStore = reactive({
 });
 
 vi.mock('@packages/ui', () => ({
-    PRIMARY_WORKSPACE_ROUTES: [
-        { path: '/', name: 'knowledge-workspace', label: '工作区' },
-        { path: '/chat', name: 'normal-chat', label: '对话' }
-    ],
-    AppTopBar: {
-        template: `
-          <div data-testid="topbar-stub">
-            <button data-testid="topbar-knowledge" @click="$emit('navigate-workspace', '/')">知识</button>
-            <button data-testid="topbar-chat" @click="$emit('navigate-workspace', '/chat')">聊天</button>
-          </div>
-        `
-    },
-    ConversationWorkspaceView: {
+    WorkspaceHostApp: {
         props: [
-            'isCompareMode',
+            'currentRoutePath',
+            'navigateTo',
+            'contextProvider',
             'showHistorySourceSwitch',
             'authStatusOverride',
             'authUnavailableMessage',
@@ -80,9 +70,12 @@ vi.mock('@packages/ui', () => ({
             'hostRecoveryActionDisabled'
         ],
         template: `
-          <div>
-            <button
-              data-testid="workspace-auth-stub"
+          <div data-testid="topbar-stub">
+            <button data-testid="topbar-knowledge" @click="navigateTo('/')">知识</button>
+            <button data-testid="workspace-auth-stub"
+              :data-route-path="currentRoutePath"
+              :data-context-id="contextProvider?.id || ''"
+              :data-switch="String(showHistorySourceSwitch)"
               :data-auth-status="authStatusOverride === null ? 'null' : String(authStatusOverride)"
               :data-auth-message="authUnavailableMessage || ''"
               :data-auth-label="authRecoveryActionLabel || ''"
@@ -96,12 +89,9 @@ vi.mock('@packages/ui', () => ({
               :data-host-disabled="String(hostRecoveryActionDisabled)"
               @click="$emit('request-host-recovery')"
             />
+            <div v-if="currentRoutePath === '/'" data-testid="document-workspace-stub" />
           </div>
         `
-    },
-    DocumentWorkspaceView: {
-        props: ['contextProvider'],
-        template: '<div data-testid="document-workspace-stub" />'
     },
     openConversationImportDialog: mockOpenConversationImportDialog,
     useChatStore: () => chatStore,
@@ -118,9 +108,15 @@ vi.mock('./sync', () => ({
     createDesktopSyncStorageProvider: mockCreateDesktopSyncStorageProvider
 }));
 
+vi.mock('./context/createDesktopContextProvider', () => ({
+    createDesktopContextProvider: vi.fn(() => ({ id: 'desktop-context' }))
+}));
+
 vi.mock('./router', () => ({
     currentRoute: mockCurrentRoute,
-    navigateTo: mockNavigateTo
+    navigateTo: vi.fn((path: string) => {
+        workspaceHostCalls(path);
+    })
 }));
 
 describe('Desktop App auth recovery', () => {
@@ -157,6 +153,9 @@ describe('Desktop App auth recovery', () => {
         await flushPromises();
 
         const workspace = wrapper.get('[data-testid="workspace-auth-stub"]');
+        expect(workspace.attributes('data-route-path')).toBe('/chat');
+        expect(workspace.attributes('data-context-id')).toBe('desktop-context');
+        expect(workspace.attributes('data-switch')).toBe('true');
         expect(workspace.attributes('data-auth-status')).toBe('false');
         expect(workspace.attributes('data-auth-message')).toContain('当前桌面宿主的 ChatGPT 登录态不可用');
         expect(workspace.attributes('data-auth-label')).toBe('登录 ChatGPT');
@@ -294,7 +293,7 @@ describe('Desktop App auth recovery', () => {
         const wrapper = mount(App);
         await flushPromises();
 
-        expect(wrapper.find('[data-testid="workspace-auth-stub"]').exists()).toBe(false);
+        expect(wrapper.get('[data-testid="workspace-auth-stub"]').attributes('data-route-path')).toBe('/');
         expect(wrapper.get('[data-testid="document-workspace-stub"]').exists()).toBe(true);
 
         mockCurrentRoute.value = { path: '/chat' };
@@ -307,6 +306,6 @@ describe('Desktop App auth recovery', () => {
         await flushPromises();
 
         await wrapper.get('[data-testid="topbar-knowledge"]').trigger('click');
-        expect(mockNavigateTo).toHaveBeenCalledWith('/');
+        expect(workspaceHostCalls).toHaveBeenCalledWith('/');
     });
 });

@@ -88,6 +88,8 @@ export interface Conversation {
     origin?: ConversationOrigin;
     externalId?: string;
     agentKey?: string;
+    starred?: boolean;
+    documentPaths?: string[];
     messages: ConversationMessage[];
     updatedAt: number;
     sync?: ConversationSyncState;
@@ -321,6 +323,8 @@ export function cloneConversation(conversation: Conversation): Conversation {
     return {
         ...conversation,
         agentKey: conversation.agentKey,
+        starred: conversation.starred === true ? true : undefined,
+        documentPaths: conversation.documentPaths ? [...conversation.documentPaths] : undefined,
         sync: conversation.sync ? { ...conversation.sync } : undefined,
         modelSelection: conversation.modelSelection
             ? {
@@ -343,6 +347,13 @@ export function normalizeConversation(conversation: Conversation): Conversation 
     const modelSelection = conversation.modelSelection && typeof conversation.modelSelection === 'object'
         ? conversation.modelSelection
         : undefined;
+    const documentPaths = Array.isArray(conversation.documentPaths)
+        ? Array.from(new Set(
+            conversation.documentPaths.filter((path): path is string => {
+                return typeof path === 'string' && path.trim().length > 0;
+            }).map((path) => path.trim())
+        ))
+        : undefined;
 
     return {
         ...conversation,
@@ -350,6 +361,8 @@ export function normalizeConversation(conversation: Conversation): Conversation 
         agentKey: typeof conversation.agentKey === 'string' && conversation.agentKey.trim()
             ? conversation.agentKey
             : undefined,
+        starred: conversation.starred === true ? true : undefined,
+        documentPaths: documentPaths?.length ? documentPaths : undefined,
         sync: conversation.sync ? { ...conversation.sync } : undefined,
         modelSelection: modelSelection
             && typeof modelSelection.providerId === 'string'

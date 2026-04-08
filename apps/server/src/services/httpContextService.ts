@@ -1,3 +1,4 @@
+import type { Conversation, ConversationQuery } from '@packages/core';
 import type {
     ContextDocument,
     ContextNode,
@@ -19,6 +20,10 @@ export class HttpContextService {
 
     async getContext(): Promise<WorkspaceContext> {
         return this.provider.getContext();
+    }
+
+    async getConversations(query: ConversationQuery): Promise<Conversation[]> {
+        return this.provider.getConversations(query);
     }
 
     async readDocument(path: string): Promise<ContextDocument> {

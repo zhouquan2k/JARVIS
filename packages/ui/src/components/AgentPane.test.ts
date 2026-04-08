@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
 
-import { describe, expect, it } from 'vitest';
-import { mount } from '@vue/test-utils';
+import { describe, expect, it, vi } from 'vitest';
+import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import type { Conversation, IConversationPersistProvider, IModelProvider } from '@packages/core/src';
+import { nextTick } from 'vue';
+import type { Conversation, IContextProvider, IConversationPersistProvider, IModelProvider } from '@packages/core/src';
 import { encodeTextDocument } from '@packages/core/src';
 import type { ProviderConfig } from '@packages/core/config';
 import AgentPane from './AgentPane.vue';
@@ -74,6 +75,28 @@ class PaneTestStorageProvider implements IConversationPersistProvider {
     }
 }
 
+function createPaneContextProvider(conversations: Conversation[] = []): IContextProvider {
+    return {
+        id: 'workspace-context',
+        initializeAccess: async () => undefined,
+        getContext: async () => ({ nodes: [], agentConfigs: {} }),
+        getConversations: vi.fn(async (query: { documentPath?: string }) => conversations.filter((conversation) => (
+            query.documentPath ? conversation.documentPaths?.includes(query.documentPath) : true
+        ))),
+        readDocument: async (path: string) => ({ path, mimeType: 'text/markdown', dataBase64: encodeTextDocument('') }),
+        writeDocument: async () => undefined,
+        createNode: async () => ({ path: '/draft.md', name: 'draft.md', kind: 'file', agentKey: '/' }),
+        deleteNode: async () => undefined,
+        renameNode: async (input: { path: string; name: string }) => ({
+            path: input.path.replace(/[^/]+$/, input.name),
+            name: input.name,
+            kind: 'file',
+            agentKey: '/'
+        }),
+        searchInScope: async () => []
+    };
+}
+
 const paneProviderCatalog: ProviderConfig[] = [
     {
         id: 'pane-test-provider',
@@ -85,7 +108,7 @@ const paneProviderCatalog: ProviderConfig[] = [
 ];
 
 describe('AgentPane', () => {
-    it('mounts the normal chat view and renders active agent metadata', () => {
+    it('renders the document conversation list with the shared toolbar for document selections', () => {
         setActivePinia(createPinia());
         const wrapper = mount(AgentPane, {
             props: {
@@ -105,24 +128,23 @@ describe('AgentPane', () => {
                     mimeType: 'text/markdown',
                     dataBase64: encodeTextDocument('# Guide')
                 },
-                contextProvider: null,
+                contextProvider: createPaneContextProvider(),
                 onFileChanged: null
-            },
-            global: {
-                stubs: {
-                    NormalChatView: {
-                        template: '<div data-testid="normal-chat-stub" />'
-                    }
-                }
             }
         });
 
         expect(wrapper.get('[data-testid="agent-pane"]').exists()).toBe(true);
-        expect(wrapper.get('[data-testid="normal-chat-stub"]').exists()).toBe(true);
+        expect(wrapper.get('[data-testid="agent-document-conversation-list"]').exists()).toBe(true);
+        expect(wrapper.get('[data-testid="agent-conversation-toolbar"]').exists()).toBe(true);
+        expect(wrapper.find('[data-testid="agent-conversation-title"]').exists()).toBe(false);
+        expect(wrapper.get('[data-testid="agent-conversation-back"]').attributes('disabled')).toBeDefined();
+        expect(wrapper.get('[data-testid="agent-conversation-list-plus"]').exists()).toBe(true);
         expect(wrapper.get('[data-testid="agent-name"]').text()).toContain('Docs Agent（/docs）');
         expect(wrapper.get('[data-testid="agent-model"]').text()).toContain('gemini-api / gemini-2.5-pro');
         expect(wrapper.text()).toContain('Docs Agent（/docs）');
         expect(wrapper.text()).toContain('gemini-api / gemini-2.5-pro');
+        expect(wrapper.text()).not.toContain('当前文档');
+        expect(wrapper.text()).not.toContain('新建对话');
     });
 
     it('prefers the nearest matched agent config directory over the current scope path', () => {
@@ -143,7 +165,7 @@ describe('AgentPane', () => {
                     mimeType: 'text/markdown',
                     dataBase64: encodeTextDocument('# Note')
                 },
-                contextProvider: null,
+                contextProvider: createPaneContextProvider(),
                 onFileChanged: null
             },
             global: {
@@ -175,7 +197,7 @@ describe('AgentPane', () => {
                     mimeType: 'text/markdown',
                     dataBase64: encodeTextDocument('# Welcome')
                 },
-                contextProvider: null,
+                contextProvider: createPaneContextProvider(),
                 onFileChanged: null
             },
             global: {
@@ -232,21 +254,7 @@ describe('AgentPane', () => {
                     mimeType: 'text/markdown',
                     dataBase64: encodeTextDocument('# Guide')
                 },
-                contextProvider: {
-                    id: 'workspace-context',
-                    initializeAccess: async () => undefined,
-                    listTree: async () => [],
-                    readDocument: async (path: string) => ({ path, mimeType: 'text/markdown', dataBase64: encodeTextDocument('') }),
-                    writeDocument: async () => undefined,
-                    createNode: async () => ({ path: '/draft.md', name: 'draft.md', kind: 'file' as const }),
-                    searchInScope: async () => [],
-                    resolveScopedAgentConfig: async () => ({
-                        name: 'Docs Agent',
-                        effectiveInstructions: 'Use docs context',
-                        scopePath: '/docs',
-                        sourcePaths: ['/docs/.agent.json']
-                    })
-                },
+                contextProvider: createPaneContextProvider(),
                 onFileChanged: async () => undefined
             },
             global: {
@@ -296,6 +304,236 @@ describe('AgentPane', () => {
         expect(chatStore.activeAgentContext).toBeNull();
         expect(chatStore.activeWorkspacePath).toBeNull();
         expect(chatStore.activeWorkspaceDocument).toBeNull();
+    });
+
+    it('opens detail mode from the document conversation list and shows the outer toolbar', async () => {
+        setActivePinia(createPinia());
+        const chatStore = useChatStore();
+        const provider = new PaneTestProvider();
+        const storage = new PaneTestStorageProvider();
+        await storage.saveConversation({
+            id: 'conversation-1',
+            title: 'Guide discussion',
+            origin: 'local',
+            agentKey: '/docs/',
+            documentPaths: ['/docs/guide.md'],
+            messages: [],
+            updatedAt: 100
+        });
+        chatStore.setProviders(provider, storage);
+        await chatStore.initializeProviderCatalog(paneProviderCatalog);
+
+        const wrapper = mount(AgentPane, {
+            props: {
+                activeAgent: {
+                    name: 'Docs Agent',
+                    effectiveInstructions: 'Use docs context',
+                    scopePath: '/docs',
+                    sourcePaths: ['/docs/.agent.json']
+                },
+                activeAgentKey: '/docs/',
+                activePath: '/docs/guide.md',
+                activeDocument: {
+                    path: '/docs/guide.md',
+                    mimeType: 'text/markdown',
+                    dataBase64: encodeTextDocument('# Guide')
+                },
+                contextProvider: createPaneContextProvider([
+                    {
+                        id: 'conversation-1',
+                        title: 'Guide discussion',
+                        origin: 'local',
+                        agentKey: '/docs/',
+                        documentPaths: ['/docs/guide.md'],
+                        messages: [],
+                        updatedAt: 100
+                    }
+                ]),
+                onFileChanged: null
+            },
+            global: {
+                stubs: {
+                    NormalChatView: {
+                        template: '<div data-testid="normal-chat-stub" />'
+                    }
+                }
+            }
+        });
+
+        await nextTick();
+        await wrapper.get('[data-testid="agent-document-conversation-item"]').trigger('click');
+        await flushPromises();
+
+        expect(wrapper.get('[data-testid="agent-conversation-toolbar"]').exists()).toBe(true);
+        expect(wrapper.get('[data-testid="agent-conversation-title"]').text()).toBe('Guide discussion');
+        expect(wrapper.get('[data-testid="normal-chat-stub"]').exists()).toBe(true);
+    });
+
+    it('shows the agent conversation list when an agent-bound directory is selected', async () => {
+        setActivePinia(createPinia());
+        const chatStore = useChatStore();
+        const provider = new PaneTestProvider();
+        const storage = new PaneTestStorageProvider();
+        await storage.saveConversation({
+            id: 'conversation-agent-1',
+            title: 'Archive planning',
+            origin: 'local',
+            agentKey: '/archive/.agent.json',
+            messages: [],
+            updatedAt: 200
+        });
+        await storage.saveConversation({
+            id: 'conversation-other',
+            title: 'Other discussion',
+            origin: 'local',
+            agentKey: '/other/.agent.json',
+            messages: [],
+            updatedAt: 100
+        });
+        chatStore.setProviders(provider, storage);
+        await chatStore.initializeProviderCatalog(paneProviderCatalog);
+        await chatStore.loadLocalConversations();
+
+        const wrapper = mount(AgentPane, {
+            props: {
+                activeAgent: {
+                    name: 'Archive Agent',
+                    effectiveInstructions: 'Use archive context',
+                    scopePath: '/archive',
+                    sourcePaths: ['/archive/.agent.json']
+                },
+                activeAgentKey: '/archive/.agent.json',
+                activePath: '/archive',
+                activeDocument: null,
+                showAgentConversationList: true,
+                contextProvider: createPaneContextProvider(),
+                onFileChanged: null
+            },
+            global: {
+                stubs: {
+                    NormalChatView: {
+                        template: '<div data-testid="normal-chat-stub" />'
+                    }
+                }
+            }
+        });
+
+        await nextTick();
+
+        expect(wrapper.get('[data-testid="agent-document-conversation-list"]').exists()).toBe(true);
+        expect(wrapper.get('[data-testid="agent-conversation-toolbar"]').exists()).toBe(true);
+        expect(wrapper.find('[data-testid="agent-conversation-title"]').exists()).toBe(false);
+        expect(wrapper.text()).toContain('Archive planning');
+        expect(wrapper.text()).not.toContain('Other discussion');
+        expect(wrapper.text()).not.toContain('当前文档还没有关联会话。');
+    });
+
+    it('opens detail mode from the agent conversation list and keeps the shared toolbar', async () => {
+        setActivePinia(createPinia());
+        const chatStore = useChatStore();
+        const provider = new PaneTestProvider();
+        const storage = new PaneTestStorageProvider();
+        await storage.saveConversation({
+            id: 'conversation-agent-1',
+            title: 'Archive planning',
+            origin: 'local',
+            agentKey: '/archive/.agent.json',
+            messages: [],
+            updatedAt: 200
+        });
+        chatStore.setProviders(provider, storage);
+        await chatStore.initializeProviderCatalog(paneProviderCatalog);
+        await chatStore.loadLocalConversations();
+
+        const wrapper = mount(AgentPane, {
+            props: {
+                activeAgent: {
+                    name: 'Archive Agent',
+                    effectiveInstructions: 'Use archive context',
+                    scopePath: '/archive',
+                    sourcePaths: ['/archive/.agent.json']
+                },
+                activeAgentKey: '/archive/.agent.json',
+                activePath: '/archive',
+                activeDocument: null,
+                showAgentConversationList: true,
+                contextProvider: createPaneContextProvider(),
+                onFileChanged: null
+            },
+            global: {
+                stubs: {
+                    NormalChatView: {
+                        template: '<div data-testid="normal-chat-stub" />'
+                    }
+                }
+            }
+        });
+
+        await nextTick();
+        await wrapper.get('[data-testid="agent-document-conversation-item"]').trigger('click');
+        await flushPromises();
+
+        expect(wrapper.get('[data-testid="agent-conversation-toolbar"]').exists()).toBe(true);
+        expect(wrapper.get('[data-testid="agent-conversation-title"]').text()).toBe('Archive planning');
+        expect(wrapper.get('[data-testid="normal-chat-stub"]').exists()).toBe(true);
+    });
+
+    it('resets back to the agent conversation list when the selected node changes within the same agent scope', async () => {
+        setActivePinia(createPinia());
+        const chatStore = useChatStore();
+        const provider = new PaneTestProvider();
+        const storage = new PaneTestStorageProvider();
+        await storage.saveConversation({
+            id: 'conversation-agent-1',
+            title: 'Archive planning',
+            origin: 'local',
+            agentKey: '/archive/.agent.json',
+            messages: [],
+            updatedAt: 200
+        });
+        chatStore.setProviders(provider, storage);
+        await chatStore.initializeProviderCatalog(paneProviderCatalog);
+        await chatStore.loadLocalConversations();
+
+        const wrapper = mount(AgentPane, {
+            props: {
+                activeAgent: {
+                    name: 'Archive Agent',
+                    effectiveInstructions: 'Use archive context',
+                    scopePath: '/archive',
+                    sourcePaths: ['/archive/.agent.json']
+                },
+                activeAgentKey: '/archive/.agent.json',
+                activePath: null,
+                selectedNodePath: '/archive',
+                activeDocument: null,
+                showAgentConversationList: true,
+                contextProvider: createPaneContextProvider(),
+                onFileChanged: null
+            },
+            global: {
+                stubs: {
+                    NormalChatView: {
+                        template: '<div data-testid="normal-chat-stub" />'
+                    }
+                }
+            }
+        });
+
+        await nextTick();
+        await wrapper.get('[data-testid="agent-document-conversation-item"]').trigger('click');
+        await flushPromises();
+
+        expect(wrapper.get('[data-testid="agent-conversation-title"]').text()).toBe('Archive planning');
+
+        await wrapper.setProps({
+            selectedNodePath: '/archive/reports'
+        });
+        await flushPromises();
+
+        expect(wrapper.find('[data-testid="agent-conversation-title"]').exists()).toBe(false);
+        expect(wrapper.get('[data-testid="agent-document-conversation-list"]').exists()).toBe(true);
+        expect(wrapper.text()).toContain('Archive planning');
     });
 
     it('routes active pdf documents into attachments after provider mime negotiation', async () => {

@@ -1,4 +1,5 @@
 import type {
+    ConversationQuery,
     ContextSearchRequest,
     CreateContextNodeInput,
     IContextProvider,
@@ -17,6 +18,13 @@ export function createDesktopContextProvider(): IContextProvider {
             }
 
             return window.chatprismDesktop.getContext();
+        },
+        async getConversations(query: ConversationQuery) {
+            if (!window.chatprismDesktop) {
+                throw new Error('Desktop context bridge is unavailable');
+            }
+
+            return window.chatprismDesktop.getConversations(query);
         },
         async readDocument(path: string) {
             if (!window.chatprismDesktop) {

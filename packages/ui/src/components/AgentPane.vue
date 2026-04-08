@@ -20,21 +20,31 @@
       </div>
     </header>
 
-    <NormalChatView class="agent-pane-chat" />
+    <AgentConversationPanel
+      class="agent-pane-chat"
+      :active-agent-key="props.activeAgentKey"
+      :active-path="props.activePath"
+      :selected-node-path="props.selectedNodePath"
+      :active-document="props.activeDocument"
+      :show-agent-conversation-list="props.showAgentConversationList"
+      :context-provider="props.contextProvider"
+    />
   </aside>
 </template>
 
 <script setup lang="ts">
 import { DEFAULT_SCOPED_AGENT_CONFIG, type ContextDocument, type IContextProvider, type ResolvedAgentConfig } from '@packages/core/src';
 import { onBeforeUnmount, watch } from 'vue';
-import NormalChatView from '../views/NormalChatView.vue';
+import AgentConversationPanel from './AgentConversationPanel.vue';
 import { useChatStore } from '../store/chat';
 
 const props = defineProps<{
   activeAgent?: ResolvedAgentConfig | null;
   activeAgentKey?: string | null;
   activePath?: string | null;
+  selectedNodePath?: string | null;
   activeDocument?: ContextDocument | null;
+  showAgentConversationList?: boolean;
   contextProvider?: IContextProvider | null;
   onFileChanged?: ((change: { path: string; beforeContent: string; afterContent: string }) => void | Promise<void>) | null;
   agentResolutionError?: string | null;

@@ -85,6 +85,21 @@
       </div>
     </div>
 
+    <div v-if="!collapsed && historySource === 'local'" class="sidebar-nav sidebar-nav--local-filter">
+      <button
+        type="button"
+        class="local-filter-toggle"
+        data-testid="local-history-filter-toggle"
+        :class="{ active: localConversationFilter === 'starred' }"
+        :aria-pressed="localConversationFilter === 'starred'"
+        :title="localConversationFilter === 'starred' ? '显示全部会话' : '仅看星标会话'"
+        @click="toggleLocalFilter"
+      >
+        <span class="local-filter-toggle__icon" aria-hidden="true">★</span>
+        <span>{{ localConversationFilter === 'starred' ? '仅看星标' : '星标过滤' }}</span>
+      </button>
+    </div>
+
     <div v-if="!collapsed" class="sidebar-content">
       <p v-if="isCompareMode" class="mode-hint">
         当前为对比模式，选择历史后会切回普通聊天视图。
@@ -103,6 +118,7 @@
             data-testid="local-history-item"
             @click="handleSelectLocal(item.id)"
           >
+            <span v-if="item.starred" class="history-star-marker" aria-hidden="true">★</span>
             <span class="title">{{ item.title || 'Untitled' }}</span>
           </button>
           <div class="history-actions">
@@ -124,16 +140,28 @@
                 取消
               </button>
             </template>
-            <button
-              v-else
-              type="button"
-              class="history-action danger"
-              data-testid="local-history-delete"
-              aria-label="删除会话"
-              @click.stop="pendingDeleteId = item.id"
-            >
-              x
-            </button>
+            <template v-else>
+              <button
+                type="button"
+                class="history-action"
+                :class="{ active: item.starred === true }"
+                data-testid="local-history-star"
+                :aria-label="item.starred ? '取消星标会话' : '星标会话'"
+                :title="item.starred ? '取消星标会话' : '星标会话'"
+                @click.stop="$emit('toggle-local-star', item.id)"
+              >
+                ★
+              </button>
+              <button
+                type="button"
+                class="history-action danger"
+                data-testid="local-history-delete"
+                aria-label="删除会话"
+                @click.stop="pendingDeleteId = item.id"
+              >
+                x
+              </button>
+            </template>
           </div>
         </div>
         <p v-if="localItems.length === 0" class="empty-text">暂无本地历史</p>
@@ -216,9 +244,9 @@ import type {
   ExternalHistoryProviderEntry,
   ExternalHistoryProviderId
 } from '@packages/core/src';
-import type { WorkspaceHistorySource } from '../store/chat';
+import type { LocalConversationFilter, WorkspaceHistorySource } from '../store/chat';
 
-defineProps<{
+const props = defineProps<{
   collapsed: boolean;
   historySource: WorkspaceHistorySource;
   localItems: Conversation[];
@@ -234,6 +262,7 @@ defineProps<{
   activeExternalId?: string | null;
   isCompareMode: boolean;
   showHistorySourceSwitch?: boolean;
+  localConversationFilter?: LocalConversationFilter;
 }>();
 
 const emit = defineEmits<{
@@ -242,6 +271,8 @@ const emit = defineEmits<{
   (event: 'select-external-provider', id: ExternalHistoryProviderId): void;
   (event: 'select-local', id: string): void;
   (event: 'delete-local', id: string): void;
+  (event: 'toggle-local-star', id: string): void;
+  (event: 'set-local-filter', value: LocalConversationFilter): void;
   (event: 'select-external', id: string): void;
   (event: 'update-external-query', value: string): void;
   (event: 'submit-external-query'): void;
@@ -272,6 +303,10 @@ function handleSelectLocal(id: string) {
 function confirmDeleteLocal(id: string) {
   pendingDeleteId.value = null;
   emit('delete-local', id);
+}
+
+function toggleLocalFilter() {
+  emit('set-local-filter', props.localConversationFilter === 'starred' ? 'all' : 'starred');
 }
 
 function handleWindowClick(event: MouseEvent) {
@@ -487,6 +522,11 @@ onUnmounted(() => {
   padding: 0 12px 8px;
 }
 
+.sidebar-nav--local-filter {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
 .source-switch {
   display: inline-flex;
   align-items: flex-end;
@@ -524,6 +564,40 @@ onUnmounted(() => {
   color: #f8fafc;
   border-bottom-color: rgba(96, 165, 250, 0.9);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.local-filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--cp-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.local-filter-toggle:hover,
+.local-filter-toggle:focus-visible {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--cp-text-primary);
+}
+
+.local-filter-toggle.active {
+  background: rgba(250, 204, 21, 0.14);
+  color: #fde68a;
+  box-shadow: inset 0 0 0 1px rgba(250, 204, 21, 0.2);
+}
+
+.local-filter-toggle__icon {
+  font-size: 11px;
+  line-height: 1;
 }
 
 .sidebar-content {
@@ -609,14 +683,20 @@ onUnmounted(() => {
   box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.28);
 }
 
-.history-actions {
-  position: absolute;
-  top: 50%;
-  right: 8px;
+.local-history-button {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px;
+}
+
+.history-actions {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
   border-radius: 999px;
   background: linear-gradient(90deg, rgba(7, 10, 18, 0) 0%, rgba(7, 10, 18, 0.92) 24%, rgba(7, 10, 18, 0.98) 100%);
   transform: translateY(-50%);
@@ -636,13 +716,13 @@ onUnmounted(() => {
 }
 
 .history-action {
-  min-height: 26px;
-  min-width: 26px;
-  padding: 0 8px;
+  min-height: 24px;
+  min-width: 24px;
+  padding: 0 6px;
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.92);
   color: var(--cp-text-muted);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.14);
   transition: color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
@@ -653,6 +733,18 @@ onUnmounted(() => {
   color: var(--cp-text-primary);
   background: rgba(30, 41, 59, 0.96);
   box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.28);
+}
+
+.history-action.active {
+  color: #fcd34d;
+  box-shadow: inset 0 0 0 1px rgba(250, 204, 21, 0.22);
+}
+
+.history-action.active:hover,
+.history-action.active:focus-visible {
+  color: #fde68a;
+  background: rgba(120, 53, 15, 0.92);
+  box-shadow: inset 0 0 0 1px rgba(250, 204, 21, 0.32);
 }
 
 .history-action.danger {
@@ -676,6 +768,17 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   width: 100%;
+}
+
+.local-history-button .title {
+  flex: 1;
+  min-width: 0;
+}
+
+.history-star-marker {
+  flex: 0 0 auto;
+  color: #fcd34d;
+  font-size: 12px;
 }
 
 .loading-status {

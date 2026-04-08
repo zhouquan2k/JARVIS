@@ -72,8 +72,10 @@ export interface SyncConversation {
     backendId?: string;
     title: string;
     agentKey?: string;
+    starred?: boolean;
     origin?: string;
     externalId?: string;
+    documentPaths?: string[];
     messages: ConversationMessage[];
     updatedAt: number;
     sync?: ConversationSyncState;
@@ -337,8 +339,16 @@ export function normalizeConversation(value: unknown): SyncConversation {
         backendId: readOptionalString(value, 'backendId'),
         title: readRequiredString(value, 'title', 'conversation.title'),
         agentKey: readOptionalString(value, 'agentKey'),
+        starred: value.starred === true ? true : undefined,
         origin: readOptionalString(value, 'origin'),
         externalId: readOptionalString(value, 'externalId'),
+        documentPaths: Array.isArray(value.documentPaths)
+            ? Array.from(new Set(
+                value.documentPaths.filter((path): path is string => {
+                    return typeof path === 'string' && path.trim().length > 0;
+                }).map((path) => path.trim())
+            ))
+            : undefined,
         messages: value.messages.map((message, index) => normalizeMessage(message, index)),
         updatedAt: readRequiredTimestamp(value, 'updatedAt', 'conversation.updatedAt'),
         sync: normalizeSyncState(value.sync)

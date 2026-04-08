@@ -1,3 +1,4 @@
+import type { Conversation, ConversationQuery, IConversationQueryProvider } from '@packages/core';
 import type { SyncDatabase } from '../db.js';
 import type { SyncConversation, SyncDeletedConversation } from '../types/sync.js';
 
@@ -50,7 +51,7 @@ export interface SaveDeletedConversationInput {
     createdAt: number;
 }
 
-export class SyncRepository {
+export class SyncRepository implements IConversationQueryProvider {
     constructor(private readonly database: SyncDatabase) {}
 
     runInTransaction<T>(callback: () => T): T {
@@ -122,6 +123,40 @@ export class SyncRepository {
             createdAt: row.created_at,
             lastSeenAt: row.last_seen_at
         }));
+    }
+
+    async getConversations(query: ConversationQuery): Promise<Conversation[]> {
+        const rows = this.database
+            .prepare(`
+                SELECT agent_key, payload_json, server_cursor, created_at, last_seen_at
+                FROM synced_conversations
+                WHERE deleted = 0
+                ORDER BY updated_at DESC
+            `)
+            .all() as ConversationRow[];
+
+        return rows
+            .map((row) => this.hydrateConversation(row))
+            .filter((conversation) => {
+                if (query.documentPath) {
+                    return conversation.documentPaths?.includes(query.documentPath);
+                }
+                return true;
+            })
+            .map((conversation) => ({
+                ...conversation,
+                origin: conversation.origin === 'chatgpt-web'
+                    || conversation.origin === 'gemini-web'
+                    || conversation.origin === 'external-file'
+                    || conversation.origin === 'local'
+                    ? conversation.origin
+                    : 'local',
+                documentPaths: Array.isArray(conversation.documentPaths)
+                    ? Array.from(new Set(conversation.documentPaths.filter((path): path is string => {
+                        return typeof path === 'string' && path.trim().length > 0;
+                    }).map((path) => path.trim())))
+                    : undefined
+            }));
     }
 
     getDeletedConversation(syncKey: string, conversationId: string): PersistedDeletedConversation | null {

@@ -177,6 +177,7 @@ describe('IndexedDBStorageProvider', () => {
             title: 'Agent key',
             origin: 'local',
             agentKey: '/workspace/.agent.json',
+            starred: true,
             messages: [],
             updatedAt: 789
         };
@@ -185,7 +186,8 @@ describe('IndexedDBStorageProvider', () => {
 
         await expect(provider.getConversation(conversation.id)).resolves.toMatchObject({
             id: 'agent-key-conversation',
-            agentKey: '/workspace/.agent.json'
+            agentKey: '/workspace/.agent.json',
+            starred: true
         });
     });
 });

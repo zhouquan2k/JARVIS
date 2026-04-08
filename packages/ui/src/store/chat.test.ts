@@ -711,10 +711,10 @@ describe('useChatStore workspace history flow', () => {
         };
 
         store.applyConversationAgentKey(conversation, '/workspace/archive/.agent.json');
-        expect(conversation.agentKey).toBe('/workspace/archive/.agent.json');
+        expect(conversation.agentKey).toBe('/workspace/archive/');
 
         store.applyConversationAgentKey(conversation, '/workspace/.agent.json');
-        expect(conversation.agentKey).toBe('/workspace/archive/.agent.json');
+        expect(conversation.agentKey).toBe('/workspace/archive/');
 
         store.conversations = [
             conversation,
@@ -722,7 +722,7 @@ describe('useChatStore workspace history flow', () => {
                 id: 'conversation-2',
                 title: 'Workspace notes',
                 origin: 'local',
-                agentKey: '/workspace/.agent.json',
+                agentKey: '/workspace/',
                 messages: [],
                 updatedAt: 101
             },
@@ -737,7 +737,7 @@ describe('useChatStore workspace history flow', () => {
 
         expect(store.getConversationsByAgent('/workspace/archive/.agent.json').map((item) => item.id)).toEqual(['conversation-1']);
         expect(store.resolveConversationAgentKey('')).toBeUndefined();
-        expect(store.resolveConversationAgentKey('/workspace/.agent.json')).toBe('/workspace/.agent.json');
+        expect(store.resolveConversationAgentKey('/workspace/.agent.json')).toBe('/workspace/');
     });
 
     it('includes the active local conversation in agent grouping before persistence refresh completes', async () => {
@@ -747,7 +747,7 @@ describe('useChatStore workspace history flow', () => {
                 id: 'conversation-1',
                 title: 'Archive notes',
                 origin: 'local',
-                agentKey: '/workspace/archive/.agent.json',
+                agentKey: '/workspace/archive/',
                 messages: [],
                 updatedAt: 100
             }
@@ -756,7 +756,7 @@ describe('useChatStore workspace history flow', () => {
             id: 'conversation-active',
             title: 'Docs owner conversation',
             origin: 'local',
-            agentKey: '/workspace/docs/.agent.json',
+            agentKey: '/workspace/docs/',
             messages: [],
             updatedAt: 101
         };
@@ -817,6 +817,7 @@ describe('useChatStore workspace history flow', () => {
             ],
             activeDocumentMode: 'attachment'
         });
+        expect(store.currentConversation?.documentPaths).toEqual(['/docs/spec.pdf']);
     });
 
     it('omits active document payloads when the provider does not accept the current mime type', async () => {
@@ -850,6 +851,44 @@ describe('useChatStore workspace history flow', () => {
             attachments: [],
             activeDocumentMode: 'omitted'
         });
+        expect(store.currentConversation?.documentPaths).toBeUndefined();
+    });
+
+    it('keeps the first-turn document binding when later turns switch to another document', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+
+        store.setActiveAgentContext({
+            ...scopedAgent,
+            modelProviderName: undefined,
+            modelName: undefined
+        });
+        store.setWorkspaceContext({
+            activePath: '/docs/guide.md',
+            activeDocument: {
+                path: '/docs/guide.md',
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('# Guide')
+            },
+            contextProvider: null
+        });
+        await store.sendMessage('第一轮');
+
+        store.setWorkspaceContext({
+            activePath: '/docs/appendix.md',
+            activeDocument: {
+                path: '/docs/appendix.md',
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('# Appendix')
+            },
+            contextProvider: null
+        });
+        await store.sendMessage('第二轮');
+
+        expect(store.currentConversation?.documentPaths).toEqual(['/docs/guide.md']);
     });
 
     it('keeps the prepared active document attachment visible when agent model resolution fails before send', async () => {
@@ -1495,6 +1534,39 @@ describe('useChatStore workspace history flow', () => {
                 starred: true
             })
         ]);
+    });
+
+    it('toggles conversation stars and filters the local sidebar list', async () => {
+        const storage = new MockStorageProvider([
+            {
+                id: 'conversation-1',
+                title: 'Star me',
+                origin: 'local',
+                updatedAt: 10,
+                messages: []
+            },
+            {
+                id: 'conversation-2',
+                title: 'Keep hidden',
+                origin: 'local',
+                updatedAt: 9,
+                messages: []
+            }
+        ]);
+        const store = useChatStore();
+        store.setProviders(new MockModelProvider(), storage);
+
+        await store.init();
+        await store.toggleConversationStar('conversation-1');
+
+        expect(store.conversations.find((item) => item.id === 'conversation-1')?.starred).toBe(true);
+
+        store.setLocalConversationFilter('starred');
+        expect(store.filteredLocalConversations.map((item) => item.id)).toEqual(['conversation-1']);
+
+        await store.toggleConversationStar('conversation-1');
+        expect(store.conversations.find((item) => item.id === 'conversation-1')?.starred).toBeUndefined();
+        expect(store.filteredLocalConversations).toEqual([]);
     });
 
     it('soft deletes legacy question pairs with fallback matching', async () => {
