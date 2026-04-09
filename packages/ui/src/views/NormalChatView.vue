@@ -149,6 +149,17 @@
           <div class="input-actions">
             <div v-if="!chatStore.isGenerating" class="secondary-actions" data-testid="secondary-actions">
               <button
+                v-if="!isAgentMode"
+                type="button"
+                class="secondary-action-btn"
+                data-testid="workspace-restore"
+                title="恢复知识工作区"
+                aria-label="恢复知识工作区"
+                @click="requestWorkspaceSwitch('/')"
+              >
+                <PanelLeftOpen class="action-icon" :size="16" aria-hidden="true" />
+              </button>
+              <button
                 v-if="isAgentMode"
                 type="button"
                 class="toolbar-collapse-toggle"
@@ -226,7 +237,7 @@
 <script setup lang="ts">
 import type { ConversationMessage } from '@packages/core/src';
 import { computed, nextTick, onMounted, ref, watch, type PropType } from 'vue';
-import { ArrowUp, PanelTopOpen, SquarePen } from 'lucide-vue-next';
+import { ArrowUp, PanelLeftOpen, PanelTopOpen, SquarePen } from 'lucide-vue-next';
 import AttachmentComposer from '../components/AttachmentComposer.vue';
 import MarkdownContent from '../components/MarkdownContent.vue';
 import MessageAttachmentStrip from '../components/MessageAttachmentStrip.vue';
@@ -234,6 +245,7 @@ import ModelOptionToggleGroup from '../components/ModelOptionToggleGroup.vue';
 import ProviderModelSelector from '../components/ProviderModelSelector.vue';
 import QuestionIndexPanel from '../components/QuestionIndexPanel.vue';
 import { useChatStore } from '../store/chat';
+import type { ChatRoutePath } from '../routes';
 import { isPromptSubmitHotkey } from '../utils/promptHotkeys';
 
 const props = defineProps({
@@ -271,6 +283,7 @@ const props = defineProps({
   }
 });
 const emit = defineEmits<{
+  (event: 'request-workspace-switch', path: ChatRoutePath): void;
   (event: 'request-auth-recovery'): void;
   (event: 'request-host-recovery'): void;
 }>();
@@ -290,7 +303,7 @@ const displayConversation = computed(() => chatStore.displayConversation);
 const isPreviewing = computed(() => chatStore.isPreviewing);
 const renderedMessages = computed(() => isPreviewing.value ? displayConversation.value?.messages || [] : chatStore.visibleMessages);
 const modelOptionDefinitions = computed(() => chatStore.currentModelOptionDefinitions);
-const isAgentMode = computed(() => chatStore.activeAgentContext !== null);
+const isAgentMode = computed(() => chatStore.workspaceMode === 'agent');
 const hasDraftAttachments = computed(() => chatStore.draftAttachments.length > 0);
 const showSelectorRow = computed(() => !isTopToolbarCollapsed.value || hasDraftAttachments.value);
 const draftPrompt = computed({
@@ -298,7 +311,7 @@ const draftPrompt = computed({
   set: (value: string) => chatStore.setDraftPrompt(value)
 });
 const hasQuestionIndexContent = computed(() => {
-  if (!props.showQuestionIndex || chatStore.workspaceMode !== 'active') {
+  if (!props.showQuestionIndex || chatStore.isPreviewing) {
     return false;
   }
 
@@ -496,6 +509,10 @@ async function send(e?: Event) {
 
 function getMessageQuestionKey(message: ConversationMessage): string | null {
   return messageQuestionMeta.value.get(message.id)?.questionKey || null;
+}
+
+function requestWorkspaceSwitch(path: ChatRoutePath): void {
+  emit('request-workspace-switch', path);
 }
 
 function isQuestionRoot(message: ConversationMessage): boolean {

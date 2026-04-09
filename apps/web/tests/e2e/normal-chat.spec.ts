@@ -138,6 +138,36 @@ test('local history supports switching between conversations from sidebar', asyn
   await expect(page.getByTestId('normal-messages')).toContainText('gemini-api/gemini-2.5-pro => WEB_LOCAL_ALPHA');
 });
 
+test('normal chat can bind a local conversation to an agent and surface it in the knowledge workspace agent lists', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('chatprism:mock-sync-events', '[]');
+  });
+
+  await page.goto('/#/chat');
+  await expect(page.getByTestId('normal-chat-view')).toBeVisible();
+
+  const prompt = 'BIND_TO_AGENT_E2E';
+  await page.getByTestId('normal-input').fill(prompt);
+  await page.getByTestId('normal-send').click();
+  await expect(page.getByTestId('local-history-item')).toHaveCount(1);
+  await expect(page.getByTestId('local-history-item').first()).toContainText(prompt);
+
+  const localHistoryRow = page.locator('.local-history-row').first();
+  await localHistoryRow.hover();
+  await localHistoryRow.getByTestId('local-history-agent-binding').click();
+  const docsAgentOption = localHistoryRow.locator('[data-testid="local-history-agent-option"][data-agent-key="/docs/"]');
+  await expect(docsAgentOption).toBeVisible();
+  await docsAgentOption.click();
+
+  await page.getByTestId('topbar-workspace-knowledge-workspace').click();
+  await expect(page.getByTestId('document-workspace')).toBeVisible();
+
+  await page.locator('[data-path="/docs"]').click();
+  await expect(page.getByTestId('agent-view')).toBeVisible();
+  await expect(page.getByTestId('agent-view-conversation')).toContainText(prompt);
+  await expect(page.getByTestId('agent-document-conversation-item')).toContainText(prompt);
+});
+
 test('local history deletes the active conversation with hover-only controls and falls back cleanly', async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('chatprism:mock-sync-events', '[]');

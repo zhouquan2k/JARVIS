@@ -1,12 +1,17 @@
 ## MODIFIED Requirements
 
 ### Requirement: Workspace shell MUST provide shared history sidebar for chat workspace
-系统 MUST 提供一个高于 `NormalChatView` 与 `CompareChatView` 的共享对话工作台视图容器，用于统一承载左侧会话边栏、中部聊天内容区域以及普通聊天模式下的右侧问题索引区域，并在 Web 与 Extension 两个宿主中复用一致的暗色沉浸式布局。该容器 MUST 保持“本地 / 外部”一级切换，并在外部视图下进一步管理具体 provider 选择；当右侧内容区处于普通聊天活动态时，工作台 MUST 同步挂载问题索引面板。对于本地历史来源，工作台还 MUST 提供整会话级星标过滤入口，使用户可以在不离开当前 workspace 的前提下切换“全部”与“仅看星标”两种视图。
+系统 MUST 提供一个高于 `NormalChatView` 与 `CompareChatView` 的共享对话工作台视图容器，用于统一承载左侧会话边栏、中部聊天内容区域以及普通聊天模式下的右侧问题索引区域，并在 Web 与 Extension 两个宿主中复用一致的暗色沉浸式布局。该容器 MUST 保持“本地 / 外部”一级切换，并在外部视图下进一步管理具体 provider 选择；当右侧内容区处于普通聊天活动态时，工作台 MUST 同步挂载问题索引面板。对于本地历史来源，工作台还 MUST 提供整会话级星标过滤入口，使用户可以在不离开当前 workspace 的前提下切换“全部”与“仅看星标”两种视图。该工作台在 `chatStore.workspaceMode === 'active'` 时 MUST 继续作为 Agent 主视图的辅助展示层，而在切换到对话模式时 MUST 仅改变展示方式，不得清空当前会话或重置已保存的 Agent 恢复点。
 
 #### Scenario: Render workspace shell in host app
 - **WHEN** Web 宿主或扩展宿主进入聊天工作台
 - **THEN** 系统 MUST 渲染一个包含可折叠侧边栏和右侧内容区的 workspace 容器
 - **AND** 该容器 MUST 负责管理“本地 / 外部”一级来源切换、外部 provider 二级选择、当前右侧视图的挂载以及普通聊天问题索引面板的显示状态
+
+#### Scenario: Treat chat mode as an auxiliary view of the active Agent conversation
+- **WHEN** 用户从 Agent 模式切换到对话模式
+- **THEN** 系统 MUST 继续展示当前 `currentConversation` 的详情视图
+- **AND** 系统 MUST NOT 清空当前会话或重置 Agent 恢复状态
 
 ### Requirement: External workspace MUST provide secondary provider selection
 系统 MUST 在“外部”来源视图中提供二级 provider 选择，至少包含 `ChatGPT`、`Gemini` 与 `外部文件导入` 三个入口。对于声明支持历史搜索的 provider，工作台 MUST 在左侧外部历史区域提供一份共享搜索框；该搜索框的关键词状态 MUST 在 `chatgpt-web` 与 `gemini-web` 之间共享，并在切换 provider 时沿用当前关键词重新加载新 provider 的结果。对于不支持搜索的 provider，工作台 MUST 隐藏该搜索框。
@@ -59,6 +64,29 @@
 - **AND** 系统 MUST 将当前会话切换为对应的本地活动会话并恢复普通输入区
 
 ## ADDED Requirements
+
+### Requirement: Local history sidebar MUST provide manual agent binding for local conversations
+系统 MUST 在普通对话工作台左侧本地历史列表中，为每条本地普通会话提供手动 Agent 绑定入口。该入口 MUST 支持把会话绑定到当前工作区可解析到的某个 Agent、绑定到默认根作用域 Agent，或清空已有绑定。
+
+#### Scenario: Bind a local conversation to a scoped agent from the sidebar
+- **WHEN** 用户在左侧本地历史项上打开“绑定 Agent”入口并选择某个 scoped Agent
+- **THEN** 系统 MUST 将该会话的 `conversation.agentKey` 更新为所选 Agent 对应的 key
+- **AND** 该更新 MUST 持久化到现有本地会话存储中
+
+#### Scenario: Clear an existing agent binding from the sidebar
+- **WHEN** 用户在左侧本地历史项上选择“不绑定”
+- **THEN** 系统 MUST 清空该会话已有的 `conversation.agentKey`
+- **AND** 该会话后续 MUST 不再出现在任何按 `agentKey` 聚合的 Agent 会话列表中
+
+#### Scenario: Load binding candidates from the workspace context
+- **WHEN** 用户首次打开左侧本地历史项的“绑定 Agent”入口
+- **THEN** 系统 MUST 基于当前工作区 `contextProvider.getContext()` 返回的 `agentConfigs` 构造可选 Agent 列表
+- **AND** 该列表 MUST 同时包含默认根作用域 Agent 以及当前工作区中可解析到的 scoped agents
+
+#### Scenario: Keep normal chat execution semantics unchanged after manual binding
+- **WHEN** 用户已经为一条本地普通会话手动设置了 `conversation.agentKey`
+- **THEN** 用户在普通对话工作台继续发送后续消息时，系统 MUST NOT 仅因该手动绑定而自动切换实际执行 Agent
+- **AND** 手动绑定 MUST 只影响该会话在 Agent 相关列表中的归属与展示
 
 ### Requirement: Normal chat view MUST support multimodal attachment composition
 系统 MUST 在普通聊天输入区支持文件选择、拖拽和剪贴板图片粘贴三类附件输入方式，并在发送前展示可移除的附件预览。

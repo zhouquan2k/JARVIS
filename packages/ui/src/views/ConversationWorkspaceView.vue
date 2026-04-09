@@ -14,9 +14,15 @@
       :external-history-search-placeholder="externalHistorySearchPlaceholder"
       :external-preview-loading-id="chatStore.externalPreviewLoadingId"
       :active-external-provider-id="chatStore.activeExternalProviderId"
-      :active-local-id="chatStore.workspaceMode === 'active' ? chatStore.currentConversation?.id : null"
-      :active-external-id="chatStore.workspaceMode === 'preview' ? chatStore.previewConversation?.externalId : null"
+      :active-local-id="chatStore.isPreviewing ? null : chatStore.currentConversation?.id"
+      :active-external-id="chatStore.isPreviewing ? chatStore.previewConversation?.externalId : null"
       :is-compare-mode="isCompareMode"
+      :agent-binding-options="agentBindingOptions"
+      :agent-binding-loading="agentBindingLoading"
+      :agent-binding-error="agentBindingError"
+      :agent-binding-notice="agentBindingNotice"
+      :agent-binding-notice-tone="agentBindingNoticeTone"
+      :agent-binding-submitting="agentBindingSubmitting"
       @toggle-collapse="chatStore.setSidebarCollapsed"
       @switch-source="onSwitchSource"
       @select-external-provider="onSelectExternalProvider"
@@ -28,6 +34,8 @@
       @update-external-query="chatStore.setExternalHistoryQuery"
       @submit-external-query="chatStore.submitExternalHistoryQuery"
       @clear-external-query="chatStore.clearExternalHistoryQuery"
+      @open-local-agent-binding="onOpenLocalAgentBinding"
+      @bind-local-agent="onBindLocalAgent"
       @new-chat="onNewChat"
       @new-compare="onNewCompare"
     />
@@ -45,6 +53,7 @@
         :host-recovery-message="hostRecoveryMessage"
         :host-recovery-action-label="hostRecoveryActionLabel"
         :host-recovery-action-disabled="hostRecoveryActionDisabled"
+        @request-workspace-switch="emit('request-workspace-switch', $event)"
         @request-auth-recovery="emit('request-auth-recovery')"
         @request-host-recovery="emit('request-host-recovery')"
       />
@@ -53,13 +62,26 @@
 </template>
 
 <script setup lang="ts">
-import { computed, type PropType } from 'vue';
+import { computed, onBeforeUnmount, ref, type PropType } from 'vue';
 import '../theme/chatgpt-dark.css';
 import CompareChatView from './CompareChatView.vue';
 import ConversationSidebar from '../components/ConversationSidebar.vue';
 import NormalChatView from './NormalChatView.vue';
 import { useChatStore } from '../store/chat';
-import type { ExternalHistoryProviderId } from '@packages/core/src';
+import {
+  DEFAULT_WORKSPACE_AGENT_KEY,
+  type IContextProvider,
+  type ExternalHistoryProviderId,
+  type ResolvedAgentConfig,
+  type WorkspaceContext
+} from '@packages/core/src';
+import type { ChatRoutePath } from '../routes';
+
+type AgentBindingOption = {
+  key: string | null;
+  label: string;
+  title: string;
+};
 
 const props = defineProps({
   isCompareMode: {
@@ -86,6 +108,10 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
+  contextProvider: {
+    type: null as unknown as PropType<IContextProvider | null>,
+    default: null
+  },
   hostRecoveryMessage: {
     type: String,
     default: ''
@@ -101,7 +127,7 @@ const props = defineProps({
 });
 
 const emit = defineEmits<{
-  (event: 'request-normal-mode'): void;
+  (event: 'request-workspace-switch', path: ChatRoutePath): void;
   (event: 'request-compare-mode'): void;
   (event: 'request-auth-recovery'): void;
   (event: 'request-host-recovery'): void;
@@ -109,6 +135,14 @@ const emit = defineEmits<{
 
 const chatStore = useChatStore();
 const activeExternalProviderFeatures = computed(() => chatStore.activeExternalProvider?.features || null);
+const agentBindingOptions = ref<AgentBindingOption[]>([]);
+const agentBindingLoading = ref(false);
+const agentBindingError = ref<string | null>(null);
+const agentBindingNotice = ref<string | null>(null);
+const agentBindingNoticeTone = ref<'info' | 'success' | 'error'>('info');
+const agentBindingSubmitting = ref(false);
+let agentBindingLoadPromise: Promise<void> | null = null;
+let agentBindingNoticeTimer: ReturnType<typeof setTimeout> | null = null;
 const showExternalHistorySearch = computed(() => {
   return chatStore.historySource === 'external' && activeExternalProviderFeatures.value?.historySearch === true;
 });
@@ -116,41 +150,156 @@ const externalHistorySearchPlaceholder = computed(() => {
   return activeExternalProviderFeatures.value?.historySearchPlaceholder || '搜索外部历史';
 });
 
+function resolveAgentBindingLabel(agent: ResolvedAgentConfig, key: string): string {
+  const name = agent.name?.trim() || '未命名 Agent';
+  if (key === DEFAULT_WORKSPACE_AGENT_KEY) {
+    return `${name}（默认）`;
+  }
+
+  return name;
+}
+
+function resolveAgentBindingTitle(agent: ResolvedAgentConfig, key: string): string {
+  const scopePath = agent.scopePath?.trim() || key;
+  return `作用域：${scopePath}`;
+}
+
+function buildAgentBindingOptions(context: WorkspaceContext): AgentBindingOption[] {
+  const entries = Object.entries(context.agentConfigs)
+    .filter((entry): entry is [string, ResolvedAgentConfig] => !!entry[1])
+    .sort(([leftKey, leftAgent], [rightKey, rightAgent]) => {
+      const leftScope = leftAgent.scopePath || leftKey;
+      const rightScope = rightAgent.scopePath || rightKey;
+      return leftScope.localeCompare(rightScope);
+    });
+
+  const options: AgentBindingOption[] = [
+    {
+      key: null,
+      label: '不绑定',
+      title: '保持为普通会话'
+    }
+  ];
+
+  const rootAgent = context.agentConfigs[DEFAULT_WORKSPACE_AGENT_KEY];
+  if (rootAgent) {
+    options.push({
+      key: DEFAULT_WORKSPACE_AGENT_KEY,
+      label: resolveAgentBindingLabel(rootAgent, DEFAULT_WORKSPACE_AGENT_KEY),
+      title: resolveAgentBindingTitle(rootAgent, DEFAULT_WORKSPACE_AGENT_KEY)
+    });
+  }
+
+  for (const [key, agent] of entries) {
+    if (key === DEFAULT_WORKSPACE_AGENT_KEY) {
+      continue;
+    }
+
+    options.push({
+      key,
+      label: resolveAgentBindingLabel(agent, key),
+      title: resolveAgentBindingTitle(agent, key)
+    });
+  }
+
+  return options;
+}
+
+async function ensureAgentBindingOptionsLoaded(): Promise<void> {
+  if (agentBindingOptions.value.length > 0 || agentBindingLoadPromise) {
+    return agentBindingLoadPromise ?? Promise.resolve();
+  }
+
+  const provider = props.contextProvider;
+  if (!provider) {
+    agentBindingError.value = '当前上下文 Provider 不可用。';
+    agentBindingOptions.value = [];
+    return;
+  }
+
+  agentBindingLoading.value = true;
+  agentBindingError.value = null;
+  agentBindingLoadPromise = (async () => {
+    await provider.initializeAccess();
+    const context = await provider.getContext();
+    agentBindingOptions.value = buildAgentBindingOptions(context);
+  })()
+    .catch((error) => {
+      agentBindingOptions.value = [];
+      agentBindingError.value = error instanceof Error ? error.message : '加载 Agent 候选项失败。';
+    })
+    .finally(() => {
+      agentBindingLoading.value = false;
+      agentBindingLoadPromise = null;
+    });
+
+  await agentBindingLoadPromise;
+}
+
+function setAgentBindingNotice(message: string | null, tone: 'info' | 'success' | 'error' = 'info', autoClear = true) {
+  if (agentBindingNoticeTimer) {
+    clearTimeout(agentBindingNoticeTimer);
+    agentBindingNoticeTimer = null;
+  }
+
+  agentBindingNotice.value = message;
+  agentBindingNoticeTone.value = tone;
+
+  if (message && autoClear) {
+    agentBindingNoticeTimer = setTimeout(() => {
+      agentBindingNotice.value = null;
+      agentBindingNoticeTimer = null;
+    }, 4000);
+  }
+}
+
+function resolveAgentBindingLabelByKey(agentKey: string | null): string {
+  if (agentKey === null) {
+    return '不绑定';
+  }
+
+  return agentBindingOptions.value.find((option) => option.key === agentKey)?.label ?? agentKey;
+}
+
+function requestWorkspaceSwitch(path: ChatRoutePath) {
+  emit('request-workspace-switch', path);
+}
+
 async function onSwitchSource(source: 'local' | 'external') {
   await chatStore.setHistorySource(source);
 }
 
 async function onSelectLocal(id: string) {
   if (props.isCompareMode) {
-    emit('request-normal-mode');
+    requestWorkspaceSwitch('/chat');
   }
   await chatStore.selectLocalConversation(id);
 }
 
 async function onDeleteLocal(id: string) {
   if (props.isCompareMode) {
-    emit('request-normal-mode');
+    requestWorkspaceSwitch('/chat');
   }
   await chatStore.deleteLocalConversation(id);
 }
 
 async function onSelectExternal(id: string) {
   if (props.isCompareMode) {
-    emit('request-normal-mode');
+    requestWorkspaceSwitch('/chat');
   }
   await chatStore.previewExternalConversation(chatStore.activeExternalProviderId, id);
 }
 
 async function onSelectExternalProvider(providerId: ExternalHistoryProviderId) {
   if (props.isCompareMode) {
-    emit('request-normal-mode');
+    requestWorkspaceSwitch('/chat');
   }
   await chatStore.setActiveExternalProvider(providerId);
 }
 
 async function onNewChat() {
   if (props.isCompareMode) {
-    emit('request-normal-mode');
+    requestWorkspaceSwitch('/chat');
   }
   await chatStore.startNewConversation();
 }
@@ -158,6 +307,35 @@ async function onNewChat() {
 function onNewCompare() {
   emit('request-compare-mode');
 }
+
+function onOpenLocalAgentBinding(): void {
+  setAgentBindingNotice(null);
+  void ensureAgentBindingOptionsLoaded();
+}
+
+async function onBindLocalAgent(payload: { conversationId: string; agentKey: string | null }): Promise<void> {
+  agentBindingSubmitting.value = true;
+  setAgentBindingNotice('正在绑定...', 'info', false);
+  try {
+    await chatStore.bindConversationToAgent(payload.conversationId, payload.agentKey);
+    setAgentBindingNotice(
+      `已绑定到 ${resolveAgentBindingLabelByKey(payload.agentKey)}，可到知识工作区对应 Agent 下查看这条会话。`,
+      'success'
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '绑定失败';
+    setAgentBindingNotice(message, 'error', false);
+  } finally {
+    agentBindingSubmitting.value = false;
+  }
+}
+
+onBeforeUnmount(() => {
+  if (agentBindingNoticeTimer) {
+    clearTimeout(agentBindingNoticeTimer);
+    agentBindingNoticeTimer = null;
+  }
+});
 </script>
 
 <style scoped>

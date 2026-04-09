@@ -28,6 +28,8 @@
       :active-document="props.activeDocument"
       :show-agent-conversation-list="props.showAgentConversationList"
       :context-provider="props.contextProvider"
+      :restore-conversation-id="props.restoreConversationId"
+      @request-workspace-switch="emit('request-workspace-switch', $event)"
     />
   </aside>
 </template>
@@ -35,6 +37,7 @@
 <script setup lang="ts">
 import { DEFAULT_SCOPED_AGENT_CONFIG, type ContextDocument, type IContextProvider, type ResolvedAgentConfig } from '@packages/core/src';
 import { onBeforeUnmount, watch } from 'vue';
+import type { ChatRoutePath } from '../routes';
 import AgentConversationPanel from './AgentConversationPanel.vue';
 import { useChatStore } from '../store/chat';
 
@@ -48,8 +51,12 @@ const props = defineProps<{
   contextProvider?: IContextProvider | null;
   onFileChanged?: ((change: { path: string; beforeContent: string; afterContent: string }) => void | Promise<void>) | null;
   agentResolutionError?: string | null;
+  restoreConversationId?: string | null;
 }>();
 const chatStore = useChatStore();
+const emit = defineEmits<{
+  (event: 'request-workspace-switch', path: ChatRoutePath): void;
+}>();
 
 function resolveAgentName(agent: ResolvedAgentConfig | null | undefined): string {
   return agent?.name?.trim() || 'Default Knowledge Agent';

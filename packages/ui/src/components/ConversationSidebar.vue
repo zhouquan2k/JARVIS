@@ -100,6 +100,16 @@
       </button>
     </div>
 
+    <div v-if="!collapsed && historySource === 'local' && agentBindingNotice" class="sidebar-nav sidebar-nav--binding-status">
+      <p
+        class="binding-status"
+        :class="`binding-status--${agentBindingNoticeTone}`"
+        data-testid="local-history-binding-status"
+      >
+        {{ agentBindingNotice }}
+      </p>
+    </div>
+
     <div v-if="!collapsed" class="sidebar-content">
       <p v-if="isCompareMode" class="mode-hint">
         当前为对比模式，选择历史后会切回普通聊天视图。
@@ -110,7 +120,11 @@
           v-for="item in localItems"
           :key="item.id"
           class="history-row local-history-row"
-          :class="{ active: activeLocalId === item.id, confirming: pendingDeleteId === item.id }"
+          :class="{
+            active: activeLocalId === item.id,
+            confirming: pendingDeleteId === item.id,
+            'binding-open': localAgentBindingId === item.id
+          }"
         >
           <button
             class="history-item local-history-button"
@@ -120,6 +134,9 @@
           >
             <span v-if="item.starred" class="history-star-marker" aria-hidden="true">★</span>
             <span class="title">{{ item.title || 'Untitled' }}</span>
+            <span v-if="resolveConversationAgentLabel(item.agentKey)" class="history-agent-tag">
+              {{ resolveConversationAgentLabel(item.agentKey) }}
+            </span>
           </button>
           <div class="history-actions">
             <template v-if="pendingDeleteId === item.id">
@@ -140,7 +157,29 @@
                 取消
               </button>
             </template>
+            <template v-else-if="localAgentBindingId === item.id">
+              <button
+                type="button"
+                class="history-action"
+                data-testid="local-history-agent-binding-close"
+                :aria-label="`关闭 ${item.title || 'Untitled'} 的 Agent 绑定面板`"
+                @click.stop="closeLocalAgentBinding"
+              >
+                取消
+              </button>
+            </template>
             <template v-else>
+              <button
+                type="button"
+                class="history-action"
+                data-testid="local-history-agent-binding"
+                aria-label="绑定到 Agent"
+                title="绑定到 Agent"
+                :disabled="agentBindingSubmitting === true"
+                @click.stop="openLocalAgentBinding(item.id)"
+              >
+                绑
+              </button>
               <button
                 type="button"
                 class="history-action"
@@ -162,6 +201,28 @@
                 x
               </button>
             </template>
+          </div>
+          <div v-if="localAgentBindingId === item.id" class="local-agent-binding-panel">
+            <p class="local-agent-binding-panel__title">选择 Agent</p>
+            <p v-if="agentBindingLoading" class="local-agent-binding-panel__message">正在加载 Agent 候选项...</p>
+            <p v-else-if="agentBindingError" class="local-agent-binding-panel__message local-agent-binding-panel__message--error">
+              {{ agentBindingError }}
+            </p>
+            <div v-else class="local-agent-binding-panel__options">
+              <button
+                v-for="option in localAgentBindingOptions"
+                :key="option.key ?? 'null'"
+                type="button"
+                class="local-agent-binding-panel__option"
+                :class="{ 'local-agent-binding-panel__option--muted': option.key === null }"
+                :title="option.title"
+                data-testid="local-history-agent-option"
+                :data-agent-key="option.key ?? ''"
+                @click.stop="bindLocalAgent(item.id, option.key)"
+              >
+                {{ option.label }}
+              </button>
+            </div>
           </div>
         </div>
         <p v-if="localItems.length === 0" class="empty-text">暂无本地历史</p>
@@ -236,7 +297,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import ExternalHistorySearchBox from './ExternalHistorySearchBox.vue';
 import type {
   Conversation,
@@ -263,6 +324,12 @@ const props = defineProps<{
   isCompareMode: boolean;
   showHistorySourceSwitch?: boolean;
   localConversationFilter?: LocalConversationFilter;
+  agentBindingOptions?: Array<{ key: string | null; label: string; title: string }>;
+  agentBindingLoading?: boolean;
+  agentBindingError?: string | null;
+  agentBindingNotice?: string | null;
+  agentBindingNoticeTone?: 'info' | 'success' | 'error';
+  agentBindingSubmitting?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -277,6 +344,8 @@ const emit = defineEmits<{
   (event: 'update-external-query', value: string): void;
   (event: 'submit-external-query'): void;
   (event: 'clear-external-query'): void;
+  (event: 'open-local-agent-binding', id: string): void;
+  (event: 'bind-local-agent', payload: { conversationId: string; agentKey: string | null }): void;
   (event: 'new-chat'): void;
   (event: 'new-compare'): void;
 }>();
@@ -284,6 +353,8 @@ const emit = defineEmits<{
 const menuOpen = ref(false);
 const menuHostRef = ref<HTMLElement | null>(null);
 const pendingDeleteId = ref<string | null>(null);
+const localAgentBindingId = ref<string | null>(null);
+const localAgentBindingOptions = computed(() => props.agentBindingOptions ?? []);
 
 function emitNewChat() {
   menuOpen.value = false;
@@ -297,16 +368,46 @@ function emitNewCompare() {
 
 function handleSelectLocal(id: string) {
   pendingDeleteId.value = null;
+  localAgentBindingId.value = null;
   emit('select-local', id);
 }
 
 function confirmDeleteLocal(id: string) {
   pendingDeleteId.value = null;
+  localAgentBindingId.value = null;
   emit('delete-local', id);
 }
 
 function toggleLocalFilter() {
   emit('set-local-filter', props.localConversationFilter === 'starred' ? 'all' : 'starred');
+}
+
+function resolveConversationAgentLabel(agentKey: string | null | undefined): string {
+  if (!agentKey) {
+    return '';
+  }
+
+  return props.agentBindingOptions?.find((option) => option.key === agentKey)?.label ?? agentKey;
+}
+
+function openLocalAgentBinding(id: string) {
+  pendingDeleteId.value = null;
+  if (localAgentBindingId.value === id) {
+    localAgentBindingId.value = null;
+    return;
+  }
+
+  localAgentBindingId.value = id;
+  emit('open-local-agent-binding', id);
+}
+
+function closeLocalAgentBinding() {
+  localAgentBindingId.value = null;
+}
+
+function bindLocalAgent(conversationId: string, agentKey: string | null) {
+  emit('bind-local-agent', { conversationId, agentKey });
+  localAgentBindingId.value = null;
 }
 
 function handleWindowClick(event: MouseEvent) {
@@ -527,6 +628,11 @@ onUnmounted(() => {
   padding-bottom: 6px;
 }
 
+.sidebar-nav--binding-status {
+  padding-top: 0;
+  padding-bottom: 8px;
+}
+
 .source-switch {
   display: inline-flex;
   align-items: flex-end;
@@ -600,6 +706,29 @@ onUnmounted(() => {
   line-height: 1;
 }
 
+.binding-status {
+  margin: 0 12px 0 0;
+  padding: 8px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  line-height: 1.4;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.binding-status--info {
+  color: #cbd5e1;
+}
+
+.binding-status--success {
+  color: #bbf7d0;
+  background: rgba(22, 101, 52, 0.16);
+}
+
+.binding-status--error {
+  color: #fecaca;
+  background: rgba(127, 29, 29, 0.22);
+}
+
 .sidebar-content {
   flex: 1;
   min-height: 0;
@@ -655,6 +784,10 @@ onUnmounted(() => {
   position: relative;
 }
 
+.history-row.binding-open {
+  padding-bottom: 6px;
+}
+
 .history-item {
   position: relative;
   display: block;
@@ -687,6 +820,18 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.history-agent-tag {
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(96, 165, 250, 0.14);
+  color: #bfdbfe;
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .history-actions {
@@ -757,6 +902,66 @@ onUnmounted(() => {
   color: #ffe4e6;
   background: rgba(127, 29, 29, 0.92);
   box-shadow: inset 0 0 0 1px rgba(248, 113, 113, 0.34);
+}
+
+.history-action:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.local-agent-binding-panel {
+  margin: 4px 0 8px;
+  padding: 10px 10px 12px;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.92);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.12);
+}
+
+.local-agent-binding-panel__title {
+  margin: 0 0 8px;
+  color: var(--cp-text-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.local-agent-binding-panel__message {
+  margin: 0;
+  color: var(--cp-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.local-agent-binding-panel__message--error {
+  color: #fca5a5;
+}
+
+.local-agent-binding-panel__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.local-agent-binding-panel__option {
+  min-height: 28px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--cp-text-primary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.local-agent-binding-panel__option:hover,
+.local-agent-binding-panel__option:focus-visible {
+  background: rgba(255, 255, 255, 0.1);
+  color: #f8fafc;
+}
+
+.local-agent-binding-panel__option--muted {
+  color: var(--cp-text-muted);
 }
 
 .title {

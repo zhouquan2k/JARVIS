@@ -582,4 +582,78 @@ describe('AgentPane', () => {
 
         wrapper.unmount();
     });
+
+    it('passes the restore conversation id to the conversation panel', () => {
+        setActivePinia(createPinia());
+        const wrapper = mount(AgentPane, {
+            props: {
+                activeAgent: {
+                    name: 'Docs Agent',
+                    effectiveInstructions: 'Use docs context',
+                    modelProviderName: 'gemini-api',
+                    modelName: 'gemini-2.5-flash',
+                    scopePath: '/docs',
+                    sourcePaths: ['/docs/.agent.json']
+                },
+                activeAgentKey: '/docs/',
+                activePath: null,
+                selectedNodePath: '/docs',
+                activeDocument: null,
+                showAgentConversationList: true,
+                contextProvider: createPaneContextProvider(),
+                onFileChanged: null,
+                restoreConversationId: 'conversation-1'
+            },
+            global: {
+                stubs: {
+                    AgentConversationPanel: {
+                        props: ['restoreConversationId'],
+                        template: '<div data-testid="agent-conversation-panel-stub" :data-restore-conversation-id="restoreConversationId || \'\'" />'
+                    },
+                    NormalChatView: {
+                        template: '<div data-testid="normal-chat-stub" />'
+                    }
+                }
+            }
+        });
+
+        expect(wrapper.get('[data-testid="agent-conversation-panel-stub"]').attributes('data-restore-conversation-id')).toBe('conversation-1');
+    });
+
+    it('forwards workspace switch requests from the conversation panel', async () => {
+        setActivePinia(createPinia());
+        const wrapper = mount(AgentPane, {
+            props: {
+                activeAgent: {
+                    name: 'Docs Agent',
+                    effectiveInstructions: 'Use docs context',
+                    modelProviderName: 'gemini-api',
+                    modelName: 'gemini-2.5-flash',
+                    scopePath: '/docs',
+                    sourcePaths: ['/docs/.agent.json']
+                },
+                activeAgentKey: '/docs/',
+                activePath: null,
+                selectedNodePath: '/docs',
+                activeDocument: null,
+                showAgentConversationList: true,
+                contextProvider: createPaneContextProvider(),
+                onFileChanged: null
+            },
+            global: {
+                stubs: {
+                    AgentConversationPanel: {
+                        template: '<button data-testid="agent-conversation-panel-stub" @click="$emit(\'request-workspace-switch\', \'/chat\')" />'
+                    },
+                    NormalChatView: {
+                        template: '<div data-testid="normal-chat-stub" />'
+                    }
+                }
+            }
+        });
+
+        await wrapper.get('[data-testid="agent-conversation-panel-stub"]').trigger('click');
+
+        expect(wrapper.emitted('request-workspace-switch')).toEqual([['/chat']]);
+    });
 });

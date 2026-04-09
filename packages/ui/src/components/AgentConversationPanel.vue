@@ -28,6 +28,16 @@
       <button
         type="button"
         class="agent-conversation-panel__icon-btn"
+        data-testid="agent-conversation-expand"
+        title="放大对话"
+        aria-label="放大对话"
+        @click="switchWorkspace('/chat')"
+      >
+        <PanelRightOpen :size="16" />
+      </button>
+      <button
+        type="button"
+        class="agent-conversation-panel__icon-btn"
         data-testid="agent-conversation-list-plus"
         @click="createDocumentConversation"
       >
@@ -50,11 +60,12 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { ArrowLeft, Plus } from 'lucide-vue-next';
+import { ArrowLeft, PanelRightOpen, Plus } from 'lucide-vue-next';
 import type { ContextDocument, Conversation, IContextProvider } from '@packages/core/src';
 import AgentDocumentConversationList from './AgentDocumentConversationList.vue';
 import NormalChatView from '../views/NormalChatView.vue';
 import { useChatStore } from '../store/chat';
+import type { ChatRoutePath } from '../routes';
 
 type PanelMode = 'list' | 'detail';
 
@@ -65,13 +76,18 @@ const props = defineProps<{
   activeDocument?: ContextDocument | null;
   showAgentConversationList?: boolean;
   contextProvider?: IContextProvider | null;
+  restoreConversationId?: string | null;
 }>();
 
 const chatStore = useChatStore();
+const emit = defineEmits<{
+  (event: 'request-workspace-switch', path: ChatRoutePath): void;
+}>();
 const panelMode = ref<PanelMode>('detail');
 const documentConversations = ref<Conversation[]>([]);
 const isLoading = ref(false);
 const currentError = ref<string | null>(null);
+const pendingRestoreConversationId = ref<string | null>(props.restoreConversationId ?? null);
 let documentConversationLoadToken = 0;
 
 const activeDocumentPath = computed(() => props.activeDocument?.path?.trim() || '');
@@ -178,8 +194,23 @@ async function createDocumentConversation(): Promise<void> {
   panelMode.value = 'detail';
 }
 
+function switchWorkspace(path: ChatRoutePath): void {
+  emit('request-workspace-switch', path);
+}
+
+function consumeRestoreConversationId(): void {
+  pendingRestoreConversationId.value = null;
+}
+
 function syncPanelStateFromSelection(): void {
   if (hasConversationListContext.value) {
+    if (pendingRestoreConversationId.value) {
+      if (chatStore.currentConversation?.id === pendingRestoreConversationId.value) {
+        panelMode.value = 'detail';
+      }
+      return;
+    }
+
     panelMode.value = 'list';
     if (activeDocumentPath.value) {
       void loadDocumentConversations(activeDocumentPath.value);
@@ -199,6 +230,15 @@ function syncPanelStateFromSelection(): void {
 }
 
 watch(
+  () => props.restoreConversationId ?? null,
+  (restoreConversationId) => {
+    pendingRestoreConversationId.value = restoreConversationId;
+    syncPanelStateFromSelection();
+  },
+  { immediate: true, flush: 'sync' }
+);
+
+watch(
   () => [
     props.selectedNodePath ?? null,
     props.activePath ?? null,
@@ -214,12 +254,23 @@ watch(
 );
 
 watch(
-  () => [chatStore.currentConversation?.id ?? null, chatStore.currentConversation?.updatedAt ?? null, panelMode.value] as const,
+  () => [chatStore.currentConversation?.id ?? null, chatStore.currentConversation?.updatedAt ?? null, pendingRestoreConversationId.value] as const,
   () => {
+    if (
+      hasConversationListContext.value
+      && pendingRestoreConversationId.value
+      && chatStore.currentConversation?.id === pendingRestoreConversationId.value
+    ) {
+      panelMode.value = 'detail';
+      consumeRestoreConversationId();
+      return;
+    }
+
     if (panelMode.value === 'list' && activeDocumentPath.value) {
       void loadDocumentConversations(activeDocumentPath.value);
     }
-  }
+  },
+  { immediate: true }
 );
 </script>
 
@@ -234,7 +285,7 @@ watch(
 
 .agent-conversation-panel__toolbar {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) 36px;
+  grid-template-columns: 36px minmax(0, 1fr) 36px 36px;
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
@@ -281,6 +332,7 @@ watch(
 }
 
 .agent-conversation-panel__title-spacer {
+  grid-column: 2;
   min-width: 0;
   min-height: 1px;
 }

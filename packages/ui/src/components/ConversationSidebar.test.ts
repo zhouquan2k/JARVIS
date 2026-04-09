@@ -149,6 +149,70 @@ describe('ConversationSidebar', () => {
         expect(wrapper.emitted('set-local-filter')).toEqual([['all']]);
     });
 
+    it('opens the local agent binding panel and emits bind-local-agent for the selected option', async () => {
+        const wrapper = mount(ConversationSidebar, {
+            props: {
+                collapsed: false,
+                historySource: 'local',
+                localItems: [createLocalConversation('local-1', '第一条会话')],
+                localConversationFilter: 'all',
+                agentBindingOptions: [
+                    { key: null, label: '不绑定', title: '保持为普通会话' },
+                    { key: '/docs/', label: 'Docs Agent', title: '作用域：/docs' }
+                ],
+                externalProviders,
+                externalItems: [],
+                externalHistoryLoading: false,
+                externalHistoryQuery: '',
+                activeExternalProviderId: 'chatgpt-web',
+                isCompareMode: false
+            }
+        });
+
+        await wrapper.get('[data-testid="local-history-agent-binding"]').trigger('click');
+
+        expect(wrapper.emitted('open-local-agent-binding')).toEqual([['local-1']]);
+        expect(wrapper.find('[data-testid="local-history-star"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid="local-history-delete"]').exists()).toBe(false);
+
+        const optionButtons = wrapper.findAll('[data-testid="local-history-agent-option"]');
+        expect(optionButtons).toHaveLength(2);
+        expect((optionButtons[1].element as HTMLButtonElement).dataset.agentKey).toBe('/docs/');
+
+        await optionButtons[1].trigger('click');
+
+        expect(wrapper.emitted('bind-local-agent')).toEqual([
+            [{ conversationId: 'local-1', agentKey: '/docs/' }]
+        ]);
+    });
+
+    it('renders the bound agent label on local conversations', () => {
+        const wrapper = mount(ConversationSidebar, {
+            props: {
+                collapsed: false,
+                historySource: 'local',
+                localItems: [
+                    {
+                        ...createLocalConversation('local-1', '第一条会话'),
+                        agentKey: '/docs/'
+                    }
+                ],
+                agentBindingOptions: [
+                    { key: null, label: '不绑定', title: '保持为普通会话' },
+                    { key: '/docs/', label: 'Docs Agent', title: '作用域：/docs' }
+                ],
+                externalProviders,
+                externalItems: [],
+                externalHistoryLoading: false,
+                externalHistoryQuery: '',
+                activeExternalProviderId: 'chatgpt-web',
+                isCompareMode: false
+            }
+        });
+
+        expect(wrapper.get('[data-testid="local-history-item"]').text()).toContain('Docs Agent');
+    });
+
     it('renders the shared external history search box only for searchable providers', () => {
         const wrapper = mount(ConversationSidebar, {
             props: {

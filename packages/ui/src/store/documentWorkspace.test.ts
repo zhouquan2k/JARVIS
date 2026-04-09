@@ -86,6 +86,36 @@ describe('useDocumentWorkspaceStore', () => {
         expect(store.expandedPaths).toContain('/docs');
     });
 
+    it('restores a selected agent directory while opening its active document', async () => {
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory', isAgentOwner: true, agentKey: '/docs/' },
+                { path: '/docs/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/docs' },
+                { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' }
+            ],
+            documents: {
+                '/docs/.agent.json': JSON.stringify({
+                    name: 'Docs Agent',
+                    instructions: 'Handle docs.'
+                }),
+                '/docs/guide.md': '# Guide'
+            }
+        }));
+
+        await store.hydrateWorkspace();
+        await store.restoreSelection({
+            selectedNodePath: '/docs',
+            activePath: '/docs/guide.md'
+        });
+
+        expect(store.selectedNodePath).toBe('/docs');
+        expect(store.activePath).toBe('/docs/guide.md');
+        expect(store.activeDocument?.path).toBe('/docs/guide.md');
+        expect(store.isAgentOwnerSelected).toBe(true);
+        expect(store.activeAgentKey).not.toBeNull();
+    });
+
     it('resolves text/plain with the shared text viewer', async () => {
         const store = useDocumentWorkspaceStore();
         store.setContextProvider(createMockContextProvider({

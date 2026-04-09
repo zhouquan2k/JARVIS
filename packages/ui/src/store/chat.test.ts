@@ -131,8 +131,9 @@ class AbortableMockModelProvider extends MockModelProvider {
 
 class MockStorageProvider implements IConversationPersistProvider {
     id = 'mock-storage';
+    syncNowCalls = 0;
 
-    constructor(private readonly conversations: Conversation[]) {}
+    constructor(public readonly conversations: Conversation[]) {}
 
     async saveConversation(chat: Conversation): Promise<void> {
         const index = this.conversations.findIndex((item) => item.id === chat.id);
@@ -156,6 +157,10 @@ class MockStorageProvider implements IConversationPersistProvider {
         if (index >= 0) {
             this.conversations.splice(index, 1);
         }
+    }
+
+    async syncNow(): Promise<void> {
+        this.syncNowCalls += 1;
     }
 }
 
@@ -318,12 +323,12 @@ describe('useChatStore workspace history flow', () => {
 
         await store.init();
         await store.previewExternalConversation('chatgpt-web', 'remote-1');
-        expect(store.workspaceMode).toBe('preview');
+        expect(store.isPreviewing).toBe(true);
         expect(store.previewConversation?.externalId).toBe('remote-1');
 
         await store.importPreviewConversation();
 
-        expect(store.workspaceMode).toBe('active');
+        expect(store.isPreviewing).toBe(false);
         expect(store.historySource).toBe('local');
         expect(store.currentConversation?.id).toBe('local-existing');
         expect((await storage.getAllConversations()).length).toBe(1);
@@ -640,6 +645,52 @@ describe('useChatStore workspace history flow', () => {
         });
     });
 
+    it('resets inherited workspace agent selection when starting a new chat in conversation mode', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+
+        await store.initializeProviderCatalog(providerCatalog);
+        store.saveWorkspaceAgentContext({
+            ...scopedAgent,
+            modelProviderName: 'other-provider',
+            modelName: 'other-static'
+        });
+        store.currentProviderId = 'other-provider';
+        store.currentModelId = 'other-static';
+
+        await store.startNewConversation();
+
+        expect(store.workspaceAgentContext).toBeNull();
+        expect(store.currentProviderId).toBe('mock-provider');
+        expect(store.currentModelId).toBe('static-model');
+        expect(store.currentConversation?.modelSelection).toEqual({
+            providerId: 'mock-provider',
+            modelId: 'static-model',
+            modelOptions: {}
+        });
+    });
+
+    it('applies the saved workspace agent selection to the current model state', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+
+        await store.initializeProviderCatalog(providerCatalog);
+        store.saveWorkspaceAgentContext({
+            ...scopedAgent,
+            modelProviderName: 'other-provider',
+            modelName: 'other-static'
+        });
+
+        await store.applyWorkspaceAgentContextSelection();
+
+        expect(store.currentProviderId).toBe('other-provider');
+        expect(store.currentModelId).toBe('other-static');
+    });
+
     it('attaches the active text document with a stable prompt prefix when an active agent context is present', async () => {
         const provider = new MockModelProvider();
         const storage = new MockStorageProvider([]);
@@ -738,6 +789,59 @@ describe('useChatStore workspace history flow', () => {
         expect(store.getConversationsByAgent('/workspace/archive/.agent.json').map((item) => item.id)).toEqual(['conversation-1']);
         expect(store.resolveConversationAgentKey('')).toBeUndefined();
         expect(store.resolveConversationAgentKey('/workspace/.agent.json')).toBe('/workspace/');
+    });
+
+    it('binds, rebinds, and unbinds local conversations while keeping the active conversation in sync', async () => {
+        const storage = new MockStorageProvider([
+            {
+                id: 'conversation-1',
+                title: 'Archive notes',
+                origin: 'local',
+                messages: [],
+                updatedAt: 100
+            }
+        ]);
+        const store = useChatStore();
+        store.setProviders(new MockModelProvider(), storage);
+        await store.init();
+
+        store.currentConversation = {
+            id: 'conversation-1',
+            title: 'Archive notes',
+            origin: 'local',
+            messages: [],
+            updatedAt: 100
+        };
+
+        await store.bindConversationToAgent('conversation-1', '/workspace/archive/.agent.json');
+        expect(storage['conversations'][0]).toMatchObject({
+            id: 'conversation-1',
+            agentKey: '/workspace/archive/',
+            updatedAt: expect.any(Number)
+        });
+        expect(storage.syncNowCalls).toBe(1);
+        expect(store.currentConversation?.agentKey).toBe('/workspace/archive/');
+        expect(store.getConversationsByAgent('/workspace/archive/.agent.json').map((item) => item.id)).toEqual(['conversation-1']);
+
+        await store.bindConversationToAgent('conversation-1', '/workspace/.agent.json');
+        expect(storage['conversations'][0]).toMatchObject({
+            id: 'conversation-1',
+            agentKey: '/workspace/',
+            updatedAt: expect.any(Number)
+        });
+        expect(storage.syncNowCalls).toBe(2);
+        expect(store.currentConversation?.agentKey).toBe('/workspace/');
+        expect(store.getConversationsByAgent('/workspace/.agent.json').map((item) => item.id)).toEqual(['conversation-1']);
+
+        await store.bindConversationToAgent('conversation-1', null);
+        expect(storage['conversations'][0]).toMatchObject({
+            id: 'conversation-1',
+            updatedAt: expect.any(Number)
+        });
+        expect(storage.syncNowCalls).toBe(3);
+        expect(storage['conversations'][0].agentKey).toBeUndefined();
+        expect(store.currentConversation?.agentKey).toBeUndefined();
+        expect(store.getConversationsByAgent('/workspace/.agent.json').map((item) => item.id)).toEqual([]);
     });
 
     it('includes the active local conversation in agent grouping before persistence refresh completes', async () => {
@@ -1635,7 +1739,23 @@ describe('useChatStore workspace history flow', () => {
         expect((await storage.getAllConversations())).toHaveLength(1);
     });
 
-    it('resets workspace conversation state without touching model selection', async () => {
+    it('saves and restores the agent view status snapshot', () => {
+        const store = useChatStore();
+
+        store.saveAgentViewStatus({
+            selectedNodePath: '/docs',
+            activePath: '/docs/guide.md',
+            activeConversationId: 'conversation-1'
+        });
+
+        expect(store.restoreAgentViewStatus()).toEqual({
+            selectedNodePath: '/docs',
+            activePath: '/docs/guide.md',
+            activeConversationId: 'conversation-1'
+        });
+    });
+
+    it('resets workspace conversation state without clearing the active conversation', async () => {
         const storage = new MockStorageProvider([]);
         const store = useChatStore();
         store.setProviders(new MockModelProvider(), storage);
@@ -1656,7 +1776,6 @@ describe('useChatStore workspace history flow', () => {
             updatedAt: Date.now(),
             messages: []
         };
-        store.workspaceMode = 'preview';
         store.historySource = 'external';
         store.currentError = 'temporary error';
         store.currentHistoryErrorCode = 'AUTH_REQUIRED';
@@ -1682,9 +1801,13 @@ describe('useChatStore workspace history flow', () => {
 
         store.resetWorkspaceConversationState();
 
-        expect(store.currentConversation).toBeNull();
+        expect(store.currentConversation).toMatchObject({
+            id: 'conversation-active',
+            title: 'Workspace Chat',
+            origin: 'local'
+        });
         expect(store.previewConversation).toBeNull();
-        expect(store.workspaceMode).toBe('active');
+        expect(store.isPreviewing).toBe(false);
         expect(store.historySource).toBe('local');
         expect(store.currentError).toBeNull();
         expect(store.currentHistoryErrorCode).toBeNull();

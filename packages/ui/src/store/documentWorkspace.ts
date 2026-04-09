@@ -50,6 +50,7 @@ export interface DocumentWorkspaceState {
 }
 
 const AUTO_SAVE_DELAY_MS = 400;
+
 function flattenVisibleNodes(nodes: ContextNode[]): ContextNode[] {
     const flattened: ContextNode[] = [];
 
@@ -148,6 +149,43 @@ function remapPath(path: string | null, fromPath: string, toPath: string): strin
     }
 
     return path;
+}
+
+function resolveExistingPath(path: string | null, nodes: ContextNode[]): string | null {
+    if (!path) {
+        return null;
+    }
+
+    if (path === '/') {
+        return '/';
+    }
+
+    let current = path;
+    while (current !== '/') {
+        if (findNodeByPath(nodes, current)) {
+            return current;
+        }
+
+        current = getParentPath(current);
+    }
+
+    return '/';
+}
+
+function buildExpandedPathsForRestore(path: string, includeSelf: boolean): string[] {
+    if (path === '/') {
+        return ['/'];
+    }
+
+    const expanded = new Set<string>(['/']);
+    let current = includeSelf ? path : getParentPath(path);
+
+    while (current !== '/') {
+        expanded.add(current);
+        current = getParentPath(current);
+    }
+
+    return Array.from(expanded);
 }
 
 function normalizeSizes(sizes: [number, number, number]): [number, number, number] {
@@ -406,6 +444,53 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
                 : null;
         },
 
+        async restoreSelection(input: {
+            selectedNodePath: string | null;
+            activePath?: string | null;
+        }) {
+            if (!this.contextProvider) {
+                return;
+            }
+
+            const activeExactPath = input.activePath === '/'
+                ? '/'
+                : input.activePath && this.findNodeByPath(input.activePath)
+                    ? input.activePath
+                    : null;
+            const selectedExactPath = input.selectedNodePath === '/'
+                ? '/'
+                : input.selectedNodePath && this.findNodeByPath(input.selectedNodePath)
+                    ? input.selectedNodePath
+                    : null;
+
+            const restorePath = activeExactPath
+                ?? selectedExactPath
+                ?? resolveExistingPath(input.activePath ?? null, this.nodes)
+                ?? resolveExistingPath(input.selectedNodePath ?? null, this.nodes)
+                ?? '/';
+
+            const targetNode = restorePath === '/' ? null : this.findNodeByPath(restorePath);
+            this.expandedPaths = filterExpandedPaths(
+                this.nodes,
+                [
+                    ...this.expandedPaths,
+                    ...buildExpandedPathsForRestore(restorePath, targetNode?.kind === 'directory')
+                ]
+            );
+
+            const shouldPreserveSelectedDirectory = !!selectedExactPath
+                && !!activeExactPath
+                && selectedExactPath !== activeExactPath
+                && this.findNodeByPath(selectedExactPath)?.kind === 'directory';
+
+            await this.openNode(
+                restorePath,
+                shouldPreserveSelectedDirectory
+                    ? { selectedNodePath: selectedExactPath }
+                    : undefined
+            );
+        },
+
         toggleExpanded(path: string) {
             if (this.expandedPaths.includes(path)) {
                 this.expandedPaths = this.expandedPaths.filter((item) => item !== path);
@@ -415,7 +500,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             this.expandedPaths = [...this.expandedPaths, path];
         },
 
-        async openNode(path: string) {
+        async openNode(path: string, options?: { selectedNodePath?: string | null }) {
             if (!this.contextProvider) {
                 return;
             }
@@ -434,18 +519,19 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
                 return;
             }
 
+            const selectedNodePath = options?.selectedNodePath ?? path;
             if (node.kind === 'directory') {
-                this.selectedNodePath = path;
+                this.selectedNodePath = selectedNodePath;
                 clearActiveDocumentState(this);
                 this.syncActiveFileChange(null);
-                this.syncActiveAgent(path);
+                this.syncActiveAgent(selectedNodePath);
                 return;
             }
 
             await this.flushActiveDocument();
             const document = await this.contextProvider.readDocument(path);
             const viewer = resolveDocumentViewer(document);
-            this.selectedNodePath = path;
+            this.selectedNodePath = selectedNodePath;
             this.activePath = path;
             this.activeDocument = document;
             this.activeViewerId = viewer?.id ?? null;
@@ -459,7 +545,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
                 [path]: false
             };
             this.syncActiveFileChange(path);
-            this.syncActiveAgent(path);
+            this.syncActiveAgent(selectedNodePath);
         },
 
         updateActiveDocument(content: string) {

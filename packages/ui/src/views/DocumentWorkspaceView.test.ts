@@ -3,8 +3,50 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount } from '@vue/test-utils';
+import type { Conversation, IConversationPersistProvider, IModelProvider } from '@packages/core/src';
 import { createMockContextProvider } from '@packages/core/src';
 import DocumentWorkspaceView from './DocumentWorkspaceView.vue';
+import { useChatStore } from '../store/chat';
+import { useDocumentWorkspaceStore } from '../store/documentWorkspace';
+
+class MockConversationStorage implements IConversationPersistProvider {
+    constructor(private conversations: Conversation[]) {}
+
+    async saveConversation(conversation: Conversation): Promise<void> {
+        const index = this.conversations.findIndex((item) => item.id === conversation.id);
+        if (index >= 0) {
+            this.conversations[index] = conversation;
+            return;
+        }
+
+        this.conversations.unshift(conversation);
+    }
+
+    async getConversation(id: string): Promise<Conversation | null> {
+        return this.conversations.find((conversation) => conversation.id === id) || null;
+    }
+
+    async getAllConversations(): Promise<Conversation[]> {
+        return [...this.conversations];
+    }
+
+    async deleteConversation(id: string): Promise<void> {
+        this.conversations = this.conversations.filter((conversation) => conversation.id !== id);
+    }
+
+    async syncNow(): Promise<void> {}
+}
+
+function createMockModelProvider(): IModelProvider {
+    return {
+        id: 'mock-provider',
+        getAvailableModels: async () => ({ models: [{ id: 'mock-model', name: 'Mock Model' }], defaultModel: 'mock-model' }),
+        checkAuth: async () => true,
+        getDocumentCapability: async () => ({ acceptedMimeTypes: ['text/plain', 'text/markdown'] }),
+        sendMessage: async () => ({ text: '', conversationId: 'conversation-1', messageId: 'message-1' }),
+        abort: () => undefined
+    } as IModelProvider;
+}
 
 describe('DocumentWorkspaceView', () => {
     beforeEach(() => {
@@ -170,5 +212,201 @@ describe('DocumentWorkspaceView', () => {
 
         expect(wrapper.get('[data-testid="agent-pane"]').attributes('data-show-agent-conversation-list')).toBe('true');
         expect(wrapper.get('[data-testid="agent-pane"]').attributes('data-agent-key')).toBe('/docs/');
+    });
+
+    it('forwards workspace switch requests from the agent pane', async () => {
+        const wrapper = mount(DocumentWorkspaceView, {
+            props: {
+                contextProvider: createMockContextProvider({
+                    nodes: [
+                        { path: '/docs', name: 'docs', kind: 'directory' },
+                        { path: '/docs/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/docs' }
+                    ],
+                    documents: {
+                        '/docs/.agent.json': JSON.stringify({
+                            name: 'Docs Agent',
+                            instructions: 'Handle docs.'
+                        })
+                    }
+                })
+            },
+            global: {
+                stubs: {
+                    AgentPane: {
+                        template: '<button data-testid="agent-pane-switch" @click="$emit(\'request-workspace-switch\', \'/chat\')" />'
+                    },
+                    DocumentEditorPane: {
+                        template: '<div data-testid="document-editor" />'
+                    }
+                }
+            }
+        });
+
+        await flushPromises();
+        await wrapper.get('[data-testid="agent-pane-switch"]').trigger('click');
+
+        expect(wrapper.emitted('request-workspace-switch')).toEqual([['/chat']]);
+    });
+
+    it('restores the saved agent conversation and document selection when remounting', async () => {
+        const chatStore = useChatStore();
+        const storage = new MockConversationStorage([
+            {
+                id: 'conversation-saved',
+                title: 'Saved Chat',
+                origin: 'local',
+                updatedAt: 10,
+                messages: []
+            },
+            {
+                id: 'conversation-current',
+                title: 'Current Chat',
+                origin: 'local',
+                updatedAt: 9,
+                messages: []
+            }
+        ]);
+
+        chatStore.setProviders(createMockModelProvider(), storage);
+        chatStore.currentConversation = {
+            id: 'conversation-current',
+            title: 'Current Chat',
+            origin: 'local',
+            updatedAt: 9,
+            messages: []
+        };
+        chatStore.saveAgentViewStatus({
+            selectedNodePath: '/docs',
+            activePath: '/docs/guide.md',
+            activeConversationId: 'conversation-saved'
+        });
+
+        const wrapper = mount(DocumentWorkspaceView, {
+            props: {
+                contextProvider: createMockContextProvider({
+                    nodes: [
+                        { path: '/docs', name: 'docs', kind: 'directory' },
+                        { path: '/docs/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/docs' },
+                        { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' },
+                        { path: '/other.md', name: 'other.md', kind: 'file' }
+                    ],
+                    documents: {
+                        '/docs/.agent.json': JSON.stringify({
+                            name: 'Docs Agent',
+                            instructions: 'Handle docs.'
+                        }),
+                        '/docs/guide.md': '# Guide',
+                        '/other.md': '# Other'
+                    }
+                })
+            },
+            global: {
+                stubs: {
+                    AgentPane: {
+                        props: ['activeAgent', 'agentResolutionError', 'isResolvingAgent'],
+                        template: `
+                          <div
+                            data-testid="agent-pane"
+                            :data-agent-name="activeAgent?.name ?? ''"
+                            :data-agent-error="agentResolutionError ?? ''"
+                            :data-agent-loading="isResolvingAgent === true"
+                          />
+                        `
+                    },
+                    DocumentEditorPane: {
+                        template: '<div data-testid="document-editor" />'
+                    }
+                }
+            }
+        });
+
+        await flushPromises();
+        await wrapper.vm.$nextTick();
+
+        expect(chatStore.currentConversation?.id).toBe('conversation-saved');
+        expect(chatStore.workspaceMode).toBe('conversation');
+        expect(chatStore.historySource).toBe('local');
+
+        const documentStore = useDocumentWorkspaceStore();
+        expect(documentStore.selectedNodePath).toBe('/docs');
+        expect(documentStore.activePath).toBe('/docs/guide.md');
+        expect(documentStore.activeDocument?.path).toBe('/docs/guide.md');
+        expect(documentStore.expandedPaths).toContain('/docs');
+        expect(documentStore.isAgentOwnerSelected).toBe(true);
+
+        await wrapper.get('[data-path="/other.md"]').trigger('click');
+        await flushPromises();
+
+        expect(chatStore.currentConversation).toBeNull();
+        expect(documentStore.selectedNodePath).toBe('/other.md');
+        expect(documentStore.activePath).toBe('/other.md');
+    });
+
+    it('restores a saved file selection, directory selection and stale fallback path', async () => {
+        const contextProvider = createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' },
+                { path: '/docs/archive', name: 'archive', kind: 'directory', parentPath: '/docs' }
+            ],
+            documents: {
+                '/docs/guide.md': '# Guide'
+            }
+        });
+
+        const wrapper = mount(DocumentWorkspaceView, {
+            props: {
+                contextProvider
+            },
+            global: {
+                stubs: {
+                    AgentPane: {
+                        props: ['activeAgent', 'agentResolutionError', 'isResolvingAgent'],
+                        template: `
+                          <div
+                            data-testid="agent-pane"
+                            :data-agent-name="activeAgent?.name ?? ''"
+                            :data-agent-error="agentResolutionError ?? ''"
+                            :data-agent-loading="isResolvingAgent === true"
+                          />
+                        `
+                    },
+                    DocumentEditorPane: {
+                        template: '<div data-testid="document-editor" />'
+                    }
+                }
+            }
+        });
+
+        await flushPromises();
+        await wrapper.vm.$nextTick();
+
+        const documentStore = useDocumentWorkspaceStore();
+
+        await documentStore.restoreSelection({
+            selectedNodePath: '/docs/guide.md',
+            activePath: '/docs/guide.md'
+        });
+        expect(documentStore.selectedNodePath).toBe('/docs/guide.md');
+        expect(documentStore.activePath).toBe('/docs/guide.md');
+        expect(documentStore.activeDocument?.path).toBe('/docs/guide.md');
+        expect(documentStore.expandedPaths).toContain('/docs');
+
+        await documentStore.restoreSelection({
+            selectedNodePath: '/docs',
+            activePath: null
+        });
+        expect(documentStore.selectedNodePath).toBe('/docs');
+        expect(documentStore.activePath).toBeNull();
+        expect(documentStore.activeDocument).toBeNull();
+        expect(documentStore.expandedPaths).toContain('/docs');
+
+        await documentStore.restoreSelection({
+            selectedNodePath: '/docs/archive/old.md',
+            activePath: '/docs/archive/old.md'
+        });
+        expect(documentStore.selectedNodePath).toBe('/docs/archive');
+        expect(documentStore.activePath).toBeNull();
+        expect(documentStore.activeDocument).toBeNull();
     });
 });

@@ -11,7 +11,7 @@
           :expanded-paths="documentStore.expandedPaths"
           :active-path="documentStore.selectedNodePath"
           :current-error="documentStore.currentError"
-          @open="documentStore.openNode"
+          @open="onOpenNode"
           @toggle-expand="documentStore.toggleExpanded"
           @create="documentStore.createNode"
           @delete="documentStore.deleteNode"
@@ -60,16 +60,18 @@
       />
       <div class="grid-pane">
         <slot name="assistant-pane">
-          <AgentPane
-            :active-agent="documentStore.activeAgent"
-            :active-agent-key="documentStore.activeAgentKey"
-            :active-path="documentStore.activePath"
+        <AgentPane
+          @request-workspace-switch="requestWorkspaceSwitch"
+          :active-agent="documentStore.activeAgent"
+          :active-agent-key="documentStore.activeAgentKey"
+          :active-path="documentStore.activePath"
             :selected-node-path="documentStore.selectedNodePath"
             :active-document="activeAssistantDocument"
             :show-agent-conversation-list="documentStore.isAgentOwnerSelected"
             :context-provider="props.contextProvider"
             :on-file-changed="handleAssistantFileChanged"
             :agent-resolution-error="documentStore.agentResolutionError"
+            :restore-conversation-id="restoredAgentConversationId"
           />
         </slot>
       </div>
@@ -86,6 +88,7 @@ import DocumentEditorPane from '../components/DocumentEditorPane.vue';
 import DocumentFileTree from '../components/DocumentFileTree.vue';
 import { useChatStore } from '../store/chat';
 import { useDocumentWorkspaceStore } from '../store/documentWorkspace';
+import type { ChatRoutePath } from '../routes';
 
 const props = withDefaults(defineProps<{
   contextProvider: IContextProvider;
@@ -96,9 +99,13 @@ const props = withDefaults(defineProps<{
 
 const documentStore = useDocumentWorkspaceStore();
 const chatStore = useChatStore();
+const emit = defineEmits<{
+  (event: 'request-workspace-switch', path: ChatRoutePath): void;
+}>();
 const shellRef = ref<HTMLElement | null>(null);
 const panelSizes = computed(() => documentStore.panelSizes);
 const draftContent = computed(() => documentStore.draftContent);
+const isWorkspaceSelectionReady = ref(false);
 const selectedOwnerNode = computed(() => {
   const activeNode = documentStore.activeNode;
   return activeNode?.kind === 'directory' && activeNode.isAgentOwner ? activeNode : null;
@@ -112,6 +119,20 @@ const agentViewConversations = computed(() => {
   return documentStore.activeAgentKey
     ? chatStore.getConversationsByAgent(documentStore.activeAgentKey)
     : [];
+});
+const restoredAgentConversationId = computed(() => {
+  const savedAgentViewStatus = chatStore.restoreAgentViewStatus();
+  if (!savedAgentViewStatus?.activeConversationId) {
+    return null;
+  }
+
+  const matchesSavedSelection = (
+    savedAgentViewStatus.activePath
+      ? documentStore.activePath === savedAgentViewStatus.activePath
+      : false
+  ) || documentStore.selectedNodePath === savedAgentViewStatus.selectedNodePath;
+
+  return matchesSavedSelection ? savedAgentViewStatus.activeConversationId : null;
 });
 const activeAssistantDocument = computed(() => {
   if (!documentStore.activeDocument) {
@@ -128,14 +149,101 @@ const activeAssistantDocument = computed(() => {
   };
 });
 
+function requestWorkspaceSwitch(path: ChatRoutePath): void {
+  if (path === '/chat' && documentStore.activeAgent) {
+    chatStore.saveWorkspaceAgentContext(documentStore.activeAgent);
+  }
+
+  emit('request-workspace-switch', path);
+}
+
+async function syncWorkspaceConversationSelection(): Promise<void> {
+  if (!isWorkspaceSelectionReady.value) {
+    return;
+  }
+
+  const savedAgentViewStatus = chatStore.restoreAgentViewStatus();
+  const isSameSelection = savedAgentViewStatus
+    && (
+      (savedAgentViewStatus.activePath
+        ? documentStore.activePath === savedAgentViewStatus.activePath
+        : false)
+      || documentStore.selectedNodePath === savedAgentViewStatus.selectedNodePath
+    );
+
+  if (isSameSelection) {
+    if (!savedAgentViewStatus.activeConversationId) {
+      if (chatStore.currentConversation) {
+        chatStore.clearWorkspaceConversationSelection();
+      }
+      return;
+    }
+
+    if (chatStore.currentConversation?.id !== savedAgentViewStatus.activeConversationId) {
+      try {
+        await chatStore.selectLocalConversation(savedAgentViewStatus.activeConversationId);
+      } catch {
+        chatStore.clearWorkspaceConversationSelection();
+      }
+    }
+    return;
+  }
+
+  if (chatStore.currentConversation) {
+    chatStore.clearWorkspaceConversationSelection();
+  }
+}
+
+async function onOpenNode(path: string) {
+  await documentStore.openNode(path);
+  await syncWorkspaceConversationSelection();
+}
+
 watch(() => props.panelSizes, (value) => {
   documentStore.setPanelSizes(value);
 }, { immediate: true });
 
 watch(() => props.contextProvider, async (provider) => {
+  isWorkspaceSelectionReady.value = false;
   documentStore.setContextProvider(provider);
   await documentStore.hydrateWorkspace();
+
+  const savedAgentViewStatus = chatStore.restoreAgentViewStatus();
+  if (!savedAgentViewStatus) {
+    isWorkspaceSelectionReady.value = true;
+    return;
+  }
+
+  if (
+    savedAgentViewStatus.activeConversationId
+    && chatStore.currentConversation?.id !== savedAgentViewStatus.activeConversationId
+  ) {
+    await chatStore.selectLocalConversation(savedAgentViewStatus.activeConversationId).catch(() => undefined);
+  } else {
+    if (chatStore.isPreviewing) {
+      chatStore.exitPreview();
+    }
+
+    if (chatStore.historySource !== 'local') {
+      await chatStore.setHistorySource('local');
+    }
+  }
+
+  await documentStore.restoreSelection({
+    selectedNodePath: savedAgentViewStatus.selectedNodePath,
+    activePath: savedAgentViewStatus.activePath
+  });
+  isWorkspaceSelectionReady.value = true;
+  await syncWorkspaceConversationSelection();
 }, { immediate: true });
+
+watch(
+  () => [documentStore.selectedNodePath, documentStore.activePath] as const,
+  () => {
+    void syncWorkspaceConversationSelection();
+  },
+  { immediate: true, flush: 'sync' }
+);
 
 watch(
   () => [documentStore.activeAgentKey, documentStore.activePath, activeAssistantDocument.value, props.contextProvider] as const,

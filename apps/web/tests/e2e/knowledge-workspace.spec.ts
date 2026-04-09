@@ -62,6 +62,38 @@ test('web knowledge workspace supports file browsing markdown editing diff undo 
   await expect(page.getByTestId('normal-chat-view')).toBeVisible();
 });
 
+test('web knowledge workspace preserves the shared conversation and restores the agent selection after chat mode switches', async ({ page }) => {
+  await page.goto('/#/');
+
+  await expect(page.getByTestId('document-workspace')).toBeVisible();
+  await page.getByTestId('document-node-file').filter({ hasText: 'guide.md' }).click();
+  await expect(page.getByTestId('document-editor-input')).toBeVisible();
+
+  await page.getByTestId('agent-conversation-list-plus').click();
+  await expect(page.getByTestId('agent-conversation-toolbar')).toBeVisible();
+  await page.getByTestId('normal-input').fill('Shared agent conversation');
+  await page.getByTestId('normal-send').click();
+  await expect(page.getByTestId('agent-conversation-title')).toContainText('Shared agent conversation');
+
+  await page.getByTestId('agent-conversation-expand').click();
+  await expect(page.getByTestId('conversation-workspace')).toBeVisible();
+  await expect(page.getByTestId('workspace-sidebar')).toHaveClass(/collapsed/);
+  await expect(page.getByTestId('normal-messages')).toContainText('Shared agent conversation');
+
+  await page.getByTestId('sidebar-toggle').click();
+  await page.getByTestId('sidebar-new-chat').click();
+  await page.getByTestId('normal-input').fill('Temporary chat mode conversation');
+  await page.getByTestId('normal-send').click();
+  await expect(page.getByTestId('normal-messages')).toContainText('Temporary chat mode conversation');
+
+  await page.getByTestId('workspace-restore').click();
+  await expect(page.getByTestId('document-workspace')).toBeVisible();
+  await expect(page.getByTestId('document-editor-input')).toBeVisible();
+  await expect(page.getByTestId('agent-conversation-toolbar')).toBeVisible();
+  await expect(page.getByTestId('agent-conversation-title')).toContainText('Shared agent conversation');
+  await expect(page.getByTestId('agent-document-conversation-list')).toHaveCount(0);
+});
+
 test('web knowledge workspace negotiates text pdf and unsupported document requests', async ({ page }) => {
   await page.goto('/#/');
 

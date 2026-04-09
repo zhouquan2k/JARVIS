@@ -39,6 +39,11 @@
 - **THEN** 系统 MUST 只显示 `conversation.agentKey === 当前 agentKey` 的本地会话
 - **AND** 系统 MUST NOT 混入无 `agentKey` 的普通聊天会话或其他 Agent 的会话
 
+#### Scenario: Include manually bound local conversations in the agent view
+- **WHEN** 用户在普通对话工作台中将一条本地会话手动绑定到当前 `agentKey`
+- **THEN** `AgentView` MUST 将该会话视为当前 Agent 的本地会话并展示出来
+- **AND** 系统 MUST NOT 要求该会话必须源自知识工作区自动绑定链路
+
 #### Scenario: Switch to a local conversation from the agent view
 - **WHEN** 用户在 `AgentView` 中点击一条会话记录
 - **THEN** 系统 MUST 切换当前本地活动会话到该记录

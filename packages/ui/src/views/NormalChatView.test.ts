@@ -79,7 +79,7 @@ describe('NormalChatView', () => {
                 createdAt: 2
             }
         ]);
-        store.workspaceMode = 'active';
+        store.workspaceMode = 'conversation';
         store.isQuestionIndexPanelOpen = true;
         store.init = vi.fn().mockResolvedValue(undefined);
         store.checkAuth = vi.fn().mockResolvedValue(true);
@@ -103,7 +103,7 @@ describe('NormalChatView', () => {
 
     it('does not render the empty placeholder container when there is no conversation', async () => {
         const store = useChatStore();
-        store.workspaceMode = 'active';
+        store.workspaceMode = 'conversation';
         store.currentConversation = null;
         store.previewConversation = null;
         store.init = vi.fn().mockResolvedValue(undefined);
@@ -128,7 +128,6 @@ describe('NormalChatView', () => {
                 createdAt: 1
             }
         ]);
-        store.workspaceMode = 'preview';
         store.isQuestionIndexPanelOpen = true;
         store.init = vi.fn().mockResolvedValue(undefined);
         store.checkAuth = vi.fn().mockResolvedValue(true);
@@ -150,7 +149,7 @@ describe('NormalChatView', () => {
                 createdAt: 1
             }
         ]);
-        store.workspaceMode = 'active';
+        store.workspaceMode = 'conversation';
         store.isQuestionIndexPanelOpen = true;
         store.init = vi.fn().mockResolvedValue(undefined);
         store.checkAuth = vi.fn().mockResolvedValue(true);
@@ -194,7 +193,7 @@ describe('NormalChatView', () => {
                 loaded: true
             }
         };
-        store.workspaceMode = 'active';
+        store.workspaceMode = 'conversation';
         store.currentConversation = createConversation([]);
         store.init = vi.fn().mockResolvedValue(undefined);
         store.checkAuth = vi.fn().mockResolvedValue(true);
@@ -210,8 +209,9 @@ describe('NormalChatView', () => {
 
     it('collapses the top selector row by default in agent mode', async () => {
         const store = useChatStore();
-        store.workspaceMode = 'active';
+        store.workspaceMode = 'conversation';
         store.currentConversation = createConversation([]);
+        store.workspaceMode = 'agent';
         store.activeAgentContext = {
             name: 'Docs Agent',
             effectiveInstructions: 'Use docs context',
@@ -234,7 +234,7 @@ describe('NormalChatView', () => {
 
     it('keeps the top selector row expanded by default outside agent mode', async () => {
         const store = useChatStore();
-        store.workspaceMode = 'active';
+        store.workspaceMode = 'conversation';
         store.currentConversation = createConversation([]);
         store.init = vi.fn().mockResolvedValue(undefined);
         store.checkAuth = vi.fn().mockResolvedValue(true);
@@ -251,8 +251,9 @@ describe('NormalChatView', () => {
 
     it('toggles the top selector row in agent mode', async () => {
         const store = useChatStore();
-        store.workspaceMode = 'active';
+        store.workspaceMode = 'conversation';
         store.currentConversation = createConversation([]);
+        store.workspaceMode = 'agent';
         store.activeAgentContext = {
             name: 'Docs Agent',
             effectiveInstructions: 'Use docs context',
@@ -275,10 +276,33 @@ describe('NormalChatView', () => {
         expect(wrapper.find('[data-testid="selector-row"]').exists()).toBe(false);
     });
 
+    it('treats an inherited workspace agent seed as conversation mode in the chat view', async () => {
+        const store = useChatStore();
+        store.workspaceMode = 'conversation';
+        store.currentConversation = createConversation([]);
+        store.workspaceAgentContext = {
+            name: 'Docs Agent',
+            effectiveInstructions: 'Use docs context',
+            scopePath: '/docs',
+            sourcePaths: ['/docs/.agent.json']
+        };
+        store.init = vi.fn().mockResolvedValue(undefined);
+        store.checkAuth = vi.fn().mockResolvedValue(true);
+
+        const wrapper = mountView();
+        await flushPromises();
+
+        expect(wrapper.get('[data-testid="normal-chat-view"]').classes()).toContain('standard-mode');
+        expect(wrapper.find('[data-testid="toolbar-collapse-toggle"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid="selector-row"]').exists()).toBe(true);
+        expect(wrapper.find('[data-testid="provider-selector-stub"]').exists()).toBe(true);
+    });
+
     it('keeps the attachment panel visible in agent mode when draft attachments exist', async () => {
         const store = useChatStore();
-        store.workspaceMode = 'active';
+        store.workspaceMode = 'conversation';
         store.currentConversation = createConversation([]);
+        store.workspaceMode = 'agent';
         store.activeAgentContext = {
             name: 'Docs Agent',
             effectiveInstructions: 'Use docs context',
@@ -309,7 +333,7 @@ describe('NormalChatView', () => {
 
     it('renders a new chat action below the send button and calls the existing store entry', async () => {
         const store = useChatStore();
-        store.workspaceMode = 'active';
+        store.workspaceMode = 'conversation';
         store.currentConversation = createConversation([]);
         store.currentModelId = 'gpt-4o';
         store.startNewConversation = vi.fn().mockResolvedValue(undefined);
@@ -324,9 +348,45 @@ describe('NormalChatView', () => {
         expect(store.startNewConversation).toHaveBeenCalledTimes(1);
     });
 
+    it('emits a workspace switch request for the knowledge workspace restore button', async () => {
+        const store = useChatStore();
+        store.workspaceMode = 'conversation';
+        store.currentConversation = createConversation([]);
+        store.currentModelId = 'gpt-4o';
+        store.init = vi.fn().mockResolvedValue(undefined);
+        store.checkAuth = vi.fn().mockResolvedValue(true);
+
+        const wrapper = mountView();
+        await flushPromises();
+
+        expect(wrapper.get('[data-testid="workspace-restore"]').exists()).toBe(true);
+        await wrapper.get('[data-testid="workspace-restore"]').trigger('click');
+        expect(wrapper.emitted('request-workspace-switch')).toEqual([['/']]);
+    });
+
+    it('hides the workspace restore button in agent mode', async () => {
+        const store = useChatStore();
+        store.workspaceMode = 'agent';
+        store.currentConversation = createConversation([]);
+        store.currentModelId = 'gpt-4o';
+        store.activeAgentContext = {
+            name: 'Docs Agent',
+            effectiveInstructions: 'Use docs context',
+            scopePath: '/docs',
+            sourcePaths: ['/docs/.agent.json']
+        };
+        store.init = vi.fn().mockResolvedValue(undefined);
+        store.checkAuth = vi.fn().mockResolvedValue(true);
+
+        const wrapper = mountView();
+        await flushPromises();
+
+        expect(wrapper.find('[data-testid="workspace-restore"]').exists()).toBe(false);
+    });
+
     it('renders attachments in agent mode when they are stored on the message', async () => {
         const store = useChatStore();
-        store.workspaceMode = 'active';
+        store.workspaceMode = 'agent';
         store.activeAgentContext = {
             name: 'Docs Agent',
             effectiveInstructions: 'Use docs context',
@@ -363,7 +423,8 @@ describe('NormalChatView', () => {
 
     it('renders attachments in agent mode when they only exist in the request snapshot', async () => {
         const store = useChatStore();
-        store.workspaceMode = 'active';
+        store.workspaceMode = 'conversation';
+        store.workspaceMode = 'agent';
         store.activeAgentContext = {
             name: 'Docs Agent',
             effectiveInstructions: 'Use docs context',
@@ -433,7 +494,7 @@ describe('NormalChatView', () => {
                 loaded: true
             }
         };
-        store.workspaceMode = 'active';
+        store.workspaceMode = 'conversation';
         store.currentConversation = createConversation([]);
         store.isGenerating = true;
         store.init = vi.fn().mockResolvedValue(undefined);
@@ -449,7 +510,7 @@ describe('NormalChatView', () => {
     it('renders a custom auth recovery action when the host provides one', async () => {
         const store = useChatStore();
         store.currentConversation = createConversation([]);
-        store.workspaceMode = 'active';
+        store.workspaceMode = 'conversation';
         store.currentModelId = 'gpt-4o';
         store.init = vi.fn().mockResolvedValue(undefined);
         store.checkAuth = vi.fn().mockResolvedValue(true);
@@ -471,7 +532,7 @@ describe('NormalChatView', () => {
     it('does not coerce an absent auth override into unauthenticated state', async () => {
         const store = useChatStore();
         store.currentConversation = createConversation([]);
-        store.workspaceMode = 'active';
+        store.workspaceMode = 'conversation';
         store.currentProviderId = 'mock-provider';
         store.currentModelId = 'mock-model';
         store.availableProviders = [
