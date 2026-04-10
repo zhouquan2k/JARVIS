@@ -1,4 +1,4 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: Agent binding MUST use `.agent.json` as the scoped configuration source
 系统 MUST 使用隐藏文件 `.agent.json` 作为目录作用域 Agent 的唯一配置载体。该文件 MUST 支持声明 Agent 名称、职责描述、核心指令、目标模型 Provider、目标模型名称、工具列表、技能列表、继承策略，以及可选的 `linkDir` 字段，以便知识目录能够以 Config-as-Code 的方式沉淀 Agent 身份与能力。
@@ -54,16 +54,3 @@
 - **WHEN** `linkDir` 指向不存在的目录、普通文件或非法路径
 - **THEN** 系统 MUST 产生明确错误
 - **AND** 系统 MUST NOT 将该目录悄然降级为普通空目录
-
-### Requirement: Agent binding MUST provide a deterministic fallback and explicit config errors
-当目录树中不存在任何 `.agent.json` 时，系统 MUST 提供可预测的全局默认 Agent 作为兜底；当命中的 `.agent.json` 非法或无法解析时，系统 MUST 明确暴露该错误，而不是静默退回到随机状态。
-
-#### Scenario: Fall back to the default agent when no scoped config exists
-- **WHEN** 当前激活路径及其所有父目录都不存在 `.agent.json`
-- **THEN** 系统 MUST 返回具备基础读写能力和通用指令的默认 Agent
-- **AND** 默认 Agent MUST 仍然包含稳定的名称与作用域信息
-
-#### Scenario: Surface invalid scoped agent configuration
-- **WHEN** 命中的 `.agent.json` 不是合法 JSON 或缺失必要字段
-- **THEN** 系统 MUST 产生可诊断的 Agent 配置错误
-- **AND** 调用方 MUST 能区分“未找到配置”和“配置文件非法”这两种结果

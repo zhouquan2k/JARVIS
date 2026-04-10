@@ -1,0 +1,861 @@
+
+classDiagram
+
+
+class AgentCapabilities {
+            <<interface>>
+            +nativeAgent: true
++toolLoop: "application-managed"
+            
+        }
+class AgentToolCall {
+            <<interface>>
+            +id: string
++name: string
++arguments?: string | Record~string, unknown~
+            
+        }
+class AgentResponsePart {
+            <<interface>>
+            +text?: string
++thoughtSignature?: string
++functionCall?: #123; id?: string; name: string; args: string | Record~string, unknown~; #125;
+            
+        }
+class AgentModelTurn {
+            <<interface>>
+            +role: "model"
++parts: AgentResponsePart[]
+            
+        }
+class AgentToolResult {
+            <<interface>>
+            +toolCallId: string
++name: string
++result: string
++isError?: boolean
+            
+        }
+class AgentToolExchange {
+            <<interface>>
+            +modelTurn: AgentModelTurn
++call: AgentToolCall
++result: AgentToolResult
+            
+        }
+class AgentRunRequest {
+            <<interface>>
+            +prompt: string
++agent: ResolvedAgentConfig
++tools?: AgentToolDeclaration[]
++context?: #123; parentMessageId?: string; conversationId?: string; #125;
++modelId?: string
++attachments?: MessageAttachment[]
++history?: ProviderContextMessage[]
++modelOptions?: Record~string, boolean~
++toolExchanges?: AgentToolExchange[]
+            
+        }
+class IAgentCapableProvider {
+            <<interface>>
+            
+            +getAgentCapabilities() AgentCapabilities
++runAgent() Promise~ProviderSendResult~
+        }
+IModelProvider<|..IAgentCapableProvider
+AgentModelTurn  -- "0..*" AgentResponsePart
+AgentToolExchange  --  AgentModelTurn
+AgentToolExchange  --  AgentToolCall
+AgentToolExchange  --  AgentToolResult
+AgentRunRequest  --  ResolvedAgentConfig
+AgentRunRequest  -- "0..*" AgentToolDeclaration
+AgentRunRequest  -- "0..*" MessageAttachment
+AgentRunRequest  -- "0..*" ProviderContextMessage
+AgentRunRequest  -- "0..*" AgentToolExchange
+class AgentToolBinding {
+            <<interface>>
+            +id: string
++description?: string
+            
+        }
+class AgentSkillBinding {
+            <<interface>>
+            +id: string
++description?: string
+            
+        }
+class AgentConfig {
+            <<interface>>
+            +name: string
++description?: string
++instructions?: string
++modelProviderName?: string
++modelName?: string
++tools?: AgentToolBinding[]
++skills?: AgentSkillBinding[]
++inheritance?: AgentInheritanceMode
+            
+        }
+class ResolvedAgentConfig {
+            <<interface>>
+            +scopePath: string
++sourcePaths: string[]
++effectiveInstructions: string
+            
+        }
+AgentConfig<|..ResolvedAgentConfig
+AgentConfig  -- "0..*" AgentToolBinding
+AgentConfig  -- "0..*" AgentSkillBinding
+class ContextNode {
+            <<interface>>
+            +path: string
++name: string
++kind: "file" | "directory"
++parentPath?: string
++hasChildren?: boolean
++updatedAt?: number
+            
+        }
+class ContextDocument {
+            <<interface>>
+            +path: string
++content: string
++updatedAt?: number
++version?: string
+            
+        }
+class CreateContextNodeInput {
+            <<interface>>
+            +parentPath?: string
++name: string
++kind: "file" | "directory"
+            
+        }
+class ContextSearchRequest {
+            <<interface>>
+            +query: string
++scopePath?: string
++maxResults?: number
+            
+        }
+class ContextSearchMatch {
+            <<interface>>
+            +path: string
++line: number
++column: number
++preview: string
+            
+        }
+class IContextProvider {
+            <<interface>>
+            +id: string
+            +initializeAccess() Promise~void~
++getContext() Promise~WorkspaceContext~
++readDocument() Promise~ContextDocument~
++writeDocument() Promise~void~
++createNode() Promise~ContextNode~
++searchInScope() Promise~ContextSearchMatch[]~
+        }
+class IConversationStorageProvider {
+            <<interface>>
+            +id: string
+            +saveConversation() Promise~void~
++getConversation() Promise~Conversation~
++getAllConversations() Promise~Conversation[]~
++deleteConversation() Promise~void~
+        }
+class ExternalHistoryError{
+            +code: ExternalHistoryErrorCode
++providerId?: ExternalHistoryProviderId
++recoverable: boolean
++fromCache: boolean
++cause?: unknown
+            
+        }
+class ExternalHistoryProviderFeatures {
+            <<interface>>
+            +historySearch?: boolean
++historySearchPlaceholder?: string
+            
+        }
+class ExternalHistoryProviderEntry {
+            <<interface>>
+            +id: ExternalHistoryProviderId
++label: string
++kind: ExternalHistoryProviderKind
++features?: ExternalHistoryProviderFeatures
++provider?: IHistoryProvider
+            
+        }
+class ExternalHistoryErrorOptions {
+            <<interface>>
+            +providerId?: ExternalHistoryProviderId
++recoverable?: boolean
++fromCache?: boolean
++cause?: unknown
+            
+        }
+class ConversationHistorySummary {
+            <<interface>>
+            +id: string
++title: string
++updatedAt: number
++origin: ExternalHistoryProviderId
++isImported?: boolean
+            
+        }
+class HistoryListQueryOptions {
+            <<interface>>
+            +query?: string
+            
+        }
+class IHistoryProvider {
+            <<interface>>
+            +id: ExternalHistoryProviderId
+            +getHistoryList() Promise~ConversationHistorySummary[]~
++getHistoryDetail() Promise~Conversation~
+        }
+ExternalHistoryProviderEntry  --  ExternalHistoryProviderFeatures
+ExternalHistoryProviderEntry  --  IHistoryProvider
+class ProviderContextMessage {
+            <<interface>>
+            +role: ConversationRole
++content: string
++attachments?: MessageAttachment[]
+            
+        }
+class SendMessageOptions {
+            <<interface>>
+            +context?: #123; parentMessageId?: string; conversationId?: string; #125;
++modelId?: string
++attachments?: MessageAttachment[]
++history?: ProviderContextMessage[]
++modelOptions?: Record~string, boolean~
+            
+        }
+class ProviderStreamUpdate {
+            <<interface>>
+            +text: string
++annotations?: MessageAnnotation[]
++toolCalls?: AgentToolCall[]
+            
+        }
+class ProviderSendResult {
+            <<interface>>
+            +text: string
++conversationId: string
++messageId: string
++annotations?: MessageAnnotation[]
++toolCalls?: AgentToolCall[]
++modelTurn?: AgentModelTurn
+            
+        }
+class IModelProvider {
+            <<interface>>
+            +id: string
+            +getAvailableModels() Promise~ProviderModelCatalog~
++checkAuth() Promise~boolean~
++sendMessage() Promise~ProviderSendResult~
++abort() void
+        }
+ProviderContextMessage  -- "0..*" MessageAttachment
+SendMessageOptions  -- "0..*" MessageAttachment
+SendMessageOptions  -- "0..*" ProviderContextMessage
+ProviderStreamUpdate  -- "0..*" CiteAnnotation
+ProviderStreamUpdate  -- "0..*" ImageGroupAnnotation
+ProviderStreamUpdate  -- "0..*" AgentToolCall
+ProviderSendResult  -- "0..*" CiteAnnotation
+ProviderSendResult  -- "0..*" ImageGroupAnnotation
+ProviderSendResult  -- "0..*" AgentToolCall
+ProviderSendResult  --  AgentModelTurn
+class MessageAttachment {
+            <<interface>>
+            +id: string
++type: MessageAttachmentType
++name: string
++mimeType: string
++size: number
++base64Data?: string
++previewBase64?: string
+            
+        }
+class AnnotationRange {
+            <<interface>>
+            +start: number
++end: number
+            
+        }
+class CiteAnnotation {
+            <<interface>>
+            +kind: "cite"
++range: AnnotationRange
++payload: #123; refId: string; label: string; title?: string; url?: string; snippet?: string; #125;
+            
+        }
+class ImageGroupAnnotation {
+            <<interface>>
+            +kind: "image_group"
++range: AnnotationRange
++payload: #123; groupId: string; images: { id: string; mimeType: string; alt?: string; previewBase64?: string; remoteUrl?: string; width?: number; height?: number; #125;[]; }
+            
+        }
+class ConversationMessage {
+            <<interface>>
+            +id: string
++role: ConversationRole
++content: string
++createdAt?: number
++questionId?: string
++starred?: boolean
++deleted?: boolean
++attachments?: MessageAttachment[]
++annotations?: MessageAnnotation[]
+            
+        }
+class ConversationSyncState {
+            <<interface>>
+            +dirty?: boolean
++deleted?: boolean
++syncedAt?: number
+            
+        }
+class ConversationModelSelection {
+            <<interface>>
+            +providerId: string
++modelId: string
++modelOptions: Record~string, boolean~
+            
+        }
+class Conversation {
+            <<interface>>
+            +id: string
++backendId?: string
++title: string
++origin?: ConversationOrigin
++externalId?: string
++messages: ConversationMessage[]
++updatedAt: number
++sync?: ConversationSyncState
++modelSelection?: ConversationModelSelection
++compare?: #123; prompt: string; modelAProviderId: string; modelAModelId: string; modelBProviderId: string; modelBModelId: string; outputA: string; outputB: string; analysisResult: AnalysisResult; analysisRaw?: string; #125;
+            
+        }
+class IStorageProvider {
+            <<interface>>
+            +id: string
+            +saveConversation() Promise~void~
++getConversation() Promise~Conversation~
++getAllConversations() Promise~Conversation[]~
++deleteConversation() Promise~void~
+        }
+CiteAnnotation  --  AnnotationRange
+ImageGroupAnnotation  --  AnnotationRange
+ConversationMessage  -- "0..*" MessageAttachment
+ConversationMessage  -- "0..*" CiteAnnotation
+ConversationMessage  -- "0..*" ImageGroupAnnotation
+Conversation  -- "0..*" ConversationMessage
+Conversation  --  ConversationSyncState
+Conversation  --  ConversationModelSelection
+class SyncDeletedConversation {
+            <<interface>>
+            +id: string
++updatedAt: number
+            
+        }
+class SyncPullResult {
+            <<interface>>
+            +conversations: Conversation[]
++deletedConversations: SyncDeletedConversation[]
++nextCursor: number
+            
+        }
+class SyncPushResult {
+            <<interface>>
+            +processedIds: string[]
++processedDeletedIds?: string[]
++nextCursor?: number
+            
+        }
+class ISyncTransport {
+            <<interface>>
+            
+            +pull() Promise~SyncPullResult~
++push() Promise~SyncPushResult~
+        }
+SyncPullResult  -- "0..*" Conversation
+SyncPullResult  -- "0..*" SyncDeletedConversation
+class ProviderRemoteConfigMetadata {
+            <<interface>>
+            +providerId: "gemini-history"
++version: string
++fetchedAt: number
++source: ProviderRemoteConfigSource
++cacheControl?: string
+            
+        }
+class GeminiHistorySelectors {
+            <<interface>>
+            +historyListContainer: string
++historyListItem: string
++historyTitle: string
++historyLink: string
++historySearchInput?: string
++historySearchSubmit?: string
++historySearchClear?: string
++historySearchResultItem?: string
++conversationRoot: string
++userBubble: string
++assistantBubble: string
++lazyLoadSentinel?: string
++loginGate?: string
+            
+        }
+class GeminiHistoryHealthCheck {
+            <<interface>>
+            +requiredSelectors: (keyof GeminiHistorySelectors)[]
++maxMissingCount: number
+            
+        }
+class GeminiHistoryRemoteConfig {
+            <<interface>>
+            +providerId: ExternalHistoryProviderId
++version: string
++matchOrigins: string[]
++selectors: GeminiHistorySelectors
++healthCheck: GeminiHistoryHealthCheck
+            
+        }
+class ProviderRemoteConfigLoadResult~TConfig~ {
+            <<interface>>
+            +config: TConfig
++metadata: ProviderRemoteConfigMetadata
+            
+        }
+GeminiHistoryRemoteConfig  --  GeminiHistorySelectors
+GeminiHistoryRemoteConfig  --  GeminiHistoryHealthCheck
+ProviderRemoteConfigLoadResult~TConfig~  --  ProviderRemoteConfigMetadata
+class ProviderRuntimeOptions {
+            <<interface>>
+            +runtimeMode: RuntimeMode
++credentials?: RuntimeCredentials
++providerFactory?: RuntimeProviderFactory
++providerOptionsResolver?: RuntimeProviderOptionsResolver
+            
+        }
+class ProviderRuntime {
+            <<interface>>
+            
+            +getAvailableProviders() ProviderConfig[]
++getProviderCatalog() ProviderConfig[]
++getProviderModels() Promise~ProviderModelCatalog~
++getProvider() IModelProvider
+        }
+class StoredContextNode {
+            <<interface>>
+            +path: string
++name: string
++kind: "file" | "directory"
++parentPath?: string
++updatedAt?: number
+            
+        }
+class StoredWorkspaceSnapshot {
+            <<interface>>
+            +nodes: StoredContextNode[]
++documents: Record~string, string~
+            
+        }
+StoredWorkspaceSnapshot  -- "0..*" StoredContextNode
+class CreateMockRuntimeOptions {
+            <<interface>>
+            +runtimeMode: RuntimeMode
++slowStreamTrigger?: string
++defaultCharDelayMs?: number
++slowCharDelayMs?: number
++providerAuthOverrides?: Partial~Record~string, boolean~~
+            
+        }
+class MockSyncEvent {
+            <<interface>>
+            +type: "pull" | "push"
++syncKey: string
++cursor?: number
++nextCursor?: number
++conversations?: Conversation[]
++deletedConversations?: SyncDeletedConversation[]
+            
+        }
+class MockSyncTransportOptions {
+            <<interface>>
+            +storage?: Pick~Storage, "getItem" | "setItem"~
+            
+        }
+MockSyncEvent  -- "0..*" Conversation
+MockSyncEvent  -- "0..*" SyncDeletedConversation
+class CreateAgentRuntimeOptions {
+            <<interface>>
+            +providerRuntime: ProviderRuntime
++maxToolIterations?: number
+            
+        }
+CreateAgentRuntimeOptions  --  ProviderRuntime
+class AgentRuntimeRequest {
+            <<interface>>
+            +prompt: string
++agent: ResolvedAgentConfig
++workspace?: #123; activePath: string; activeDocument?: Pick~ContextDocument, "path" | "content"~; contextProvider: IContextProvider; onFileChanged?: (change: { ...; #125;) =~ void | Promise~...~; }
++providerId?: string
++modelId?: string
++attachments?: MessageAttachment[]
++history?: ProviderContextMessage[]
++modelOptions?: Record~string, boolean~
++context?: #123; parentMessageId?: string; conversationId?: string; #125;
+            
+        }
+class AgentRuntime {
+            <<interface>>
+            
+            +run() Promise~ProviderSendResult~
++abort() void
+        }
+AgentRuntimeRequest  --  ResolvedAgentConfig
+AgentRuntimeRequest  -- "0..*" MessageAttachment
+AgentRuntimeRequest  -- "0..*" ProviderContextMessage
+class AgentToolDeclaration {
+            <<interface>>
+            +id: string
++description: string
++inputSchema: Record~string, unknown~
+            
+        }
+class AgentToolExecutionContext {
+            <<interface>>
+            +agent: ResolvedAgentConfig
++activePath: string
++contextProvider: IContextProvider
++onFileChanged?: (change: #123; path: string; beforeContent: string; afterContent: string; #125;) =~ void | Promise~void~
+            
+        }
+class AgentToolDefinition~TArgs,TResult~ {
+            <<interface>>
+            +id: string
++description: string
++inputSchema: Record~string, unknown~
+            +execute() TResult | Promise~TResult~
+        }
+class AgentToolExecutor {
+            <<interface>>
+            
+            +getDeclarations() AgentToolDeclaration[]
++execute() Promise~AgentToolResult~
+        }
+AgentToolExecutionContext  --  ResolvedAgentConfig
+AgentToolExecutionContext  --  IContextProvider
+class SearchableScopedFile {
+            <<interface>>
+            +path: string
++readContent: () =~ Promise~string~
+            
+        }
+class HttpContextProvider{
+            +id: "http-context"
+-baseUrl: string
+-fetchImpl: (input: RequestInfo | URL, init?: RequestInit) =~ Promise~Response~
+            +initializeAccess() Promise~void~
++getContext() Promise~WorkspaceContext~
++readDocument() Promise~ContextDocument~
++writeDocument() Promise~void~
++createNode() Promise~ContextNode~
++searchInScope() Promise~ContextSearchMatch[]~
+-post() Promise~unknown~
+        }
+class HttpContextProviderOptions {
+            <<interface>>
+            +baseUrl?: string
++fetchImpl?: (input: RequestInfo | URL, init?: RequestInit) =~ Promise~Response~
+            
+        }
+class ResolveContextBaseUrlOptions {
+            <<interface>>
+            +env?: Record~string, string~
+            
+        }
+IContextProvider<|..HttpContextProvider
+class ChatGPTWebProvider{
+            +id: string
+-accessToken: string
+-abortController: AbortController
+-requestClient: ProviderRequestClient
+-cookieStore?: ProviderCookieStore
+-userAgent: string
+            +checkAuth() Promise~boolean~
++getAvailableModels() Promise~ProviderModelCatalog~
+-fetchModelCatalogPayload() Promise~unknown~
+-getOaiDeviceId() Promise~string~
+-ensureAccessToken() Promise~void~
+-fetchJson() Promise~T~
+-normalizeHistorySummaries() ConversationHistorySummary[]
+-fetchHistoryListJson() Promise~ConversationHistorySummary[]~
+-searchHistoryList() Promise~ConversationHistorySummary[]~
++getHistoryList() Promise~ConversationHistorySummary[]~
++getHistoryDetail() Promise~Conversation~
++getChatRequirements() Promise~any~
++sendMessage() Promise~ProviderSendResult~
++abort() void
+        }
+IModelProvider<|..ChatGPTWebProvider
+IHistoryProvider<|..ChatGPTWebProvider
+ChatGPTWebProvider  --  ProviderRequestClient
+ChatGPTWebProvider  --  ProviderCookieStore
+class GeminiApiProvider{
+            +id: string
+-abortController: AbortController
+-apiKey?: string
+            -resolveApiKey() string
++getAvailableModels() Promise~ProviderModelCatalog~
++checkAuth() Promise~boolean~
++sendMessage() Promise~ProviderSendResult~
++getAgentCapabilities() AgentCapabilities
++runAgent() Promise~ProviderSendResult~
++abort() void
+        }
+IAgentCapableProvider<|..GeminiApiProvider
+class ProviderRequestClient {
+            <<interface>>
+            
+            +fetch() Promise~Response~
+        }
+class ProviderCookieStore {
+            <<interface>>
+            
+            +get() Promise~#123; value?: string; #125;~
+        }
+class ChatGPTWebProviderOptions {
+            <<interface>>
+            +requestClient?: ProviderRequestClient
++cookieStore?: ProviderCookieStore
++userAgent?: string
+            
+        }
+ChatGPTWebProviderOptions  --  ProviderRequestClient
+ChatGPTWebProviderOptions  --  ProviderCookieStore
+class IndexedDBStorageProvider{
+            +id: string
+-store: LocalForage
+            +saveConversation() Promise~void~
++getConversation() Promise~Conversation~
++getAllConversations() Promise~Conversation[]~
++deleteConversation() Promise~void~
+        }
+IStorageProvider<|..IndexedDBStorageProvider
+class SyncStorageProvider{
+            +id: string
+-localStore: IStorageProvider
+-transport: ISyncTransport
+-syncKey: string
+-stateStore: SyncStateStore
+-deletedConversationStore: DeletedConversationStateStore
+-cursorLoaded: boolean
+-cursor: number
+-activeSync: Promise~void~
+-pendingSync: boolean
+            +saveConversation() Promise~void~
++getConversation() Promise~Conversation~
++getAllConversations() Promise~Conversation[]~
++deleteConversation() Promise~void~
++hydrate() Promise~void~
++syncNow() Promise~void~
+-performSync() Promise~void~
+-prepareLocalConversation() Conversation
+-markPendingUnsyncedConversations() Promise~void~
+-listDirtyConversations() Promise~Conversation[]~
+-listPendingDeletedConversations() Promise~SyncDeletedConversation[]~
+-markProcessedConversations() Promise~void~
+-markProcessedDeletedConversations() Promise~void~
+-mergeRemoteConversation() Promise~void~
+-mergeRemoteDeletedConversation() Promise~void~
+-addPendingDeletedConversation() Promise~void~
+-removePendingDeletedConversation() Promise~void~
+-getPendingDeletedConversation() Promise~SyncDeletedConversation~
+-queueSync() void
+-ensureCursorLoaded() Promise~void~
+-updateCursor() Promise~void~
+        }
+class SyncStateStore {
+            <<interface>>
+            
+            +getCursor() Promise~number~
++setCursor() Promise~void~
+        }
+class DeletedConversationStateStore {
+            <<interface>>
+            
+            +getDeletedConversations() Promise~SyncDeletedConversation[]~
++setDeletedConversations() Promise~void~
+        }
+class SyncStorageProviderOptions {
+            <<interface>>
+            +localStore: IStorageProvider
++transport: ISyncTransport
++syncKey: string
++initialCursor?: number
++stateStore?: SyncStateStore
++deletedConversationStore?: DeletedConversationStateStore
+            
+        }
+IStorageProvider<|..SyncStorageProvider
+SyncStorageProvider  --  IStorageProvider
+SyncStorageProvider  --  ISyncTransport
+SyncStorageProvider  --  SyncStateStore
+SyncStorageProvider  --  DeletedConversationStateStore
+SyncStorageProviderOptions  --  IStorageProvider
+SyncStorageProviderOptions  --  ISyncTransport
+SyncStorageProviderOptions  --  SyncStateStore
+SyncStorageProviderOptions  --  DeletedConversationStateStore
+class FetchSyncTransport{
+            -syncKey: string
+-baseUrl: string
+-fetchImpl: (input: RequestInfo | URL, init?: RequestInit) =~ Promise~Response~
+-headers: Record~string, string~
+            +pull() Promise~SyncPullResult~
++push() Promise~SyncPushResult~
+-post() Promise~T~
+        }
+class FetchSyncTransportOptions {
+            <<interface>>
+            +syncKey: string
++baseUrl?: string
++fetchImpl?: (input: RequestInfo | URL, init?: RequestInit) =~ Promise~Response~
++headers?: Record~string, string~
+            
+        }
+ISyncTransport<|..FetchSyncTransport
+class CompareWorkflowController{
+            -activeProviders: #123; abort: () =~ void; #125;[]
+-runtime: ProviderRuntime
+-analyzer: ComparisonAnalyzerLike
+            +executeCompareWorkflow() Promise~CompareWorkflowResult~
++abort() void
+        }
+class CompareModelSelection {
+            <<interface>>
+            +providerId: string
++modelId: string
+            
+        }
+class CompareWorkflowCallbacks {
+            <<interface>>
+            +onOutputA: (chunk: string) =~ void
++onOutputB: (chunk: string) =~ void
++onAnalysisUpdate: (chunk: string) =~ void
++onStageChange?: (stage: CompareWorkflowStage, error?: Error) =~ void
+            
+        }
+class ExecuteCompareWorkflowParams {
+            <<interface>>
+            +prompt: string
++modelA: CompareModelSelection
++modelB: CompareModelSelection
+            
+        }
+class CompareWorkflowResult {
+            <<interface>>
+            +outputA: string
++outputB: string
++analysis: AnalysisResult
+            
+        }
+class ComparisonAnalyzerLike {
+            <<interface>>
+            
+            +analyze() Promise~AnalysisResult~
+        }
+CompareWorkflowCallbacks<|..ExecuteCompareWorkflowParams
+CompareWorkflowController  --  ProviderRuntime
+CompareWorkflowController  --  ComparisonAnalyzerLike
+ExecuteCompareWorkflowParams  --  CompareModelSelection
+ExecuteCompareWorkflowParams  --  CompareModelSelection
+CompareWorkflowResult  --  AnalysisResult
+class AnalysisParseError{
+            +code: "ANALYSIS_PARSE_ERROR"
++rawText: string
+            
+        }
+class ComparisonAnalyzer{
+            -runtime: ProviderRuntime
+-analyzerConfig: AnalyzerConfig
+            +analyze() Promise~AnalysisResult~
+-buildPrompt() string
+-parseResult() AnalysisResult
+-tryParseAnalysisResult() AnalysisResult
+-normalizeAnalysisResult() AnalysisResult
+-normalizeField() string
+-extractFirstJSONObject() string
+-extractFirstMarkdownJsonBlock() string
+        }
+ComparisonAnalyzer  --  ProviderRuntime
+class AnalysisResult {
+            <<interface>>
+            +agreements: string
++conflictsA: string
++conflictsB: string
++uniqueA: string
++uniqueB: string
+            
+        }
+class GeminiContentHistorySummary {
+            <<interface>>
+            +id: string
++title: string
++updatedAt: number
+            
+        }
+class GeminiContentConversationDetail {
+            <<interface>>
+            +id: string
++title: string
++updatedAt: number
++messages: #123; id: string; role: "user" | "assistant"; content: string; #125;[]
+            
+        }
+class GeminiContentRequest {
+            <<interface>>
+            +action: GeminiContentAction
++config: GeminiHistoryRemoteConfig
++externalId?: string
++query?: string
+            
+        }
+GeminiContentRequest  --  GeminiHistoryRemoteConfig
+class GeminiDomHistoryProvider{
+            +id: "gemini-web"
+-summaryTitleById: any
+-deps: #123; configLoader: GeminiHistoryConfigLoader; tabBridge: GeminiHistoryBridge; #125;
+            +getHistoryList() Promise~ConversationHistorySummary[]~
++getHistoryDetail() Promise~Conversation~
+        }
+IHistoryProvider<|..GeminiDomHistoryProvider
+class GeminiHistoryBridge {
+            <<interface>>
+            
+            +getHistoryList() Promise~GeminiContentHistorySummary[]~
++getHistoryDetail() Promise~GeminiContentConversationDetail~
+        }
+class GeminiHistoryConfigLoader{
+            -runtimeConfig: GeminiHistoryRuntimeConfig
+-storage: ConfigStorage
+-fetchImpl: (input: RequestInfo | URL, init?: RequestInit) =~ Promise~Response~
+-now: () =~ number
+-builtinConfig: GeminiHistoryRemoteConfig
+            +load() Promise~ProviderRemoteConfigLoadResult~GeminiHistoryRemoteConfig~~
++markValidated() Promise~void~
+-readCachedConfig() Promise~ProviderRemoteConfigLoadResult~GeminiHistoryRemoteConfig~~
+        }
+class ConfigStorage {
+            <<interface>>
+            
+            +get() Promise~string~
++set() Promise~void~
+        }
+GeminiHistoryConfigLoader  --  ConfigStorage
+GeminiHistoryConfigLoader  --  GeminiHistoryRemoteConfig

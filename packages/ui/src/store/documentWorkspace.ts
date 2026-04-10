@@ -80,6 +80,35 @@ function flattenAllNodes(nodes: ContextNode[]): ContextNode[] {
     return flattened;
 }
 
+function collectMarkdownTree(nodes: ContextNode[]): ContextNode[] {
+    const collected: ContextNode[] = [];
+
+    nodes.forEach((node) => {
+        if (node.kind === 'file') {
+            const isMarkdownFile = !node.name.startsWith('.')
+                && (node.name.endsWith('.md') || node.name.endsWith('.markdown'));
+
+            if (isMarkdownFile) {
+                collected.push({
+                    ...node,
+                    children: undefined
+                });
+            }
+            return;
+        }
+
+        const children = collectMarkdownTree(node.children ?? []);
+        if (children.length > 0) {
+            collected.push({
+                ...node,
+                children
+            });
+        }
+    });
+
+    return collected;
+}
+
 function findNodeByPath(nodes: ContextNode[], targetPath: string): ContextNode | null {
     for (const node of nodes) {
         if (node.path === targetPath) {
@@ -283,12 +312,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
                 return [];
             }
 
-            const descendants = flattenAllNodes(ownerNode.children ?? []);
-            return descendants.filter((node) => (
-                node.kind === 'file'
-                && !node.name.startsWith('.')
-                && (node.name.endsWith('.md') || node.name.endsWith('.markdown'))
-            ));
+            return collectMarkdownTree(ownerNode.children ?? []);
         },
 
         syncActiveFileChange(path?: string | null) {

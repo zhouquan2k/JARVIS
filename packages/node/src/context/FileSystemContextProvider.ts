@@ -70,11 +70,17 @@ export interface FileSystemContextProviderOptions {
 
 type AgentInheritanceMode = 'merge' | 'override';
 type AgentBinding = AgentToolBinding | AgentSkillBinding;
-type ParsedAgentConfig = AgentConfig & { inheritance?: AgentInheritanceMode };
+type ParsedAgentConfig = AgentConfig & { inheritance?: AgentInheritanceMode; linkDir?: string };
 
 interface EffectiveAgentBinding {
     agentKey: string;
     config: ResolvedAgentConfig;
+}
+
+interface MountedDirectoryBinding {
+    aliasPath: string;
+    aliasRealPath: string;
+    targetRealPath: string;
 }
 
 function stripDataUriPrefix(value: string): string {
@@ -408,6 +414,10 @@ function parseAgentConfig(content: string, configPath: string): ParsedAgentConfi
         throw new Error(`Invalid agent config in ${configPath}: "modelName" must be a string.`);
     }
 
+    if (parsed.linkDir !== undefined && typeof parsed.linkDir !== 'string') {
+        throw new Error(`Invalid agent config in ${configPath}: "linkDir" must be a string.`);
+    }
+
     return {
         name,
         description: parsed.description,
@@ -416,7 +426,8 @@ function parseAgentConfig(content: string, configPath: string): ParsedAgentConfi
         modelName: parsed.modelName,
         tools: parseBindings<AgentToolBinding>(parsed.tools, configPath, 'tools'),
         skills: parseBindings<AgentSkillBinding>(parsed.skills, configPath, 'skills'),
-        inheritance: parseInheritance(parsed.inheritance, configPath)
+        inheritance: parseInheritance(parsed.inheritance, configPath),
+        linkDir: typeof parsed.linkDir === 'string' ? parsed.linkDir : undefined
     };
 }
 
@@ -434,6 +445,41 @@ function createDefaultAgentBinding(): EffectiveAgentBinding {
         agentKey: DEFAULT_WORKSPACE_AGENT_KEY,
         config: createResolvedAgentConfig('/', [], DEFAULT_SCOPED_AGENT_CONFIG)
     };
+}
+
+function normalizeMountedAliasPath(aliasName: string): string {
+    return `/${aliasName}`;
+}
+
+function resolveMountedTargetCandidate(aliasRealPath: string, linkDir: string): string {
+    const normalizedLinkDir = linkDir.trim();
+    if (!normalizedLinkDir) {
+        throw new Error('linkDir 不能为空。');
+    }
+
+    return path.resolve(aliasRealPath, normalizedLinkDir);
+}
+
+function isPathWithin(parentPath: string, candidatePath: string): boolean {
+    const relative = path.relative(parentPath, candidatePath);
+    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function findMountedDirectoryBinding(
+    virtualPath: string,
+    bindings: MountedDirectoryBinding[]
+): MountedDirectoryBinding | undefined {
+    let matched: MountedDirectoryBinding | undefined;
+
+    for (const binding of bindings) {
+        if (virtualPath === binding.aliasPath || virtualPath.startsWith(`${binding.aliasPath}/`)) {
+            if (!matched || binding.aliasPath.length > matched.aliasPath.length) {
+                matched = binding;
+            }
+        }
+    }
+
+    return matched;
 }
 
 function findContextNodeByPath(nodes: ContextNode[], targetPath: string): ContextNode | null {
@@ -491,6 +537,7 @@ export class FileSystemContextProvider implements IContextProvider {
 
     async getContext(): Promise<WorkspaceContext> {
         const rootDirectory = await this.resolveRootDirectory();
+        const mountBindings = await this.resolveMountedDirectoryBindings(rootDirectory);
         const agentConfigs = new Map<string, ResolvedAgentConfig>();
         const rootAgent = await this.resolveDirectoryAgentBinding(rootDirectory, '/', createDefaultAgentBinding());
         agentConfigs.set(rootAgent.agentKey, rootAgent.config);
@@ -499,7 +546,8 @@ export class FileSystemContextProvider implements IContextProvider {
             realPath: rootDirectory,
             virtualPath: undefined,
             inheritedAgent: rootAgent,
-            agentConfigs
+            agentConfigs,
+            mountBindings
         });
 
         return {
@@ -606,7 +654,11 @@ export class FileSystemContextProvider implements IContextProvider {
             throw new Error('不允许删除根目录。');
         }
 
-        const realPath = await this.resolveRealPath(normalizedPath, { expectExisting: true });
+        const rootDirectory = await this.resolveRootDirectory();
+        const mountBindings = await this.resolveMountedDirectoryBindings(rootDirectory);
+        const mountedRoot = mountBindings.find((binding) => binding.aliasPath === normalizedPath);
+        const realPath = mountedRoot?.aliasRealPath
+            ?? await this.resolveRealPath(normalizedPath, { expectExisting: true });
         await fs.rm(realPath, { recursive: true, force: false });
     }
 
@@ -616,7 +668,11 @@ export class FileSystemContextProvider implements IContextProvider {
             throw new Error('不允许重命名根目录。');
         }
 
-        const sourceRealPath = await this.resolveRealPath(normalizedPath, { expectExisting: true });
+        const rootDirectory = await this.resolveRootDirectory();
+        const mountBindings = await this.resolveMountedDirectoryBindings(rootDirectory);
+        const mountedRoot = mountBindings.find((binding) => binding.aliasPath === normalizedPath);
+        const sourceRealPath = mountedRoot?.aliasRealPath
+            ?? await this.resolveRealPath(normalizedPath, { expectExisting: true });
         const parentPath = path.posix.dirname(normalizedPath) === '/' ? undefined : path.posix.dirname(normalizedPath);
         const targetPath = toVirtualPath(parentPath, input.name);
         const targetRealPath = await this.resolveRealPath(targetPath, { expectExisting: false });
@@ -637,38 +693,16 @@ export class FileSystemContextProvider implements IContextProvider {
 
     async searchInScope(request: ContextSearchRequest): Promise<ContextSearchMatch[]> {
         const rootDirectory = await this.resolveRootDirectory();
+        const mountBindings = await this.resolveMountedDirectoryBindings(rootDirectory);
         const scopePath = normalizeVirtualPath(request.scopePath);
         const startDirectory = scopePath
-            ? path.join(rootDirectory, ...scopePath.split('/').filter(Boolean))
+            ? await this.resolveRealPath(scopePath, { expectExisting: true, expectDirectory: true })
             : rootDirectory;
-
-        const files: Array<{ path: string; readContent: () => Promise<string> }> = [];
-        const walk = async (directoryPath: string, currentVirtualPath?: string): Promise<void> => {
-            const entries = await fs.readdir(directoryPath, { withFileTypes: true });
-            for (const entry of entries) {
-                if (entry.name.startsWith('.')) continue;
-                const entryVirtualPath = currentVirtualPath ? `${currentVirtualPath}/${entry.name}` : `/${entry.name}`;
-                const entryRealPath = path.join(directoryPath, entry.name);
-                if (entry.isDirectory()) {
-                    await walk(entryRealPath, entryVirtualPath);
-                    continue;
-                }
-
-                files.push({
-                    path: entryVirtualPath,
-                    readContent: async () => {
-                        const mimeType = inferDocumentMimeType(entryVirtualPath);
-                        if (!isTextDocumentMimeType(mimeType)) {
-                            return '';
-                        }
-
-                        return fs.readFile(entryRealPath, 'utf8');
-                    }
-                });
-            }
-        };
-
-        await walk(startDirectory, normalizeSearchScopePath(scopePath ?? '/'));
+        const files = await this.collectSearchableFiles({
+            directoryPath: startDirectory,
+            virtualPath: normalizeSearchScopePath(scopePath ?? '/'),
+            mountBindings
+        });
         return searchInScopedFiles({
             query: request.query,
             scopePath,
@@ -699,7 +733,44 @@ export class FileSystemContextProvider implements IContextProvider {
         options: { expectExisting: boolean; expectDirectory?: boolean }
     ): Promise<string> {
         const rootDirectory = await this.resolveRootDirectory();
-        const relativePath = virtualPath ? `.${virtualPath}` : '.';
+        const normalizedPath = virtualPath ? normalizeVirtualPath(virtualPath, { allowRoot: false }) : undefined;
+        const mountBindings = await this.resolveMountedDirectoryBindings(rootDirectory);
+        const mountedBinding = normalizedPath ? findMountedDirectoryBinding(normalizedPath, mountBindings) : undefined;
+
+        if (normalizedPath && mountedBinding) {
+            const suffix = normalizedPath.length === mountedBinding.aliasPath.length
+                ? ''
+                : normalizedPath.slice(mountedBinding.aliasPath.length);
+            const candidatePath = suffix
+                ? path.resolve(mountedBinding.targetRealPath, `.${suffix}`)
+                : mountedBinding.targetRealPath;
+
+            if (!options.expectExisting) {
+                const parentDirectory = path.dirname(candidatePath);
+                await fs.realpath(parentDirectory).catch(() => {
+                    throw new Error(`父目录不存在: ${virtualPath ?? '/'}`);
+                });
+                return candidatePath;
+            }
+
+            const resolvedPath = await fs.realpath(candidatePath).catch(() => {
+                throw new Error(`节点不存在: ${virtualPath ?? '/'}`);
+            });
+
+            if (options.expectDirectory !== undefined) {
+                const stats = await fs.stat(resolvedPath);
+                if (options.expectDirectory && !stats.isDirectory()) {
+                    throw new Error(`节点不是目录: ${virtualPath ?? '/'}`);
+                }
+                if (!options.expectDirectory && !stats.isFile()) {
+                    throw new Error(`节点不是文件: ${virtualPath ?? '/'}`);
+                }
+            }
+
+            return resolvedPath;
+        }
+
+        const relativePath = normalizedPath ? `.${normalizedPath}` : '.';
         const candidatePath = path.resolve(rootDirectory, relativePath);
 
         if (!this.isInsideRoot(rootDirectory, candidatePath)) {
@@ -747,6 +818,7 @@ export class FileSystemContextProvider implements IContextProvider {
         virtualPath?: string;
         inheritedAgent: EffectiveAgentBinding;
         agentConfigs: Map<string, ResolvedAgentConfig>;
+        mountBindings: MountedDirectoryBinding[];
     }): Promise<ContextNode[]> {
         const entries = await fs.readdir(input.realPath, { withFileTypes: true });
         const visibleEntries = entries.filter((entry) => !entry.name.startsWith('.'));
@@ -754,6 +826,37 @@ export class FileSystemContextProvider implements IContextProvider {
             const virtualPath = input.virtualPath
                 ? path.posix.join(input.virtualPath, entry.name)
                 : `/${entry.name}`;
+            const mountedBinding = input.virtualPath ? undefined : findMountedDirectoryBinding(virtualPath, input.mountBindings);
+
+            if (entry.isDirectory() && mountedBinding) {
+                const stats = await fs.stat(mountedBinding.aliasRealPath);
+                const directoryAgent = await this.resolveDirectoryAgentBinding(
+                    mountedBinding.aliasRealPath,
+                    virtualPath,
+                    input.inheritedAgent
+                );
+                input.agentConfigs.set(directoryAgent.agentKey, directoryAgent.config);
+                const children = await this.buildDirectoryNodes({
+                    realPath: mountedBinding.targetRealPath,
+                    virtualPath,
+                    inheritedAgent: directoryAgent,
+                    agentConfigs: input.agentConfigs,
+                    mountBindings: input.mountBindings
+                });
+
+                return {
+                    path: virtualPath,
+                    name: entry.name,
+                    kind: 'directory',
+                    parentPath: input.virtualPath,
+                    hasChildren: children.length > 0,
+                    updatedAt: stats.mtimeMs,
+                    children,
+                    isAgentOwner: directoryAgent.agentKey === (virtualPath.endsWith('/') ? virtualPath : `${virtualPath}/`),
+                    agentKey: directoryAgent.agentKey
+                } satisfies ContextNode;
+            }
+
             const realPath = path.join(input.realPath, entry.name);
             const stats = await fs.stat(realPath);
 
@@ -764,7 +867,8 @@ export class FileSystemContextProvider implements IContextProvider {
                     realPath,
                     virtualPath,
                     inheritedAgent: directoryAgent,
-                    agentConfigs: input.agentConfigs
+                    agentConfigs: input.agentConfigs,
+                    mountBindings: input.mountBindings
                 });
 
                 return {
@@ -809,5 +913,106 @@ export class FileSystemContextProvider implements IContextProvider {
         const content = await fs.readFile(realConfigPath, 'utf8');
         const config = parseAgentConfig(content, configPath);
         return resolveEffectiveAgentBinding(inheritedAgent, scopePath, configPath, config);
+    }
+
+    private async resolveMountedDirectoryBindings(rootDirectory: string): Promise<MountedDirectoryBinding[]> {
+        const entries = await fs.readdir(rootDirectory, { withFileTypes: true });
+        const visibleEntries = entries.filter((entry) => !entry.name.startsWith('.'));
+        const bindings: MountedDirectoryBinding[] = [];
+
+        for (const entry of visibleEntries) {
+            if (!entry.isDirectory()) {
+                continue;
+            }
+
+            const aliasPath = normalizeMountedAliasPath(entry.name);
+            const aliasRealPath = path.join(rootDirectory, entry.name);
+            const configRealPath = path.join(aliasRealPath, '.agent.json');
+            if (!(await exists(configRealPath))) {
+                continue;
+            }
+
+            const configContent = await fs.readFile(configRealPath, 'utf8');
+            const config = parseAgentConfig(configContent, getConfigPath(aliasPath));
+            if (config.linkDir === undefined) {
+                continue;
+            }
+
+            const visibleChildren = (await fs.readdir(aliasRealPath, { withFileTypes: true }))
+                .filter((child) => !child.name.startsWith('.') && child.name !== '.agent.json');
+            if (visibleChildren.length > 0) {
+                throw new Error(`非法挂载入口 ${aliasPath}: 仅允许 .agent.json。`);
+            }
+
+            const targetCandidate = resolveMountedTargetCandidate(aliasRealPath, config.linkDir);
+            const targetRealPath = await fs.realpath(targetCandidate).catch(() => {
+                throw new Error(`挂载目标目录不存在: ${config.linkDir}`);
+            });
+            const targetStats = await fs.stat(targetRealPath);
+            if (!targetStats.isDirectory()) {
+                throw new Error(`挂载目标不是目录: ${config.linkDir}`);
+            }
+
+            if (isPathWithin(targetRealPath, aliasRealPath)) {
+                throw new Error(`挂载目标不能包含挂载入口本身: ${config.linkDir}`);
+            }
+
+            bindings.push({
+                aliasPath,
+                aliasRealPath,
+                targetRealPath
+            });
+        }
+
+        bindings.sort((left, right) => left.aliasPath.localeCompare(right.aliasPath, 'zh-Hans-CN'));
+        return bindings;
+    }
+
+    private async collectSearchableFiles(input: {
+        directoryPath: string;
+        virtualPath?: string;
+        mountBindings: MountedDirectoryBinding[];
+    }): Promise<Array<{ path: string; readContent: () => Promise<string> }>> {
+        const files: Array<{ path: string; readContent: () => Promise<string> }> = [];
+
+        const walk = async (directoryPath: string, currentVirtualPath?: string): Promise<void> => {
+            const entries = await fs.readdir(directoryPath, { withFileTypes: true });
+            for (const entry of entries) {
+                if (entry.name.startsWith('.')) {
+                    continue;
+                }
+
+                const entryVirtualPath = currentVirtualPath ? `${currentVirtualPath}/${entry.name}` : `/${entry.name}`;
+                const entryRealPath = path.join(directoryPath, entry.name);
+
+                if (!currentVirtualPath) {
+                    const mountedBinding = findMountedDirectoryBinding(entryVirtualPath, input.mountBindings);
+                    if (entry.isDirectory() && mountedBinding) {
+                        await walk(mountedBinding.targetRealPath, entryVirtualPath);
+                        continue;
+                    }
+                }
+
+                if (entry.isDirectory()) {
+                    await walk(entryRealPath, entryVirtualPath);
+                    continue;
+                }
+
+                files.push({
+                    path: entryVirtualPath,
+                    readContent: async () => {
+                        const mimeType = inferDocumentMimeType(entryVirtualPath);
+                        if (!isTextDocumentMimeType(mimeType)) {
+                            return '';
+                        }
+
+                        return fs.readFile(entryRealPath, 'utf8');
+                    }
+                });
+            }
+        };
+
+        await walk(input.directoryPath, input.virtualPath);
+        return files;
     }
 }

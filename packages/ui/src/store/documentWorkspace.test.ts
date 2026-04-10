@@ -31,6 +31,32 @@ describe('useDocumentWorkspaceStore', () => {
         expect(store.activeAgent?.scopePath).toBe('/');
     });
 
+    it('collects markdown documents while preserving nested directory structure', async () => {
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(createMockContextProvider({
+            nodes: [
+                { path: '/workspace', name: 'workspace', kind: 'directory' },
+                { path: '/workspace/guide.md', name: 'guide.md', kind: 'file', parentPath: '/workspace' },
+                { path: '/workspace/archive', name: 'archive', kind: 'directory', parentPath: '/workspace' },
+                { path: '/workspace/archive/history.md', name: 'history.md', kind: 'file', parentPath: '/workspace/archive' },
+                { path: '/workspace/archive/raw.txt', name: 'raw.txt', kind: 'file', parentPath: '/workspace/archive' }
+            ],
+            documents: {
+                '/workspace/guide.md': '# Guide',
+                '/workspace/archive/history.md': '# History',
+                '/workspace/archive/raw.txt': 'plain text'
+            }
+        }));
+
+        await store.hydrateWorkspace();
+
+        const documents = store.collectMarkdownDocuments('/workspace');
+        expect(documents).toHaveLength(2);
+        expect(documents[0].path).toBe('/workspace/guide.md');
+        expect(documents[1].path).toBe('/workspace/archive');
+        expect(documents[1].children?.map((node) => node.path)).toEqual(['/workspace/archive/history.md']);
+    });
+
     it('flushes the previous file before switching documents', async () => {
         const provider = createMockContextProvider({
             nodes: [

@@ -128,6 +128,9 @@ classDiagram
 
 ## Notes
 
-- `Conversation.documentPaths` is the persisted basis for document-scoped conversation lookup.
-- `IContextProvider.getConversations(query)` is the single query entry used by the workspace panel.
-- `AgentConversationPanel` stays responsible for list/detail state, while `IContextProvider` owns the data query.
+* `Conversation.documentPaths` is the persisted basis for document-scoped conversation lookup.
+
+* `IContextProvider.getConversations(query)` is the single query entry used by the workspace panel.
+
+* `AgentConversationPanel` stays responsible for list/detail state, while `IContextProvider` owns the data query.
+

@@ -39,17 +39,11 @@
           <div v-if="documents.length === 0" class="agent-view__empty" data-testid="agent-view-documents-empty">
             当前 owner 子树下没有 Markdown 文档。
           </div>
-          <div v-else class="agent-view__list">
-            <button
-              v-for="document in documents"
-              :key="document.path"
-              type="button"
-              class="agent-view__list-item"
-              data-testid="agent-view-document"
-              @click="emit('open-document', document.path)"
-            >
-              <span>{{ document.name }}</span>
-            </button>
+          <div v-else class="agent-view__tree">
+            <AgentDocumentTree
+              :nodes="documents"
+              @open-document="emit('open-document', $event)"
+            />
           </div>
         </div>
       </section>
@@ -85,6 +79,7 @@
 import { computed, ref } from 'vue';
 import { ChevronDown } from 'lucide-vue-next';
 import { DEFAULT_SCOPED_AGENT_CONFIG, type ContextNode, type Conversation, type ResolvedAgentConfig } from '@packages/core/src';
+import AgentDocumentTree from './AgentDocumentTree.vue';
 
 const props = defineProps<{
   agentKey: string;
@@ -272,37 +267,12 @@ function toggleInstructions(): void {
   overflow: hidden;
 }
 
-.agent-view__list {
+.agent-view__tree {
   display: flex;
   flex: 1;
   min-height: 0;
-  flex-direction: column;
-  gap: 8px;
   overflow: auto;
   padding-right: 4px;
-}
-
-.agent-view__list-item {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 8px;
-  padding: 10px 4px;
-  border: 0;
-  border-radius: 8px;
-  color: #e2e8f0;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-}
-
-.agent-view__list-item span {
-  min-width: 0;
-}
-
-.agent-view__list-item:hover,
-.agent-view__list-item:focus-visible {
-  background: rgba(148, 163, 184, 0.1);
 }
 
 @media (max-width: 960px) {
@@ -315,7 +285,7 @@ function toggleInstructions(): void {
   }
 
   .agent-view__panel-body,
-  .agent-view__list {
+  .agent-view__tree {
     overflow: visible;
   }
 }

@@ -35,7 +35,7 @@ const conversations: Conversation[] = [
 ];
 
 describe('AgentView', () => {
-    it('renders agent metadata, markdown documents and local conversations', async () => {
+    it('renders agent metadata, markdown document trees and local conversations', async () => {
         const wrapper = mount(AgentView, {
             props: {
                 agentKey: '/workspace/archive/.agent.json',
@@ -49,11 +49,27 @@ describe('AgentView', () => {
                 },
                 documents: [
                     {
-                        path: '/workspace/archive/history.md',
-                        name: 'history.md',
+                        path: '/workspace/archive/guide.md',
+                        name: 'guide.md',
                         kind: 'file',
                         parentPath: '/workspace/archive',
                         agentKey: '/workspace/archive/.agent.json'
+                    },
+                    {
+                        path: '/workspace/archive/guides',
+                        name: 'guides',
+                        kind: 'directory',
+                        parentPath: '/workspace/archive',
+                        agentKey: '/workspace/archive/.agent.json',
+                        children: [
+                            {
+                                path: '/workspace/archive/guides/history.md',
+                                name: 'history.md',
+                                kind: 'file',
+                                parentPath: '/workspace/archive/guides',
+                                agentKey: '/workspace/archive/.agent.json'
+                            }
+                        ]
                     }
                 ],
                 conversations
@@ -62,7 +78,11 @@ describe('AgentView', () => {
 
         expect(wrapper.get('[data-testid="agent-view"]').text()).toContain('Archive Agent');
         expect(wrapper.get('[data-testid="agent-view-model"]').text()).toContain('gemini-api / gemini-2.5-flash');
-        expect(wrapper.get('[data-testid="agent-view-document"]').text()).toContain('history.md');
+        expect(wrapper.get('[data-testid="agent-document-tree"]').text()).toContain('guides');
+        const documentItems = wrapper.findAll('[data-testid="agent-view-document"]');
+        expect(documentItems).toHaveLength(2);
+        expect(documentItems[0].text()).toContain('guide.md');
+        expect(documentItems[1].text()).toContain('history.md');
         const conversationItems = wrapper.findAll('[data-testid="agent-view-conversation"]');
         expect(conversationItems).toHaveLength(2);
         expect(conversationItems[0].text()).toBe('Latest archive follow-up');
@@ -77,11 +97,11 @@ describe('AgentView', () => {
         expect(wrapper.get('[data-testid="agent-view-instructions"]').text()).toContain('Use archive context');
         expect(wrapper.get('[data-testid="agent-view-instructions-toggle"]').attributes('aria-expanded')).toBe('true');
 
-        await wrapper.get('[data-testid="agent-view-document"]').trigger('click');
+        await documentItems[1].trigger('click');
         await wrapper.get('[data-testid="agent-view-conversation"]').trigger('click');
 
         expect(wrapper.emitted('open-document')).toEqual([
-            ['/workspace/archive/history.md']
+            ['/workspace/archive/guides/history.md']
         ]);
         expect(wrapper.emitted('open-conversation')).toEqual([
             ['conversation-2']
