@@ -9,7 +9,7 @@
         class="collapse-toggle"
         type="button"
         data-testid="sidebar-toggle"
-        :aria-label="collapsed ? '展开侧边栏' : '折叠侧边栏'"
+        :aria-label="collapsed ? t('shared.expandSidebar') : t('shared.collapseSidebar')"
         @click="$emit('toggle-collapse', !collapsed)"
       >
         <span class="collapse-icon">{{ collapsed ? '>' : '<' }}</span>
@@ -33,13 +33,13 @@
               />
             </svg>
           </span>
-          <span>新建聊天</span>
+          <span>{{ t('shared.newChat') }}</span>
         </button>
         <button
           class="new-chat-menu-btn"
           type="button"
           data-testid="sidebar-new-chat-menu"
-          aria-label="选择聊天模式"
+          :aria-label="t('shared.chooseChatMode')"
           :aria-expanded="menuOpen"
           @click.stop="menuOpen = !menuOpen"
         >
@@ -51,14 +51,14 @@
             data-testid="sidebar-new-chat-normal"
             @click="emitNewChat"
           >
-            普通聊天
+            {{ t('shared.normalChat') }}
           </button>
           <button
             type="button"
             data-testid="sidebar-new-chat-compare"
             @click="emitNewCompare"
           >
-            对比聊天
+            {{ t('shared.compareChat') }}
           </button>
         </div>
       </div>
@@ -72,7 +72,7 @@
           :class="{ active: historySource === 'local' }"
           @click="$emit('switch-source', 'local')"
         >
-          本地
+          {{ t('shared.historySourceLocal') }}
         </button>
         <button
           type="button"
@@ -80,7 +80,7 @@
           :class="{ active: historySource === 'external' }"
           @click="$emit('switch-source', 'external')"
         >
-          外部
+          {{ t('shared.historySourceExternal') }}
         </button>
       </div>
     </div>
@@ -92,11 +92,11 @@
         data-testid="local-history-filter-toggle"
         :class="{ active: localConversationFilter === 'starred' }"
         :aria-pressed="localConversationFilter === 'starred'"
-        :title="localConversationFilter === 'starred' ? '显示全部会话' : '仅看星标会话'"
+        :title="localConversationFilter === 'starred' ? t('shared.showAllConversations') : t('shared.onlyStarred')"
         @click="toggleLocalFilter"
       >
         <span class="local-filter-toggle__icon" aria-hidden="true">★</span>
-        <span>{{ localConversationFilter === 'starred' ? '仅看星标' : '星标过滤' }}</span>
+        <span>{{ localConversationFilter === 'starred' ? t('shared.onlyStarred') : t('shared.starredFilter') }}</span>
       </button>
     </div>
 
@@ -112,7 +112,7 @@
 
     <div v-if="!collapsed" class="sidebar-content">
       <p v-if="isCompareMode" class="mode-hint">
-        当前为对比模式，选择历史后会切回普通聊天视图。
+        {{ t('shared.compareModeHint') }}
       </p>
 
       <div v-if="historySource === 'local'" class="history-list">
@@ -133,7 +133,7 @@
             @click="handleSelectLocal(item.id)"
           >
             <span v-if="item.starred" class="history-star-marker" aria-hidden="true">★</span>
-            <span class="title">{{ item.title || 'Untitled' }}</span>
+            <span class="title">{{ item.title || t('shared.untitled') }}</span>
             <span v-if="resolveConversationAgentLabel(item.agentKey)" class="history-agent-tag">
               {{ resolveConversationAgentLabel(item.agentKey) }}
             </span>
@@ -146,7 +146,7 @@
                 data-testid="local-history-delete-confirm"
                 @click.stop="confirmDeleteLocal(item.id)"
               >
-                确认
+                {{ t('shared.confirm') }}
               </button>
               <button
                 type="button"
@@ -154,7 +154,7 @@
                 data-testid="local-history-delete-cancel"
                 @click.stop="pendingDeleteId = null"
               >
-                取消
+                {{ t('shared.cancel') }}
               </button>
             </template>
             <template v-else-if="localAgentBindingId === item.id">
@@ -162,10 +162,10 @@
                 type="button"
                 class="history-action"
                 data-testid="local-history-agent-binding-close"
-                :aria-label="`关闭 ${item.title || 'Untitled'} 的 Agent 绑定面板`"
+                :aria-label="`${t('shared.cancel')} ${item.title || t('shared.untitled')} ${t('shared.agentBindingPanel')}`"
                 @click.stop="closeLocalAgentBinding"
               >
-                取消
+                {{ t('shared.cancel') }}
               </button>
             </template>
             <template v-else>
@@ -173,20 +173,20 @@
                 type="button"
                 class="history-action"
                 data-testid="local-history-agent-binding"
-                aria-label="绑定到 Agent"
-                title="绑定到 Agent"
+                :aria-label="t('shared.bindToAgent')"
+                :title="t('shared.bindToAgent')"
                 :disabled="agentBindingSubmitting === true"
                 @click.stop="openLocalAgentBinding(item.id)"
               >
-                绑
+                {{ t('shared.bindToAgentShort') }}
               </button>
               <button
                 type="button"
                 class="history-action"
                 :class="{ active: item.starred === true }"
                 data-testid="local-history-star"
-                :aria-label="item.starred ? '取消星标会话' : '星标会话'"
-                :title="item.starred ? '取消星标会话' : '星标会话'"
+                :aria-label="item.starred ? t('shared.unstarConversation') : t('shared.starConversation')"
+                :title="item.starred ? t('shared.unstarConversation') : t('shared.starConversation')"
                 @click.stop="$emit('toggle-local-star', item.id)"
               >
                 ★
@@ -195,7 +195,7 @@
                 type="button"
                 class="history-action danger"
                 data-testid="local-history-delete"
-                aria-label="删除会话"
+                :aria-label="t('shared.deleteConversation')"
                 @click.stop="pendingDeleteId = item.id"
               >
                 x
@@ -203,8 +203,8 @@
             </template>
           </div>
           <div v-if="localAgentBindingId === item.id" class="local-agent-binding-panel">
-            <p class="local-agent-binding-panel__title">选择 Agent</p>
-            <p v-if="agentBindingLoading" class="local-agent-binding-panel__message">正在加载 Agent 候选项...</p>
+            <p class="local-agent-binding-panel__title">{{ t('shared.selectedAgent') }}</p>
+            <p v-if="agentBindingLoading" class="local-agent-binding-panel__message">{{ t('shared.loadingAgentOptions') }}</p>
             <p v-else-if="agentBindingError" class="local-agent-binding-panel__message local-agent-binding-panel__message--error">
               {{ agentBindingError }}
             </p>
@@ -225,7 +225,7 @@
             </div>
           </div>
         </div>
-        <p v-if="localItems.length === 0" class="empty-text">暂无本地历史</p>
+        <p v-if="localItems.length === 0" class="empty-text">{{ t('shared.noLocalHistory') }}</p>
       </div>
 
       <div v-else class="external-panel">
@@ -259,7 +259,7 @@
             class="empty-text"
             data-testid="external-history-loading"
           >
-            正在加载对话历史...
+            {{ t('shared.loadingHistory') }}
           </p>
           <button
             v-for="item in externalItems"
@@ -269,13 +269,13 @@
             data-testid="external-history-item"
             @click="$emit('select-external', item.id)"
           >
-            <span class="title">{{ item.title || 'Untitled' }}</span>
+            <span class="title">{{ item.title || t('shared.untitled') }}</span>
             <span
               v-if="externalPreviewLoadingId === item.id"
               class="loading-status"
               data-testid="external-history-item-loading"
             >
-              等待加载...
+              {{ t('shared.waitingLoad') }}
             </span>
             <span
               v-if="item.isImported"
@@ -287,9 +287,9 @@
             </span>
           </button>
           <p v-if="activeExternalProviderId === 'external-file'" class="empty-text">
-            选择文件后会直接导入到本地工作台。
+            {{ t('shared.importOnSelectFile') }}
           </p>
-          <p v-else-if="!externalHistoryLoading && externalItems.length === 0" class="empty-text">暂无可导入历史</p>
+          <p v-else-if="!externalHistoryLoading && externalItems.length === 0" class="empty-text">{{ t('shared.noImportableHistory') }}</p>
         </div>
       </div>
     </div>
@@ -306,6 +306,7 @@ import type {
   ExternalHistoryProviderId
 } from '@packages/core/src';
 import type { LocalConversationFilter, WorkspaceHistorySource } from '../store/chat';
+import { useWorkspaceI18n } from '../i18n';
 
 const props = defineProps<{
   collapsed: boolean;
@@ -355,6 +356,7 @@ const menuHostRef = ref<HTMLElement | null>(null);
 const pendingDeleteId = ref<string | null>(null);
 const localAgentBindingId = ref<string | null>(null);
 const localAgentBindingOptions = computed(() => props.agentBindingOptions ?? []);
+const { t } = useWorkspaceI18n();
 
 function emitNewChat() {
   menuOpen.value = false;

@@ -1,3 +1,5 @@
+English | [中文](spec.zh-CN.md)
+
 ## ADDED Requirements
 
 ### Requirement: Agent runtime adapter MUST route requests through a dedicated agent runtime

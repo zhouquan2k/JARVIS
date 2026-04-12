@@ -138,7 +138,7 @@ function createResolvedAgentConfig(
 
 function isMissingDocumentError(error: unknown): boolean {
     const message = error instanceof Error ? error.message : String(error);
-    return /节点不存在|not found|enoent|http 404/i.test(message);
+    return /节点不存在|does not exist|not found|enoent|http 404/i.test(message);
 }
 
 function isDirectoryReadError(error: unknown): boolean {

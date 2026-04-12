@@ -40,6 +40,7 @@ import { onBeforeUnmount, watch } from 'vue';
 import type { ChatRoutePath } from '../routes';
 import AgentConversationPanel from './AgentConversationPanel.vue';
 import { useChatStore } from '../store/chat';
+import { useWorkspaceI18n } from '../i18n';
 
 const props = defineProps<{
   activeAgent?: ResolvedAgentConfig | null;
@@ -54,17 +55,18 @@ const props = defineProps<{
   restoreConversationId?: string | null;
 }>();
 const chatStore = useChatStore();
+const { t } = useWorkspaceI18n();
 const emit = defineEmits<{
   (event: 'request-workspace-switch', path: ChatRoutePath): void;
 }>();
 
 function resolveAgentName(agent: ResolvedAgentConfig | null | undefined): string {
-  return agent?.name?.trim() || 'Default Knowledge Agent';
+  return agent?.name?.trim() || t('shared.workspaceAgent');
 }
 
 function resolveAgentModelLabel(agent: ResolvedAgentConfig | null | undefined): string {
-  const provider = agent?.modelProviderName?.trim() || DEFAULT_SCOPED_AGENT_CONFIG.modelProviderName?.trim() || '未指定 Provider';
-  const model = agent?.modelName?.trim() || DEFAULT_SCOPED_AGENT_CONFIG.modelName?.trim() || '未指定模型';
+  const provider = agent?.modelProviderName?.trim() || DEFAULT_SCOPED_AGENT_CONFIG.modelProviderName?.trim() || t('shared.unknownProvider');
+  const model = agent?.modelName?.trim() || DEFAULT_SCOPED_AGENT_CONFIG.modelName?.trim() || t('shared.unknownModel');
   return `${provider} / ${model}`;
 }
 

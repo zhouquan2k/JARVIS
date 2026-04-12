@@ -1,19 +1,19 @@
 <template>
   <div class="compare-container" data-testid="compare-chat-view">
     <header class="sticky-top">
-      <p class="prompt-line" v-if="compareStore.prompt">当前问题：{{ compareStore.prompt }}</p>
+      <p class="prompt-line" v-if="compareStore.prompt">{{ t('shared.currentQuestion', { prompt: compareStore.prompt }) }}</p>
       <nav class="tab-row">
         <button
           data-testid="tab-native"
           :class="{ active: compareStore.activeTab === 'native' }"
           @click="compareStore.setActiveTab('native')">
-          原生输出
+          {{ t('shared.originalOutput') }}
         </button>
         <button
           data-testid="tab-analysis"
           :class="{ active: compareStore.activeTab === 'analysis' }"
           @click="compareStore.setActiveTab('analysis')">
-          深度剖析
+          {{ t('shared.analysisOutput') }}
         </button>
       </nav>
     </header>
@@ -21,14 +21,14 @@
     <main class="scroll-panel">
       <section v-if="compareStore.activeTab === 'native'" class="native-grid">
         <article class="output-card output-card-a">
-          <h3>Model A</h3>
+          <h3>{{ t('shared.modelA') }}</h3>
           <div class="output-body" data-testid="output-a">
             <MarkdownContent v-if="compareStore.outputA" :source="compareStore.outputA" />
             <pre v-else>{{ outputPlaceholder }}</pre>
           </div>
         </article>
         <article class="output-card output-card-b">
-          <h3>Model B</h3>
+          <h3>{{ t('shared.modelB') }}</h3>
           <div class="output-body" data-testid="output-b">
             <MarkdownContent v-if="compareStore.outputB" :source="compareStore.outputB" />
             <pre v-else>{{ outputPlaceholder }}</pre>
@@ -65,21 +65,21 @@
           v-model="inputPrompt"
           data-testid="compare-input"
           @keydown="onInputKeydown"
-          placeholder="输入内容，按 Enter 换行，Ctrl/Cmd + Enter 开始对比"
+          :placeholder="t('shared.compareInputPlaceholder')"
           :disabled="isBusy || !isSelectionReady"
         />
         <div class="input-actions">
-          <p class="shortcut-hint">Enter 换行，Ctrl/Cmd + Enter 开始对比</p>
+          <p class="shortcut-hint">{{ t('shared.compareShortcutHint') }}</p>
           <div class="button-row">
             <button
               data-testid="compare-send"
               @click="submitCompare"
               :disabled="!inputPrompt.trim() || isBusy || !isSelectionReady"
             >
-              开始对比
+              {{ t('shared.beginComparison') }}
             </button>
-            <button v-if="isBusy" class="stop-btn" @click="compareStore.abort()" data-testid="compare-stop">停止</button>
-            <button class="new-btn" @click="startNewChat" :disabled="isBusy" data-testid="compare-new">新建聊天</button>
+            <button v-if="isBusy" class="stop-btn" @click="compareStore.abort()" data-testid="compare-stop">{{ t('shared.stop') }}</button>
+            <button class="new-btn" @click="startNewChat" :disabled="isBusy" data-testid="compare-new">{{ t('shared.newChat') }}</button>
           </div>
         </div>
       </div>
@@ -94,9 +94,11 @@ import CompareModelSelectors from '../components/CompareModelSelectors.vue';
 import MarkdownContent from '../components/MarkdownContent.vue';
 import { useCompareStore } from '../store/compare';
 import { isPromptSubmitHotkey } from '../utils/promptHotkeys';
+import { useWorkspaceI18n } from '../i18n';
 
 const compareStore = useCompareStore();
 const inputPrompt = ref('');
+const { t } = useWorkspaceI18n();
 
 const isBusy = computed(() => compareStore.stage === 'generating' || compareStore.stage === 'analyzing');
 const isSelectionReady = computed(() => {
@@ -110,9 +112,9 @@ const isSelectionReady = computed(() => {
 });
 
 const outputPlaceholder = computed(() => {
-  if (compareStore.stage === 'idle') return '等待输入...';
-  if (compareStore.stage === 'generating') return '流式生成中...';
-  return '暂无输出';
+  if (compareStore.stage === 'idle') return t('shared.waitingInput');
+  if (compareStore.stage === 'generating') return t('shared.streamingOutput');
+  return t('shared.noOutput');
 });
 
 async function submitCompare() {

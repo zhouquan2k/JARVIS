@@ -1,3 +1,5 @@
+English | [中文](spec.zh-CN.md)
+
 ## ADDED Requirements
 
 ### Requirement: Workspace read tools MUST expose scoped file-reading capabilities to agents

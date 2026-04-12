@@ -137,7 +137,7 @@ export class GeminiHistoryConfigLoader {
                 };
             }
 
-            throw new ExternalHistoryError('CONFIG_UNAVAILABLE', 'Gemini 抓取配置不可用。', {
+            throw new ExternalHistoryError('CONFIG_UNAVAILABLE', 'Gemini capture configuration is unavailable.', {
                 providerId: 'gemini-web',
                 cause: error
             });

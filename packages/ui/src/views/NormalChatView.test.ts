@@ -98,7 +98,7 @@ describe('NormalChatView', () => {
         await wrapper.vm.$nextTick();
 
         expect(wrapper.find('[data-testid="question-index-panel"]').exists()).toBe(false);
-        expect(wrapper.get('[data-testid="question-panel-open"]').text()).toContain('显示大纲');
+        expect(wrapper.get('[data-testid="question-panel-open"]').text()).toContain('Show outline');
     });
 
     it('does not render the empty placeholder container when there is no conversation', async () => {

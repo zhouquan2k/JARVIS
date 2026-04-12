@@ -28,11 +28,11 @@ function applyCorsHeaders(c: Context, origin: string): void {
 function resolveSyncKey(value: string | undefined, config: ServerConfig): string {
     const normalized = value?.trim();
     if (!normalized) {
-        throw new Error('syncKey 不能为空。');
+        throw new Error('syncKey must not be empty.');
     }
 
     if (normalized === '0' && !config.isDevelopment) {
-        throw new Error('syncKey=0 仅允许在开发环境使用，请先配置真实的 syncKey。');
+        throw new Error('syncKey=0 is only allowed in development; configure a real syncKey first.');
     }
 
     return normalized;
@@ -42,7 +42,7 @@ async function readJsonBody(c: Context): Promise<unknown> {
     try {
         return await c.req.json();
     } catch {
-        throw new Error('请求体必须是合法 JSON。');
+        throw new Error('Request body must be valid JSON.');
     }
 }
 

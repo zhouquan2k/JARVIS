@@ -1211,7 +1211,7 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
                 action: request.action,
                 requiredKeys
             });
-            return createError('SELECTOR_MISMATCH', 'Gemini 页面结构与远程配置不匹配。');
+            return createError('SELECTOR_MISMATCH', 'Gemini page structure does not match the remote configuration.');
         }
 
         return null;
@@ -1740,7 +1740,7 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
                     snapshot: getDetailDomSnapshot(request.config)
                 });
             }
-            return createError('AUTH_REQUIRED', '当前标签页不在 Gemini 站点上下文中。');
+            return createError('AUTH_REQUIRED', 'The current tab is not in a Gemini site context.');
         }
 
         if (request.action === 'GET_HISTORY_LIST') {
@@ -1754,13 +1754,13 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
                     snapshot: getDetailDomSnapshot(request.config)
                 });
             }
-            return createError('AUTH_REQUIRED', 'Gemini 页面当前未登录。');
+            return createError('AUTH_REQUIRED', 'Gemini page is not signed in.');
         }
 
         if (request.action === 'GET_HISTORY_LIST' && shouldTreatMissingHistoryScaffoldAsAuthRequired(request.config, {
             bodyText: document.body?.innerText ?? ''
         })) {
-            return createError('AUTH_REQUIRED', 'Gemini 页面当前未登录。');
+            return createError('AUTH_REQUIRED', 'Gemini page is not signed in.');
         }
 
         const shouldDeferDetailHealthCheck = request.action === 'GET_HISTORY_DETAIL' && Boolean(parseTemporarySearchResultId(request.externalId));

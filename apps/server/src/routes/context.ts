@@ -30,13 +30,13 @@ async function readJsonBody(c: Context): Promise<unknown> {
     try {
         return await c.req.json();
     } catch {
-        throw new Error('请求体必须是合法 JSON。');
+        throw new Error('Request body must be valid JSON.');
     }
 }
 
 function normalizeObjectBody(body: unknown): Record<string, unknown> {
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
-        throw new Error('请求体必须是对象。');
+        throw new Error('Request body must be an object.');
     }
     return body as Record<string, unknown>;
 }
@@ -47,7 +47,7 @@ function normalizeOptionalPath(body: Record<string, unknown>): string | undefine
         return undefined;
     }
     if (typeof value !== 'string') {
-        throw new Error('parentPath 必须是字符串。');
+        throw new Error('parentPath must be a string.');
     }
     return value;
 }
@@ -55,14 +55,14 @@ function normalizeOptionalPath(body: Record<string, unknown>): string | undefine
 function normalizeRequiredPath(body: Record<string, unknown>): string {
     const value = body.path;
     if (typeof value !== 'string' || !value.trim()) {
-        throw new Error('path 不能为空。');
+        throw new Error('path must not be empty.');
     }
     return value;
 }
 
 function normalizeConversationQuery(body: Record<string, unknown>): ConversationQuery {
     if (body.documentPath !== undefined && body.documentPath !== null && typeof body.documentPath !== 'string') {
-        throw new Error('documentPath 必须是字符串。');
+        throw new Error('documentPath must be a string.');
     }
 
     return {
@@ -72,15 +72,15 @@ function normalizeConversationQuery(body: Record<string, unknown>): Conversation
 
 function normalizeWriteDocumentInput(body: Record<string, unknown>): WriteContextDocumentInput {
     if (typeof body.mimeType !== 'string' || !body.mimeType.trim()) {
-        throw new Error('mimeType 不能为空。');
+        throw new Error('mimeType must not be empty.');
     }
 
     if (typeof body.dataBase64 !== 'string') {
-        throw new Error('dataBase64 必须是字符串。');
+        throw new Error('dataBase64 must be a string.');
     }
 
     if (body.expectedVersion !== undefined && body.expectedVersion !== null && typeof body.expectedVersion !== 'string') {
-        throw new Error('expectedVersion 必须是字符串。');
+        throw new Error('expectedVersion must be a string.');
     }
 
     return {
@@ -93,10 +93,10 @@ function normalizeWriteDocumentInput(body: Record<string, unknown>): WriteContex
 
 function normalizeCreateNodeInput(body: Record<string, unknown>): CreateContextNodeInput {
     if (typeof body.name !== 'string' || !body.name.trim()) {
-        throw new Error('name 不能为空。');
+        throw new Error('name must not be empty.');
     }
     if (body.kind !== 'file' && body.kind !== 'directory') {
-        throw new Error('kind 必须是 file 或 directory。');
+        throw new Error('kind must be file or directory.');
     }
 
     return {
@@ -108,7 +108,7 @@ function normalizeCreateNodeInput(body: Record<string, unknown>): CreateContextN
 
 function normalizeRenameNodeInput(body: Record<string, unknown>): RenameContextNodeInput {
     if (typeof body.name !== 'string' || !body.name.trim()) {
-        throw new Error('name 不能为空。');
+        throw new Error('name must not be empty.');
     }
 
     return {
@@ -119,16 +119,16 @@ function normalizeRenameNodeInput(body: Record<string, unknown>): RenameContextN
 
 function normalizeSearchRequest(body: Record<string, unknown>): ContextSearchRequest {
     if (typeof body.query !== 'string' || !body.query.trim()) {
-        throw new Error('query 不能为空。');
+        throw new Error('query must not be empty.');
     }
 
     if (body.scopePath !== undefined && body.scopePath !== null && typeof body.scopePath !== 'string') {
-        throw new Error('scopePath 必须是字符串。');
+        throw new Error('scopePath must be a string.');
     }
 
     if (body.maxResults !== undefined && body.maxResults !== null) {
         if (typeof body.maxResults !== 'number' || !Number.isFinite(body.maxResults)) {
-            throw new Error('maxResults 必须是数字。');
+            throw new Error('maxResults must be a number.');
         }
     }
 
@@ -170,7 +170,7 @@ export function createContextRouter(options: { service: HttpContextService; conf
             await service.initializeAccess();
             return c.json({ ok: true });
         } catch (error) {
-            const message = error instanceof Error ? error.message : '初始化 context 访问失败。';
+            const message = error instanceof Error ? error.message : 'Failed to initialize context access.';
             return c.json({ error: message }, 400);
         }
     });
@@ -180,7 +180,7 @@ export function createContextRouter(options: { service: HttpContextService; conf
             normalizeObjectBody(await readJsonBody(c));
             return c.json(await service.getContext());
         } catch (error) {
-            const message = error instanceof Error ? error.message : '读取工作区上下文失败。';
+            const message = error instanceof Error ? error.message : 'Failed to read workspace context.';
             return c.json({ error: message }, 400);
         }
     });
@@ -190,7 +190,7 @@ export function createContextRouter(options: { service: HttpContextService; conf
             const body = normalizeObjectBody(await readJsonBody(c));
             return c.json({ conversations: await service.getConversations(normalizeConversationQuery(body)) });
         } catch (error) {
-            const message = error instanceof Error ? error.message : '读取文档会话失败。';
+            const message = error instanceof Error ? error.message : 'Failed to read document conversations.';
             return c.json({ error: message }, 400);
         }
     });
@@ -200,7 +200,7 @@ export function createContextRouter(options: { service: HttpContextService; conf
             const body = normalizeObjectBody(await readJsonBody(c));
             return c.json({ document: await service.readDocument(normalizeRequiredPath(body)) });
         } catch (error) {
-            const message = error instanceof Error ? error.message : '读取文档失败。';
+            const message = error instanceof Error ? error.message : 'Failed to read document.';
             return c.json({ error: message }, 400);
         }
     });
@@ -211,7 +211,7 @@ export function createContextRouter(options: { service: HttpContextService; conf
             await service.writeDocument(normalizeWriteDocumentInput(body));
             return c.json({ ok: true });
         } catch (error) {
-            const message = error instanceof Error ? error.message : '写入文档失败。';
+            const message = error instanceof Error ? error.message : 'Failed to write document.';
             return c.json({ error: message }, 400);
         }
     });
@@ -221,7 +221,7 @@ export function createContextRouter(options: { service: HttpContextService; conf
             const body = normalizeObjectBody(await readJsonBody(c));
             return c.json({ node: await service.createNode(normalizeCreateNodeInput(body)) });
         } catch (error) {
-            const message = error instanceof Error ? error.message : '创建节点失败。';
+            const message = error instanceof Error ? error.message : 'Failed to create node.';
             return c.json({ error: message }, 400);
         }
     });
@@ -232,7 +232,7 @@ export function createContextRouter(options: { service: HttpContextService; conf
             await service.deleteNode(normalizeRequiredPath(body));
             return c.json({ ok: true });
         } catch (error) {
-            const message = error instanceof Error ? error.message : '删除节点失败。';
+            const message = error instanceof Error ? error.message : 'Failed to delete node.';
             return c.json({ error: message }, 400);
         }
     });
@@ -242,7 +242,7 @@ export function createContextRouter(options: { service: HttpContextService; conf
             const body = normalizeObjectBody(await readJsonBody(c));
             return c.json({ node: await service.renameNode(normalizeRenameNodeInput(body)) });
         } catch (error) {
-            const message = error instanceof Error ? error.message : '重命名节点失败。';
+            const message = error instanceof Error ? error.message : 'Failed to rename node.';
             return c.json({ error: message }, 400);
         }
     });
@@ -252,7 +252,7 @@ export function createContextRouter(options: { service: HttpContextService; conf
             const body = normalizeObjectBody(await readJsonBody(c));
             return c.json({ matches: await service.searchInScope(normalizeSearchRequest(body)) });
         } catch (error) {
-            const message = error instanceof Error ? error.message : '搜索作用域失败。';
+            const message = error instanceof Error ? error.message : 'Failed to search scope.';
             return c.json({ error: message }, 400);
         }
     });

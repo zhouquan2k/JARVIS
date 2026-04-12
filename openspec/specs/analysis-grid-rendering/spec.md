@@ -1,3 +1,5 @@
+English | [中文](spec.zh-CN.md)
+
 ## ADDED Requirements
 
 ### Requirement: Render analysis result with symmetric 3x2 grid mapping

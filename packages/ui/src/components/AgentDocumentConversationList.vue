@@ -1,7 +1,7 @@
 <template>
-  <section class="agent-document-list" data-testid="agent-document-conversation-list">
+    <section class="agent-document-list" data-testid="agent-document-conversation-list">
     <div v-if="loading" class="agent-document-list__state" data-testid="agent-document-conversation-loading">
-      正在加载文档关联会话...
+      {{ t('shared.loadingDocumentConversations') }}
     </div>
     <div v-else-if="error" class="agent-document-list__state agent-document-list__state--error" data-testid="agent-document-conversation-error">
       {{ error }}
@@ -36,6 +36,7 @@
 
 <script setup lang="ts">
 import type { Conversation } from '@packages/core/src';
+import { useWorkspaceI18n } from '../i18n';
 
 defineProps<{
   conversations: Conversation[];
@@ -44,6 +45,8 @@ defineProps<{
   error?: string | null;
   emptyMessage?: string;
 }>();
+
+const { t } = useWorkspaceI18n();
 
 const emit = defineEmits<{
   (event: 'open', conversationId: string): void;

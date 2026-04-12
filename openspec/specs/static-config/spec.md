@@ -1,3 +1,5 @@
+English | [中文](spec.zh-CN.md)
+
 ## ADDED Requirements
 
 ### Requirement: System MUST provide syncKey setting for remote namespace selection

@@ -2,20 +2,20 @@
   <div class="provider-model-selector" :class="{ compact }">
     <span v-if="leadingLabel" class="selector-badge">{{ leadingLabel }}</span>
     <label class="select-shell provider-shell">
-      <span class="sr-only">选择 Provider</span>
+      <span class="sr-only">{{ t('shared.selectProvider') }}</span>
       <select
         :data-testid="providerTestId"
         v-model="selectedProviderId"
         class="select-control"
         @change="onProviderChange"
         :disabled="disabled || providers.length === 0">
-        <option v-for="provider in providers" :key="provider.id" :value="provider.id">
-          {{ provider.name }}
+      <option v-for="provider in providers" :key="provider.id" :value="provider.id">
+          {{ provider.nameKey ? t(provider.nameKey) : provider.name }}
         </option>
       </select>
     </label>
     <label class="select-shell model-shell">
-      <span class="sr-only">选择模型</span>
+      <span class="sr-only">{{ t('shared.selectModel') }}</span>
       <select
         :data-testid="modelTestId"
         v-model="selectedModelId"
@@ -23,13 +23,13 @@
         @change="onModelChange"
         :disabled="disabled || modelsLoading || currentModels.length === 0">
         <option v-if="modelsLoading" value="">
-          加载模型中...
+          {{ t('shared.loadingModels') }}
         </option>
         <option v-else-if="currentModels.length === 0" value="">
-          无可用模型
+          {{ t('shared.noModels') }}
         </option>
         <option v-for="model in currentModels" :key="model.id" :value="model.id">
-          {{ model.name }}
+          {{ model.nameKey ? t(model.nameKey) : model.name }}
         </option>
       </select>
     </label>
@@ -39,6 +39,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import type { ProviderConfig } from '@packages/core/config';
+import { useWorkspaceI18n } from '../i18n';
 
 const props = withDefaults(defineProps<{
   providers: ProviderConfig[];
@@ -63,6 +64,7 @@ const emit = defineEmits<{
   (e: 'model-change', modelId: string): void;
 }>();
 
+const { t } = useWorkspaceI18n();
 const selectedProviderId = ref(props.currentProviderId);
 const selectedModelId = ref(props.currentModelId);
 

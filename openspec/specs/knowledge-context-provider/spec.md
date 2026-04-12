@@ -1,3 +1,5 @@
+English | [中文](spec.zh-CN.md)
+
 ## ADDED Requirements
 
 ### Requirement: Knowledge context provider MUST initialize document access explicitly

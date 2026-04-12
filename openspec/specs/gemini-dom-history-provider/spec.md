@@ -1,3 +1,5 @@
+English | [中文](spec.zh-CN.md)
+
 ## MODIFIED Requirements
 
 ### Requirement: Gemini DOM history provider MUST fetch history through remote-config-driven selectors

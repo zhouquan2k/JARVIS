@@ -69,7 +69,7 @@ export class HttpContextProvider implements IContextProvider {
 
     constructor(options: HttpContextProviderOptions = {}) {
         if (!options.fetchImpl && typeof fetch === 'undefined') {
-            throw new Error('当前环境不支持 fetch。');
+            throw new Error('The current environment does not support fetch.');
         }
 
         this.baseUrl = normalizeBaseUrl(options.baseUrl);

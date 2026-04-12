@@ -3,12 +3,12 @@
     <header class="agent-view__hero">
       <div class="agent-view__hero-main">
         <h2 class="agent-view__title">{{ agent.name }}</h2>
-        <p class="agent-view__summary">{{ agent.description || '当前目录直接绑定的知识工作区 Agent。' }}</p>
+        <p class="agent-view__summary">{{ agent.description || t('shared.agentDescription') }}</p>
         <div class="agent-view__meta-bar">
           <div class="agent-view__meta">
-            <span data-testid="agent-view-scope">作用域：{{ agent.scopePath || ownerNode.path }}</span>
-            <span data-testid="agent-view-model">模型：{{ modelLabel }}</span>
-            <span data-testid="agent-view-key">Key：{{ agentKey }}</span>
+            <span data-testid="agent-view-scope">{{ t('shared.agentScope', { scope: agent.scopePath || ownerNode.path }) }}</span>
+            <span data-testid="agent-view-model">{{ t('shared.agentModel', { model: modelLabel }) }}</span>
+            <span data-testid="agent-view-key">{{ t('shared.agentKey', { key: agentKey }) }}</span>
           </div>
           <button
             type="button"
@@ -25,19 +25,19 @@
         <pre
           class="agent-view__instructions"
           data-testid="agent-view-instructions"
-        >{{ agent.effectiveInstructions || '未配置。' }}</pre>
+          >{{ agent.effectiveInstructions || t('shared.instructionsNotConfigured') }}</pre>
       </div>
     </header>
 
     <div class="agent-view__content-grid">
       <section class="agent-view__panel">
         <div class="agent-view__panel-header">
-          <h3>文档</h3>
+          <h3>{{ t('shared.documents') }}</h3>
           <span>{{ documents.length }}</span>
         </div>
         <div class="agent-view__panel-body">
           <div v-if="documents.length === 0" class="agent-view__empty" data-testid="agent-view-documents-empty">
-            当前 owner 子树下没有 Markdown 文档。
+            {{ t('shared.noMarkdownDocuments') }}
           </div>
           <div v-else class="agent-view__tree">
             <AgentDocumentTree
@@ -50,12 +50,12 @@
 
       <section class="agent-view__panel">
         <div class="agent-view__panel-header">
-          <h3>本地会话</h3>
+          <h3>{{ t('shared.localConversations') }}</h3>
           <span>{{ conversations.length }}</span>
         </div>
         <div class="agent-view__panel-body">
           <div v-if="conversations.length === 0" class="agent-view__empty" data-testid="agent-view-conversations-empty">
-            当前 Agent 暂无本地会话。
+            {{ t('shared.currentAgentUnavailable') }}
           </div>
           <div v-else class="agent-view__list">
             <button
@@ -80,6 +80,7 @@ import { computed, ref } from 'vue';
 import { ChevronDown } from 'lucide-vue-next';
 import { DEFAULT_SCOPED_AGENT_CONFIG, type ContextNode, type Conversation, type ResolvedAgentConfig } from '@packages/core/src';
 import AgentDocumentTree from './AgentDocumentTree.vue';
+import { useWorkspaceI18n } from '../i18n';
 
 const props = defineProps<{
   agentKey: string;
@@ -95,9 +96,10 @@ const emit = defineEmits<{
 }>();
 
 const isInstructionsExpanded = ref(false);
+const { t } = useWorkspaceI18n();
 const modelLabel = computed(() => {
-  const provider = props.agent.modelProviderName?.trim() || DEFAULT_SCOPED_AGENT_CONFIG.modelProviderName?.trim() || '未指定 Provider';
-  const model = props.agent.modelName?.trim() || DEFAULT_SCOPED_AGENT_CONFIG.modelName?.trim() || '未指定模型';
+  const provider = props.agent.modelProviderName?.trim() || DEFAULT_SCOPED_AGENT_CONFIG.modelProviderName?.trim() || t('shared.unknownProvider');
+  const model = props.agent.modelName?.trim() || DEFAULT_SCOPED_AGENT_CONFIG.modelName?.trim() || t('shared.unknownModel');
   return `${provider} / ${model}`;
 });
 const sortedConversations = computed(() => {

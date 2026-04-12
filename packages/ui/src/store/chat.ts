@@ -23,6 +23,7 @@ import {
 } from '@packages/core/src';
 import type { ModelConfig, ModelOptionDefinition, ProviderConfig, ProviderModelCatalog } from '@packages/core/config';
 import { markRaw, toRaw } from 'vue';
+import { translateWorkspaceMessage } from '../i18n';
 
 export type WorkspaceHistorySource = 'local' | 'external';
 export type WorkspaceMode = 'agent' | 'conversation';
@@ -213,11 +214,11 @@ function cloneActiveWorkspaceDocument(
 function resolveProviderLabel(providerId: ExternalHistoryProviderId): string {
     switch (providerId) {
         case 'chatgpt-web':
-            return 'ChatGPT';
+            return translateWorkspaceMessage('provider.chatgptWeb');
         case 'gemini-web':
-            return 'Gemini';
+            return translateWorkspaceMessage('provider.geminiApi');
         case 'external-file':
-            return '外部文件导入';
+            return translateWorkspaceMessage('shared.externalChatTitle');
         default:
             return providerId;
     }
@@ -355,7 +356,7 @@ function getQuestionTitle(message: ConversationMessage): string {
         return firstLine;
     }
 
-    return message.attachments?.length ? '已发送附件' : '空白问题';
+    return message.attachments?.length ? translateWorkspaceMessage('shared.sendingAttachments') : translateWorkspaceMessage('shared.blankQuestion');
 }
 
 function isAbortError(error: unknown): boolean {
@@ -501,21 +502,21 @@ function formatHistoryError(error: unknown): string {
     if (error instanceof ExternalHistoryError) {
         switch (error.code) {
             case 'AUTH_REQUIRED':
-                return '请先登录对应站点后再重试。';
+                return error.message || translateWorkspaceMessage('shared.externalAuthRequired');
             case 'CONFIG_UNAVAILABLE':
-                return '远程抓取配置当前不可用，请稍后再试。';
+                return error.message || translateWorkspaceMessage('shared.externalConfigUnavailable');
             case 'SELECTOR_MISMATCH':
-                return '页面结构已变化，当前暂时无法抓取该来源历史。';
+                return error.message || translateWorkspaceMessage('shared.externalSelectorMismatch');
             case 'DETAIL_NOT_FOUND':
-                return '未找到这条外部会话详情。';
+                return error.message || translateWorkspaceMessage('shared.externalDetailNotFound');
             case 'TAB_UNAVAILABLE':
-                return error.message || '无法准备外部站点标签页，请稍后再试。';
+                return error.message || translateWorkspaceMessage('shared.externalTabUnavailable');
             default:
                 return error.message;
         }
     }
 
-    return error instanceof Error ? error.message : '外部历史加载失败。';
+    return error instanceof Error ? error.message : translateWorkspaceMessage('shared.externalHistoryFailed');
 }
 
 function extractHistoryErrorCode(error: unknown): ExternalHistoryErrorCode | null {
@@ -1572,7 +1573,7 @@ export const useChatStore = defineStore('chat', {
 
         async openExternalFileImport() {
             if (!this.externalFileImportHandler) {
-                this.currentError = '当前宿主未注入文件导入能力。';
+                this.currentError = translateWorkspaceMessage('shared.currentHostUnavailable');
                 return;
             }
 
@@ -1601,7 +1602,7 @@ export const useChatStore = defineStore('chat', {
                 this.isQuestionIndexPanelOpen = true;
                 await this.applyConversationModelSelection(this.currentConversation);
             } catch (error) {
-                this.currentError = error instanceof Error ? error.message : '外部文件导入失败。';
+                this.currentError = error instanceof Error ? error.message : translateWorkspaceMessage('shared.fileImportFailed');
                 throw error;
             }
         },
@@ -1901,7 +1902,9 @@ export const useChatStore = defineStore('chat', {
             const nextAttachments: MessageAttachment[] = [];
             for (const file of files) {
                 if (file.size > MAX_ATTACHMENT_SIZE) {
-                    this.attachmentError = `单个附件不能超过 ${Math.floor(MAX_ATTACHMENT_SIZE / (1024 * 1024))}MB`;
+                    this.attachmentError = translateWorkspaceMessage('shared.attachmentsLimitExceeded', {
+                        maxSizeMB: Math.floor(MAX_ATTACHMENT_SIZE / (1024 * 1024))
+                    });
                     continue;
                 }
 

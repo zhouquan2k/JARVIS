@@ -57,8 +57,8 @@ describe('QuestionIndexPanel', () => {
         store.currentConversation = createConversation();
 
         const wrapper = mount(QuestionIndexPanel);
-        expect(wrapper.get('h3').text()).toBe('对话大纲');
-        expect(wrapper.get('[data-testid="question-panel-close"]').attributes('aria-label')).toBe('关闭问题面板');
+        expect(wrapper.get('h3').text()).toBe('Show outline');
+        expect(wrapper.get('[data-testid="question-panel-close"]').attributes('aria-label')).toBe('Close question panel');
         expect(wrapper.findAll('[data-testid="question-item"]')).toHaveLength(2);
         expect(wrapper.text()).toContain('第一条问题');
         expect(wrapper.text()).not.toContain('补充说明');
@@ -71,7 +71,7 @@ describe('QuestionIndexPanel', () => {
 
         expect(store.currentConversation?.messages[0]?.starred).toBe(false);
         expect(wrapper.findAll('[data-testid="question-item"]')).toHaveLength(0);
-        expect(wrapper.get('[data-testid="question-index-empty"]').text()).toContain('当前没有星标问题');
+        expect(wrapper.get('[data-testid="question-index-empty"]').text()).toContain('No starred questions.');
     });
 
     it('closes the panel from the compact title bar', async () => {

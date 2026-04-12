@@ -200,7 +200,7 @@ describe('FileSystemContextProvider', () => {
         ]);
 
         await provider.deleteNode('/docs');
-        await expect(provider.readDocument('/docs/summary.md')).rejects.toThrow('节点不存在');
+        await expect(provider.readDocument('/docs/summary.md')).rejects.toThrow('Node does not exist');
         const targetStats = await stat(targetPath);
         expect(targetStats.isDirectory()).toBe(true);
     });
@@ -221,7 +221,7 @@ describe('FileSystemContextProvider', () => {
         await writeFile(path.join(reportsPath, 'README.md'), '# Not empty\n');
 
         const provider = new FileSystemContextProvider({ rootPath });
-        await expect(provider.getContext()).rejects.toThrow('非法挂载入口');
+        await expect(provider.getContext()).rejects.toThrow('Invalid mount entry');
     });
 
     it('rejects malformed mount declarations', async () => {
@@ -230,7 +230,7 @@ describe('FileSystemContextProvider', () => {
                 name: 'empty linkDir',
                 config: { name: 'Reports Mount', linkDir: '   ' },
                 prepare: async () => {},
-                message: 'linkDir 不能为空'
+                message: 'linkDir must not be empty.'
             },
             {
                 name: 'non-string linkDir',
@@ -242,7 +242,7 @@ describe('FileSystemContextProvider', () => {
                 name: 'missing target',
                 config: { name: 'Reports Mount', linkDir: '../missing-dir' },
                 prepare: async () => {},
-                message: '挂载目标目录不存在'
+                message: 'Mount target directory does not exist'
             },
             {
                 name: 'file target',
@@ -250,7 +250,7 @@ describe('FileSystemContextProvider', () => {
                 prepare: async ({ basePath }: { basePath: string }) => {
                     await writeFile(path.join(basePath, 'linked-file.md'), '# not a directory\n');
                 },
-                message: '挂载目标不是目录'
+                message: 'Mount target is not a directory'
             }
         ] as const;
 

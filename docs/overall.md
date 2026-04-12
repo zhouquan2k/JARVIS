@@ -1,175 +1,39 @@
-## 软件名称
-ChatPrizm
+[English](overall.md) | [中文](zh/overall.zh-CN.md)
 
-## 目标用户：
-重度AI对话使用者，效率工具控，个人知识管理者
+# Repository Overview
 
+## Product Summary
 
-## 场景和价值：
-重要的长篇的多轮交互的需要多模相互印证的对话，在这个插件/app里面用。
-多端联动，共享聊天记录存储。
-（不含临时的，短的）
+ChatPrism is a multi-host AI workspace for users who need dependable answer comparison, long-lived conversation recovery, and document-centric knowledge organization.
 
-1. 对于相对重要决策担心单个大模型幻觉，误导，希望使用多个大模型回答，比较差异，总结得到更靠谱的答案。可进一步的跟踪差异
-2. 通过上述比较评估比较大模型。
-3. 历史对话记录的搜索查找，长聊天记录。快速找到所需内容，在整个对话记录冗长的情况下，按问题/关键字在对话中索引（支持搜索，收藏）
-4. 长聊天记录，多轮对话，AI回答的内容大量重复，不便查看，将其整理提纯为结构化的文档，方便导出，及作为新对话的上下文（节省token）
-5. 能够使用已有app的oauth账号，不需要额外付费
+## Primary Audience
 
-## 定位
-从普通的AI对话客户端 向 个人知识管理PKM 转变
+- Power AI users validating important decisions across multiple models.
+- People who want to search, revisit, and refine long conversations.
+- Individual knowledge workers who want to turn chat output into reusable documents.
 
-## 主要特性
+## Value Proposition
 
-这是一个可以直接拿来和多个 AI 模型对话、比较结果、保存历史的聊天工具。用户既可以像普通聊天产品一样单独提问某个模型，也可以把同一个问题同时发给两个模型，看它们各自怎么回答，再让系统自动帮你总结差异。
+- Compare multiple model responses before accepting a conclusion.
+- Recover and search conversation history across hosts.
+- Turn repeated AI output into structured knowledge artifacts.
+- Reuse existing provider accounts instead of forcing a separate hosted subscription model.
 
-具体能力主要有这些：
+## Public Documentation Scope
 
-普通聊天
-用户可以像使用常见 AI 聊天工具一样输入问题、发送消息，并实时看到模型一边生成一边输出的内容。可以选择不同的 AI 提供方和具体模型，
+Phase 1 public documentation covers:
 
-对比聊天
-用户可以把同一个问题同时发给两个模型，左右并排查看两边的回答，适合做方案比较、质量判断、风格对照。在两个模型都回答完成后，系统会自动生成一份结构化对比结果，帮助用户快速看出：两边一致的观点，两边冲突的地方，A 独有的内容，B 独有的内容
+- Root entry docs such as `README.md`, `CONTRIBUTING.md`, and `ARCHITECTURE.md`.
+- Core `docs/` pages that explain repository scope, context providers, and the primary C4 DSL.
+- Chinese mirrors stored under `docs/zh/`.
 
-历史记录与恢复
-用户关闭页面或刷新后，之前的聊天和对比结果不会立刻丢失，之后还能重新打开继续看历史内容。
+Historical files under `docs/history/` remain available but are explicitly out of scope for the Phase 1 public-document migration.
 
-浏览器插件中直接使用
-除了普通 Web 页面外，这套能力还可以直接在浏览器插件里打开一个完整页面来使用.
+## Architecture Summary
 
-## 架构设计
+- Shared runtime contracts live in `packages/core`.
+- Shared interface and workspace views live in `packages/ui`.
+- Node-only adapters live in `packages/node`.
+- Host assembly happens in `apps/web`, `apps/extension`, `apps/desktop`, and `apps/server`.
 
-### 核心抽象
-
-**`IModelProvider`**
-
-统一模型调用抽象。
-
-作用是把不同模型厂商或不同接入方式收敛到同一套调用接口下，使上层只关心“发消息、收流式结果、检查鉴权、终止请求”，不关心底层实现细节。
-
-**`IStorageProvider`**
-
-统一存储抽象。
-
-作用是把会话保存、读取、删除等持久化能力从具体存储介质中解耦出来，使系统可以在不同宿主下复用相同的会话管理逻辑。
-
-**`Conversation`**
-
-统一会话数据抽象。
-
-它是聊天记录、对比结果和分析结果的承载对象，也是状态恢复和历史记录的基础数据模型。
-
-### 分层结构
-
-**`packages/core`**
-
-核心业务层。
-
-负责承载共享的领域能力，包括：
-
-- Provider 抽象与实现
-- 存储抽象与实现
-- 分析引擎
-- 配置
-- Runtime 装配逻辑
-
-这一层不直接依赖具体 UI 或宿主环境。
-
-**`packages/ui`**
-
-共享界面层。
-
-负责聊天界面、模型选择器、对比视图、分析展示等可复用界面能力，但不直接依赖具体模型实现或宿主 API。
-
-**`apps/*`**
-
-宿主装配层。
-
-如 `apps/web` 和 `apps/extension`，主要职责是把 `core` 与 `ui` 组合起来，并注入当前宿主可用的能力、凭据和通信方式。
-
-### Runtime 装配设计
-
-系统不是让页面直接实例化某个具体 Provider，而是通过 Runtime 统一装配。
-
-它解决的核心问题包括：
-
-- 当前宿主能用哪些 Provider
-- Provider 如何创建
-- 凭据如何注入
-- 不同宿主下如何保持相同调用方式
-
-`runtimeMode` 是这里的关键概念，它用于区分当前运行环境，例如 `web` 或 `extension`，并决定 Provider 的可见性和装配策略。
-
-### Provider 模式
-
-系统采用统一 Provider 模式承载模型调用能力。
-
-从高层看，可以分成两类：
-
-- 真实 Provider：真正执行网络请求
-- 代理 Provider：在受限宿主中替代前端直接请求模型
-
-这样做的目的，是让 UI 层始终面向统一接口编程，而把网络细节、权限边界和宿主限制都收敛到 Provider 层和宿主层处理。
-
-### Extension 通信设计
-
-在浏览器扩展宿主中，系统采用“前端页面 + Proxy + Background”的分工结构。
-
-高层链路可以概括为：
-
-`UI -> Proxy -> Background -> Real Provider`
-
-其核心意义是：
-
-- 前端界面保持简单
-- 后台承担真实网络请求与权限能力
-- 扩展环境下的跨域、Cookie、并发流管理问题由后台统一处理
-
-这使得同一套 UI 可以在扩展内复用，而不需要把大量浏览器特有逻辑写进组件层。
-
-### 分析引擎设计
-
-系统不仅支持普通聊天，还支持双模型对比后的自动分析。
-
-为此，文档中引入了独立的 `ComparisonAnalyzer` 概念，它负责：
-
-- 接收同一问题下的 A/B 输出
-- 生成结构化分析结果
-- 为 UI 提供可稳定渲染的数据结构
-
-这意味着“模型回答生成”和“对比结果分析”在架构上是两个独立能力，而不是混在一个页面流程里。
-
-### 配置驱动设计
-
-系统使用统一配置中心来描述支持哪些 Provider、每个 Provider 对应哪些模型，以及分析器默认使用什么模型。
-
-这是一种典型的配置驱动设计，目的不是把能力写死在页面或组件里，而是让：
-
-- 能力开关更集中
-- 模型扩展更容易
-- UI 选择器和底层能力保持一致
-
-### 高层工作流
-
-从架构角度看，系统主要支持两类工作流：
-
-**普通聊天工作流**
-
-用户选择模型，宿主通过 Runtime 获取 Provider，Provider 返回流式结果，最终对话持久化保存。
-
-**对比聊天工作流**
-
-系统并发执行 A/B 两路模型请求，在两路结果完成后再触发分析引擎，并将分析结果和会话一并保存。
-
-### 总结
-
-整体上，这套架构可以概括为：
-
-- 用 `IModelProvider` 统一模型能力
-- 用 `IStorageProvider` 统一持久化能力
-- 用 `Runtime` 统一宿主装配
-- 用 `Proxy + Background` 解决扩展宿主限制
-- 用独立分析引擎承载对比分析能力
-- 用配置驱动模型与分析器管理
-
-因此，它本质上是一套面向多宿主、多模型、可扩展聊天与对比分析场景的分层架构。
+See [../ARCHITECTURE.md](../ARCHITECTURE.md) and [workspace.dsl](workspace.dsl) for the public architecture entry.

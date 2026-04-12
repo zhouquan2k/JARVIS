@@ -3,8 +3,10 @@ export type RuntimeMode = 'extension' | 'web' | 'desktop';
 export interface ModelOptionDefinition {
     key: string;
     label: string;
+    labelKey?: string;
     type: 'boolean';
     description?: string;
+    descriptionKey?: string;
     conflictsWith?: string[];
     defaultValue?: boolean;
 }
@@ -12,6 +14,7 @@ export interface ModelOptionDefinition {
 export interface ModelConfig {
     id: string;
     name: string;
+    nameKey?: string;
     options?: ModelOptionDefinition[];
 }
 
@@ -23,6 +26,7 @@ export interface ProviderModelCatalog {
 export interface ProviderConfig {
     id: string;
     name: string;
+    nameKey?: string;
     models: ModelConfig[];
     defaultModel: string;
     preferredDefaultModel?: string;
@@ -103,21 +107,26 @@ export const APP_CONFIG: { providers: ProviderConfig[]; analyzer: AnalyzerConfig
             models: [
                 {
                     id: 'auto',
-                    name: 'Auto (默认)',
+                    name: 'Auto (Default)',
+                    nameKey: 'model.autoDefault',
                     options: [
                         {
                             key: 'web_search',
-                            label: '联网搜索',
+                            label: 'Web search',
+                            labelKey: 'option.webSearch',
                             type: 'boolean',
-                            description: '允许模型通过网页搜索补充实时信息。',
+                            description: 'Allow the model to use web search for fresh information.',
+                            descriptionKey: 'option.webSearchDescription',
                             conflictsWith: ['deep_research'],
                             defaultValue: false
                         },
                         {
                             key: 'deep_research',
                             label: 'Deep Research',
+                            labelKey: 'option.deepResearch',
                             type: 'boolean',
-                            description: '切换到更重的研究型请求路径。',
+                            description: 'Switch to the heavier research request path.',
+                            descriptionKey: 'option.deepResearchDescription',
                             conflictsWith: ['web_search'],
                             defaultValue: false
                         }
@@ -126,20 +135,25 @@ export const APP_CONFIG: { providers: ProviderConfig[]; analyzer: AnalyzerConfig
                 {
                     id: 'gpt-4o',
                     name: 'GPT-4o',
+                    nameKey: 'model.gpt4o',
                     options: [
                         {
                             key: 'web_search',
-                            label: '联网搜索',
+                            label: 'Web search',
+                            labelKey: 'option.webSearch',
                             type: 'boolean',
-                            description: '允许模型通过网页搜索补充实时信息。',
+                            description: 'Allow the model to use web search for fresh information.',
+                            descriptionKey: 'option.webSearchDescription',
                             conflictsWith: ['deep_research'],
                             defaultValue: false
                         },
                         {
                             key: 'deep_research',
                             label: 'Deep Research',
+                            labelKey: 'option.deepResearch',
                             type: 'boolean',
-                            description: '切换到更重的研究型请求路径。',
+                            description: 'Switch to the heavier research request path.',
+                            descriptionKey: 'option.deepResearchDescription',
                             conflictsWith: ['web_search'],
                             defaultValue: false
                         }
@@ -157,12 +171,15 @@ export const APP_CONFIG: { providers: ProviderConfig[]; analyzer: AnalyzerConfig
                 {
                     id: 'gemini-2.5-flash',
                     name: 'Gemini 2.5 Flash',
+                    nameKey: 'model.gemini25Flash',
                     options: [
                         {
                             key: 'deep_research',
                             label: 'Deep Research',
+                            labelKey: 'option.deepResearch',
                             type: 'boolean',
-                            description: '切换到 Gemini 的研究型请求路径。',
+                            description: 'Switch to Gemini’s research request path.',
+                            descriptionKey: 'option.deepResearchDescription',
                             defaultValue: false
                         }
                     ]
@@ -170,12 +187,15 @@ export const APP_CONFIG: { providers: ProviderConfig[]; analyzer: AnalyzerConfig
                 {
                     id: 'gemini-2.0-flash',
                     name: 'Gemini 2.0 Flash',
+                    nameKey: 'model.gemini20Flash',
                     options: [
                         {
                             key: 'deep_research',
                             label: 'Deep Research',
+                            labelKey: 'option.deepResearch',
                             type: 'boolean',
-                            description: '切换到 Gemini 的研究型请求路径。',
+                            description: 'Switch to Gemini’s research request path.',
+                            descriptionKey: 'option.deepResearchDescription',
                             defaultValue: false
                         }
                     ]
@@ -183,12 +203,15 @@ export const APP_CONFIG: { providers: ProviderConfig[]; analyzer: AnalyzerConfig
                 {
                     id: 'gemini-pro-latest',
                     name: 'Gemini Pro Latest',
+                    nameKey: 'model.geminiProLatest',
                     options: [
                         {
                             key: 'deep_research',
                             label: 'Deep Research',
+                            labelKey: 'option.deepResearch',
                             type: 'boolean',
-                            description: '切换到 Gemini 的研究型请求路径。',
+                            description: 'Switch to Gemini’s research request path.',
+                            descriptionKey: 'option.deepResearchDescription',
                             defaultValue: false
                         }
                     ]
@@ -196,12 +219,15 @@ export const APP_CONFIG: { providers: ProviderConfig[]; analyzer: AnalyzerConfig
                 {
                     id: 'gemini-2.5-pro',
                     name: 'Gemini 2.5 Pro',
+                    nameKey: 'model.gemini25Pro',
                     options: [
                         {
                             key: 'deep_research',
                             label: 'Deep Research',
+                            labelKey: 'option.deepResearch',
                             type: 'boolean',
-                            description: '切换到 Gemini 的研究型请求路径。',
+                            description: 'Switch to Gemini’s research request path.',
+                            descriptionKey: 'option.deepResearchDescription',
                             defaultValue: false
                         }
                     ]
@@ -266,11 +292,11 @@ export function readSyncKey(options: SyncKeyOptions = {}): string {
 export function validateSyncKey(syncKey: string, options: SyncKeyOptions = {}): string {
     const normalized = normalizeSyncKey(syncKey);
     if (!normalized) {
-        throw new Error('syncKey 不能为空，请先配置有效的同步命名空间。');
+        throw new Error('syncKey cannot be empty. Configure a valid sync namespace first.');
     }
 
     if (normalized === DEFAULT_SYNC_KEY && !options.isDevelopment) {
-        throw new Error('syncKey=0 仅允许在开发环境使用，请先配置真实的 syncKey。');
+        throw new Error('syncKey=0 is only allowed in development; configure a real syncKey first.');
     }
 
     return normalized;

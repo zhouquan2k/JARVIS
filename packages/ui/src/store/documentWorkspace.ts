@@ -464,7 +464,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             this.activeAgent = agentKey ? this.context.agentConfigs[agentKey] ?? null : null;
             this.isAgentOwnerSelected = activeNode?.kind === 'directory' && activeNode.isAgentOwner === true;
             this.agentResolutionError = agentKey && !this.activeAgent
-                ? `未找到 agentConfigs['${agentKey}'] 对应的 Agent 配置。`
+                ? `No Agent configuration was found for agentConfigs['${agentKey}'].`
                 : null;
         },
 

@@ -2,13 +2,13 @@
   <aside class="question-index-panel" data-testid="question-index-panel">
     <header class="panel-header">
       <div class="panel-header-row">
-        <div class="panel-toolbar" role="toolbar" aria-label="问题筛选">
+        <div class="panel-toolbar" role="toolbar" :aria-label="t('shared.questionFilter')">
           <button
             type="button"
             class="tool-btn"
             :class="{ active: chatStore.questionIndexFilter === 'all' }"
             data-testid="question-filter-all"
-            aria-label="显示全部问题"
+            :aria-label="t('shared.showAllQuestions')"
             :aria-pressed="chatStore.questionIndexFilter === 'all'"
             @click="chatStore.setQuestionIndexFilter('all')"
           >
@@ -27,7 +27,7 @@
             class="tool-btn"
             :class="{ active: chatStore.questionIndexFilter === 'starred' }"
             data-testid="question-filter-starred"
-            aria-label="仅看星标问题"
+            :aria-label="t('shared.onlyStarredQuestions')"
             :aria-pressed="chatStore.questionIndexFilter === 'starred'"
             @click="chatStore.setQuestionIndexFilter('starred')"
           >
@@ -39,12 +39,12 @@
             </svg>
           </button>
         </div>
-        <h3>对话大纲</h3>
+        <h3>{{ t('shared.showOutline') }}</h3>
         <button
           type="button"
           class="panel-close-btn"
           data-testid="question-panel-close"
-          aria-label="关闭问题面板"
+          :aria-label="t('shared.closeQuestionPanel')"
           @click="chatStore.setQuestionIndexPanelOpen(false)"
         >
           <svg viewBox="0 0 20 20" focusable="false" aria-hidden="true">
@@ -97,7 +97,7 @@
               data-testid="question-delete-confirm"
               @click.stop="confirmDelete(item.questionId)"
             >
-              确认
+              {{ t('shared.confirm') }}
             </button>
             <button
               type="button"
@@ -105,7 +105,7 @@
               data-testid="question-delete-cancel"
               @click.stop="pendingDeleteId = null"
             >
-              取消
+              {{ t('shared.cancel') }}
             </button>
           </template>
           <template v-else>
@@ -114,8 +114,8 @@
               class="icon-btn"
               :class="{ active: item.starred }"
               data-testid="question-star"
-              :aria-label="item.starred ? '取消星标' : '星标问题'"
-              :title="item.starred ? '取消星标' : '星标问题'"
+              :aria-label="item.starred ? t('shared.unstarQuestion') : t('shared.starQuestion')"
+              :title="item.starred ? t('shared.unstarQuestion') : t('shared.starQuestion')"
               @click.stop="toggleStar(item.questionId)"
             >
               <svg viewBox="0 0 20 20" focusable="false" aria-hidden="true">
@@ -132,8 +132,8 @@
               type="button"
               class="icon-btn danger-btn"
               data-testid="question-delete"
-              aria-label="删除问题"
-              title="删除问题"
+              :aria-label="t('shared.deleteQuestion')"
+              :title="t('shared.deleteQuestion')"
               @click.stop="pendingDeleteId = item.questionId"
             >
               <svg viewBox="0 0 20 20" focusable="false" aria-hidden="true">
@@ -157,14 +157,16 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useChatStore } from '../store/chat';
+import { useWorkspaceI18n } from '../i18n';
 
 const chatStore = useChatStore();
 const pendingDeleteId = ref<string | null>(null);
+const { t } = useWorkspaceI18n();
 
 const emptyMessage = computed(() => {
   return chatStore.questionIndexFilter === 'starred'
-    ? '当前没有星标问题。'
-    : '当前没有可展示的问题。';
+    ? t('shared.noStarredQuestions')
+    : t('shared.noQuestions');
 });
 
 watch(() => chatStore.questionIndexItems.map((item) => item.questionId), (questionIds) => {

@@ -1,3 +1,5 @@
+English | [中文](spec.zh-CN.md)
+
 ## MODIFIED Requirements
 
 ### Requirement: Knowledge workspace MUST provide a default assistant pane that is bound to the active scope agent

@@ -231,7 +231,7 @@ describe('AgentPane', () => {
             }
         });
 
-        expect(wrapper.get('[data-testid="agent-name"]').text()).toContain('Default Knowledge Agent（/）');
+        expect(wrapper.get('[data-testid="agent-name"]').text()).toContain('Workspace Agent（/）');
         expect(wrapper.get('[data-testid="agent-model"]').text()).toContain('gemini-api / Gemini Pro Latest');
     });
 

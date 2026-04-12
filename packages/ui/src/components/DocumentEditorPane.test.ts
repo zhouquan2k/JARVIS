@@ -146,12 +146,12 @@ describe('DocumentEditorPane', () => {
         await Promise.resolve();
         await wrapper.vm.$nextTick();
 
-        expect(wrapper.get('[data-testid="document-save"]').attributes('title')).toBe('保存');
-        expect(wrapper.get('[data-testid="document-save"]').attributes('aria-label')).toBe('保存');
+        expect(wrapper.get('[data-testid="document-save"]').attributes('title')).toBe('Save');
+        expect(wrapper.get('[data-testid="document-save"]').attributes('aria-label')).toBe('Save');
         await wrapper.get('[data-testid="document-save"]').trigger('mouseenter');
-        expect(document.body.textContent).toContain('保存');
+        expect(document.body.textContent).toContain('Save');
         await wrapper.get('[data-testid="document-save"]').trigger('mouseleave');
-        expect(document.body.textContent).not.toContain('保存');
+        expect(document.body.textContent).not.toContain('Save');
         await wrapper.get('[data-testid="document-save"]').trigger('click');
         expect(wrapper.emitted('save')).toHaveLength(1);
 
@@ -229,7 +229,8 @@ describe('DocumentEditorPane', () => {
 
         await wrapper.vm.$nextTick();
 
-        expect(wrapper.get('[data-testid="document-pdf-fallback"]').text()).toContain('当前环境不支持内嵌 PDF 预览');
+        expect(wrapper.get('[data-testid="document-pdf-fallback"]').text()).toContain('This environment does not support embedded PDF preview.');
+        expect(wrapper.get('[data-testid="document-pdf-fallback"]').text()).toContain('Open PDF in a new tab');
         expect(wrapper.get('[data-testid="document-pdf-open-link"]').attributes('href')).toBe('data:application/pdf;base64,JVBERg==');
     });
 

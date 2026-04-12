@@ -64,27 +64,27 @@ const chatgptAuthStatusOverride = computed(() => {
 });
 const chatgptAuthMessage = computed(() => {
   if (isLoginOpening('chatgpt-web')) {
-    return '正在打开 ChatGPT 登录窗口...';
+    return 'Opening the ChatGPT sign-in window...';
   }
 
   if (isLoginAcknowledged('chatgpt-web')) {
-    return '已请求打开 ChatGPT 登录窗口；如果未看到窗口，请检查当前桌面、Dock 或切换空间。';
+    return 'A ChatGPT sign-in window was requested. If you do not see it, check the current desktop, Dock, or switch spaces.';
   }
 
   return chatgptAuthStatusOverride.value === false
-    ? '当前桌面宿主的 ChatGPT 登录态不可用，请先登录后再继续。'
+    ? 'The desktop host ChatGPT sign-in state is unavailable. Please sign in before continuing.'
     : '';
 });
 const chatgptAuthRecoveryLabel = computed(() => {
   if (isLoginOpening('chatgpt-web')) {
-    return '打开中...';
+    return 'Opening...';
   }
 
   if (chatgptAuthStatusOverride.value === false && isLoginAcknowledged('chatgpt-web')) {
-    return '重新打开 ChatGPT';
+    return 'Reopen ChatGPT';
   }
 
-  return chatgptAuthStatusOverride.value === false ? '登录 ChatGPT' : '';
+  return chatgptAuthStatusOverride.value === false ? 'Sign in to ChatGPT' : '';
 });
 const hostRecoveryMessage = computed(() => {
   if (
@@ -93,8 +93,8 @@ const hostRecoveryMessage = computed(() => {
     && chatStore.currentHistoryErrorCode === 'AUTH_REQUIRED'
   ) {
     return isLoginOpening('gemini-web')
-      ? '正在打开 Gemini 登录窗口...'
-      : '当前桌面宿主的 Gemini 登录态不可用，请先登录后再继续。';
+      ? 'Opening the Gemini sign-in window...'
+      : 'The desktop host Gemini sign-in state is unavailable. Please sign in before continuing.';
   }
 
   return '';
@@ -105,14 +105,14 @@ const hostRecoveryActionLabel = computed(() => {
   }
 
   if (isLoginOpening('gemini-web')) {
-    return '打开中...';
+    return 'Opening...';
   }
 
   if (isLoginAcknowledged('gemini-web')) {
-    return '重新打开 Gemini';
+    return 'Reopen Gemini';
   }
 
-  return '登录 Gemini';
+  return 'Sign in to Gemini';
 });
 const hostRecoveryActionDisabled = computed(() => isLoginActionDisabled('gemini-web'));
 

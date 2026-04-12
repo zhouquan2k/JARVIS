@@ -52,7 +52,7 @@ export class GeminiDomHistoryProvider implements IExternalConversationProvider {
         const messages = detail.messages.filter((message) => message.content.trim().length > 0);
 
         if (messages.length === 0) {
-            throw new ExternalHistoryError('DETAIL_NOT_FOUND', '未抓取到 Gemini 对话详情。', {
+            throw new ExternalHistoryError('DETAIL_NOT_FOUND', 'Gemini conversation detail was not captured.', {
                 providerId: 'gemini-web'
             });
         }

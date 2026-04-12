@@ -1,3 +1,5 @@
+English | [中文](spec.zh-CN.md)
+
 ## MODIFIED Requirements
 
 ### Requirement: Background Proxy Forwarding

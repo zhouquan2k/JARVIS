@@ -137,7 +137,7 @@ function normalizeSearchScopePath(value?: string): string | undefined {
 function normalizeSearchRequest(query: string | undefined, maxResults?: number): { query: string; maxResults: number } {
     const normalizedQuery = query?.trim();
     if (!normalizedQuery) {
-        throw new Error('query 不能为空。');
+        throw new Error('query must not be empty.');
     }
 
     return {
@@ -227,15 +227,15 @@ function normalizeVirtualPath(value?: string, { allowRoot = true }: { allowRoot?
     const rawPath = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
     const rawSegments = rawPath.split('/');
     if (rawSegments.some((segment) => segment === '..')) {
-        throw new Error(`路径超出知识工作区根目录: ${value}`);
+        throw new Error(`Path escapes the knowledge workspace root: ${value}`);
     }
 
     const normalized = path.posix.normalize(rawPath);
     if (!normalized.startsWith('/')) {
-        throw new Error(`非法路径: ${value}`);
+        throw new Error(`Invalid path: ${value}`);
     }
     if (normalized.includes('\0')) {
-        throw new Error(`非法路径: ${value}`);
+        throw new Error(`Invalid path: ${value}`);
     }
     return normalized;
 }
@@ -243,7 +243,7 @@ function normalizeVirtualPath(value?: string, { allowRoot = true }: { allowRoot?
 function toVirtualPath(parentPath: string | undefined, name: string): string {
     const normalizedName = name.trim();
     if (!normalizedName || normalizedName.includes('/') || normalizedName === '.' || normalizedName === '..') {
-        throw new Error('节点名称不合法。');
+        throw new Error('Node name is invalid.');
     }
 
     const normalizedParent = normalizeVirtualPath(parentPath);
@@ -454,7 +454,7 @@ function normalizeMountedAliasPath(aliasName: string): string {
 function resolveMountedTargetCandidate(aliasRealPath: string, linkDir: string): string {
     const normalizedLinkDir = linkDir.trim();
     if (!normalizedLinkDir) {
-        throw new Error('linkDir 不能为空。');
+        throw new Error('linkDir must not be empty.');
     }
 
     return path.resolve(aliasRealPath, normalizedLinkDir);
@@ -565,7 +565,7 @@ export class FileSystemContextProvider implements IContextProvider {
             ? undefined
             : normalizeVirtualPath(query.documentPath, { allowRoot: false });
         if (query.documentPath !== undefined && !normalizedDocumentPath) {
-            throw new Error('文档路径不能为空。');
+            throw new Error('Document path must not be empty.');
         }
 
         return this.conversationQueryProvider.getConversations({
@@ -577,7 +577,7 @@ export class FileSystemContextProvider implements IContextProvider {
     async readDocument(filePath: string): Promise<ContextDocument> {
         const normalizedPath = normalizeVirtualPath(filePath, { allowRoot: false });
         if (!normalizedPath || normalizedPath === '/') {
-            throw new Error('文档路径不能为空。');
+            throw new Error('Document path must not be empty.');
         }
 
         const realPath = await this.resolveRealPath(normalizedPath, { expectExisting: true, expectDirectory: false });
@@ -602,18 +602,18 @@ export class FileSystemContextProvider implements IContextProvider {
     async writeDocument(input: WriteContextDocumentInput): Promise<void> {
         const normalizedPath = normalizeVirtualPath(input.path, { allowRoot: false });
         if (!normalizedPath || normalizedPath === '/') {
-            throw new Error('文档路径不能为空。');
+            throw new Error('Document path must not be empty.');
         }
 
         if (!isTextDocumentMimeType(input.mimeType)) {
-            throw new Error(`当前文档类型暂不支持写入: ${input.mimeType}`);
+            throw new Error(`Current document type does not support writing yet: ${input.mimeType}`);
         }
 
         const realPath = await this.resolveRealPath(normalizedPath, { expectExisting: true, expectDirectory: false });
         if (input.expectedVersion) {
             const stats = await fs.stat(realPath);
             if (`${stats.mtimeMs}` !== input.expectedVersion) {
-                throw new Error('文档版本已变更，请重新读取后再试。');
+                throw new Error('The document version has changed. Please reload and try again.');
             }
         }
 
@@ -626,7 +626,7 @@ export class FileSystemContextProvider implements IContextProvider {
         const targetRealPath = await this.resolveRealPath(targetPath, { expectExisting: false });
 
         if (await exists(targetRealPath)) {
-            throw new Error(`节点已存在: ${targetPath}`);
+            throw new Error(`Node already exists: ${targetPath}`);
         }
 
         if (parentPath) {
@@ -642,7 +642,7 @@ export class FileSystemContextProvider implements IContextProvider {
         const context = await this.getContext();
         const createdNode = findContextNodeByPath(context.nodes, targetPath);
         if (!createdNode) {
-            throw new Error(`创建节点后无法在上下文中找到: ${targetPath}`);
+            throw new Error(`Unable to find the node in context after creation: ${targetPath}`);
         }
 
         return createdNode;
@@ -651,7 +651,7 @@ export class FileSystemContextProvider implements IContextProvider {
     async deleteNode(targetPath: string): Promise<void> {
         const normalizedPath = normalizeVirtualPath(targetPath, { allowRoot: false });
         if (!normalizedPath || normalizedPath === '/') {
-            throw new Error('不允许删除根目录。');
+            throw new Error('Deleting the root directory is not allowed.');
         }
 
         const rootDirectory = await this.resolveRootDirectory();
@@ -665,7 +665,7 @@ export class FileSystemContextProvider implements IContextProvider {
     async renameNode(input: { path: string; name: string }): Promise<ContextNode> {
         const normalizedPath = normalizeVirtualPath(input.path, { allowRoot: false });
         if (!normalizedPath || normalizedPath === '/') {
-            throw new Error('不允许重命名根目录。');
+            throw new Error('Renaming the root directory is not allowed.');
         }
 
         const rootDirectory = await this.resolveRootDirectory();
@@ -678,14 +678,14 @@ export class FileSystemContextProvider implements IContextProvider {
         const targetRealPath = await this.resolveRealPath(targetPath, { expectExisting: false });
 
         if (await exists(targetRealPath)) {
-            throw new Error(`节点已存在: ${targetPath}`);
+            throw new Error(`Node already exists: ${targetPath}`);
         }
 
         await fs.rename(sourceRealPath, targetRealPath);
         const context = await this.getContext();
         const renamedNode = findContextNodeByPath(context.nodes, targetPath);
         if (!renamedNode) {
-            throw new Error(`重命名节点后无法在上下文中找到: ${targetPath}`);
+            throw new Error(`Unable to find the node in context after rename: ${targetPath}`);
         }
 
         return renamedNode;
@@ -713,16 +713,16 @@ export class FileSystemContextProvider implements IContextProvider {
 
     private async resolveRootDirectory(): Promise<string> {
         if (!this.rootPath) {
-            throw new Error('CHATPRISM_KNOWLEDGE_ROOT 未配置。');
+            throw new Error('CHATPRISM_KNOWLEDGE_ROOT is not configured.');
         }
 
         const configuredRoot = path.resolve(this.rootPath);
         const stats = await fs.stat(configuredRoot).catch(() => {
-            throw new Error(`知识工作区根目录不存在: ${configuredRoot}`);
+            throw new Error(`Knowledge workspace root directory does not exist: ${configuredRoot}`);
         });
 
         if (!stats.isDirectory()) {
-            throw new Error(`知识工作区根路径不是目录: ${configuredRoot}`);
+            throw new Error(`Knowledge workspace root path is not a directory: ${configuredRoot}`);
         }
 
         return fs.realpath(configuredRoot);
@@ -748,22 +748,22 @@ export class FileSystemContextProvider implements IContextProvider {
             if (!options.expectExisting) {
                 const parentDirectory = path.dirname(candidatePath);
                 await fs.realpath(parentDirectory).catch(() => {
-                    throw new Error(`父目录不存在: ${virtualPath ?? '/'}`);
+                    throw new Error(`Parent directory does not exist: ${virtualPath ?? '/'}`);
                 });
                 return candidatePath;
             }
 
             const resolvedPath = await fs.realpath(candidatePath).catch(() => {
-                throw new Error(`节点不存在: ${virtualPath ?? '/'}`);
+                throw new Error(`Node does not exist: ${virtualPath ?? '/'}`);
             });
 
             if (options.expectDirectory !== undefined) {
                 const stats = await fs.stat(resolvedPath);
                 if (options.expectDirectory && !stats.isDirectory()) {
-                    throw new Error(`节点不是目录: ${virtualPath ?? '/'}`);
+                    throw new Error(`Node is not a directory: ${virtualPath ?? '/'}`);
                 }
                 if (!options.expectDirectory && !stats.isFile()) {
-                    throw new Error(`节点不是文件: ${virtualPath ?? '/'}`);
+                    throw new Error(`Node is not a file: ${virtualPath ?? '/'}`);
                 }
             }
 
@@ -774,34 +774,34 @@ export class FileSystemContextProvider implements IContextProvider {
         const candidatePath = path.resolve(rootDirectory, relativePath);
 
         if (!this.isInsideRoot(rootDirectory, candidatePath)) {
-            throw new Error(`路径超出知识工作区根目录: ${virtualPath ?? '/'}`);
+            throw new Error(`Path escapes the knowledge workspace root: ${virtualPath ?? '/'}`);
         }
 
         if (!options.expectExisting) {
             const parentDirectory = path.dirname(candidatePath);
             const resolvedParent = await fs.realpath(parentDirectory).catch(() => {
-                throw new Error(`父目录不存在: ${virtualPath ?? '/'}`);
+                throw new Error(`Parent directory does not exist: ${virtualPath ?? '/'}`);
             });
             if (!this.isInsideRoot(rootDirectory, resolvedParent)) {
-                throw new Error(`路径超出知识工作区根目录: ${virtualPath ?? '/'}`);
+                throw new Error(`Path escapes the knowledge workspace root: ${virtualPath ?? '/'}`);
             }
             return candidatePath;
         }
 
         const resolvedPath = await fs.realpath(candidatePath).catch(() => {
-            throw new Error(`节点不存在: ${virtualPath ?? '/'}`);
+            throw new Error(`Node does not exist: ${virtualPath ?? '/'}`);
         });
         if (!this.isInsideRoot(rootDirectory, resolvedPath)) {
-            throw new Error(`路径超出知识工作区根目录: ${virtualPath ?? '/'}`);
+            throw new Error(`Path escapes the knowledge workspace root: ${virtualPath ?? '/'}`);
         }
 
         if (options.expectDirectory !== undefined) {
             const stats = await fs.stat(resolvedPath);
             if (options.expectDirectory && !stats.isDirectory()) {
-                throw new Error(`节点不是目录: ${virtualPath ?? '/'}`);
+                throw new Error(`Node is not a directory: ${virtualPath ?? '/'}`);
             }
             if (!options.expectDirectory && !stats.isFile()) {
-                throw new Error(`节点不是文件: ${virtualPath ?? '/'}`);
+                throw new Error(`Node is not a file: ${virtualPath ?? '/'}`);
             }
         }
 
@@ -941,20 +941,20 @@ export class FileSystemContextProvider implements IContextProvider {
             const visibleChildren = (await fs.readdir(aliasRealPath, { withFileTypes: true }))
                 .filter((child) => !child.name.startsWith('.') && child.name !== '.agent.json');
             if (visibleChildren.length > 0) {
-                throw new Error(`非法挂载入口 ${aliasPath}: 仅允许 .agent.json。`);
+                throw new Error(`Invalid mount entry ${aliasPath}: only .agent.json is allowed.`);
             }
 
             const targetCandidate = resolveMountedTargetCandidate(aliasRealPath, config.linkDir);
             const targetRealPath = await fs.realpath(targetCandidate).catch(() => {
-                throw new Error(`挂载目标目录不存在: ${config.linkDir}`);
+                throw new Error(`Mount target directory does not exist: ${config.linkDir}`);
             });
             const targetStats = await fs.stat(targetRealPath);
             if (!targetStats.isDirectory()) {
-                throw new Error(`挂载目标不是目录: ${config.linkDir}`);
+                throw new Error(`Mount target is not a directory: ${config.linkDir}`);
             }
 
             if (isPathWithin(targetRealPath, aliasRealPath)) {
-                throw new Error(`挂载目标不能包含挂载入口本身: ${config.linkDir}`);
+                throw new Error(`Mount target must not contain the mount entry itself: ${config.linkDir}`);
             }
 
             bindings.push({

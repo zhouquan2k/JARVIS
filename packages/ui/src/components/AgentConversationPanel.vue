@@ -29,8 +29,8 @@
         type="button"
         class="agent-conversation-panel__icon-btn"
         data-testid="agent-conversation-expand"
-        title="放大对话"
-        aria-label="放大对话"
+        :title="t('shared.expandConversation')"
+        :aria-label="t('shared.expandConversation')"
         @click="switchWorkspace('/chat')"
       >
         <PanelRightOpen :size="16" />
@@ -66,6 +66,7 @@ import AgentDocumentConversationList from './AgentDocumentConversationList.vue';
 import NormalChatView from '../views/NormalChatView.vue';
 import { useChatStore } from '../store/chat';
 import type { ChatRoutePath } from '../routes';
+import { useWorkspaceI18n } from '../i18n';
 
 type PanelMode = 'list' | 'detail';
 
@@ -80,6 +81,7 @@ const props = defineProps<{
 }>();
 
 const chatStore = useChatStore();
+const { t } = useWorkspaceI18n();
 const emit = defineEmits<{
   (event: 'request-workspace-switch', path: ChatRoutePath): void;
 }>();
@@ -95,7 +97,7 @@ const isDocumentSelection = computed(() => !!activeDocumentPath.value);
 const activeAgentKey = computed(() => props.activeAgentKey?.trim() || '');
 const isAgentDirectorySelection = computed(() => !activeDocumentPath.value && !!activeAgentKey.value && props.showAgentConversationList === true);
 const hasConversationListContext = computed(() => isDocumentSelection.value || isAgentDirectorySelection.value);
-const currentConversationTitle = computed(() => chatStore.currentConversation?.title || 'New Chat');
+const currentConversationTitle = computed(() => chatStore.currentConversation?.title || t('shared.newChat'));
 const showToolbar = computed(() => hasConversationListContext.value);
 const showBackButton = computed(() => panelMode.value === 'detail' && hasConversationListContext.value);
 const toolbarTitle = computed(() => panelMode.value === 'detail' && hasConversationListContext.value ? currentConversationTitle.value : '');
@@ -138,7 +140,7 @@ const listConversations = computed(() => {
   return isDocumentSelection.value ? documentScopedConversations.value : agentScopedConversations.value;
 });
 const listEmptyMessage = computed(() => {
-  return isDocumentSelection.value ? '当前文档还没有关联会话。' : '当前 Agent 暂无本地会话。';
+  return isDocumentSelection.value ? t('shared.currentDocumentUnavailable') : t('shared.currentAgentUnavailable');
 });
 
 async function loadDocumentConversations(path: string): Promise<void> {
@@ -146,7 +148,7 @@ async function loadDocumentConversations(path: string): Promise<void> {
     const loadToken = ++documentConversationLoadToken;
     if (!provider) {
         documentConversations.value = [];
-        currentError.value = '当前上下文 Provider 不可用。';
+        currentError.value = t('shared.noAgentBindingProvider');
         return;
   }
 
@@ -164,7 +166,7 @@ async function loadDocumentConversations(path: string): Promise<void> {
       return;
     }
     documentConversations.value = [];
-    currentError.value = error instanceof Error ? error.message : '读取文档关联会话失败。';
+    currentError.value = error instanceof Error ? error.message : t('shared.agentBindingLoadingFailed');
   } finally {
     if (loadToken === documentConversationLoadToken) {
       isLoading.value = false;

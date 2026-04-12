@@ -46,7 +46,7 @@ export type GeminiContentResponse =
 
 export function assertGeminiContentResponse<T>(response: GeminiContentResponse | undefined): T {
     if (!response) {
-        throw new ExternalHistoryError('TAB_UNAVAILABLE', 'Gemini content script 未响应。', {
+        throw new ExternalHistoryError('TAB_UNAVAILABLE', 'Gemini content script did not respond.', {
             providerId: 'gemini-web'
         });
     }

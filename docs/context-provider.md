@@ -1,6 +1,8 @@
+[English](context-provider.md) | [中文](zh/context-provider.zh-CN.md)
+
 # Context Provider
 
-这份文档汇总知识工作区 `IContextProvider` 相关的类图，重点说明右侧 `AgentPane`、会话列表、会话持久化和上下文查询之间的关系。
+This document summarizes the `IContextProvider` architecture used by the knowledge workspace. It focuses on how `AgentPane`, conversation lists, persistence, and scoped context queries work together.
 
 ## Workspace / Panel Relationship
 
@@ -132,5 +134,5 @@ classDiagram
 
 * `IContextProvider.getConversations(query)` is the single query entry used by the workspace panel.
 
-* `AgentConversationPanel` stays responsible for list/detail state, while `IContextProvider` owns the data query.
+* `AgentConversationPanel` remains responsible for list/detail state, while `IContextProvider` owns the data query.
 

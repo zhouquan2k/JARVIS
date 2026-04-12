@@ -183,7 +183,7 @@ describe('extension sync bootstrap', () => {
             localStore: new MemoryStorageProvider(),
             stateStore: new MemorySyncStateStore(),
             deletedConversationStore: new MemoryDeletedConversationStateStore()
-        })).toThrow('syncKey=0 仅允许在开发环境使用');
+        })).toThrow('syncKey=0 is only allowed in development; configure a real syncKey first.');
     });
 
     it('pushes pre-existing local unsynced conversations to the server on every startup', async () => {

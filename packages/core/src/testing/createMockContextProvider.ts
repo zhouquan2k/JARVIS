@@ -80,7 +80,7 @@ function normalizePath(path?: string): string | undefined {
 function getChildPath(parentPath: string | undefined, name: string): string {
     const trimmedName = name.trim();
     if (!trimmedName) {
-        throw new Error('节点名称不能为空');
+        throw new Error('Node name must not be empty.');
     }
 
     const normalizedParent = normalizePath(parentPath);
@@ -99,7 +99,7 @@ function getAgentScopePath(agentKey: string): string {
 function ensureNode(snapshot: StoredWorkspaceSnapshot, path: string): StoredContextNode {
     const matched = snapshot.nodes.find((node) => node.path === path);
     if (!matched) {
-        throw new Error(`节点不存在: ${path}`);
+        throw new Error(`Node does not exist: ${path}`);
     }
     return matched;
 }
@@ -223,7 +223,7 @@ export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): I
         async getConversations(query: ConversationQuery): Promise<Conversation[]> {
             const normalizedPath = normalizePath(query.documentPath);
             if (query.documentPath !== undefined && !normalizedPath) {
-                throw new Error('文档路径不能为空');
+                throw new Error('Document path must not be empty.');
             }
 
             return (currentSnapshot.conversations ?? [])
@@ -253,12 +253,12 @@ export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): I
         async readDocument(path: string): Promise<ContextDocument> {
             const normalizedPath = normalizePath(path);
             if (!normalizedPath) {
-                throw new Error('文档路径不能为空');
+                throw new Error('Document path must not be empty.');
             }
 
             const node = ensureNode(currentSnapshot, normalizedPath);
             if (node.kind !== 'file') {
-                throw new Error(`节点不是文件: ${normalizedPath}`);
+                throw new Error(`Node is not a file: ${normalizedPath}`);
             }
 
             return {
@@ -269,17 +269,17 @@ export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): I
         async writeDocument(input: WriteContextDocumentInput): Promise<void> {
             const normalizedPath = normalizePath(input.path);
             if (!normalizedPath) {
-                throw new Error('文档路径不能为空');
+                throw new Error('Document path must not be empty.');
             }
 
             const node = ensureNode(currentSnapshot, normalizedPath);
             if (node.kind !== 'file') {
-                throw new Error(`节点不是文件: ${normalizedPath}`);
+                throw new Error(`Node is not a file: ${normalizedPath}`);
             }
 
             const previous = readStoredDocument(currentSnapshot, normalizedPath);
             if (input.expectedVersion && previous.version && input.expectedVersion !== previous.version) {
-                throw new Error('文档版本已变更，请重新读取后再试。');
+                throw new Error('The document version has changed. Please reload and try again.');
             }
 
             node.updatedAt = Date.now();
@@ -299,13 +299,13 @@ export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): I
             if (parentPath) {
                 const parentNode = ensureNode(currentSnapshot, parentPath);
                 if (parentNode.kind !== 'directory') {
-                    throw new Error(`父节点不是目录: ${parentPath}`);
+                    throw new Error(`Parent node is not a directory: ${parentPath}`);
                 }
             }
 
             const path = getChildPath(parentPath, input.name);
             if (currentSnapshot.nodes.some((node) => node.path === path)) {
-                throw new Error(`节点已存在: ${path}`);
+                throw new Error(`Node already exists: ${path}`);
             }
 
             const createdAt = Date.now();
@@ -332,7 +332,7 @@ export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): I
         async deleteNode(path: string): Promise<void> {
             const normalizedPath = normalizePath(path);
             if (!normalizedPath) {
-                throw new Error('不允许删除根目录。');
+                throw new Error('Deleting the root directory is not allowed.');
             }
 
             const node = ensureNode(currentSnapshot, normalizedPath);
@@ -352,14 +352,14 @@ export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): I
         async renameNode(input: RenameContextNodeInput): Promise<ContextNode> {
             const normalizedPath = normalizePath(input.path);
             if (!normalizedPath) {
-                throw new Error('不允许重命名根目录。');
+                throw new Error('Renaming the root directory is not allowed.');
             }
 
             const node = ensureNode(currentSnapshot, normalizedPath);
             const parentPath = normalizePath(node.parentPath);
             const targetPath = getChildPath(parentPath, input.name);
             if (currentSnapshot.nodes.some((candidate) => candidate.path === targetPath && candidate.path !== normalizedPath)) {
-                throw new Error(`节点已存在: ${targetPath}`);
+                throw new Error(`Node already exists: ${targetPath}`);
             }
 
             const descendants = currentSnapshot.nodes

@@ -7,7 +7,7 @@
       <div class="chat-thread">
         <div class="chat-messages" ref="messagesRef" data-testid="normal-messages" @scroll="onMessagesScroll">
           <div v-if="chatStore.isExternalPreviewLoading" class="loading-banner" data-testid="external-preview-loading">
-            正在加载对话内容...
+            {{ t('shared.loadingConversation') }}
           </div>
 
           <template v-if="displayConversation">
@@ -26,7 +26,7 @@
                 ]"
                 :data-question-id="isQuestionRoot(msg) ? getMessageQuestionKey(msg) : undefined"
               >
-                <div v-if="msg.role === 'user'" class="content user-content">{{ msg.content || '已发送附件' }}</div>
+                <div v-if="msg.role === 'user'" class="content user-content">{{ msg.content || t('shared.sendingAttachments') }}</div>
                 <MessageAttachmentStrip
                   v-if="resolveMessageAttachments(msg).length > 0"
                   :attachments="resolveMessageAttachments(msg)"
@@ -42,7 +42,7 @@
           </template>
 
           <div v-if="chatStore.isGenerating" class="message assistant">
-            <div class="content typing">typing...</div>
+            <div class="content typing">{{ t('shared.typing') }}</div>
           </div>
 
           <div v-if="chatStore.currentError" class="error" data-testid="normal-error">
@@ -67,7 +67,7 @@
           data-testid="question-panel-open"
           @click="chatStore.setQuestionIndexPanelOpen(true)"
         >
-          显示大纲
+          {{ t('shared.showOutline') }}
         </button>
       </div>
 
@@ -118,7 +118,7 @@
           </div>
 
           <div v-if="chatStore.isCurrentProviderModelsLoading" class="auth-warning">
-            正在加载当前 Provider 的模型目录
+            {{ t('shared.providerCatalogLoading') }}
           </div>
           <div v-else-if="!effectiveIsAuthenticated" class="auth-warning" data-testid="normal-auth-warning">
             <span>{{ authUnavailableText }}</span>
@@ -143,7 +143,7 @@
             @input="syncInputHeight"
             @paste="onPaste"
             @keydown="onInputKeydown"
-            placeholder="输入内容，按 Enter 换行，Ctrl/Cmd + Enter 发送"
+            :placeholder="t('shared.chatInputPlaceholder')"
             :disabled="isInputDisabled"
           />
           <div class="input-actions">
@@ -153,8 +153,8 @@
                 type="button"
                 class="secondary-action-btn"
                 data-testid="workspace-restore"
-                title="恢复知识工作区"
-                aria-label="恢复知识工作区"
+                :title="t('shared.restoreWorkspace')"
+                :aria-label="t('shared.restoreWorkspace')"
                 @click="requestWorkspaceSwitch('/')"
               >
                 <PanelLeftOpen class="action-icon" :size="16" aria-hidden="true" />
@@ -164,8 +164,8 @@
                 type="button"
                 class="toolbar-collapse-toggle"
                 :aria-expanded="!isTopToolbarCollapsed"
-                :aria-label="isTopToolbarCollapsed ? '展开顶部工具栏' : '折叠顶部工具栏'"
-                :title="isTopToolbarCollapsed ? '展开选项' : '折叠选项'"
+                :aria-label="isTopToolbarCollapsed ? t('shared.expandToolbar') : t('shared.collapseToolbar')"
+                :title="isTopToolbarCollapsed ? t('shared.expandToolbar') : t('shared.collapseToolbar')"
                 data-testid="toolbar-collapse-toggle"
                 @click="toggleTopToolbarCollapsed"
               >
@@ -175,8 +175,8 @@
                 type="button"
                 class="secondary-action-btn"
                 data-testid="normal-new-chat"
-                title="新建聊天"
-                aria-label="新建聊天"
+                :title="t('shared.newChat')"
+                :aria-label="t('shared.newChat')"
                 :disabled="isInputDisabled"
                 @click="startNewChat"
               >
@@ -186,8 +186,8 @@
             <button
               v-if="!chatStore.isGenerating"
               data-testid="normal-send"
-              title="Enter 换行，Ctrl/Cmd + Enter 发送"
-              aria-label="发送"
+              :title="t('shared.chatSendHint')"
+              :aria-label="t('shared.send')"
               @click="send()"
               :disabled="(!draftPrompt.trim() && chatStore.draftAttachments.length === 0) || isInputDisabled"
             >
@@ -198,9 +198,9 @@
               @click="chatStore.abortGeneration()"
               class="stop-btn"
               data-testid="normal-stop"
-              title="停止当前生成"
+              :title="t('shared.stopGeneration')"
             >
-              停止生成
+              {{ t('shared.stop') }}
             </button>
           </div>
         </div>
@@ -208,8 +208,8 @@
 
       <div v-else class="preview-actions">
         <div>
-          <p class="eyebrow">只读预览</p>
-          <h3>确认后将保存为本地会话，并立即恢复输入区。</h3>
+          <p class="eyebrow">{{ t('shared.previewReadonly') }}</p>
+          <h3>{{ t('shared.previewConfirm') }}</h3>
         </div>
         <div class="preview-button-row">
           <button
@@ -218,7 +218,7 @@
             data-testid="preview-back"
             @click="chatStore.exitPreview()"
           >
-            返回活动会话
+          {{ t('shared.returnActiveConversation') }}
           </button>
           <button
             class="import-btn"
@@ -226,7 +226,7 @@
             data-testid="preview-import"
             @click="chatStore.importPreviewConversation()"
           >
-            导入到本地
+          {{ t('shared.importToLocal') }}
           </button>
         </div>
       </div>
@@ -247,6 +247,7 @@ import QuestionIndexPanel from '../components/QuestionIndexPanel.vue';
 import { useChatStore } from '../store/chat';
 import type { ChatRoutePath } from '../routes';
 import { isPromptSubmitHotkey } from '../utils/promptHotkeys';
+import { useWorkspaceI18n, translateWorkspaceMessage } from '../i18n';
 
 const props = defineProps({
   showQuestionIndex: {
@@ -259,7 +260,7 @@ const props = defineProps({
   },
   authUnavailableMessage: {
     type: String,
-    default: '当前 Provider 鉴权不可用'
+    default: () => translateWorkspaceMessage('shared.currentProviderUnavailable')
   },
   authRecoveryActionLabel: {
     type: String,
@@ -289,6 +290,7 @@ const emit = defineEmits<{
 }>();
 
 const chatStore = useChatStore();
+const { t } = useWorkspaceI18n();
 const isAuthenticated = ref(false);
 const inputRef = ref<HTMLTextAreaElement | null>(null);
 const messagesRef = ref<HTMLElement | null>(null);
@@ -332,7 +334,7 @@ const hasExplicitAuthOverride = computed(() => {
     return false;
   }
 
-  return props.authUnavailableMessage !== '当前 Provider 鉴权不可用'
+  return props.authUnavailableMessage !== t('shared.currentProviderUnavailable')
     || props.authRecoveryActionLabel.length > 0
     || props.authRecoveryActionDisabled;
 });
@@ -343,7 +345,7 @@ const effectiveIsAuthenticated = computed(() => {
 
   return props.authStatusOverride;
 });
-const authUnavailableText = computed(() => props.authUnavailableMessage || '当前 Provider 鉴权不可用');
+const authUnavailableText = computed(() => props.authUnavailableMessage || t('shared.currentProviderUnavailable'));
 const isInputDisabled = computed(() => {
   return chatStore.isGenerating || !effectiveIsAuthenticated.value || chatStore.isCurrentProviderModelsLoading || !chatStore.currentModelId;
 });

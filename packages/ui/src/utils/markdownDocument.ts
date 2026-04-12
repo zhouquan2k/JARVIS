@@ -1,5 +1,6 @@
 import { Crepe, CrepeFeature, type CrepeConfig } from '@milkdown/crepe';
 import { replaceAll } from '@milkdown/kit/utils';
+import { translateWorkspaceMessage } from '../i18n';
 
 export type MarkdownEditor = Crepe;
 
@@ -30,7 +31,7 @@ export async function createMarkdownEditor(options: CreateMarkdownEditorOptions)
         featureConfigs: {
             [CrepeFeature.Placeholder]: {
                 mode: 'doc',
-                text: '开始编写 Markdown 文档'
+                text: translateWorkspaceMessage('shared.startMarkdownDraft')
             }
         }
     });

@@ -1,3 +1,5 @@
+English | [中文](spec.zh-CN.md)
+
 ## MODIFIED Requirements
 
 ### Requirement: Workspace shell MUST provide shared history sidebar for chat workspace

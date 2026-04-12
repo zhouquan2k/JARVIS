@@ -23,7 +23,7 @@ export function normalizeScopePath(value?: string): string | undefined {
 export function normalizeSearchRequest(query: string | undefined, maxResults?: number): { query: string; maxResults: number } {
     const normalizedQuery = query?.trim();
     if (!normalizedQuery) {
-        throw new Error('query 不能为空。');
+        throw new Error('query must not be empty.');
     }
 
     return {

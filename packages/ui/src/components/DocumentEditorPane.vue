@@ -32,7 +32,7 @@
     </Teleport>
 
     <div v-if="activePaneMode === 'empty'" class="empty-state" data-testid="document-editor-empty">
-      从左侧文件树选择一个文档开始查看。
+      {{ t('shared.selectFile') }}
     </div>
     <div
       v-else-if="activeViewerId === 'text'"
@@ -49,10 +49,10 @@
         v-if="pdfBlobUrl"
         :src="pdfBlobUrl"
         class="pdf-frame"
-        title="PDF preview"
+        :title="t('shared.openPdf')"
       />
       <div v-else class="unsupported-state" data-testid="document-pdf-fallback">
-        <p>当前环境不支持内嵌 PDF 预览。</p>
+        <p>{{ t('shared.unsupportedPdf') }}</p>
         <a
           v-if="pdfOpenHref"
           :href="pdfOpenHref"
@@ -60,7 +60,7 @@
           rel="noopener noreferrer"
           data-testid="document-pdf-open-link"
         >
-          在新标签页打开 PDF
+          {{ t('shared.openPdf') }}
         </a>
       </div>
     </div>
@@ -69,7 +69,7 @@
       class="unsupported-state"
       data-testid="document-unsupported-viewer"
     >
-      当前文档类型暂不支持预览：{{ activeDocument?.mimeType ?? 'unknown' }}
+      {{ t('shared.unsupportedViewer', { mimeType: activeDocument?.mimeType ?? 'unknown' }) }}
     </div>
     <section
       v-if="activeViewerId === 'text' && activePath && latestFileChange"
@@ -78,7 +78,7 @@
     >
       <div class="file-change-header">
         <div class="file-change-meta">
-          <strong>最近一次 Agent 文件改写</strong>
+          <strong>{{ t('shared.lastAgentRewrite') }}</strong>
           <span>{{ latestFileChange.path }}</span>
         </div>
         <div class="file-change-actions">
@@ -89,7 +89,7 @@
             :disabled="!canUndo"
             @click="emit('undo-change')"
           >
-            Undo
+            {{ t('shared.undo') }}
           </button>
           <button
             type="button"
@@ -98,7 +98,7 @@
             :disabled="!canRedo"
             @click="emit('redo-change')"
           >
-            Redo
+            {{ t('shared.redo') }}
           </button>
         </div>
       </div>
@@ -125,6 +125,7 @@ import { decodeBase64, type ContextDocument } from '@packages/core/src';
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { Save } from 'lucide-vue-next';
 import type { FileChangeRecord, LineDiffEntry } from '../services/FileChangeService';
+import { useWorkspaceI18n } from '../i18n';
 import {
   createMarkdownEditor,
   destroyMarkdownEditor,
@@ -145,6 +146,7 @@ const props = defineProps<{
   canUndo: boolean;
   canRedo: boolean;
 }>();
+const { t } = useWorkspaceI18n();
 
 const emit = defineEmits<{
   (event: 'update:modelValue', value: string): void;
@@ -155,7 +157,7 @@ const emit = defineEmits<{
 
 const activePathLabel = computed(() => {
   if (!props.activePath) {
-    return '未选择文件';
+    return t('shared.noSelectedFile');
   }
 
   const segments = props.activePath.split('/').filter(Boolean);
@@ -168,10 +170,10 @@ const canSave = computed(() => {
 });
 const saveButtonLabel = computed(() => {
   if (!canSave.value) {
-    return '当前文档不可保存';
+    return t('shared.unsavedDocument');
   }
 
-  return props.isSaving ? '保存中' : '保存';
+  return props.isSaving ? t('shared.saving') : t('shared.save');
 });
 const editorRoot = ref<HTMLElement | null>(null);
 const pdfBlobUrl = ref<string | null>(null);

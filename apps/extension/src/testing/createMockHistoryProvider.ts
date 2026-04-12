@@ -118,7 +118,7 @@ export function createMockHistoryProvider(
         },
         async getHistoryDetail(externalId: string) {
             if (providerId === 'gemini-web' && externalId === 'gemini-beta') {
-                throw new ExternalHistoryError('SELECTOR_MISMATCH', 'Gemini 页面结构已变化，请稍后再试。', {
+                throw new ExternalHistoryError('SELECTOR_MISMATCH', 'Gemini page structure has changed. Please try again later.', {
                     providerId: 'gemini-web'
                 });
             }

@@ -33,7 +33,7 @@
           :documents="agentViewDocuments"
           :conversations="agentViewConversations"
           @open-document="documentStore.openNode"
-          @open-conversation="chatStore.selectLocalConversation"
+          @open-conversation="openAgentViewConversation"
         />
         <DocumentEditorPane
           v-else
@@ -197,6 +197,15 @@ async function syncWorkspaceConversationSelection(): Promise<void> {
 async function onOpenNode(path: string) {
   await documentStore.openNode(path);
   await syncWorkspaceConversationSelection();
+}
+
+async function openAgentViewConversation(conversationId: string): Promise<void> {
+  await chatStore.selectLocalConversation(conversationId);
+  chatStore.saveAgentViewStatus({
+    selectedNodePath: documentStore.selectedNodePath,
+    activePath: documentStore.activePath,
+    activeConversationId: conversationId
+  });
 }
 
 watch(() => props.panelSizes, (value) => {

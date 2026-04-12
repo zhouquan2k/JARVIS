@@ -1,3 +1,5 @@
+English | [中文](spec.zh-CN.md)
+
 ## MODIFIED Requirements
 
 ### Requirement: Extension host MUST initialize shared stores with proxy runtime

@@ -110,7 +110,7 @@ function isRecord(value: unknown): value is JsonRecord {
 function readRequiredString(record: JsonRecord, key: string, fieldName: string): string {
     const value = record[key];
     if (typeof value !== 'string' || !value.trim()) {
-        throw new Error(`${fieldName} 必须是非空字符串。`);
+        throw new Error(`${fieldName} must be a non-empty string.`);
     }
 
     return value.trim();
@@ -119,7 +119,7 @@ function readRequiredString(record: JsonRecord, key: string, fieldName: string):
 function readRequiredText(record: JsonRecord, key: string, fieldName: string): string {
     const value = record[key];
     if (typeof value !== 'string') {
-        throw new Error(`${fieldName} 必须是字符串。`);
+        throw new Error(`${fieldName} must be a string.`);
     }
 
     return value;
@@ -132,7 +132,7 @@ function readOptionalString(record: JsonRecord, key: string): string | undefined
     }
 
     if (typeof value !== 'string') {
-        throw new Error(`${key} 必须是字符串。`);
+        throw new Error(`${key} must be a string.`);
     }
 
     const normalized = value.trim();
@@ -142,7 +142,7 @@ function readOptionalString(record: JsonRecord, key: string): string | undefined
 function readRequiredTimestamp(record: JsonRecord, key: string, fieldName: string): number {
     const value = record[key];
     if (typeof value !== 'number' || !Number.isFinite(value)) {
-        throw new Error(`${fieldName} 必须是有效时间戳。`);
+        throw new Error(`${fieldName} must be a valid timestamp.`);
     }
 
     return value;
@@ -151,7 +151,7 @@ function readRequiredTimestamp(record: JsonRecord, key: string, fieldName: strin
 function readRequiredNumber(record: JsonRecord, key: string, fieldName: string): number {
     const value = record[key];
     if (typeof value !== 'number' || !Number.isFinite(value)) {
-        throw new Error(`${fieldName} 必须是有效数字。`);
+        throw new Error(`${fieldName} must be a valid number.`);
     }
 
     return value;
@@ -164,7 +164,7 @@ function readOptionalNumber(record: JsonRecord, key: string): number | undefined
     }
 
     if (typeof value !== 'number' || !Number.isFinite(value)) {
-        throw new Error(`${key} 必须是数字。`);
+        throw new Error(`${key} must be a number.`);
     }
 
     return value;
@@ -177,7 +177,7 @@ function readOptionalBoolean(record: JsonRecord, key: string): boolean | undefin
     }
 
     if (typeof value !== 'boolean') {
-        throw new Error(`${key} 必须是布尔值。`);
+        throw new Error(`${key} must be a boolean.`);
     }
 
     return value;
@@ -185,12 +185,12 @@ function readOptionalBoolean(record: JsonRecord, key: string): boolean | undefin
 
 function normalizeAttachment(value: unknown, index: number, messageIndex: number): MessageAttachment {
     if (!isRecord(value)) {
-        throw new Error(`messages[${messageIndex}].attachments[${index}] 必须是对象。`);
+        throw new Error(`messages[${messageIndex}].attachments[${index}] must be an object.`);
     }
 
     const type = readRequiredString(value, 'type', `messages[${messageIndex}].attachments[${index}].type`);
     if (type !== 'image' && type !== 'file') {
-        throw new Error(`messages[${messageIndex}].attachments[${index}].type 必须是 image 或 file。`);
+        throw new Error(`messages[${messageIndex}].attachments[${index}].type must be image or file.`);
     }
 
     return {
@@ -206,7 +206,7 @@ function normalizeAttachment(value: unknown, index: number, messageIndex: number
 
 function normalizeRange(value: unknown, fieldName: string): AnnotationRange {
     if (!isRecord(value)) {
-        throw new Error(`${fieldName} 必须是对象。`);
+        throw new Error(`${fieldName} must be an object.`);
     }
 
     return {
@@ -217,13 +217,13 @@ function normalizeRange(value: unknown, fieldName: string): AnnotationRange {
 
 function normalizeAnnotation(value: unknown, index: number, messageIndex: number): MessageAnnotation {
     if (!isRecord(value)) {
-        throw new Error(`messages[${messageIndex}].annotations[${index}] 必须是对象。`);
+        throw new Error(`messages[${messageIndex}].annotations[${index}] must be an object.`);
     }
 
     const kind = readRequiredString(value, 'kind', `messages[${messageIndex}].annotations[${index}].kind`);
     const payload = value.payload;
     if (!isRecord(payload)) {
-        throw new Error(`messages[${messageIndex}].annotations[${index}].payload 必须是对象。`);
+        throw new Error(`messages[${messageIndex}].annotations[${index}].payload must be an object.`);
     }
 
     if (kind === 'cite') {
@@ -243,7 +243,7 @@ function normalizeAnnotation(value: unknown, index: number, messageIndex: number
     if (kind === 'image_group') {
         const images = payload.images;
         if (!Array.isArray(images) || images.length === 0) {
-            throw new Error(`messages[${messageIndex}].annotations[${index}].payload.images 必须是非空数组。`);
+            throw new Error(`messages[${messageIndex}].annotations[${index}].payload.images must be a non-empty array.`);
         }
 
         return {
@@ -255,7 +255,7 @@ function normalizeAnnotation(value: unknown, index: number, messageIndex: number
                 groupId: readRequiredString(payload, 'groupId', `messages[${messageIndex}].annotations[${index}].payload.groupId`),
                 images: images.map((image, imageIndex) => {
                     if (!isRecord(image)) {
-                        throw new Error(`messages[${messageIndex}].annotations[${index}].payload.images[${imageIndex}] 必须是对象。`);
+                        throw new Error(`messages[${messageIndex}].annotations[${index}].payload.images[${imageIndex}] must be an object.`);
                     }
 
                     return {
@@ -272,17 +272,17 @@ function normalizeAnnotation(value: unknown, index: number, messageIndex: number
         };
     }
 
-    throw new Error(`messages[${messageIndex}].annotations[${index}].kind 不受支持。`);
+    throw new Error(`messages[${messageIndex}].annotations[${index}].kind is not supported.`);
 }
 
 function normalizeMessage(value: unknown, index: number): ConversationMessage {
     if (!isRecord(value)) {
-        throw new Error(`messages[${index}] 必须是对象。`);
+        throw new Error(`messages[${index}] must be an object.`);
     }
 
     const role = readRequiredString(value, 'role', `messages[${index}].role`);
     if (role !== 'user' && role !== 'assistant') {
-        throw new Error(`messages[${index}].role 必须是 user 或 assistant。`);
+        throw new Error(`messages[${index}].role must be user or assistant.`);
     }
 
     return {
@@ -308,7 +308,7 @@ function normalizeSyncState(value: unknown): ConversationSyncState | undefined {
     }
 
     if (!isRecord(value)) {
-        throw new Error('sync 必须是对象。');
+        throw new Error('sync must be an object.');
     }
 
     return value.deleted === true ? { deleted: true } : undefined;
@@ -316,7 +316,7 @@ function normalizeSyncState(value: unknown): ConversationSyncState | undefined {
 
 function normalizeDeletedConversation(value: unknown, index: number): SyncDeletedConversation {
     if (!isRecord(value)) {
-        throw new Error(`deletedConversations[${index}] 必须是对象。`);
+        throw new Error(`deletedConversations[${index}] must be an object.`);
     }
 
     return {
@@ -327,11 +327,11 @@ function normalizeDeletedConversation(value: unknown, index: number): SyncDelete
 
 export function normalizeConversation(value: unknown): SyncConversation {
     if (!isRecord(value)) {
-        throw new Error('conversation 必须是对象。');
+        throw new Error('conversation must be an object.');
     }
 
     if (!Array.isArray(value.messages)) {
-        throw new Error('messages 必须是数组。');
+        throw new Error('messages must be an array.');
     }
 
     return {
@@ -357,7 +357,7 @@ export function normalizeConversation(value: unknown): SyncConversation {
 
 export function normalizePushRequest(value: unknown): PushRequestBody {
     if (!isRecord(value) || !Array.isArray(value.conversations)) {
-        throw new Error('push 请求必须包含 conversations 数组。');
+        throw new Error('Push request must include a conversations array.');
     }
 
     return {
@@ -370,7 +370,7 @@ export function normalizePushRequest(value: unknown): PushRequestBody {
 
 export function normalizePullRequest(value: unknown): PullRequestBody {
     if (!isRecord(value)) {
-        throw new Error('pull 请求体必须是对象。');
+        throw new Error('Pull request body must be an object.');
     }
 
     const { cursor } = value;
@@ -379,7 +379,7 @@ export function normalizePullRequest(value: unknown): PullRequestBody {
     }
 
     if (typeof cursor !== 'number' || !Number.isFinite(cursor) || cursor < 0) {
-        throw new Error('cursor 必须是非负数字或 null。');
+        throw new Error('cursor must be a non-negative number or null.');
     }
 
     return { cursor };

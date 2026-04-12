@@ -16,7 +16,7 @@
         type="button"
         :disabled="loading"
         data-testid="external-history-search-clear"
-        aria-label="清空搜索"
+        :aria-label="t('shared.clearSearch')"
         @click="$emit('clear')"
       >
         ×
@@ -28,12 +28,14 @@
       :disabled="loading"
       data-testid="external-history-search-submit"
     >
-      {{ loading ? '搜索中...' : '搜索' }}
+      {{ loading ? t('shared.searching') : t('shared.search') }}
     </button>
   </form>
 </template>
 
 <script setup lang="ts">
+import { useWorkspaceI18n } from '../i18n';
+
 defineProps<{
   modelValue: string;
   loading?: boolean;
@@ -54,6 +56,8 @@ function emitUpdate(event: Event) {
 function emitSubmit() {
   emit('submit');
 }
+
+const { t } = useWorkspaceI18n();
 </script>
 
 <style scoped>

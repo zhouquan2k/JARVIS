@@ -60,6 +60,23 @@ test('normal chat can send message and recover local history after reload', asyn
   await expect(page.getByTestId('local-history-item').first()).toContainText('Playwright normal flow message');
 });
 
+test('workspace locale toggle persists after refresh', async ({ page }) => {
+  await page.goto('/#/chat');
+  await expect(page.getByTestId('conversation-workspace')).toBeVisible();
+  await expect(page.getByTestId('topbar-locale-toggle')).toHaveText('EN');
+  await expect(page.getByTestId('topbar-workspace-knowledge-workspace')).toHaveText('Workspace');
+
+  await page.getByTestId('topbar-locale-toggle').dispatchEvent('click');
+  await expect(page.getByTestId('topbar-locale-toggle')).toHaveText('中文');
+  await expect(page.getByTestId('topbar-workspace-knowledge-workspace')).toHaveText('工作区');
+  await expect(page.getByTestId('topbar-workspace-normal-chat')).toHaveText('对话');
+
+  await page.reload();
+  await expect(page.getByTestId('topbar-locale-toggle')).toHaveText('中文');
+  await expect(page.getByTestId('topbar-workspace-knowledge-workspace')).toHaveText('工作区');
+  await expect(page.getByTestId('topbar-workspace-normal-chat')).toHaveText('对话');
+});
+
 test('normal chat model options render switch persist and recover with the conversation', async ({ page }) => {
   await page.goto('/#/chat');
   await expect(page.getByTestId('normal-chat-view')).toBeVisible();
@@ -70,14 +87,14 @@ test('normal chat model options render switch persist and recover with the conve
   await expect(deepResearchToggle).toHaveClass(/active/);
 
   await page.getByTestId('normal-model').selectOption({ label: 'Gemini Pro Latest' });
-  await expect(page.getByTestId('model-option-toggle-group')).toBeHidden();
+  await expect(page.getByTestId('model-option-toggle-group')).toBeVisible();
 
   await page.getByTestId('normal-model').selectOption({ label: 'Gemini 2.5 Flash' });
   await expect(page.getByTestId('model-option-toggle-group')).toBeVisible();
-  await expect(deepResearchToggle).not.toHaveClass(/active/);
+  await expect(deepResearchToggle).toHaveClass(/active/);
 
   await deepResearchToggle.click();
-  await expect(deepResearchToggle).toHaveClass(/active/);
+  await expect(deepResearchToggle).not.toHaveClass(/active/);
 
   await page.getByTestId('normal-input').fill('MODEL_OPTION_RECOVERY');
   await page.getByTestId('normal-send').click();
@@ -88,7 +105,7 @@ test('normal chat model options render switch persist and recover with the conve
   await expect(page.getByTestId('conversation-workspace')).toBeVisible();
   await page.getByTestId('local-history-item').first().click();
   await expect(page.getByTestId('model-option-toggle-group')).toBeVisible();
-  await expect(page.getByTestId('model-option-deep_research')).toHaveClass(/active/);
+  await expect(page.getByTestId('model-option-deep_research')).not.toHaveClass(/active/);
 });
 
 test('web host initializes sync storage with configured syncKey', async ({ page }) => {
@@ -123,19 +140,19 @@ test('local history supports switching between conversations from sidebar', asyn
 
   await page.getByTestId('normal-input').fill('WEB_LOCAL_ALPHA');
   await page.getByTestId('normal-send').click();
-  await expect(page.getByTestId('normal-messages')).toContainText('gemini-api/gemini-2.5-pro => WEB_LOCAL_ALPHA');
+  await expect(page.getByTestId('normal-messages')).toContainText('gemini-api/gemini-pro-latest => WEB_LOCAL_ALPHA');
 
   await page.getByTestId('sidebar-new-chat').click();
   await page.getByTestId('normal-input').fill('WEB_LOCAL_BETA');
   await page.getByTestId('normal-send').click();
-  await expect(page.getByTestId('normal-messages')).toContainText('gemini-api/gemini-2.5-pro => WEB_LOCAL_BETA');
+  await expect(page.getByTestId('normal-messages')).toContainText('gemini-api/gemini-pro-latest => WEB_LOCAL_BETA');
 
   const localHistoryItems = page.getByTestId('local-history-item');
   await expect(localHistoryItems).toHaveCount(2);
   await localHistoryItems.nth(1).click();
 
   await expect(page.getByTestId('normal-messages')).toContainText('WEB_LOCAL_ALPHA');
-  await expect(page.getByTestId('normal-messages')).toContainText('gemini-api/gemini-2.5-pro => WEB_LOCAL_ALPHA');
+  await expect(page.getByTestId('normal-messages')).toContainText('gemini-api/gemini-pro-latest => WEB_LOCAL_ALPHA');
 });
 
 test('normal chat can bind a local conversation to an agent and surface it in the knowledge workspace agent lists', async ({ page }) => {
@@ -400,7 +417,7 @@ test('question index panel supports compact controls, reopen, starring, filterin
   await firstRow.getByTestId('question-delete').click();
   await firstRow.getByTestId('question-delete-confirm').click();
 
-  await expect(page.getByTestId('question-index-empty')).toContainText('当前没有星标问题');
+  await expect(page.getByTestId('question-index-empty')).toContainText('No starred questions.');
   await expect(page.locator('.message.user .user-content')).toHaveCount(1);
   await expect(page.locator('.message.user .user-content').first()).toContainText('索引问题二');
 });

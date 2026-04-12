@@ -11,7 +11,7 @@ import type {
 } from '../types/context.js';
 
 function notImplemented(): never {
-    throw new Error('DatabaseContextProvider 尚未实现。');
+    throw new Error('DatabaseContextProvider is not implemented yet.');
 }
 
 export class DatabaseContextProvider implements ContextProvider {
@@ -50,6 +50,6 @@ export class DatabaseContextProvider implements ContextProvider {
     }
 
     async searchInScope(_request: ContextSearchRequest): Promise<ContextSearchMatch[]> {
-        throw new Error('DatabaseContextProvider 暂不支持 searchInScope。');
+        throw new Error('DatabaseContextProvider does not support searchInScope yet.');
     }
 }

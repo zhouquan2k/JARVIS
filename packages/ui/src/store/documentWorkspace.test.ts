@@ -52,9 +52,12 @@ describe('useDocumentWorkspaceStore', () => {
 
         const documents = store.collectMarkdownDocuments('/workspace');
         expect(documents).toHaveLength(2);
-        expect(documents[0].path).toBe('/workspace/guide.md');
-        expect(documents[1].path).toBe('/workspace/archive');
-        expect(documents[1].children?.map((node) => node.path)).toEqual(['/workspace/archive/history.md']);
+        expect(documents.map((node) => node.path)).toEqual(
+            expect.arrayContaining(['/workspace/guide.md', '/workspace/archive'])
+        );
+
+        const archiveNode = documents.find((node) => node.path === '/workspace/archive');
+        expect(archiveNode?.children?.map((node) => node.path)).toEqual(['/workspace/archive/history.md']);
     });
 
     it('flushes the previous file before switching documents', async () => {

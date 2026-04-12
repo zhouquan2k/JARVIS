@@ -4,23 +4,27 @@ export interface ChatRoute {
   path: ChatRoutePath;
   name: 'normal-chat' | 'knowledge-workspace' | 'compare-chat';
   label: string;
+  labelKey?: 'routes.knowledgeWorkspace' | 'routes.normalChat' | 'routes.compareChat';
 }
 
 export const CHAT_ROUTES: ChatRoute[] = [
   {
     path: '/',
     name: 'knowledge-workspace',
-    label: '工作区'
+    label: 'Workspace',
+    labelKey: 'routes.knowledgeWorkspace'
   },
   {
     path: '/chat',
     name: 'normal-chat',
-    label: '对话'
+    label: 'Chat',
+    labelKey: 'routes.normalChat'
   },
   {
     path: '/compare',
     name: 'compare-chat',
-    label: '对比聊天'
+    label: 'Compare Chat',
+    labelKey: 'routes.compareChat'
   }
 ];
 

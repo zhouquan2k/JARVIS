@@ -76,6 +76,7 @@ import {
   type WorkspaceContext
 } from '@packages/core/src';
 import type { ChatRoutePath } from '../routes';
+import { useWorkspaceI18n } from '../i18n';
 
 type AgentBindingOption = {
   key: string | null;
@@ -134,6 +135,7 @@ const emit = defineEmits<{
 }>();
 
 const chatStore = useChatStore();
+const { t } = useWorkspaceI18n();
 const activeExternalProviderFeatures = computed(() => chatStore.activeExternalProvider?.features || null);
 const agentBindingOptions = ref<AgentBindingOption[]>([]);
 const agentBindingLoading = ref(false);
@@ -147,13 +149,13 @@ const showExternalHistorySearch = computed(() => {
   return chatStore.historySource === 'external' && activeExternalProviderFeatures.value?.historySearch === true;
 });
 const externalHistorySearchPlaceholder = computed(() => {
-  return activeExternalProviderFeatures.value?.historySearchPlaceholder || '搜索外部历史';
+  return activeExternalProviderFeatures.value?.historySearchPlaceholder || t('shared.externalSearchPlaceholder');
 });
 
 function resolveAgentBindingLabel(agent: ResolvedAgentConfig, key: string): string {
-  const name = agent.name?.trim() || '未命名 Agent';
+  const name = agent.name?.trim() || t('shared.untitled');
   if (key === DEFAULT_WORKSPACE_AGENT_KEY) {
-    return `${name}（默认）`;
+    return `${name} (${t('shared.defaultAgentSuffix')})`;
   }
 
   return name;
@@ -161,7 +163,7 @@ function resolveAgentBindingLabel(agent: ResolvedAgentConfig, key: string): stri
 
 function resolveAgentBindingTitle(agent: ResolvedAgentConfig, key: string): string {
   const scopePath = agent.scopePath?.trim() || key;
-  return `作用域：${scopePath}`;
+  return t('shared.agentScope', { scope: scopePath });
 }
 
 function buildAgentBindingOptions(context: WorkspaceContext): AgentBindingOption[] {
@@ -176,8 +178,8 @@ function buildAgentBindingOptions(context: WorkspaceContext): AgentBindingOption
   const options: AgentBindingOption[] = [
     {
       key: null,
-      label: '不绑定',
-      title: '保持为普通会话'
+      label: t('shared.bindingNoSelection'),
+      title: t('shared.keepAsNormalConversation')
     }
   ];
 
@@ -212,7 +214,7 @@ async function ensureAgentBindingOptionsLoaded(): Promise<void> {
 
   const provider = props.contextProvider;
   if (!provider) {
-    agentBindingError.value = '当前上下文 Provider 不可用。';
+    agentBindingError.value = t('shared.noAgentBindingProvider');
     agentBindingOptions.value = [];
     return;
   }
@@ -226,7 +228,7 @@ async function ensureAgentBindingOptionsLoaded(): Promise<void> {
   })()
     .catch((error) => {
       agentBindingOptions.value = [];
-      agentBindingError.value = error instanceof Error ? error.message : '加载 Agent 候选项失败。';
+      agentBindingError.value = error instanceof Error ? error.message : t('shared.agentBindingLoadingFailed');
     })
     .finally(() => {
       agentBindingLoading.value = false;
@@ -255,7 +257,7 @@ function setAgentBindingNotice(message: string | null, tone: 'info' | 'success' 
 
 function resolveAgentBindingLabelByKey(agentKey: string | null): string {
   if (agentKey === null) {
-    return '不绑定';
+    return t('shared.bindingNoSelection');
   }
 
   return agentBindingOptions.value.find((option) => option.key === agentKey)?.label ?? agentKey;
@@ -315,15 +317,15 @@ function onOpenLocalAgentBinding(): void {
 
 async function onBindLocalAgent(payload: { conversationId: string; agentKey: string | null }): Promise<void> {
   agentBindingSubmitting.value = true;
-  setAgentBindingNotice('正在绑定...', 'info', false);
+  setAgentBindingNotice(t('shared.bindingInProgress'), 'info', false);
   try {
     await chatStore.bindConversationToAgent(payload.conversationId, payload.agentKey);
     setAgentBindingNotice(
-      `已绑定到 ${resolveAgentBindingLabelByKey(payload.agentKey)}，可到知识工作区对应 Agent 下查看这条会话。`,
+      t('shared.bindingSuccess', { label: resolveAgentBindingLabelByKey(payload.agentKey) }),
       'success'
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : '绑定失败';
+    const message = error instanceof Error ? error.message : t('shared.bindingFailed');
     setAgentBindingNotice(message, 'error', false);
   } finally {
     agentBindingSubmitting.value = false;

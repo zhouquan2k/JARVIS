@@ -12,6 +12,7 @@ export { default as DocumentEditorPane } from './src/components/DocumentEditorPa
 export { default as DocumentFileTree } from './src/components/DocumentFileTree.vue';
 export { default as MessageAnnotationLayer } from './src/components/MessageAnnotationLayer.vue';
 export { default as MessageAttachmentStrip } from './src/components/MessageAttachmentStrip.vue';
+export { createWorkspaceI18n, translateWorkspaceMessage, useWorkspaceI18n, resolveWorkspaceText, resolveInitialLocale } from './src/i18n';
 export { useChatStore } from './src/store/chat';
 export { useDocumentWorkspaceStore } from './src/store/documentWorkspace';
 export { useCompareStore } from './src/store/compare';

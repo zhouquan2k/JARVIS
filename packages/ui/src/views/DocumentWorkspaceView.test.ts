@@ -214,6 +214,61 @@ describe('DocumentWorkspaceView', () => {
         expect(wrapper.get('[data-testid="agent-pane"]').attributes('data-agent-key')).toBe('/docs/');
     });
 
+    it('restores the assistant conversation detail when AgentView opens a conversation', async () => {
+        const chatStore = useChatStore();
+        const storage = new MockConversationStorage([
+            {
+                id: 'conversation-docs',
+                title: 'Docs Chat',
+                origin: 'local',
+                updatedAt: 10,
+                messages: [],
+                agentKey: '/docs/'
+            }
+        ]);
+        chatStore.setProviders(createMockModelProvider(), storage);
+
+        const wrapper = mount(DocumentWorkspaceView, {
+            props: {
+                contextProvider: createMockContextProvider({
+                    nodes: [
+                        { path: '/docs', name: 'docs', kind: 'directory' },
+                        { path: '/docs/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/docs' },
+                        { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' }
+                    ],
+                    documents: {
+                        '/docs/.agent.json': JSON.stringify({
+                            name: 'Docs Agent',
+                            instructions: 'Handle docs.'
+                        }),
+                        '/docs/guide.md': '# Guide'
+                    }
+                })
+            },
+            global: {
+                stubs: {
+                    AgentPane: {
+                        props: ['restoreConversationId'],
+                        template: '<div data-testid="agent-pane" :data-restore-conversation-id="restoreConversationId ?? \'\'" />'
+                    },
+                    AgentView: {
+                        template: '<button data-testid="agent-view-open-conversation" @click="$emit(\'open-conversation\', \'conversation-docs\')" />'
+                    },
+                    DocumentEditorPane: { template: '<div data-testid="document-editor" />' }
+                }
+            }
+        });
+
+        await flushPromises();
+        await wrapper.get('[data-path="/docs"]').trigger('click');
+        await flushPromises();
+        await wrapper.get('[data-testid="agent-view-open-conversation"]').trigger('click');
+        await flushPromises();
+
+        expect(chatStore.currentConversation?.id).toBe('conversation-docs');
+        expect(wrapper.get('[data-testid="agent-pane"]').attributes('data-restore-conversation-id')).toBe('conversation-docs');
+    });
+
     it('forwards workspace switch requests from the agent pane', async () => {
         const wrapper = mount(DocumentWorkspaceView, {
             props: {

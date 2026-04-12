@@ -272,7 +272,7 @@ describe('GeminiHistoryTabBridge', () => {
         await expect(bridge.getHistoryList(CONFIG)).rejects.toMatchObject({
             name: 'ExternalHistoryError',
             code: 'AUTH_REQUIRED',
-            message: 'Gemini 标签页跳转到了登录页，请先完成登录后再重试。'
+            message: 'The Gemini tab navigated to a sign-in page. Please sign in and try again.'
         });
     });
 });

@@ -17,7 +17,7 @@
         @click="fileInputRef?.click()"
       >
         <span class="attach-btn-icon">+</span>
-        <span>附件</span>
+        <span>{{ t('shared.attachments') }}</span>
       </button>
       <p v-if="error" class="error-text" data-testid="attachment-error">{{ error }}</p>
     </div>
@@ -45,6 +45,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import type { MessageAttachment } from '@packages/core/src';
+import { useWorkspaceI18n } from '../i18n';
 
 defineProps<{
   attachments: MessageAttachment[];
@@ -58,6 +59,7 @@ const emit = defineEmits<{
 }>();
 
 const fileInputRef = ref<HTMLInputElement | null>(null);
+const { t } = useWorkspaceI18n();
 
 function onInputChange(event: Event) {
   const input = event.target as HTMLInputElement;

@@ -1,19 +1,24 @@
+[English](core-class-diagram.md) | [中文](../zh/architecture/core-class-diagram.zh-CN.md)
+
 # Core Class Diagram
 
-`packages/core` 的类图由 `tsuml2` 从源码直接生成，当前输出文件在 [core-class-diagram.mmd](/Users/quanzhou/Workspace/ChatPrism/docs/architecture/core-class-diagram.mmd) 和 [core-class-diagram.svg](/Users/quanzhou/Workspace/ChatPrism/docs/architecture/core-class-diagram.svg)。
+The `packages/core` class diagram is generated directly from source with `tsuml2`. The generated artifacts live beside this document:
 
-## 如何查看
+- `docs/architecture/core-class-diagram.mmd`
+- `docs/architecture/core-class-diagram.svg`
 
-- 直接打开 [core-class-diagram.svg](/Users/quanzhou/Workspace/ChatPrism/docs/architecture/core-class-diagram.svg)
-- 在支持 Mermaid 的 Markdown 预览器中打开 `docs/architecture/core-class-diagram.mmd`
-- 或将 `docs/architecture/core-class-diagram.mmd` 的内容粘贴到 Mermaid Live Editor
+## How To View It
 
-## 如何同步
+- Open `docs/architecture/core-class-diagram.svg` directly.
+- Open `docs/architecture/core-class-diagram.mmd` in a Mermaid-capable Markdown preview.
+- Paste the Mermaid content into Mermaid Live Editor.
 
-当 `packages/core` 的接口、类或关系发生变化后，在仓库根目录执行：
+## How To Refresh It
+
+When the exported interfaces, classes, or associations in `packages/core` change, run:
 
 ```bash
 pnpm diagram:core
 ```
 
-该命令会重新生成 `docs/architecture/core-class-diagram.mmd` 和 `docs/architecture/core-class-diagram.svg`。
+This command regenerates both the Mermaid DSL and SVG artifacts.

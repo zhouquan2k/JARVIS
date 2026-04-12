@@ -1,3 +1,5 @@
+English | [中文](spec.zh-CN.md)
+
 ## ADDED Requirements
 
 ### Requirement: Desktop proxy MUST forward provider requests through IPC with correlation identifiers

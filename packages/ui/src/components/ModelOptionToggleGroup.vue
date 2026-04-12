@@ -4,16 +4,16 @@
     class="model-option-toggle-group"
     data-testid="model-option-toggle-group"
     role="group"
-    aria-label="模型功能开关"
+    :aria-label="t('shared.modelOptions')"
   >
-    <button
+      <button
       v-for="option in options"
       :key="option.key"
       type="button"
       class="toggle-chip"
       :class="{ active: value[option.key] === true }"
       :disabled="disabled"
-      :aria-label="option.label"
+      :aria-label="option.labelKey ? t(option.labelKey) : option.label"
       :aria-pressed="value[option.key] === true"
       :data-testid="`model-option-${option.key}`"
       @click="emit('change', { key: option.key, enabled: value[option.key] !== true })"
@@ -32,8 +32,8 @@
         <span class="switch-thumb" />
       </span>
       <span v-if="option.description" class="toggle-tip" role="tooltip">
-        <strong>{{ option.label }}</strong>
-        <span>{{ option.description }}</span>
+        <strong>{{ option.labelKey ? t(option.labelKey) : option.label }}</strong>
+        <span>{{ option.descriptionKey ? t(option.descriptionKey) : option.description }}</span>
       </span>
     </button>
   </div>
@@ -41,12 +41,15 @@
 
 <script setup lang="ts">
 import type { ModelOptionDefinition } from '@packages/core/config';
+import { useWorkspaceI18n } from '../i18n';
 
 defineProps<{
   options: ModelOptionDefinition[];
   value: Record<string, boolean>;
   disabled?: boolean;
 }>();
+
+const { t } = useWorkspaceI18n();
 
 const emit = defineEmits<{
   (e: 'change', payload: { key: string; enabled: boolean }): void;

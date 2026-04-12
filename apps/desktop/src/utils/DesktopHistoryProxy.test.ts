@@ -60,7 +60,7 @@ describe('DesktopHistoryProxy', () => {
                     type: 'ERROR',
                     requestId: message.requestId,
                     channelId: message.channelId,
-                    error: '桌面历史不可用'
+                    error: 'Desktop history is unavailable.'
                 });
             });
         });
@@ -74,7 +74,7 @@ describe('DesktopHistoryProxy', () => {
         };
 
         const provider = new DesktopHistoryProxy('gemini-web', { channelId: 'desktop-history-error-channel' });
-        await expect(provider.getHistoryDetail('external-id')).rejects.toThrow('桌面历史不可用');
+        await expect(provider.getHistoryDetail('external-id')).rejects.toThrow('Desktop history is unavailable.');
         expect(sendProxyRequest).toHaveBeenCalledWith(expect.objectContaining({
             action: 'GET_HISTORY_DETAIL',
             providerId: 'gemini-web'
@@ -91,7 +91,7 @@ describe('DesktopHistoryProxy', () => {
                         type: 'ERROR',
                         requestId: message.requestId,
                         channelId: message.channelId,
-                        error: 'Gemini 页面当前未登录。',
+                        error: 'Gemini page is not signed in.',
                         historyErrorCode: 'AUTH_REQUIRED',
                         historyProviderId: 'gemini-web'
                     });

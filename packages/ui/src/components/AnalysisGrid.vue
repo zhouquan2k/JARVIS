@@ -1,43 +1,44 @@
 <template>
   <div class="analysis-root" data-testid="analysis-grid-root">
     <div v-if="error" class="analysis-error" data-testid="analysis-error">
-      <h4>分析结果解析失败</h4>
+      <h4>{{ t('shared.analysisFailed') }}</h4>
       <p>{{ error }}</p>
       <pre v-if="rawText">{{ rawText }}</pre>
     </div>
 
     <div v-else-if="result" class="analysis-grid" data-testid="analysis-grid">
       <section class="panel agreements">
-        <h4>共识</h4>
+        <h4>{{ t('shared.consensus') }}</h4>
         <p>{{ result.agreements }}</p>
       </section>
       <section class="panel">
-        <h4>Model A 独有</h4>
+        <h4>{{ t('shared.uniqueA') }}</h4>
         <p>{{ result.uniqueA }}</p>
       </section>
       <section class="panel">
-        <h4>Model B 独有</h4>
+        <h4>{{ t('shared.uniqueB') }}</h4>
         <p>{{ result.uniqueB }}</p>
       </section>
       <section class="panel">
-        <h4>Model A 分歧</h4>
+        <h4>{{ t('shared.conflictsA') }}</h4>
         <p>{{ result.conflictsA }}</p>
       </section>
       <section class="panel">
-        <h4>Model B 分歧</h4>
+        <h4>{{ t('shared.conflictsB') }}</h4>
         <p>{{ result.conflictsB }}</p>
       </section>
     </div>
 
     <div v-else class="analysis-streaming" data-testid="analysis-streaming">
-      <h4>{{ loading ? '分析流进行中' : '等待分析结果' }}</h4>
-      <pre>{{ rawText || '分析准备中...' }}</pre>
+      <h4>{{ loading ? t('shared.analysisStreaming') : t('shared.waitingAnalysis') }}</h4>
+      <pre>{{ rawText || t('shared.analysisPreparing') }}</pre>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import type { AnalysisResult } from '@packages/core/src';
+import { useWorkspaceI18n } from '../i18n';
 
 defineProps<{
   result: AnalysisResult | null;
@@ -45,6 +46,8 @@ defineProps<{
   loading: boolean;
   error: string | null;
 }>();
+
+const { t } = useWorkspaceI18n();
 </script>
 
 <style scoped>

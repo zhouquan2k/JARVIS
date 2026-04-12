@@ -73,7 +73,7 @@ export class GeminiHistoryTabBridge {
                 active: false
             });
             if (!createdTab.id) {
-                throw new ExternalHistoryError('TAB_UNAVAILABLE', '无法创建 Gemini 后台标签页。', {
+                throw new ExternalHistoryError('TAB_UNAVAILABLE', 'Unable to create a Gemini background tab.', {
                     providerId: 'gemini-web'
                 });
             }
@@ -83,7 +83,7 @@ export class GeminiHistoryTabBridge {
         }
 
         if (tab.id === undefined) {
-            throw new ExternalHistoryError('TAB_UNAVAILABLE', 'Gemini 标签页状态异常。', {
+            throw new ExternalHistoryError('TAB_UNAVAILABLE', 'Gemini tab is in an invalid state.', {
                 providerId: 'gemini-web'
             });
         }
@@ -139,7 +139,7 @@ export class GeminiHistoryTabBridge {
         }
 
         if (/accounts\.google\.com|ServiceLogin/i.test(currentUrl)) {
-            throw new ExternalHistoryError('AUTH_REQUIRED', 'Gemini 标签页跳转到了登录页，请先完成登录后再重试。', {
+            throw new ExternalHistoryError('AUTH_REQUIRED', 'The Gemini tab navigated to a sign-in page. Please sign in and try again.', {
                 providerId: 'gemini-web'
             });
         }
@@ -149,12 +149,12 @@ export class GeminiHistoryTabBridge {
         }
 
         if (currentUrl.startsWith(this.pageOrigin)) {
-            throw new ExternalHistoryError('TAB_UNAVAILABLE', `Gemini 标签页当前不在可抓取的对话页面：${currentUrl}`, {
+            throw new ExternalHistoryError('TAB_UNAVAILABLE', `Gemini tab is not on a captureable conversation page: ${currentUrl}`, {
                 providerId: 'gemini-web'
             });
         }
 
-        throw new ExternalHistoryError('TAB_UNAVAILABLE', `Gemini 标签页当前不在可抓取页面：${currentUrl}`, {
+        throw new ExternalHistoryError('TAB_UNAVAILABLE', `Gemini tab is not on a captureable page: ${currentUrl}`, {
             providerId: 'gemini-web'
         });
     }
@@ -222,7 +222,7 @@ export class GeminiHistoryTabBridge {
             await sleep(500);
         }
 
-        throw new ExternalHistoryError('TAB_UNAVAILABLE', 'Gemini 内容脚本未就绪，请等待页面加载完成后重试。', {
+        throw new ExternalHistoryError('TAB_UNAVAILABLE', 'Gemini content script is not ready. Please wait for the page to finish loading and try again.', {
             providerId: 'gemini-web'
         });
     }
@@ -236,7 +236,7 @@ export class GeminiHistoryTabBridge {
                 }
             } catch (error) {
                 if (attempt === 3) {
-                    throw new ExternalHistoryError('TAB_UNAVAILABLE', 'Gemini 内容脚本未就绪。', {
+                    throw new ExternalHistoryError('TAB_UNAVAILABLE', 'Gemini content script is not ready.', {
                         providerId: 'gemini-web',
                         cause: error
                     });
@@ -246,7 +246,7 @@ export class GeminiHistoryTabBridge {
             await sleep(300);
         }
 
-        throw new ExternalHistoryError('TAB_UNAVAILABLE', 'Gemini 内容脚本未响应。', {
+        throw new ExternalHistoryError('TAB_UNAVAILABLE', 'Gemini content script did not respond.', {
             providerId: 'gemini-web'
         });
     }

@@ -14,25 +14,25 @@ describe('DocumentFileTree', () => {
             }
         });
 
-        expect(wrapper.get('[data-testid="document-new-file"]').attributes('title')).toBe('新建文件');
-        expect(wrapper.get('[data-testid="document-new-file"]').attributes('aria-label')).toBe('新建文件');
-        expect(wrapper.get('[data-testid="document-refresh-tree"]').attributes('title')).toBe('刷新文件树');
-        expect(wrapper.get('[data-testid="document-refresh-tree"]').attributes('aria-label')).toBe('刷新文件树');
-        expect(wrapper.get('[data-testid="document-delete-node"]').attributes('title')).toBe('删除当前节点');
-        expect(wrapper.get('[data-testid="document-delete-node"]').attributes('aria-label')).toBe('删除当前节点');
-        expect(wrapper.get('[data-testid="document-new-directory"]').attributes('title')).toBe('新建目录');
-        expect(wrapper.get('[data-testid="document-new-directory"]').attributes('aria-label')).toBe('新建目录');
-        expect(wrapper.get('[data-testid="document-node-root"]').text()).toContain('根目录');
+        expect(wrapper.get('[data-testid="document-new-file"]').attributes('title')).toBe('New file');
+        expect(wrapper.get('[data-testid="document-new-file"]').attributes('aria-label')).toBe('New file');
+        expect(wrapper.get('[data-testid="document-refresh-tree"]').attributes('title')).toBe('Refresh file tree');
+        expect(wrapper.get('[data-testid="document-refresh-tree"]').attributes('aria-label')).toBe('Refresh file tree');
+        expect(wrapper.get('[data-testid="document-delete-node"]').attributes('title')).toBe('Delete selected node');
+        expect(wrapper.get('[data-testid="document-delete-node"]').attributes('aria-label')).toBe('Delete selected node');
+        expect(wrapper.get('[data-testid="document-new-directory"]').attributes('title')).toBe('New directory');
+        expect(wrapper.get('[data-testid="document-new-directory"]').attributes('aria-label')).toBe('New directory');
+        expect(wrapper.get('[data-testid="document-node-root"]').text()).toContain('Root');
 
         await wrapper.get('[data-testid="document-new-file"]').trigger('mouseenter');
-        expect(document.body.textContent).toContain('新建文件');
+        expect(document.body.textContent).toContain('New file');
         await wrapper.get('[data-testid="document-new-file"]').trigger('mouseleave');
-        expect(document.body.textContent).not.toContain('新建文件');
+        expect(document.body.textContent).not.toContain('New file');
 
         await wrapper.get('[data-testid="document-new-directory"]').trigger('focus');
-        expect(document.body.textContent).toContain('新建目录');
+        expect(document.body.textContent).toContain('New directory');
         await wrapper.get('[data-testid="document-new-directory"]').trigger('blur');
-        expect(document.body.textContent).not.toContain('新建目录');
+        expect(document.body.textContent).not.toContain('New directory');
     });
 
     it('creates pending nodes inline and emits create events with the resolved parent path', async () => {

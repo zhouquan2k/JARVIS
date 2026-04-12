@@ -7,7 +7,7 @@
     <nav
       v-if="workspaceOptions.length > 0"
       class="workspace-switcher"
-      aria-label="工作区切换"
+      :aria-label="t('topBar.workspaceSwitcher')"
       data-testid="topbar-workspace-switcher"
     >
       <button
@@ -24,7 +24,16 @@
       </button>
     </nav>
     <div class="top-meta">
-      <span v-if="isCompareMode" class="mode-pill">对比聊天</span>
+      <button
+        type="button"
+        class="locale-toggle"
+        data-testid="topbar-locale-toggle"
+        :aria-label="t('topBar.localeSwitch')"
+        @click="toggleLocale"
+      >
+        {{ localeLabel }}
+      </button>
+      <span v-if="isCompareMode" class="mode-pill">{{ t('topBar.compareMode') }}</span>
       <span v-if="isCompareMode" class="compare-stage">{{ compareStageLabel }}</span>
     </div>
   </header>
@@ -33,6 +42,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { ChatRoute, ChatRoutePath } from '../routes';
+import { useWorkspaceI18n } from '../i18n';
 
 type Stage = 'idle' | 'generating' | 'analyzing' | 'completed' | 'failed';
 
@@ -41,7 +51,7 @@ const props = withDefaults(defineProps<{
   isCompareMode: boolean;
   compareStage: Stage;
   activeWorkspacePath?: ChatRoutePath;
-  workspaceOptions?: ReadonlyArray<Pick<ChatRoute, 'path' | 'name' | 'label'>>;
+  workspaceOptions?: ReadonlyArray<Pick<ChatRoute, 'path' | 'name' | 'label' | 'labelKey'>>;
 }>(), {
   title: 'JARVIS',
   activeWorkspacePath: '/',
@@ -52,19 +62,21 @@ const emit = defineEmits<{
   (event: 'navigate-workspace', path: ChatRoutePath): void;
 }>();
 
+const { locale, t, toggleLocale } = useWorkspaceI18n();
+
+const workspaceOptions = computed(() => {
+  return props.workspaceOptions.map((option) => ({
+    ...option,
+    label: option.labelKey ? t(option.labelKey) : option.label
+  }));
+});
+
+const localeLabel = computed(() => {
+  return locale.value === 'en' ? t('topBar.localeEnglish') : t('topBar.localeChinese');
+});
+
 const compareStageLabel = computed(() => {
-  switch (props.compareStage) {
-    case 'generating':
-      return '并发生成中';
-    case 'analyzing':
-      return '分析中';
-    case 'completed':
-      return '已完成';
-    case 'failed':
-      return '失败';
-    default:
-      return '待开始';
-  }
+  return t(`topBar.stage.${props.compareStage}`);
 });
 
 const brandIconSrc = '/jarvis.png';
@@ -145,6 +157,21 @@ const brandIconSrc = '/jarvis.png';
   display: inline-flex;
   align-items: center;
   gap: 8px;
+}
+
+.locale-toggle {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: #d1d5db;
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.locale-toggle:hover {
+  background: rgba(255, 255, 255, 0.09);
 }
 
 .mode-pill,

@@ -6,11 +6,11 @@
           type="button"
           class="tree-icon-button"
           data-testid="document-refresh-tree"
-          title="刷新文件树"
-          aria-label="刷新文件树"
-          @mouseenter="showTooltip($event, '刷新文件树')"
+          :title="t('shared.refreshTree')"
+          :aria-label="t('shared.refreshTree')"
+          @mouseenter="showTooltip($event, t('shared.refreshTree'))"
           @mouseleave="hideTooltip"
-          @focus="showTooltip($event, '刷新文件树')"
+          @focus="showTooltip($event, t('shared.refreshTree'))"
           @blur="hideTooltip"
           @click="emit('refresh')"
         >
@@ -20,12 +20,12 @@
           type="button"
           class="tree-icon-button"
           data-testid="document-delete-node"
-          title="删除当前节点"
-          aria-label="删除当前节点"
+          :title="t('shared.deleteSelectedNode')"
+          :aria-label="t('shared.deleteSelectedNode')"
           :disabled="!canDeleteSelectedNode"
-          @mouseenter="showTooltip($event, '删除当前节点')"
+          @mouseenter="showTooltip($event, t('shared.deleteSelectedNode'))"
           @mouseleave="hideTooltip"
-          @focus="showTooltip($event, '删除当前节点')"
+          @focus="showTooltip($event, t('shared.deleteSelectedNode'))"
           @blur="hideTooltip"
           @click="beginDeleteConfirmation"
         >
@@ -35,11 +35,11 @@
           type="button"
           class="tree-icon-button"
           data-testid="document-new-file"
-          title="新建文件"
-          aria-label="新建文件"
-          @mouseenter="showTooltip($event, '新建文件')"
+          :title="t('shared.createFile')"
+          :aria-label="t('shared.createFile')"
+          @mouseenter="showTooltip($event, t('shared.createFile'))"
           @mouseleave="hideTooltip"
-          @focus="showTooltip($event, '新建文件')"
+          @focus="showTooltip($event, t('shared.createFile'))"
           @blur="hideTooltip"
           @click="createNode('file')"
         >
@@ -49,11 +49,11 @@
           type="button"
           class="tree-icon-button"
           data-testid="document-new-directory"
-          title="新建目录"
-          aria-label="新建目录"
-          @mouseenter="showTooltip($event, '新建目录')"
+          :title="t('shared.createDirectory')"
+          :aria-label="t('shared.createDirectory')"
+          @mouseenter="showTooltip($event, t('shared.createDirectory'))"
           @mouseleave="hideTooltip"
-          @focus="showTooltip($event, '新建目录')"
+          @focus="showTooltip($event, t('shared.createDirectory'))"
           @blur="hideTooltip"
           @click="createNode('directory')"
         >
@@ -76,10 +76,10 @@
       </div>
       <div class="tree-confirm-actions">
         <button type="button" class="tree-confirm-button danger" data-testid="document-delete-confirm-yes" @click="confirmDelete">
-          确认删除
+          {{ t('shared.confirmDelete') }}
         </button>
         <button type="button" class="tree-confirm-button" data-testid="document-delete-confirm-no" @click="cancelDeleteConfirmation">
-          取消
+          {{ t('shared.cancel') }}
         </button>
       </div>
     </div>
@@ -108,7 +108,7 @@
           v-model="inlineEdit.name"
           class="tree-inline-input"
           :data-testid="inlineEdit.mode === 'create' ? 'document-pending-node-input' : 'document-rename-node-input'"
-          :placeholder="inlineEdit.kind === 'file' ? '输入文件名' : '输入目录名'"
+          :placeholder="inlineEdit.kind === 'file' ? t('shared.inputFileName') : t('shared.inputDirectoryName')"
           @click.stop
           @keydown.enter.prevent="submitInlineEdit"
           @keydown.esc.prevent="cancelInlineEdit"
@@ -143,6 +143,7 @@
 import { computed, nextTick, reactive, ref } from 'vue';
 import { Bot, FilePlus, FolderPlus, RefreshCw, Trash2 } from 'lucide-vue-next';
 import type { ContextNode } from '@packages/core/src';
+import { useWorkspaceI18n } from '../i18n';
 
 const props = defineProps<{
   nodes: ContextNode[];
@@ -185,6 +186,7 @@ const deleteConfirmation = reactive<{
   path: null,
   message: ''
 });
+const { t } = useWorkspaceI18n();
 
 const activeNode = computed(() => {
   if (!props.activePath || props.activePath === '/') {
@@ -228,7 +230,7 @@ const childrenByParent = computed(() => {
 const visibleNodes = computed(() => {
   const rootNode: ContextNode = {
     path: '/',
-    name: '根目录',
+    name: t('shared.rootDirectory'),
     kind: 'directory',
     hasChildren: true,
     agentKey: '__default__'
@@ -316,8 +318,8 @@ function beginDeleteConfirmation() {
   deleteConfirmation.active = true;
   deleteConfirmation.path = activeNode.value.path;
   deleteConfirmation.message = activeNode.value.kind === 'directory'
-    ? `确认删除目录“${activeNode.value.name}”及其全部内容？`
-    : `确认删除文件“${activeNode.value.name}”？`;
+    ? t('shared.confirmDeleteDirectory', { name: activeNode.value.name })
+    : t('shared.confirmDeleteFile', { name: activeNode.value.name });
 }
 
 function confirmDelete() {

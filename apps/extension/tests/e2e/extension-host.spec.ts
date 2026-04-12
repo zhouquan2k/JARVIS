@@ -114,7 +114,7 @@ test('extension host supports external provider switching, Gemini preview/error 
     await expect(page.getByTestId('external-history-item')).toHaveCount(2);
     await expect(page.getByTestId('history-imported-badge').first()).toBeVisible();
     await page.getByTestId('external-history-item').nth(1).click();
-    await expect(page.getByTestId('normal-error')).toContainText('页面结构已变化');
+    await expect(page.getByTestId('normal-error')).toContainText('Gemini page structure has changed');
 
     const fileChooserPromise = page.waitForEvent('filechooser');
     await page.getByTestId('external-provider-external-file').click();
@@ -241,6 +241,8 @@ test('extension knowledge workspace negotiates text pdf and unsupported document
     await expect(page.getByTestId('document-pdf-viewer')).toBeVisible();
     await expect(page.getByTestId('document-save')).toBeDisabled();
 
+    await page.getByTestId('agent-conversation-list-plus').click();
+    await expect(page.getByTestId('normal-input')).toBeVisible();
     await page.getByTestId('normal-input').fill('TRIGGER_ATTACHMENT_ECHO');
     await page.getByTestId('normal-send').click();
     await expect(page.getByTestId('normal-messages')).toContainText('report.pdf [application/pdf]');
@@ -255,6 +257,8 @@ test('extension knowledge workspace negotiates text pdf and unsupported document
     await page.getByTestId('document-node-file').filter({ hasText: 'archive.bin' }).click();
     await expect(page.getByTestId('document-unsupported-viewer')).toContainText('application/octet-stream');
 
+    await page.getByTestId('agent-conversation-list-plus').click();
+    await expect(page.getByTestId('normal-input')).toBeVisible();
     await page.getByTestId('normal-input').fill('TRIGGER_ATTACHMENT_ECHO');
     await page.getByTestId('normal-send').click();
     await expect(page.getByTestId('normal-messages')).not.toContainText('archive.bin [application/octet-stream]');
@@ -280,6 +284,8 @@ test('extension knowledge workspace shows AgentView for owner directories and li
     const overviewDocument = page.getByTestId('agent-view-document').filter({ hasText: 'overview.md' });
     await expect(overviewDocument).toHaveCount(1);
 
+    await page.getByTestId('agent-conversation-list-plus').click();
+    await expect(page.getByTestId('normal-input')).toBeVisible();
     await page.getByTestId('normal-input').fill('Extension docs owner');
     await page.getByTestId('normal-send').click();
     const docsConversation = page.getByTestId('agent-view-conversation').filter({ hasText: 'Extension docs owner' });
@@ -322,7 +328,7 @@ test('extension host rejects syncKey=0 outside development', async () => {
   const session = await launchExtensionPage({ syncKey: '0' });
   try {
     const { page } = session;
-    await expect(page.getByTestId('normal-error')).toContainText('syncKey=0 仅允许在开发环境使用');
+    await expect(page.getByTestId('normal-error')).toContainText('syncKey=0 is only allowed in development');
     await expect(page.getByTestId('normal-input')).toBeDisabled();
     const events = await readMockSyncEvents(page);
     expect(events.filter((event: { type: string }) => event.type === 'push')).toHaveLength(0);

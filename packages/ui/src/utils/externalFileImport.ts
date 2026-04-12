@@ -1,4 +1,5 @@
 import { normalizeConversationMessage, type Conversation } from '@packages/core/src';
+import { translateWorkspaceMessage } from '../i18n';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -23,7 +24,7 @@ function normalizeImportedConversation(value: unknown, index: number, fileName: 
 
     return {
         id: crypto.randomUUID(),
-        title: typeof value.title === 'string' && value.title.trim() ? value.title.trim() : `导入会话 ${index + 1}`,
+        title: typeof value.title === 'string' && value.title.trim() ? value.title.trim() : translateWorkspaceMessage('shared.importConversationTitle', { index: index + 1 }),
         origin: 'external-file',
         backendId: typeof value.backendId === 'string' && value.backendId ? value.backendId : externalId,
         externalId,
@@ -68,7 +69,7 @@ export async function openConversationImportDialog(): Promise<Conversation[] | n
                 const text = await file.text();
                 const conversations = parseConversationImportPayload(text, file.name);
                 if (conversations.length === 0) {
-                    reject(new Error('未识别到可导入的会话 JSON。'));
+                    reject(new Error(translateWorkspaceMessage('shared.noImportableConversationJson')));
                     return;
                 }
 
