@@ -5,7 +5,7 @@ import { HttpContextService } from '../services/httpContextService.js';
 import type { ContextSearchRequest, CreateContextNodeInput, RenameContextNodeInput, WriteContextDocumentInput } from '../types/context.js';
 
 const ALLOW_HEADERS = 'content-type';
-const ALLOW_METHODS = 'POST, OPTIONS';
+const ALLOW_METHODS = 'GET, POST, OPTIONS';
 
 function resolveCorsOrigin(origin: string | undefined, config: ServerConfig): string | null {
     if (!origin) {
@@ -201,6 +201,24 @@ export function createContextRouter(options: { service: HttpContextService; conf
             return c.json({ document: await service.readDocument(normalizeRequiredPath(body)) });
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to read document.';
+            return c.json({ error: message }, 400);
+        }
+    });
+
+    app.get('/document-asset', async (c) => {
+        try {
+            const path = c.req.query('path');
+            if (typeof path !== 'string' || !path.trim()) {
+                throw new Error('path must not be empty.');
+            }
+
+            const document = await service.readDocument(path);
+
+            c.header('Content-Type', document.mimeType);
+            c.header('Cache-Control', 'no-store');
+            return c.body(Buffer.from(document.dataBase64, 'base64'));
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to read document asset.';
             return c.json({ error: message }, 400);
         }
     });

@@ -4,21 +4,50 @@
       <div class="editor-meta">
         <span class="editor-path">{{ activePathLabel }}</span>
       </div>
-      <button
-        type="button"
-        class="save-button"
-        data-testid="document-save"
-        :title="saveButtonLabel"
-        :aria-label="saveButtonLabel"
-        :disabled="!canSave || isSaving"
-        @mouseenter="showTooltip($event, saveButtonLabel)"
-        @mouseleave="hideTooltip"
-        @focus="showTooltip($event, saveButtonLabel)"
-        @blur="hideTooltip"
-        @click="emit('save')"
-      >
-        <Save class="save-icon" :size="18" aria-hidden="true" />
-      </button>
+      <div class="editor-actions">
+        <div
+          v-if="isMarkdownDocument"
+          class="mode-switch"
+          data-testid="markdown-mode-switch"
+          :aria-label="t('shared.markdownModeSwitch')"
+        >
+          <button
+            type="button"
+            class="mode-switch-button"
+            data-testid="markdown-mode-viewer"
+            :class="{ active: markdownViewerMode === 'viewer' }"
+            :aria-pressed="markdownViewerMode === 'viewer'"
+            @click="switchMarkdownViewerMode('viewer')"
+          >
+            {{ t('shared.markdownViewerMode') }}
+          </button>
+          <button
+            type="button"
+            class="mode-switch-button"
+            data-testid="markdown-mode-edit"
+            :class="{ active: markdownViewerMode === 'edit' }"
+            :aria-pressed="markdownViewerMode === 'edit'"
+            @click="switchMarkdownViewerMode('edit')"
+          >
+            {{ t('shared.markdownEditMode') }}
+          </button>
+        </div>
+        <button
+          type="button"
+          class="save-button"
+          data-testid="document-save"
+          :title="saveButtonLabel"
+          :aria-label="saveButtonLabel"
+          :disabled="!canSave || isSaving"
+          @mouseenter="showTooltip($event, saveButtonLabel)"
+          @mouseleave="hideTooltip"
+          @focus="showTooltip($event, saveButtonLabel)"
+          @blur="hideTooltip"
+          @click="emit('save')"
+        >
+          <Save class="save-icon" :size="18" aria-hidden="true" />
+        </button>
+      </div>
     </header>
     <Teleport to="body">
       <div
@@ -129,9 +158,11 @@ import { useWorkspaceI18n } from '../i18n';
 import {
   createMarkdownEditor,
   destroyMarkdownEditor,
+  normalizeMarkdownViewerContent,
   readMarkdownDocument,
   replaceMarkdownDocument,
-  type MarkdownEditor
+  type MarkdownEditor,
+  type MarkdownViewerMode
 } from '../utils/markdownDocument';
 
 const props = defineProps<{
@@ -175,8 +206,12 @@ const saveButtonLabel = computed(() => {
 
   return props.isSaving ? t('shared.saving') : t('shared.save');
 });
+const isMarkdownDocument = computed(() => {
+  return props.activeViewerId === 'text' && props.activeDocument?.mimeType === 'text/markdown';
+});
 const editorRoot = ref<HTMLElement | null>(null);
 const pdfBlobUrl = ref<string | null>(null);
+const markdownViewerMode = ref<MarkdownViewerMode>('viewer');
 const pdfOpenHref = computed(() => {
   const document = props.activeDocument;
   if (document?.mimeType !== 'application/pdf') {
@@ -196,6 +231,26 @@ let editor: MarkdownEditor | null = null;
 let creationToken = 0;
 let isApplyingExternalSync = false;
 let lastKnownMarkdown = '';
+let activeEditorMode: MarkdownViewerMode | null = null;
+
+function getMarkdownContentForCurrentMode(content: string): string {
+  return isMarkdownDocument.value && markdownViewerMode.value === 'viewer'
+    ? normalizeMarkdownViewerContent(content)
+    : content;
+}
+
+watch(() => [props.activePath, props.activeDocument?.mimeType] as const, async ([, mimeType]) => {
+  if (mimeType === 'text/markdown') {
+    markdownViewerMode.value = 'viewer';
+
+    if (props.activePath && props.activeViewerId === 'text' && activeEditorMode !== 'viewer') {
+      const currentMarkdown = lastKnownMarkdown || props.modelValue;
+      await teardownEditor();
+      await nextTick();
+      await ensureEditor(currentMarkdown);
+    }
+  }
+});
 
 watch(() => [props.activePath, props.activeViewerId, props.modelValue] as const, async ([activePath, activeViewerId, modelValue], previousValue) => {
   const previousPath = previousValue?.[0] ?? null;
@@ -246,12 +301,24 @@ async function ensureEditor(content: string) {
   }
 
   const token = ++creationToken;
+  const renderedContent = getMarkdownContentForCurrentMode(content);
   const instance = await createMarkdownEditor({
     root: editorRoot.value,
-    content,
+    content: renderedContent,
+    mode: isMarkdownDocument.value ? markdownViewerMode.value : 'edit',
+    documentPath: props.activeDocument?.path ?? props.activePath,
     onChange(markdown) {
       lastKnownMarkdown = markdown;
       if (isApplyingExternalSync || !props.activePath) {
+        return;
+      }
+
+      // In viewer mode the editor operates on normalized content (e.g. wiki embeds converted
+      // to standard markdown).  If the emitted content is identical to what normalisation
+      // produces from the current model value, no real user edit has occurred — suppress the
+      // update so the source file is not modified by merely opening it in viewer mode.
+      if (isMarkdownDocument.value && markdownViewerMode.value === 'viewer'
+          && markdown === normalizeMarkdownViewerContent(props.modelValue)) {
         return;
       }
 
@@ -265,7 +332,29 @@ async function ensureEditor(content: string) {
   }
 
   editor = instance;
-  lastKnownMarkdown = readMarkdownDocument(instance);
+  activeEditorMode = isMarkdownDocument.value ? markdownViewerMode.value : 'edit';
+  lastKnownMarkdown = content;
+}
+
+async function switchMarkdownViewerMode(nextMode: MarkdownViewerMode) {
+  if (markdownViewerMode.value === nextMode || !isMarkdownDocument.value) {
+    return;
+  }
+
+  // When leaving viewer mode, use the original model value (disk content) rather than
+  // lastKnownMarkdown which holds normalised editor content (e.g. converted wiki embeds).
+  // This preserves source syntax like ![[image.png]] when the user switches to edit mode.
+  const currentMarkdown = markdownViewerMode.value === 'viewer'
+    ? props.modelValue
+    : editor ? readMarkdownDocument(editor) : lastKnownMarkdown || props.modelValue;
+  lastKnownMarkdown = currentMarkdown;
+  if (currentMarkdown !== props.modelValue) {
+    emit('update:modelValue', currentMarkdown);
+  }
+  await teardownEditor();
+  markdownViewerMode.value = nextMode;
+  await nextTick();
+  await ensureEditor(currentMarkdown);
 }
 
 function syncEditorContent(content: string) {
@@ -274,8 +363,8 @@ function syncEditorContent(content: string) {
   }
 
   isApplyingExternalSync = true;
-  replaceMarkdownDocument(editor, content);
-  lastKnownMarkdown = readMarkdownDocument(editor);
+  replaceMarkdownDocument(editor, getMarkdownContentForCurrentMode(content));
+  lastKnownMarkdown = content;
   queueMicrotask(() => {
     isApplyingExternalSync = false;
   });
@@ -285,6 +374,7 @@ async function teardownEditor() {
   creationToken += 1;
   const currentEditor = editor;
   editor = null;
+  activeEditorMode = null;
   lastKnownMarkdown = '';
 
   await destroyMarkdownEditor(currentEditor);
@@ -354,6 +444,43 @@ function revokePdfBlobUrl() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.mode-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.62);
+}
+
+.mode-switch-button {
+  border: 0;
+  border-radius: 6px;
+  min-width: 52px;
+  height: 26px;
+  padding: 0 10px;
+  color: rgba(226, 232, 240, 0.78);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.mode-switch-button:hover,
+.mode-switch-button:focus-visible,
+.mode-switch-button.active {
+  color: #f8fafc;
+  background: rgba(14, 165, 233, 0.26);
 }
 
 .save-button {
@@ -517,13 +644,76 @@ function revokePdfBlobUrl() {
 }
 
 .editor-input :deep(.milkdown .ProseMirror pre) {
-  border-radius: 14px;
+  border-radius: 8px;
   background: rgba(15, 23, 42, 0.9);
 }
 
 .editor-input :deep(.milkdown .ProseMirror code) {
   border-radius: 6px;
   background: rgba(15, 23, 42, 0.72);
+}
+
+.editor-input :deep(.milkdown .milkdown-code-block .hidden) {
+  display: none !important;
+}
+
+.editor-input :deep(.milkdown .milkdown-code-block .preview-panel .preview) {
+  max-width: 100%;
+  overflow-x: auto;
+  text-align: center;
+}
+
+.editor-input :deep(.milkdown .milkdown-code-block:has(.markdown-mermaid-preview) .tools) {
+  display: none;
+}
+
+.editor-input :deep(.milkdown .ProseMirror img),
+.editor-input :deep(.milkdown-image-inline img),
+.editor-input :deep(.milkdown-image-block img) {
+  max-width: 100%;
+  height: auto;
+}
+
+.editor-input :deep(.markdown-mermaid-preview) {
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 12px;
+  border-radius: 8px;
+  background: #080d14;
+}
+
+.editor-input :deep(.markdown-mermaid-preview svg) {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+.editor-input :deep(.markdown-mermaid-error) {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  border-radius: 8px;
+  color: #fecaca;
+  background: rgba(127, 29, 29, 0.26);
+  white-space: pre-wrap;
+}
+
+.editor-input :deep(.milkdown .ProseMirror p:has(a[href$='.pdf' i])) {
+  display: none;
+}
+
+.editor-input :deep(.pdf-inline-embed) {
+  width: 100%;
+  margin: 12px 0;
+}
+
+.editor-input :deep(.pdf-inline-embed iframe) {
+  width: 100%;
+  height: 500px;
+  border: 0;
 }
 
 .file-change-panel {

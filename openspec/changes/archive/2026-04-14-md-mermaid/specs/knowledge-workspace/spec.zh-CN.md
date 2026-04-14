@@ -1,9 +1,5 @@
 [English](spec.md) | 中文
 
-## 中文镜像
-
-此文件是英文主文件的中文镜像。为了保持规范一致，要求与同目录英文主文件保持相同的能力语义。
-
 ## ADDED Requirements
 
 ### 需求：知识工作区 Markdown viewer SHALL 提供 viewer 和 edit 模式

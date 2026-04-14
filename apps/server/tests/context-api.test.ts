@@ -178,6 +178,45 @@ describe('context api', () => {
         });
     });
 
+    it('serves image documents through /api/context/document-asset', async () => {
+        const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-context-'));
+        tempRoots.push(rootPath);
+        const imageBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+        const pdfBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+        await mkdir(path.join(rootPath, 'images'));
+        await writeFile(path.join(rootPath, 'images', 'flow.png'), imageBytes);
+        await writeFile(path.join(rootPath, 'welcome.md'), '# Welcome\n');
+        await writeFile(path.join(rootPath, 'guide.pdf'), pdfBytes);
+
+        const app = createApp({
+            config: createConfig({
+                isDevelopment: true,
+                knowledgeRoot: rootPath
+            })
+        });
+
+        const imageResponse = await app.request('/api/context/document-asset?path=%2Fimages%2Fflow.png', {
+            method: 'GET'
+        });
+        expect(imageResponse.status).toBe(200);
+        expect(imageResponse.headers.get('content-type')).toContain('image/png');
+        expect(new Uint8Array(await imageResponse.arrayBuffer())).toEqual(imageBytes);
+
+        const markdownResponse = await app.request('/api/context/document-asset?path=%2Fwelcome.md', {
+            method: 'GET'
+        });
+        expect(markdownResponse.status).toBe(200);
+        expect(markdownResponse.headers.get('content-type')).toContain('text/markdown');
+        expect(await markdownResponse.text()).toBe('# Welcome\n');
+
+        const pdfResponse = await app.request('/api/context/document-asset?path=%2Fguide.pdf', {
+            method: 'GET'
+        });
+        expect(pdfResponse.status).toBe(200);
+        expect(pdfResponse.headers.get('content-type')).toContain('application/pdf');
+        expect(new Uint8Array(await pdfResponse.arrayBuffer())).toEqual(pdfBytes);
+    });
+
     it('rejects out-of-root traversal and supports context route cors', async () => {
         const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-context-'));
         tempRoots.push(rootPath);
@@ -209,7 +248,7 @@ describe('context api', () => {
         });
         expect(rejected.status).toBe(400);
         await expect(rejected.json()).resolves.toEqual({
-            error: '路径超出知识工作区根目录: /../secret.md'
+            error: 'Path escapes the knowledge workspace root: /../secret.md'
         });
     });
 

@@ -130,6 +130,9 @@ classDiagram
 
 ## 说明
 
-- `Conversation.documentPaths` 是按文档维度查询会话的持久化基础。
-- `IContextProvider.getConversations(query)` 是工作区面板使用的统一查询入口。
-- `AgentConversationPanel` 负责列表/详情状态，`IContextProvider` 负责数据查询。
+* `Conversation.documentPaths` 是按文档维度查询会话的持久化基础。
+
+* `IContextProvider.getConversations(query)` 是工作区面板使用的统一查询入口。
+
+* `AgentConversationPanel` 负责列表/详情状态，`IContextProvider` 负责数据查询。
+

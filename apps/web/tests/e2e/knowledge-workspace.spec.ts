@@ -130,6 +130,65 @@ test('web knowledge workspace negotiates text pdf and unsupported document reque
   await expect(page.getByTestId('normal-messages')).not.toContainText('archive.bin [application/octet-stream]');
 });
 
+test('web knowledge workspace renders markdown mermaid and images while preserving mode switches', async ({ page }) => {
+  await page.goto('/#/');
+
+  await expect(page.getByTestId('document-workspace')).toBeVisible();
+  await page.getByTestId('document-node-file').filter({ hasText: 'md-mermaid.md' }).click();
+
+  await expect(page.getByTestId('markdown-mode-switch')).toBeVisible();
+  await expect(page.getByTestId('markdown-mode-viewer')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('document-editor')).toContainText('Normal Markdown paragraph for viewer mode.');
+  await expect(page.getByTestId('markdown-mermaid-preview')).toBeVisible();
+  const mermaidBlock = page.locator('.milkdown-code-block').filter({
+    has: page.getByTestId('markdown-mermaid-preview')
+  });
+  await expect(mermaidBlock.locator('.tools')).toBeHidden();
+  await expect(mermaidBlock.locator('.codemirror-host')).toBeHidden();
+  await expect(page.getByTestId('markdown-mermaid-preview')).toHaveCSS('background-color', 'rgb(8, 13, 20)');
+  await expect(page.getByTestId('markdown-mermaid-preview').locator('svg text')).toContainText([
+    'Draft',
+    'Preview'
+  ]);
+  await expect(page.locator('[data-testid="document-editor-surface"] img')).toHaveCount(1);
+  await expect(page.locator('[data-testid="document-editor-surface"] img[src*=\"document-asset?path=%2Freferences%2Fflow.svg\"]')).toHaveCount(1);
+
+  await page.getByTestId('markdown-mode-edit').click();
+  await expect(page.getByTestId('markdown-mode-edit')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('document-editor-input')).toContainText('classDiagram');
+  await expect(page.getByTestId('document-editor-input')).toContainText('Draft --> Preview');
+
+  await page.getByTestId('markdown-mode-viewer').click();
+  await expect(page.getByTestId('markdown-mode-viewer')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('document-editor')).toContainText('Normal Markdown paragraph for viewer mode.');
+  await expect(page.getByTestId('markdown-mermaid-preview')).toBeVisible();
+  await expect(page.locator('.milkdown-code-block').filter({
+    has: page.getByTestId('markdown-mermaid-preview')
+  }).locator('.tools')).toBeHidden();
+  await expect(page.locator('.milkdown-code-block').filter({
+    has: page.getByTestId('markdown-mermaid-preview')
+  }).locator('.codemirror-host')).toBeHidden();
+  await expect(page.locator('[data-testid="document-editor-surface"] img')).toHaveCount(1);
+  await expect(page.locator('[data-testid="document-editor-surface"] img[src*=\"document-asset?path=%2Freferences%2Fflow.svg\"]')).toHaveCount(1);
+});
+
+test('web knowledge workspace renders pdf wiki embeds as inline iframes', async ({ page }) => {
+  await page.goto('/#/');
+
+  await page.getByTestId('document-node-file').filter({ hasText: 'pdf-embed.md' }).click();
+
+  await expect(page.getByTestId('markdown-mode-switch')).toBeVisible();
+  await expect(page.getByTestId('markdown-mode-viewer')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('document-editor')).toContainText('Normal Markdown paragraph for PDF viewer fallback.');
+  await expect(page.locator('[data-testid="document-editor-surface"] img')).toHaveCount(0);
+  const pdfEmbed = page.locator('[data-testid="document-editor-surface"] .pdf-inline-embed iframe');
+  await expect(pdfEmbed).toBeVisible();
+  await expect(pdfEmbed).toHaveAttribute(
+    'src',
+    /document-asset\?path=%2Freferences%2FCustomer_Transactions_4047340\.pdf$/
+  );
+});
+
 test('web knowledge workspace shows AgentView for owner directories and links documents plus conversations', async ({ page }) => {
   await page.goto('/#/');
 
