@@ -1,54 +1,54 @@
-English | [中文](spec.zh-CN.md)
+English | [Chinese](spec.zh-CN.md)
 
 ## MODIFIED Requirements
 
 ### Requirement: Implementation of Gemini API via SSE
-系统 MUST 接入 Google Gemini API 以提供原生的大语言模型能力，并通过统一的流式快照契约输出标准化的 `text + annotations` 结果。该实现 MUST 同时消费 `modelId` 与规范化后的 `modelOptions`，以便在普通聊天、Deep Research 与第一阶段原生 Agent 模式之间切换 Gemini 侧请求行为。对于第一阶段原生 Agent 请求，系统 MUST 优先复用现有 `streamGenerateContent` 路径，而不是切换到 Live API 或新的实时 session 形态。
+The system MUST integrate with the Google Gemini API to provide native large language model capability and output standardized `text + annotations` results through a unified streaming snapshot contract. The implementation MUST consume both `modelId` and normalized `modelOptions` so Gemini request behavior can switch among normal chat, Deep Research, and the phase-one native agent mode. For phase-one native agent requests, the system MUST prefer reusing the existing `streamGenerateContent` path rather than switching to Live API or a new real-time session form.
 
 #### Scenario: Streaming response generation for standard chat
-- **WHEN** 收到发往 Gemini 提供商的普通聊天请求，并附带了 `modelId`
-- **THEN** Provider MUST 调用 Google Generative AI 端点，且响应模式为 SSE（Server-Sent Events），确保前端能收到流式的完整正文快照
-- **AND** 这些快照 MUST 通过统一的 `onUpdate` 契约返回，而不是仅返回原始分片文本
+- **WHEN** a normal chat request is sent to the Gemini provider with `modelId`
+- **THEN** the provider MUST call the Google Generative AI endpoint using SSE (Server-Sent Events) response mode so the frontend can receive streaming full-text snapshots
+- **AND** those snapshots MUST be returned through the unified `onUpdate` contract rather than only raw chunk text
 
 #### Scenario: Enable deep research mode for Gemini request
-- **WHEN** `sendMessage` 收到 `options.modelOptions.deep_research = true`
-- **THEN** Provider MUST 将该标记翻译为 Gemini 兼容的 Deep Research 请求行为
-- **AND** 当该标记缺失或为 `false` 时，Provider MUST 保持现有普通聊天请求路径不变
+- **WHEN** `sendMessage` receives `options.modelOptions.deep_research = true`
+- **THEN** the provider MUST translate that flag into Gemini-compatible Deep Research request behavior
+- **AND** when that flag is missing or `false`, the provider MUST keep the existing normal chat request path unchanged
 
 #### Scenario: Stream native agent request through the existing content API
-- **WHEN** Gemini Provider 收到一次原生 Agent 执行请求
-- **THEN** Provider MUST 继续基于现有 `streamGenerateContent` 或等价内容生成流式端点发起请求
-- **AND** Provider MUST NOT 在第一阶段要求上层切换到 WebSocket Live API 会话模型
+- **WHEN** the Gemini provider receives a native agent execution request
+- **THEN** the provider MUST continue issuing the request through the existing `streamGenerateContent` or equivalent content-generation streaming endpoint
+- **AND** the provider MUST NOT require the caller to switch to a WebSocket Live API session model in phase one
 
 ## ADDED Requirements
 
 ### Requirement: Gemini provider MUST expose native agent execution capability
-系统 MUST 允许 Gemini Provider 在保留普通聊天能力的同时，显式声明其支持原生 Agent 执行，并接收当前已解析的 Agent 配置作为运行时输入。
+The system MUST allow the Gemini provider to explicitly declare support for native agent execution while retaining normal chat capability, and it MUST accept the currently resolved agent configuration as runtime input.
 
 #### Scenario: Declare native agent capability on Gemini provider
-- **WHEN** 运行时请求 Gemini Provider 的能力声明
-- **THEN** Provider MUST 明确表明其支持原生 Agent 执行
-- **AND** 该能力声明 MUST 可被 `AgentRuntime` 用于执行路径选择
+- **WHEN** the runtime requests the Gemini provider's capability declaration
+- **THEN** the provider MUST clearly indicate that it supports native agent execution
+- **AND** that capability declaration MUST be usable by `AgentRuntime` for execution-path selection
 
 #### Scenario: Execute native agent request with the current resolved agent config
-- **WHEN** `AgentRuntime` 将当前 `ResolvedAgentConfig` 与请求上下文传递给 Gemini Provider
-- **THEN** Provider MUST 使用该配置中的模型、指令与能力边界构造 Gemini Agent 请求
-- **AND** Provider MUST 继续通过标准化的流式文本更新契约向上返回结果
+- **WHEN** `AgentRuntime` passes the current `ResolvedAgentConfig` and request context to the Gemini provider
+- **THEN** the provider MUST construct the Gemini agent request using the model, instructions, and capability boundaries from that configuration
+- **AND** the provider MUST continue returning results through the standardized streaming text update contract
 
 ### Requirement: Gemini native agent execution MUST support application-managed tool loop in phase one
-系统 MUST 允许第一阶段 Gemini 原生 Agent 请求通过 Gemini function calling / tools 机制工作，并由应用侧运行时维护多步 tool loop，而不是把完整的工具循环封装为新的传输协议。
+The system MUST allow phase-one Gemini native agent requests to work through Gemini function calling/tools, and the application-side runtime MUST maintain the multi-step tool loop rather than wrapping the full tool loop in a new transport protocol.
 
 #### Scenario: Send tool declarations with a native agent request
-- **WHEN** Gemini Provider 发起一次原生 Agent 请求且当前 Agent 具有可用工具边界
-- **THEN** Provider MUST 在 Gemini 请求中携带对应的 tools / function calling 配置
-- **AND** Provider MUST 允许上层应用在收到工具调用后继续维护后续循环
+- **WHEN** the Gemini provider starts a native agent request and the current agent has an available tool boundary
+- **THEN** the provider MUST include the corresponding tools/function-calling configuration in the Gemini request
+- **AND** the provider MUST allow the application to continue maintaining the subsequent loop after tool calls are received
 
 #### Scenario: Consume runtime-resolved tool declarations
-- **WHEN** `AgentRuntime` 已为本次请求解析出结构化工具声明
-- **THEN** Gemini Provider MUST 使用这些运行时工具声明生成 function declarations
-- **AND** Provider MUST NOT 要求自己直接从原始 `agent.tools` 推导本地工具实现细节
+- **WHEN** `AgentRuntime` has resolved structured tool declarations for this request
+- **THEN** the Gemini provider MUST use those runtime tool declarations to generate function declarations
+- **AND** the provider MUST NOT require itself to derive local tool implementation details directly from the raw `agent.tools`
 
 #### Scenario: Consume runtime-augmented agent and workspace context
-- **WHEN** `AgentRuntime` 已为本次请求准备好增强后的 Agent/Workspace 上下文
-- **THEN** Gemini Provider MUST 直接消费这份运行时输入发起原生 Agent 请求
-- **AND** Provider MUST NOT 自行决定是否读取或注入当前活动文件内容
+- **WHEN** `AgentRuntime` has prepared the augmented Agent/Workspace context for this request
+- **THEN** the Gemini provider MUST consume that runtime input directly to issue the native agent request
+- **AND** the provider MUST NOT independently decide whether to read or inject the current active file content

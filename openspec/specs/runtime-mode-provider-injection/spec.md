@@ -1,27 +1,27 @@
-English | [中文](spec.zh-CN.md)
+English | [Chinese](spec.zh-CN.md)
 
 ## MODIFIED Requirements
 
 ### Requirement: Filter providers by runtime mode
-系统 MUST 基于运行模式（`runtimeMode`）对 Provider 进行可用性过滤，仅暴露当前模式可运行的 Provider。`web`、`extension` 与 `desktop` 运行模式 MUST 全部受该过滤约束。承载该行为的运行时契约命名 MUST 收敛为 `ModelProviderRuntime`。
+The system MUST filter providers by runtime mode (`runtimeMode`) and expose only the providers that can run in the current mode. The `web`, `extension`, and `desktop` runtime modes MUST all be subject to this filtering. The runtime contract carrying this behavior MUST be consolidated under the name `ModelProviderRuntime`.
 
 #### Scenario: Runtime mode filtering remains stable after runtime rename
-- **WHEN** 宿主以任一 `runtimeMode` 初始化模型运行时装配层
-- **THEN** `ModelProviderRuntime.getAvailableProviders()` MUST 仅返回当前模式支持的 Provider
-- **AND** 不满足当前运行条件的 Provider MUST NOT 出现在选择器中
+- **WHEN** the host initializes the model runtime assembly layer with any `runtimeMode`
+- **THEN** `ModelProviderRuntime.getAvailableProviders()` MUST return only the providers supported by the current mode
+- **AND** providers that do not satisfy the current runtime conditions MUST NOT appear in the selector
 
-### Requirement: Runtime returns provider instance by providerId
-系统 MUST 通过统一的模型运行时装配接口按 `providerId` 返回 `IModelProvider` 实例。在 extension 与 desktop 对比模式下，运行时 MUST 支持并发请求所需的实例隔离（例如 fresh 实例或独立通道）。该行为在类型和工厂命名收敛到 `ModelProviderRuntime` 后 MUST 保持不变。
+### Requirement: Runtime returns provider instances by `providerId`
+The system MUST return `IModelProvider` instances by `providerId` through a unified model runtime assembly interface. In extension and desktop compare modes, the runtime MUST support the instance isolation required for concurrent requests, such as fresh instances or separate channels. This behavior MUST remain unchanged after the type and factory names are consolidated under `ModelProviderRuntime`.
 
 #### Scenario: Compare workflow still obtains isolated provider instances
-- **WHEN** 对比工作流通过 `ModelProviderRuntime.getProvider(providerId, { fresh: true })` 同时请求多个 Provider 实例
-- **THEN** Runtime MUST 返回可并发执行且互不干扰的实例
-- **AND** 各请求链路的更新与中止行为 MUST 可独立控制
+- **WHEN** the compare workflow requests multiple provider instances at the same time through `ModelProviderRuntime.getProvider(providerId, { fresh: true })`
+- **THEN** the runtime MUST return instances that can run concurrently without interfering with each other
+- **AND** updates and abort behavior for each request chain MUST be independently controllable
 
 ### Requirement: Host injects credentials and execution dependencies through runtime initialization
-宿主 MUST 在初始化模型运行时时注入凭据或执行依赖解析策略；Runtime MUST 在创建具体 Provider 实例时透传所需依赖。对 extension 与 desktop 宿主，UI 层 MUST 通过代理模型运行时调用宿主侧执行路径，不得直接耦合敏感凭据、Cookie 或受控页面读取逻辑。
+The host MUST inject credentials or execution dependency resolution strategies during model runtime initialization, and the runtime MUST pass through the required dependencies when creating concrete provider instances. For extension and desktop hosts, the UI layer MUST invoke the host-side execution path through a proxy model runtime and MUST not directly couple to sensitive credentials, cookies, or controlled-page reading logic.
 
 #### Scenario: Proxy hosts keep runtime injection semantics after rename
-- **WHEN** web、extension 或 desktop 宿主从旧命名迁移到 `ModelProviderRuntime`
-- **THEN** 宿主前端 MUST 继续通过代理或工厂注入获得 provider 实例
-- **AND** 真实敏感依赖的读取与执行路径 MUST 继续停留在受控宿主侧
+- **WHEN** the web, extension, or desktop host migrates from the old naming to `ModelProviderRuntime`
+- **THEN** the host frontend MUST continue to obtain provider instances through proxy or factory injection
+- **AND** the real sensitive dependency reading and execution path MUST remain on the controlled host side

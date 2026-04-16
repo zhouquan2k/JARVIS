@@ -188,6 +188,12 @@ function openConversationList(): void {
 
 async function openConversationDetail(conversationId: string): Promise<void> {
   await chatStore.selectLocalConversation(conversationId);
+  if (chatStore.currentConversation?.id !== conversationId) {
+    const conversationSnapshot = listConversations.value.find((conversation) => conversation.id === conversationId);
+    if (conversationSnapshot) {
+      await chatStore.activateConversationSnapshot(conversationSnapshot);
+    }
+  }
   panelMode.value = 'detail';
 }
 

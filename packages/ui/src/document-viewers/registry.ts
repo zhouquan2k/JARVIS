@@ -1,11 +1,13 @@
 import type { ContextDocument } from '@packages/core/src';
+import { imageViewer } from './imageViewer';
 import { markdownViewer } from './markdownViewer';
 import { pdfViewer } from './pdfViewer';
 import { supportsDocumentMimeType, type DocumentViewerDefinition } from './types';
 
 const DOCUMENT_VIEWERS: DocumentViewerDefinition[] = [
   markdownViewer,
-  pdfViewer
+  pdfViewer,
+  imageViewer
 ];
 
 export function getDocumentViewerRegistry(): DocumentViewerDefinition[] {

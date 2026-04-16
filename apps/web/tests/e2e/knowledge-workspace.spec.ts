@@ -103,6 +103,16 @@ test('web knowledge workspace negotiates text pdf and unsupported document reque
   await expect(page.getByTestId('document-editor-surface')).toBeVisible();
   await expect(page.getByTestId('document-save')).toBeEnabled();
 
+  await page.locator('[data-path="/images"] .tree-toggle').click();
+  await page.getByTestId('document-node-file').filter({ hasText: 'flow.svg' }).click();
+  await expect(page.getByTestId('document-image-viewer')).toBeVisible();
+  await expect(page.getByTestId('document-image-viewer').locator('img')).toHaveAttribute(
+    'src',
+    /^data:image\/svg\+xml;base64,/
+  );
+  await expect(page.getByTestId('document-save')).toBeDisabled();
+  await expect(page.getByTestId('markdown-mode-switch')).toHaveCount(0);
+
   await page.getByTestId('document-node-file').filter({ hasText: 'report.pdf' }).click();
   await expect(page.getByTestId('document-pdf-viewer')).toBeVisible();
   await expect(page.getByTestId('document-save')).toBeDisabled();

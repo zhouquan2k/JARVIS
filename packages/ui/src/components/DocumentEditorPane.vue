@@ -94,6 +94,18 @@
       </div>
     </div>
     <div
+      v-else-if="activeViewerId === 'image'"
+      class="image-viewer-shell"
+      data-testid="document-image-viewer"
+    >
+      <img
+        v-if="imageDataUrl"
+        class="image-preview"
+        :src="imageDataUrl"
+        :alt="activePathLabel"
+      >
+    </div>
+    <div
       v-else
       class="unsupported-state"
       data-testid="document-unsupported-viewer"
@@ -219,6 +231,14 @@ const pdfOpenHref = computed(() => {
   }
 
   return pdfBlobUrl.value || `data:${document.mimeType};base64,${document.dataBase64}`;
+});
+const imageDataUrl = computed(() => {
+  const document = props.activeDocument;
+  if (!document?.mimeType.startsWith('image/')) {
+    return null;
+  }
+
+  return `data:${document.mimeType};base64,${document.dataBase64}`;
 });
 const tooltipState = reactive({
   text: '',
@@ -539,6 +559,7 @@ function revokePdfBlobUrl() {
 }
 
 .pdf-viewer-shell,
+.image-viewer-shell,
 .unsupported-state {
   display: flex;
   flex: 1;
@@ -552,6 +573,21 @@ function revokePdfBlobUrl() {
   height: 100%;
   border: 0;
   background: rgba(15, 23, 42, 0.72);
+}
+
+.image-viewer-shell {
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 18px;
+  box-sizing: border-box;
+}
+
+.image-preview {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
 }
 
 .editor-input :deep(.milkdown) {

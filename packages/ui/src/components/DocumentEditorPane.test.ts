@@ -516,6 +516,66 @@ describe('DocumentEditorPane', () => {
         expect(wrapper.get('[data-testid="document-pdf-open-link"]').attributes('href')).toBe('data:application/pdf;base64,JVBERg==');
     });
 
+    it('renders image documents as read-only data urls and clears image state after switching away', async () => {
+        const { default: DocumentEditorPane } = await import('./DocumentEditorPane.vue');
+        const wrapper = mount(DocumentEditorPane, {
+            props: {
+                activePath: '/images/flow.svg',
+                activeDocument: {
+                    path: '/images/flow.svg',
+                    mimeType: 'image/svg+xml',
+                    dataBase64: 'PHN2Zy8+',
+                    canWrite: false
+                },
+                activeViewerId: 'image',
+                activePaneMode: 'viewer',
+                modelValue: '',
+                isSaving: false,
+                latestFileChange: {
+                    id: 'image-change',
+                    path: '/images/flow.svg',
+                    beforeContent: '',
+                    afterContent: '',
+                    createdAt: 1
+                },
+                diffEntries: [
+                    { kind: 'added', oldLineNumber: null, newLineNumber: 1, text: 'image change' }
+                ],
+                canUndo: true,
+                canRedo: true
+            }
+        });
+
+        const image = wrapper.get('[data-testid="document-image-viewer"] img');
+        expect(image.attributes('src')).toBe('data:image/svg+xml;base64,PHN2Zy8+');
+        expect(image.attributes('alt')).toBe('flow.svg');
+        expect(wrapper.get('[data-testid="document-save"]').attributes('disabled')).toBeDefined();
+        expect(wrapper.find('[data-testid="markdown-mode-switch"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid="document-file-change"]').exists()).toBe(false);
+        expect(createMarkdownEditor).not.toHaveBeenCalled();
+
+        await wrapper.setProps({
+            activePath: '/notes.txt',
+            activeDocument: {
+                path: '/notes.txt',
+                mimeType: 'text/plain',
+                dataBase64: encodeTextDocument('plain text'),
+                canWrite: true
+            },
+            activeViewerId: 'text',
+            modelValue: 'plain text',
+            latestFileChange: null,
+            diffEntries: [],
+            canUndo: false,
+            canRedo: false
+        });
+        await Promise.resolve();
+        await wrapper.vm.$nextTick();
+
+        expect(wrapper.find('[data-testid="document-image-viewer"]').exists()).toBe(false);
+        expect(wrapper.get('[data-testid="document-editor-surface"]').exists()).toBe(true);
+    });
+
     it('renders an unsupported state when no viewer matches the current mime type', async () => {
         const { default: DocumentEditorPane } = await import('./DocumentEditorPane.vue');
         const wrapper = mount(DocumentEditorPane, {

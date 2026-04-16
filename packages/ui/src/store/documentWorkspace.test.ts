@@ -190,6 +190,31 @@ describe('useDocumentWorkspaceStore', () => {
         expect(store.activeDocument?.canWrite).toBe(false);
     });
 
+    it('opens image documents in the read-only image viewer', async () => {
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(createMockContextProvider({
+            nodes: [
+                { path: '/diagram.png', name: 'diagram.png', kind: 'file' }
+            ],
+            documents: {
+                '/diagram.png': {
+                    mimeType: 'image/png',
+                    dataBase64: 'iVBORw0KGgo=',
+                    canWrite: false
+                }
+            }
+        }));
+
+        await store.hydrateWorkspace();
+        await store.openNode('/diagram.png');
+
+        expect(store.activeViewerId).toBe('image');
+        expect(store.activeViewerCapabilities).toEqual({ view: true, edit: false });
+        expect(store.activePaneMode).toBe('viewer');
+        expect(store.draftContent).toBe('');
+        expect(store.activeDocument?.canWrite).toBe(false);
+    });
+
     it('falls back to unsupported mode when no viewer matches the mime type', async () => {
         const store = useDocumentWorkspaceStore();
         store.setContextProvider(createMockContextProvider({

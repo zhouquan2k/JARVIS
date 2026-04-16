@@ -4,46 +4,45 @@
 TBD - created by archiving change i18n-2. Update Purpose after archive.
 ## Requirements
 ### Requirement: Shared static UI copy MUST be localized through translation keys
-共享 UI 中直接面向用户展示的静态文案 MUST 通过 translation key 渲染，而不得继续以内联硬编码字符串作为唯一文案来源。该要求 SHALL 覆盖按钮、标签、空态、占位符、菜单、面板标题和静态提示语。
+Static copy in the shared UI that is shown directly to users MUST be rendered through translation keys rather than continuing to rely on inline hard-coded strings as the sole copy source. This requirement SHALL cover buttons, labels, empty states, placeholders, menus, panel titles, and static prompts.
 
 #### Scenario: Static labels in shared views are localized
-- **WHEN** 用户切换共享聊天或对比视图的 locale
-- **THEN** 视图中的静态标签、按钮和占位符 MUST 切换到对应语言
+- **WHEN** the user switches the locale of the shared chat or compare view
+- **THEN** the static labels, buttons, and placeholders in the view MUST switch to the corresponding language
 
 #### Scenario: Static labels in shared components are localized
-- **WHEN** 用户查看共享组件中的空态、菜单和面板标题
-- **THEN** 这些静态文案 MUST 通过 translation key 渲染
+- **WHEN** the user views empty states, menus, and panel titles in shared components
+- **THEN** those static strings MUST be rendered through translation keys
 
 ### Requirement: Route labels and workspace navigation copy MUST be localized
-共享工作区路由标签和导航文案 MUST 支持 locale 切换，保证顶栏和工作区切换入口在三宿主中呈现一致的本地化结果。
+Shared workspace route labels and navigation copy MUST support locale switching so that the top bar and workspace switch entry render consistent localized results across all three hosts.
 
 #### Scenario: Route labels switch with locale
-- **WHEN** 用户切换 locale
-- **THEN** `packages/ui/src/routes.ts` 提供的工作区标签 MUST 切换到对应语言
+- **WHEN** the user switches locale
+- **THEN** the workspace labels provided by `packages/ui/src/routes.ts` MUST switch to the corresponding language
 
 ### Requirement: Provider, model and option display copy MUST support localization keys
-`packages/core/config.ts` 中面向用户的 provider / model / option 可见文本 MUST 支持 translation key；UI 渲染时 MUST 优先使用 translation key 对应文案，并在缺失时回退到英文 fallback。
+User-facing provider, model, and option text in `packages/core/config.ts` MUST support translation keys; when rendering UI, the system MUST prefer the copy associated with the translation key and fall back to the English default when it is missing.
 
 #### Scenario: Provider selector renders localized provider labels
-- **WHEN** 用户在不同 locale 下查看 provider selector
-- **THEN** provider 名称 MUST 使用对应 locale 的文案
+- **WHEN** the user views the provider selector under different locales
+- **THEN** the provider names MUST use the copy for the corresponding locale
 
 #### Scenario: Model option descriptions render localized copy with fallback
-- **WHEN** 某个 model option 配置了 translation key
-- **THEN** UI MUST 优先显示该 key 对应的本地化文案
-- **AND** 当 key 缺失时 UI MUST 回退到配置中的英文原文
+- **WHEN** a model option has a translation key configured
+- **THEN** the UI MUST prefer the localized copy for that key
+- **AND** when the key is missing, the UI MUST fall back to the English original in the config
 
 ### Requirement: Phase 2 localization MUST exclude runtime error messages
-Phase 2 的 UI 本地化 MUST 排除 `currentError`、`analysisError`、`throw new Error(...)` 以及其他运行时异常消息；这些文本 MAY 继续以原始字段展示，并 SHALL 在 Phase 3 单独治理。
+Phase 2 UI localization MUST exclude `currentError`, `analysisError`, `throw new Error(...)`, and other runtime exception messages; these texts MAY continue to be displayed from their original fields and SHALL be governed separately in Phase 3.
 
 #### Scenario: Error strings remain outside translation resources in Phase 2
-- **WHEN** 系统在 Phase 2 中迁移共享 UI 文案
-- **THEN** 运行时异常消息 MUST NOT 被要求进入翻译词条
+- **WHEN** the system migrates shared UI copy in Phase 2
+- **THEN** runtime exception messages MUST NOT be required to enter translation entries
 
 ### Requirement: Localized copy MUST follow the repository glossary
-Phase 2 新增的 `en` 与 `zh-CN` 翻译词条 MUST 遵循 Phase 1 建立的仓库级术语表，避免在工作区、Agent、Provider、Context 等核心术语上出现用词漂移。
+New `en` and `zh-CN` translation entries added in Phase 2 MUST follow the repository glossary established in Phase 1 to avoid terminology drift on core concepts such as Workspace, Agent, Provider, and Context.
 
 #### Scenario: Core UI terms stay consistent across locales
-- **WHEN** 用户在不同 locale 下查看涉及工作区、Agent、Provider 或 Context 的文案
-- **THEN** 翻译结果 MUST 与仓库级术语表中的中英文定义保持一致
-
+- **WHEN** the user views copy involving Workspace, Agent, Provider, or Context under different locales
+- **THEN** the translation results MUST remain consistent with the glossary's canonical Chinese-English definitions

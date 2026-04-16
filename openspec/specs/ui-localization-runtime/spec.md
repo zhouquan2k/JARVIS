@@ -4,51 +4,50 @@
 TBD - created by archiving change i18n-2. Update Purpose after archive.
 ## Requirements
 ### Requirement: Shared UI localization runtime MUST support English and Simplified Chinese
-共享 UI 国际化运行时 MUST 支持 `en` 与 `zh-CN` 两种 locale，并为 Web、Extension、Desktop 三个宿主提供统一的消息读取、语言切换与当前 locale 访问能力。
+The shared UI localization runtime MUST support `en` and `zh-CN` locales and provide unified message lookup, language switching, and current-locale access for the Web, Extension, and Desktop hosts.
 
 #### Scenario: Host reads localized copy through shared runtime
-- **WHEN** 任一宿主渲染共享 UI 组件或视图
-- **THEN** 系统 MUST 通过共享 UI 国际化运行时解析当前 locale
-- **AND** 组件 MUST 能基于该 locale 读取对应的消息资源
+- **WHEN** any host renders a shared UI component or view
+- **THEN** the system MUST resolve the current locale through the shared UI localization runtime
+- **AND** the component MUST be able to read the corresponding message resources based on that locale
 
 #### Scenario: Supported locale is constrained to Phase 2 scope
-- **WHEN** 宿主初始化共享 UI 国际化运行时
-- **THEN** 系统 MUST 至少支持 `en` 与 `zh-CN`
-- **AND** 系统 MUST NOT 要求在 Phase 2 中支持其他语言
+- **WHEN** the host initializes the shared UI localization runtime
+- **THEN** the system MUST support at least `en` and `zh-CN`
+- **AND** the system MUST NOT require other languages in Phase 2
 
 ### Requirement: Locale initialization MUST prefer persisted user choice
-共享 UI 国际化运行时 MUST 按“持久化用户选择 > 宿主语言 > 默认英文”的顺序解析初始 locale，保证用户显式选择的语言在刷新或重启后仍然生效。
+The shared UI localization runtime MUST resolve the initial locale in the order "persisted user choice > host language > default English" so that an explicitly chosen language remains effective after refresh or restart.
 
 #### Scenario: Persisted locale overrides host language
-- **WHEN** 本地存储中已经存在用户选择的 locale
-- **THEN** 宿主启动时 MUST 优先恢复该 locale
-- **AND** 系统 MUST NOT 因宿主语言不同而覆盖该选择
+- **WHEN** a user-selected locale already exists in local storage
+- **THEN** the host MUST restore that locale first at startup
+- **AND** the system MUST NOT override that choice because the host language differs
 
 #### Scenario: Host language is used when persisted locale is absent
-- **WHEN** 本地存储中不存在已保存的 locale
-- **THEN** 系统 MUST 根据浏览器或宿主语言解析 `en` 或 `zh-CN`
-- **AND** 无法识别时 MUST 回退到 `en`
+- **WHEN** no saved locale exists in local storage
+- **THEN** the system MUST resolve `en` or `zh-CN` based on the browser or host language
+- **AND** it MUST fall back to `en` if the language cannot be recognized
 
 ### Requirement: All three hosts MUST install the shared localization runtime before mount
-Web、Extension、Desktop 三个宿主 MUST 在应用挂载前安装共享 UI 国际化运行时，确保首屏渲染即使用正确 locale，而不是在挂载后再异步修正文案。
+The Web, Extension, and Desktop hosts MUST install the shared UI localization runtime before application mount so the initial render uses the correct locale, rather than fixing copy asynchronously after mount.
 
 #### Scenario: Web host installs localization runtime before mount
-- **WHEN** Web 宿主启动应用
-- **THEN** 宿主 MUST 在 `app.mount()` 之前安装共享 UI 国际化运行时
+- **WHEN** the Web host starts the application
+- **THEN** the host MUST install the shared UI localization runtime before `app.mount()`
 
 #### Scenario: Extension and Desktop hosts install the same runtime contract
-- **WHEN** Extension 或 Desktop 宿主启动应用
-- **THEN** 宿主 MUST 在 `app.mount()` 之前安装同一套共享 UI 国际化运行时
-- **AND** 运行时契约 MUST 与 Web 宿主保持一致
+- **WHEN** the Extension or Desktop host starts the application
+- **THEN** the host MUST install the same shared UI localization runtime before `app.mount()`
+- **AND** the runtime contract MUST remain consistent with the Web host
 
 ### Requirement: Locale switching MUST persist and update the current UI session
-用户在 UI 中切换语言时，系统 MUST 立即刷新当前会话中的静态文案，并将所选 locale 持久化，以供后续刷新和重启恢复。
+When the user switches languages in the UI, the system MUST immediately refresh the static copy in the current session and persist the selected locale for later refresh and restart recovery.
 
 #### Scenario: Switching locale updates visible UI copy
-- **WHEN** 用户通过语言切换入口将 locale 从 `zh-CN` 切换到 `en`
-- **THEN** 当前界面中的静态可见文案 MUST 切换为英文
+- **WHEN** the user switches the locale from `zh-CN` to `en` through the language switch entry
+- **THEN** the static visible copy in the current interface MUST switch to English
 
 #### Scenario: Switched locale survives refresh
-- **WHEN** 用户切换 locale 后刷新页面或重启宿主
-- **THEN** 系统 MUST 恢复上一次保存的 locale
-
+- **WHEN** the user refreshes the page or restarts the host after switching locale
+- **THEN** the system MUST restore the last saved locale

@@ -1,37 +1,37 @@
-English | [中文](spec.zh-CN.md)
+English | [Chinese](spec.zh-CN.md)
 
 ## ADDED Requirements
 
 ### Requirement: Workspace read tools MUST expose scoped file-reading capabilities to agents
-系统 MUST 为知识工作区 Agent 提供第一批只读工具，包括 `read_current_file`、`list_directory`、`read_file` 与 `search_in_scope`，并且这些工具 MUST 只在当前 Agent 显式声明后才能暴露给模型。
+The system MUST provide the first set of read-only tools for knowledge workspace agents, including `read_current_file`, `list_directory`, `read_file`, and `search_in_scope`, and those tools MUST only be exposed to the model after the current agent explicitly declares them.
 
 #### Scenario: Resolve declared read tools for a scoped agent
-- **WHEN** `AgentRuntime` 为当前 `ResolvedAgentConfig` 解析可用工具声明
-- **THEN** 系统 MUST 只暴露该 Agent `tools` 中声明过的只读工具
-- **AND** 每个工具声明 MUST 至少包含稳定的工具名、描述和输入 schema
+- **WHEN** `AgentRuntime` resolves the available tool declarations for the current `ResolvedAgentConfig`
+- **THEN** the system MUST expose only the read-only tools declared in that agent's `tools`
+- **AND** each tool declaration MUST include at least a stable tool name, description, and input schema
 
 ### Requirement: Workspace read tools MUST support reading the current file and arbitrary files
-系统 MUST 允许 Agent 读取当前激活文件，以及读取知识工作区中任意指定文件的内容，以支持作用域问答、文档总结和后续修订前的上下文分析。
+The system MUST allow agents to read the current active file and the contents of any specified file in the knowledge workspace to support scoped Q&A, document summarization, and context analysis before later edits.
 
 #### Scenario: Read the current active file
-- **WHEN** Agent 调用 `read_current_file`
-- **THEN** 系统 MUST 使用当前工作区 `activePath` 读取对应文件内容
-- **AND** 若当前没有激活文件，系统 MUST 返回明确错误而不是静默降级
+- **WHEN** the agent calls `read_current_file`
+- **THEN** the system MUST read the corresponding file contents using the current workspace `activePath`
+- **AND** if there is no active file, the system MUST return a clear error rather than failing silently
 
 #### Scenario: Read a file by explicit path
-- **WHEN** Agent 调用 `read_file` 并提供目标路径
-- **THEN** 系统 MUST 通过知识文件 Provider 读取该路径对应文档
-- **AND** 返回结果 MUST 至少包含文件路径与文本内容
+- **WHEN** the agent calls `read_file` and provides a target path
+- **THEN** the system MUST read the corresponding document through the knowledge file provider
+- **AND** the result MUST include at least the file path and text content
 
 ### Requirement: Workspace read tools MUST support directory listing and scope search
-系统 MUST 允许 Agent 查看目录下的子节点，并在当前 Agent 作用域内搜索文件内容，以支持面向知识工作区的发现、定位和引用。
+The system MUST allow agents to inspect child nodes under a directory and search file contents within the current agent scope to support discovery, location, and citation in the knowledge workspace.
 
 #### Scenario: List a directory
-- **WHEN** Agent 调用 `list_directory` 并提供目录路径
-- **THEN** 系统 MUST 返回该目录下的文件与目录节点集合
-- **AND** 每个节点 MUST 至少包含路径、名称与节点类型
+- **WHEN** the agent calls `list_directory` and provides a directory path
+- **THEN** the system MUST return the set of file and directory nodes under that directory
+- **AND** each node MUST include at least the path, name, and node type
 
 #### Scenario: Search within the current agent scope
-- **WHEN** Agent 调用 `search_in_scope` 并提供查询字符串
-- **THEN** 系统 MUST 基于当前 `agent.scopePath` 限定搜索范围
-- **AND** 返回结果 MUST 至少包含命中文件路径、行列位置与预览文本
+- **WHEN** the agent calls `search_in_scope` and provides a query string
+- **THEN** the system MUST constrain the search scope based on the current `agent.scopePath`
+- **AND** the result MUST include at least the matching file path, line and column position, and preview text

@@ -1,24 +1,23 @@
-English | [中文](spec.zh-CN.md)
+English | [Chinese](spec.zh-CN.md)
 
 ## ADDED Requirements
 
-### Requirement: System MUST provide syncKey setting for remote namespace selection
-系统 MUST 提供一个 `syncKey` 设置项作为远端同步命名空间标识，宿主在初始化同步能力时 MUST 优先读取该设置。
+### Requirement: System MUST provide a `syncKey` setting for remote namespace selection
+The system MUST provide a `syncKey` setting as the remote synchronization namespace identifier, and the host MUST read that setting first when initializing sync capabilities.
 
 #### Scenario: Host reads syncKey from settings
-- **WHEN** Web 或 Extension 宿主初始化同步存储 provider
-- **THEN** 系统 MUST 读取当前设置中的 `syncKey`
-- **AND** 后续 `pull`、`push` 与同步游标持久化 MUST 使用该 `syncKey` 作为命名空间标识
+- **WHEN** the Web or Extension host initializes the sync storage provider
+- **THEN** the system MUST read the current `syncKey` setting
+- **AND** subsequent `pull`, `push`, and sync-cursor persistence MUST use that `syncKey` as the namespace identifier
 
-### Requirement: Default syncKey zero MUST be development-only
-系统 MAY 为开发便利提供默认 `syncKey = "0"`，但该默认值 MUST 仅限开发环境使用。
+### Requirement: Default `syncKey` zero MUST be development-only
+The system MAY provide a default `syncKey = "0"` for development convenience, but that default value MUST be limited to development environments.
 
 #### Scenario: Development environment uses default syncKey
-- **WHEN** 宿主运行于开发环境且用户未配置 `syncKey`
-- **THEN** 系统 MUST 允许使用默认值 `0` 初始化同步能力
+- **WHEN** the host is running in a development environment and the user has not configured `syncKey`
+- **THEN** the system MUST allow sync capabilities to initialize with the default value `0`
 
 #### Scenario: Non-development environment rejects default syncKey
-- **WHEN** 宿主运行于非开发环境且当前 `syncKey` 仍为 `0`
-- **THEN** 系统 MUST 阻止同步初始化
-- **AND** 系统 MUST 提示用户配置真实 `syncKey`
-
+- **WHEN** the host is running in a non-development environment and the current `syncKey` is still `0`
+- **THEN** the system MUST block sync initialization
+- **AND** the system MUST prompt the user to configure a real `syncKey`

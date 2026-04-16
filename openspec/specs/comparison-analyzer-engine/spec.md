@@ -1,37 +1,37 @@
-English | [中文](spec.zh-CN.md)
+English | [Chinese](spec.zh-CN.md)
 
 ## ADDED Requirements
 
 ### Requirement: Run analyzer with configuration-driven provider and model
-分析引擎 MUST 从 `APP_CONFIG.analyzer` 读取默认 Provider、默认模型与系统提示词模板，并通过 `{prompt}`、`{outputA}`、`{outputB}` 占位符构造最终分析请求。
+The analysis engine MUST read the default provider, default model, and system prompt template from `APP_CONFIG.analyzer`, and construct the final analysis request using the `{prompt}`, `{outputA}`, and `{outputB}` placeholders.
 
 #### Scenario: Analyzer resolves provider and model from static config
-- **WHEN** 系统发起一次对比分析请求
-- **THEN** 分析引擎 MUST 使用配置中的 `defaultProvider` 与 `defaultModel` 执行分析
-- **AND** 发送给模型的提示词 MUST 包含已替换完成的三个占位符值。
+- **WHEN** the system starts a comparison analysis request
+- **THEN** the analysis engine MUST perform the analysis using the configured `defaultProvider` and `defaultModel`
+- **AND** the prompt sent to the model MUST include the three placeholder values after substitution.
 
 ### Requirement: Stream analyzer output to caller
-分析引擎 MUST 支持流式透传，在分析响应尚未结束时将每次增量内容通过回调抛出给上层调用者。
+The analysis engine MUST support streaming passthrough and deliver each incremental chunk to the caller via callbacks before the analysis response has finished.
 
 #### Scenario: Analyzer emits progressive updates
-- **WHEN** 分析 Provider 返回流式数据块
-- **THEN** 引擎 MUST 按接收顺序触发 `onUpdate` 回调
-- **AND** 上层 MUST 能在最终结果完成前消费这些更新。
+- **WHEN** the analysis provider returns streaming data chunks
+- **THEN** the engine MUST trigger the `onUpdate` callback in receive order
+- **AND** the caller MUST be able to consume these updates before the final result is complete.
 
-### Requirement: Produce structured five-field analysis result
-分析引擎 MUST 将最终响应解析为包含 `agreements`、`conflictsA`、`conflictsB`、`uniqueA`、`uniqueB` 五个字段的结构化结果；字段内容 MUST 优先展示来自 A/B 原答案的原文摘录（可为字符串或字符串数组），而非主观评论。
+### Requirement: Produce a structured five-field analysis result
+The analysis engine MUST parse the final response into a structured result containing five fields: `agreements`, `conflictsA`, `conflictsB`, `uniqueA`, and `uniqueB`. Field content MUST primarily surface verbatim excerpts from the A/B original answers, either as strings or string arrays, rather than subjective commentary.
 
 #### Scenario: Analyzer returns valid JSON payload
-- **WHEN** 模型最终返回满足字段约束的 JSON 字符串
-- **THEN** 引擎 MUST 成功解析并返回完整 `AnalysisResult`
-- **AND** 五个字段 MUST 全部存在且可用于 UI 渲染，并保持“内容优先、评论最少”语义。
+- **WHEN** the model finally returns a JSON string that satisfies the field constraints
+- **THEN** the engine MUST successfully parse and return a complete `AnalysisResult`
+- **AND** all five fields MUST be present and usable for UI rendering, while preserving the "content first, commentary minimal" semantics.
 
 #### Scenario: Analyzer returns markdown-fenced JSON or array fields
-- **WHEN** 模型返回 Markdown 代码块包裹的 JSON，或字段值为字符串数组
-- **THEN** 引擎 MUST 能提取并解析出五字段结果
-- **AND** 上层 UI MUST 能继续渲染而不是直接进入解析失败态。
+- **WHEN** the model returns JSON wrapped in a Markdown code block, or field values are string arrays
+- **THEN** the engine MUST be able to extract and parse the five-field result
+- **AND** the upstream UI MUST continue rendering instead of entering a parsing-failure state directly.
 
 #### Scenario: Analyzer returns invalid or incomplete JSON payload
-- **WHEN** 模型最终响应无法解析为符合约束的 JSON
-- **THEN** 引擎 MUST 抛出可识别的解析错误
-- **AND** 错误信息 MUST 允许上层触发降级展示逻辑。
+- **WHEN** the model's final response cannot be parsed as JSON that satisfies the constraints
+- **THEN** the engine MUST throw a recognizable parsing error
+- **AND** the error message MUST allow the caller to trigger fallback display logic.

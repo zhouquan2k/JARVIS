@@ -1312,6 +1312,24 @@ export const useChatStore = defineStore('chat', {
             await this.applyConversationModelSelection(this.currentConversation);
         },
 
+        async activateConversationSnapshot(conversation: Conversation) {
+            if (conversation.compare || conversation.sync?.deleted) {
+                return;
+            }
+
+            this.currentConversation = normalizeStoredConversation(conversation);
+            this.historySource = 'local';
+            this.previewConversation = null;
+            this.currentError = null;
+            this.currentHistoryErrorCode = null;
+            this.isExternalPreviewLoading = false;
+            this.externalPreviewLoadingId = null;
+            this.isQuestionIndexPanelOpen = true;
+            this.activeQuestionId = null;
+            this.pendingScrollQuestionId = null;
+            await this.applyConversationModelSelection(this.currentConversation);
+        },
+
         async deleteLocalConversation(id: string) {
             if (!this.storageProvider) {
                 return;

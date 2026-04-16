@@ -1,6 +1,8 @@
 import {
-    IModelProvider,
+    type AgentCapabilities,
+    type AgentRunRequest,
     type AnalysisResult,
+    type IAgentCapableProvider,
     type ProviderDocumentCapability,
     type ProviderSendResult,
     type ProviderStreamUpdate
@@ -13,6 +15,7 @@ import type {
     ProviderSendOptions,
     ProxyRequest,
     ProxyResponse,
+    RunAgentRequest,
     SendMessageRequest
 } from './proxyProtocol';
 
@@ -22,7 +25,7 @@ type PendingRequest = {
     reject: (reason: Error) => void;
 };
 
-export class DesktopProxyProvider implements IModelProvider {
+export class DesktopProxyProvider implements IAgentCapableProvider {
     public id: string;
     private unsubscribe: (() => void) | null = null;
     private readonly channelId: string;
@@ -170,6 +173,32 @@ export class DesktopProxyProvider implements IModelProvider {
 
         return this.createTrackedRequest<AnalysisResult>(request, (update) => {
             if (typeof update === 'string') {
+                onUpdate(update);
+            }
+        });
+    }
+
+    getAgentCapabilities(): AgentCapabilities {
+        return {
+            nativeAgent: true,
+            toolLoop: 'application-managed'
+        };
+    }
+
+    runAgent(
+        request: AgentRunRequest,
+        onUpdate: (update: ProviderStreamUpdate) => void
+    ): Promise<ProviderSendResult> {
+        const proxyRequest: RunAgentRequest = {
+            action: 'RUN_AGENT',
+            requestId: this.nextRequestId('RUN_AGENT'),
+            channelId: this.channelId,
+            providerId: this.id,
+            agentRequest: request
+        };
+
+        return this.createTrackedRequest<ProviderSendResult>(proxyRequest, (update) => {
+            if (typeof update !== 'string') {
                 onUpdate(update);
             }
         });

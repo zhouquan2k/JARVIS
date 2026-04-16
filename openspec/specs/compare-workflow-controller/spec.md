@@ -1,27 +1,27 @@
-English | [中文](spec.zh-CN.md)
+English | [Chinese](spec.zh-CN.md)
 
 ## ADDED Requirements
 
 ### Requirement: Execute dual-model generation concurrently
-并发调度控制器 MUST 支持在一次请求中并发执行 Model A 与 Model B 的流式对话调用，而不是串行执行。
+The concurrent scheduling controller MUST support running the streaming conversation calls for Model A and Model B in parallel within a single request, rather than serially.
 
 #### Scenario: Controller starts two model streams in one workflow
-- **WHEN** 用户提交对比问题并触发对比工作流
-- **THEN** 控制器 MUST 同时发起 Model A 与 Model B 的请求
-- **AND** 两路输出 MUST 通过独立回调通道返回给上层。
+- **WHEN** the user submits a comparison question and triggers the compare workflow
+- **THEN** the controller MUST start Model A and Model B requests at the same time
+- **AND** both outputs MUST be returned to the caller through separate callback channels.
 
 ### Requirement: Trigger analyzer only after both model outputs complete
-控制器 MUST 在双模型流式输出均结束后再启动分析引擎，并将完整 `outputA` 与 `outputB` 作为分析输入。
+The controller MUST start the analysis engine only after both model streams have finished, and it MUST pass the complete `outputA` and `outputB` as analysis inputs.
 
 #### Scenario: Analyzer waits for both model responses
-- **WHEN** 仅有一路模型完成且另一路仍在生成
-- **THEN** 控制器 MUST NOT 启动分析引擎
-- **AND** 仅当两路都完成后才 MUST 调用分析流程。
+- **WHEN** only one model has finished and the other is still generating
+- **THEN** the controller MUST NOT start the analysis engine
+- **AND** the analysis flow MUST only be invoked after both streams are complete.
 
 ### Requirement: Expose compare workflow lifecycle to UI
-控制器 MUST 向 UI 暴露可观测的对比工作流生命周期，包括并发生成中、分析中、完成与失败等关键阶段。
+The controller MUST expose an observable compare workflow lifecycle to the UI, including key stages such as generating, analyzing, completed, and failed.
 
 #### Scenario: UI can render stage-specific state
-- **WHEN** 对比工作流从生成阶段进入分析阶段
-- **THEN** 控制器 MUST 发出阶段变化信号
-- **AND** UI MUST 能基于该信号切换 loading、分析面板或错误状态展示。
+- **WHEN** the compare workflow moves from the generation stage to the analysis stage
+- **THEN** the controller MUST emit a stage transition signal
+- **AND** the UI MUST be able to switch loading, analysis-panel, or error-state presentation based on that signal.

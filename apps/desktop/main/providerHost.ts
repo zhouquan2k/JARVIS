@@ -4,6 +4,7 @@ import {
     createModelProviderRuntime,
     ExternalHistoryError,
     type ChatGPTWebProviderOptions,
+    type IAgentCapableProvider,
     type IExternalConversationProvider,
     type IModelProvider,
     type ModelProviderRuntime
@@ -18,6 +19,7 @@ import type {
     GetHistoryListRequest,
     ProxyRequest,
     ProxyResponse,
+    RunAgentRequest,
     SendMessageRequest
 } from '../shared/proxyProtocol';
 
@@ -161,6 +163,15 @@ export function createProviderHost(options: ProviderHostOptions = {}): ProviderH
             const provider = await resolveProvider(msg.providerId);
             trackActiveRequest(msg.requestId, msg.channelId, provider);
 
+            const attachmentCount = msg.options?.attachments?.length ?? 0;
+            const historyAttachmentCount = msg.options?.history?.reduce((n, m) => n + (m.attachments?.length ?? 0), 0) ?? 0;
+            if (attachmentCount > 0 || historyAttachmentCount > 0) {
+                console.log(`[providerHost] sendMessage attachments=${attachmentCount} historyAttachments=${historyAttachmentCount} provider=${msg.providerId}`);
+                for (const att of msg.options?.attachments ?? []) {
+                    console.log(`  attachment: name=${att.name} mimeType=${att.mimeType} size=${att.size} hasBase64=${!!att.base64Data}`);
+                }
+            }
+
             const result = await provider.sendMessage(msg.prompt, msg.options || {}, (chunk) => {
                 sendResponse({
                     type: 'UPDATE',
@@ -266,6 +277,47 @@ export function createProviderHost(options: ProviderHostOptions = {}): ProviderH
         }
     };
 
+    const handleRunAgent = async (msg: RunAgentRequest, sendResponse: ResponseSender) => {
+        try {
+            const provider = await resolveProvider(msg.providerId);
+
+            const agentCapableProvider = typeof (provider as Partial<IAgentCapableProvider>).runAgent === 'function'
+                ? provider as IAgentCapableProvider
+                : null;
+
+            if (!agentCapableProvider) {
+                throw new Error(`Provider '${msg.providerId}' does not support agent execution`);
+            }
+
+            trackActiveRequest(msg.requestId, msg.channelId, provider);
+
+            const attachmentCount = msg.agentRequest.attachments?.length ?? 0;
+            if (attachmentCount > 0 || (msg.agentRequest.tools?.length ?? 0) > 0) {
+                console.log(`[providerHost] runAgent tools=${msg.agentRequest.tools?.length ?? 0} attachments=${attachmentCount} provider=${msg.providerId}`);
+            }
+
+            const result = await agentCapableProvider.runAgent(msg.agentRequest, (chunk) => {
+                sendResponse({
+                    type: 'UPDATE',
+                    requestId: msg.requestId,
+                    channelId: msg.channelId,
+                    chunk
+                });
+            });
+
+            sendResponse({
+                type: 'DONE',
+                requestId: msg.requestId,
+                channelId: msg.channelId,
+                result
+            });
+        } catch (error) {
+            postError(msg.requestId, msg.channelId, error, sendResponse);
+        } finally {
+            clearActiveRequest(msg.requestId);
+        }
+    };
+
     const handleGetHistoryList = async (msg: GetHistoryListRequest, sendResponse: ResponseSender) => {
         try {
             const provider = await resolveHistoryProvider(msg.providerId);
@@ -316,6 +368,9 @@ export function createProviderHost(options: ProviderHostOptions = {}): ProviderH
                 case 'SEND_MESSAGE':
                     await handleSendMessage(message, sendResponse);
                     break;
+                case 'RUN_AGENT':
+                    await handleRunAgent(message, sendResponse);
+                    break;
                 case 'ANALYZE_COMPARISON':
                     await handleAnalyzeComparison(message, sendResponse);
                     break;
@@ -334,9 +389,11 @@ export function createProviderHost(options: ProviderHostOptions = {}): ProviderH
                 case 'ABORT':
                     handleAbort(message);
                     break;
-                default:
-                    postError(message.requestId, message.channelId, `Unknown action: ${(message as { action?: string }).action}`, sendResponse);
+                default: {
+                    const unknownMsg = message as { requestId?: string; channelId?: string; action?: string };
+                    postError(unknownMsg.requestId ?? '', unknownMsg.channelId ?? '', `Unknown action: ${unknownMsg.action}`, sendResponse);
                     break;
+                }
             }
         },
 

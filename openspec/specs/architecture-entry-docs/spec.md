@@ -3,50 +3,49 @@
 ## Purpose
 TBD - created by archiving change i18n-1. Update Purpose after archive.
 ## Requirements
-### Requirement: workspace.dsl SHALL be the primary architecture source for public documentation
-公开架构入口 MUST 以 `docs/workspace.dsl` 作为唯一主设计源，仓库对外描述架构时 SHALL 以该文件生成或引用的架构内容为基础，而不是单独维护脱节的说明文本。
+### Requirement: `workspace.dsl` SHALL be the primary architecture source for public documentation
+The public architecture entry MUST use `docs/workspace.dsl` as the single source of truth. When describing architecture externally, the repository SHALL rely on content generated from or referenced by that file rather than maintaining a separate, disconnected explanation.
 
 #### Scenario: Public architecture entry references workspace.dsl
-- **WHEN** 维护者编写或更新公开架构入口文档
-- **THEN** 架构说明 MUST 明确以 `docs/workspace.dsl` 为主设计源
+- **WHEN** a maintainer writes or updates the public architecture entry document
+- **THEN** the architecture description MUST explicitly use `docs/workspace.dsl` as the primary design source
 
 ### Requirement: The primary public workspace DSL SHALL be English
-`docs/workspace.dsl` SHALL 使用英文作为主版本，供外部读者理解系统上下文与容器边界；中文版本 MUST 作为镜像独立存在，而不是与英文混排在同一主文件中。
+`docs/workspace.dsl` SHALL use English as the primary version so external readers can understand the system context and container boundaries; the Chinese version MUST exist as a separate mirror rather than being mixed into the same main file.
 
 #### Scenario: English workspace DSL is used as the public primary file
-- **WHEN** 外部读者查看公开架构 DSL
-- **THEN** `docs/workspace.dsl` MUST 为英文主版本
+- **WHEN** an external reader views the public architecture DSL
+- **THEN** `docs/workspace.dsl` MUST be the English primary version
 
 #### Scenario: Chinese workspace DSL remains available as a mirror
-- **WHEN** 中文读者需要查看架构 DSL
-- **THEN** 仓库 MUST 提供 `docs/zh/workspace.zh-CN.dsl` 作为中文镜像
+- **WHEN** a Chinese reader needs to view the architecture DSL
+- **THEN** the repository MUST provide `docs/zh/workspace.zh-CN.dsl` as the Chinese mirror
 
-### Requirement: ARCHITECTURE.md SHALL be derived from context and container views
-`ARCHITECTURE.md` SHALL 基于 `workspace.dsl` 的 context 图和 container 图来组织内容，至少覆盖系统上下文、主要容器、职责边界和外部依赖关系；该文档 MUST NOT 脱离这两个视图单独定义另一套公开架构结构。
+### Requirement: `ARCHITECTURE.md` SHALL be derived from context and container views
+`ARCHITECTURE.md` SHALL organize its content around the context and container views in `workspace.dsl`, covering at least the system context, primary containers, responsibility boundaries, and external dependencies; the document MUST NOT define a separate public architecture structure detached from those two views.
 
 #### Scenario: Architecture entry covers context and container structure
-- **WHEN** 读者打开 `ARCHITECTURE.md`
-- **THEN** 文档 MUST 基于 context 图和 container 图解释系统上下文与容器职责
+- **WHEN** a reader opens `ARCHITECTURE.md`
+- **THEN** the document MUST explain system context and container responsibilities based on the context and container views
 
 #### Scenario: Architecture entry does not invent a parallel structure
-- **WHEN** 维护者更新 `ARCHITECTURE.md`
-- **THEN** 文档内容 MUST 与 `workspace.dsl` 中的 context/container 结构保持一致
+- **WHEN** a maintainer updates `ARCHITECTURE.md`
+- **THEN** the document content MUST stay consistent with the context/container structure in `workspace.dsl`
 
 ### Requirement: Public architecture docs SHALL provide bilingual navigation
-公开架构文档 SHALL 提供英文主入口与中文镜像之间的双向导航，确保英文读者和中文读者都能在不改变主路径约定的前提下访问对应内容。
+The public architecture documents SHALL provide bidirectional navigation between the English entry and the Chinese mirror, ensuring that both English and Chinese readers can reach the corresponding content without changing the primary path convention.
 
 #### Scenario: English architecture entry links to Chinese mirror
-- **WHEN** 读者阅读 `ARCHITECTURE.md`
-- **THEN** 文档 MUST 提供到 `ARCHITECTURE.zh-CN.md` 的显式链接
+- **WHEN** a reader reads `ARCHITECTURE.md`
+- **THEN** the document MUST provide an explicit link to `ARCHITECTURE.zh-CN.md`
 
 #### Scenario: Chinese architecture mirror links back to English entry
-- **WHEN** 读者阅读 `ARCHITECTURE.zh-CN.md`
-- **THEN** 文档 MUST 提供返回 `ARCHITECTURE.md` 的显式链接
+- **WHEN** a reader reads `ARCHITECTURE.zh-CN.md`
+- **THEN** the document MUST provide an explicit link back to `ARCHITECTURE.md`
 
 ### Requirement: Architecture artifacts SHALL be updated together
-当 `docs/workspace.dsl` 被英文化或结构调整时，相关公开架构入口文档和镜像文档 MUST 同步更新，以避免 DSL、架构说明与镜像内容漂移。
+When `docs/workspace.dsl` is anglicized or structurally adjusted, the related public architecture entry documents and mirror documents MUST be updated together to avoid drift between the DSL, the architecture description, and the mirror content.
 
 #### Scenario: DSL and architecture entry are updated in the same change
-- **WHEN** 变更修改 `docs/workspace.dsl` 的公开表达
-- **THEN** 同一变更 MUST 同步更新 `ARCHITECTURE.md` 及必要的中文镜像文件
-
+- **WHEN** a change modifies the public expression of `docs/workspace.dsl`
+- **THEN** the same change MUST update `ARCHITECTURE.md` and any necessary Chinese mirror files

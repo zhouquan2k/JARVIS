@@ -1,29 +1,29 @@
-English | [中文](spec.zh-CN.md)
+English | [Chinese](spec.zh-CN.md)
 
 ## ADDED Requirements
 
 ### Requirement: Provider remote config MUST expose a versioned Gemini history selector document
-系统 MUST 提供面向 Gemini 历史抓取的远程配置文档，并以可版本化 JSON 契约分发，使扩展端能够在不重新发布的情况下更新选择器规则。
+The system MUST provide a remote configuration document for Gemini history fetching and distribute it through a versioned JSON contract so the extension can update selector rules without republishing.
 
 #### Scenario: Fetch latest Gemini history config
-- **WHEN** 扩展端请求 Gemini 历史远程配置
-- **THEN** 服务端 MUST 返回一个包含 `version`、`matchOrigins`、`selectors` 和 `healthCheck` 的 JSON 文档
-- **AND** 该文档 MUST 足以驱动 Gemini 历史列表、详情与懒加载检测
+- **WHEN** the extension requests the Gemini history remote configuration
+- **THEN** the server MUST return a JSON document containing `version`, `matchOrigins`, `selectors`, and `healthCheck`
+- **AND** that document MUST be sufficient to drive Gemini history lists, details, and lazy-load detection
 
 #### Scenario: Reject unknown provider config request
-- **WHEN** 客户端请求不存在的 provider 远程配置
-- **THEN** 服务端 MUST 返回明确的未找到响应
-- **AND** 系统 MUST NOT 返回伪造的空配置
+- **WHEN** the client requests a remote configuration for a provider that does not exist
+- **THEN** the server MUST return a clear not-found response
+- **AND** the system MUST NOT return a fabricated empty configuration
 
 ### Requirement: Provider remote config consumer MUST cache the last valid config and support fallback
-系统 MUST 在扩展端缓存最近一次通过健康检查的 Gemini 远程配置，并在网络失败时回退到缓存或内置快照。
+The extension MUST cache the most recent Gemini remote configuration that passed health checks, and it MUST fall back to the cache or a built-in snapshot when the network fails.
 
 #### Scenario: Use cached config when network is unavailable
-- **WHEN** 扩展端刷新 Gemini 远程配置时遇到网络错误，但本地存在最近一次有效缓存
-- **THEN** 系统 MUST 继续使用该缓存配置完成本次抓取
-- **AND** 系统 MUST 标记本次运行来自缓存回退而不是最新拉取
+- **WHEN** the extension encounters a network error while refreshing the Gemini remote configuration, but a recent valid cache exists locally
+- **THEN** the system MUST continue using that cached configuration to complete the fetch
+- **AND** the system MUST mark this run as coming from cache fallback rather than a fresh fetch
 
 #### Scenario: Fail when no valid config exists
-- **WHEN** 远程拉取失败且本地缓存与内置回退快照都不可用
-- **THEN** 系统 MUST 返回 `CONFIG_UNAVAILABLE`
-- **AND** 系统 MUST 阻止 Gemini DOM 抓取继续执行
+- **WHEN** the remote fetch fails and both the local cache and the built-in fallback snapshot are unavailable
+- **THEN** the system MUST return `CONFIG_UNAVAILABLE`
+- **AND** the system MUST stop Gemini DOM fetching from continuing
