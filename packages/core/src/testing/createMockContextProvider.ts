@@ -146,12 +146,10 @@ export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): I
         },
         async getContext(): Promise<WorkspaceContext> {
             const agentConfigs = new Map<string, WorkspaceContext['agentConfigs'][string]>();
+            const rootResolved = await resolveScopedAgentConfig(provider, '/', DEFAULT_SCOPED_AGENT_CONFIG);
             agentConfigs.set(DEFAULT_WORKSPACE_AGENT_KEY, {
-                ...DEFAULT_SCOPED_AGENT_CONFIG,
+                ...rootResolved,
                 scopePath: '/',
-                sourcePaths: [],
-                effectiveInstructions: DEFAULT_SCOPED_AGENT_CONFIG.instructions ?? '',
-                instructions: DEFAULT_SCOPED_AGENT_CONFIG.instructions ?? undefined
             });
 
             const ensureAgentConfig = async (targetPath: string): Promise<string> => {

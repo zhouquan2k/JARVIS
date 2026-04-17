@@ -38,9 +38,10 @@ knowledge workspace的右栏 MUST defaultrender真实的 AI 对话 pane，并将
 - **AND** The system MUST NOT only因current工作区仍selectedthe same个文件，就再次automatically附加已经存在于 history 中的旧document #### Scenario: Changing the active node does not retroactively replace conversation context
 - **WHEN** the user在conversationcreate后switch了工作区current节点，但没有explicit将新文件添加到对话
 - **THEN** The system MUST NOT automatically用新节点替换currentconversation已经固定下来的document上下文
-- **AND** 后续请求 MUST continue以history中已记录的真实上下文为准 #### Scenario: Fall back to the default agent in the assistant pane
+- **AND** 后续请求 MUST continue以history中已记录的真实上下文为准 #### Scenario: Fall back to the root default agent in the assistant pane
 - **WHEN** current激活节点及其父directory都不存在 `.agent.json`
-- **THEN** 右栏 AI pane MUST 退回到globaldefault Agent
+- **THEN** 右栏 AI pane MUST 退回到根目录 `/.agent.json` 中持久化的默认 Agent
+- **AND** 如果根目录 `/.agent.json` 尚未存在，系统 MUST 在首次需要时创建它并继续使用该 pane
 - **AND** the user仍然 MUST 可以continue以普通聊天方式使用该 pane #### Scenario: Selecting a directory updates the effective assistant agent immediately
 - **WHEN** the user在knowledge workspaceleft-side点击一个directory节点，但未打开新文件
 - **THEN** The system MUST 立即以该directory路径重新resolve并switch右栏生效 Agent

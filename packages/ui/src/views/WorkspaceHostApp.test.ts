@@ -188,6 +188,43 @@ describe('WorkspaceHostApp', () => {
         expect(navigateTo).toHaveBeenCalledWith('/');
     });
 
+    it('shows top bar node history controls in knowledge mode and forwards navigation to the document store', async () => {
+        setActivePinia(createPinia());
+        const navigateTo = vi.fn();
+        const documentStore = useDocumentWorkspaceStore();
+        documentStore.nodeHistory = ['/alpha.md', '/beta.md'];
+        documentStore.nodeHistoryIndex = 1;
+        const backSpy = vi.spyOn(documentStore, 'goBackNodeHistory').mockResolvedValue(undefined);
+        const forwardSpy = vi.spyOn(documentStore, 'goForwardNodeHistory').mockResolvedValue(undefined);
+
+        const wrapper = mount(WorkspaceHostApp, {
+            props: {
+                currentRoutePath: '/',
+                navigateTo,
+                contextProvider: { id: 'ctx' }
+            },
+            global: {
+                stubs: {
+                    DocumentWorkspaceView: {
+                        template: '<div data-testid="document-workspace-stub" />'
+                    },
+                    ConversationWorkspaceView: {
+                        template: '<div data-testid="conversation-workspace-stub" />'
+                    }
+                }
+            }
+        });
+
+        expect(wrapper.get('[data-testid="topbar-node-history-controls"]').exists()).toBe(true);
+        expect(wrapper.get('[data-testid="topbar-node-history-back"]').attributes('disabled')).toBeUndefined();
+        expect(wrapper.get('[data-testid="topbar-node-history-forward"]').attributes('disabled')).toBeDefined();
+
+        await wrapper.get('[data-testid="topbar-node-history-back"]').trigger('click');
+        await flushPromises();
+        expect(backSpy).toHaveBeenCalledTimes(1);
+        expect(forwardSpy).not.toHaveBeenCalled();
+    });
+
     it('maps compare route to chat in the top bar and forwards recovery props', async () => {
         setActivePinia(createPinia());
         const compareStore = useCompareStore();

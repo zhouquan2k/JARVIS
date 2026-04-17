@@ -24,6 +24,34 @@
       </button>
     </nav>
     <div class="top-meta">
+      <div
+        v-if="showNodeHistoryControls"
+        class="node-history-controls"
+        data-testid="topbar-node-history-controls"
+      >
+        <button
+          type="button"
+          class="top-icon-button"
+          data-testid="topbar-node-history-back"
+          :title="t('shared.goBackNodeHistory')"
+          :aria-label="t('shared.goBackNodeHistory')"
+          :disabled="!canGoBackNodeHistory"
+          @click="emit('go-back-node-history')"
+        >
+          <ChevronLeft class="top-icon" :size="18" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          class="top-icon-button"
+          data-testid="topbar-node-history-forward"
+          :title="t('shared.goForwardNodeHistory')"
+          :aria-label="t('shared.goForwardNodeHistory')"
+          :disabled="!canGoForwardNodeHistory"
+          @click="emit('go-forward-node-history')"
+        >
+          <ChevronRight class="top-icon" :size="18" aria-hidden="true" />
+        </button>
+      </div>
       <button
         type="button"
         class="locale-toggle"
@@ -41,6 +69,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
+import { ChevronLeft, ChevronRight } from 'lucide-vue-next';
 import type { ChatRoute, ChatRoutePath } from '../routes';
 import { useWorkspaceI18n } from '../i18n';
 
@@ -52,14 +81,22 @@ const props = withDefaults(defineProps<{
   compareStage: Stage;
   activeWorkspacePath?: ChatRoutePath;
   workspaceOptions?: ReadonlyArray<Pick<ChatRoute, 'path' | 'name' | 'label' | 'labelKey'>>;
+  showNodeHistoryControls?: boolean;
+  canGoBackNodeHistory?: boolean;
+  canGoForwardNodeHistory?: boolean;
 }>(), {
   title: 'JARVIS',
   activeWorkspacePath: '/',
-  workspaceOptions: () => []
+  workspaceOptions: () => [],
+  showNodeHistoryControls: false,
+  canGoBackNodeHistory: false,
+  canGoForwardNodeHistory: false
 });
 
 const emit = defineEmits<{
   (event: 'navigate-workspace', path: ChatRoutePath): void;
+  (event: 'go-back-node-history'): void;
+  (event: 'go-forward-node-history'): void;
 }>();
 
 const { locale, t, toggleLocale } = useWorkspaceI18n();
@@ -126,6 +163,45 @@ const brandIconSrc = '/jarvis.png';
   padding: 4px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.06);
+}
+
+.node-history-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.top-icon-button {
+  border: 0;
+  border-radius: 8px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: rgba(226, 232, 240, 0.88);
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.top-icon-button:hover,
+.top-icon-button:focus-visible {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f8fafc;
+}
+
+.top-icon-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.top-icon {
+  width: 18px;
+  height: 18px;
 }
 
 .workspace-btn {

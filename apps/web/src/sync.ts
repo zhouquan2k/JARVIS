@@ -65,3 +65,8 @@ export function createWebSyncStorageProvider(options: CreateWebSyncStorageProvid
         deletedConversationStore: options.deletedConversationStore
     });
 }
+
+export async function resetWebSyncCache(options: CreateWebSyncStorageProviderOptions = {}): Promise<void> {
+    const provider = createWebSyncStorageProvider(options);
+    await provider.clearLocalState();
+}

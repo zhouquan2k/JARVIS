@@ -14,4 +14,5 @@ export interface IConversationPersistProvider {
     getConversation(id: string): Promise<Conversation | null>;
     getAllConversations(): Promise<Conversation[]>;
     deleteConversation(id: string): Promise<void>;
+    clear?(): Promise<void>;
 }

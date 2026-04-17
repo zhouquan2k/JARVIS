@@ -5,7 +5,12 @@
       :compare-stage="compareStore.stage"
       :active-workspace-path="activeWorkspacePath"
       :workspace-options="PRIMARY_WORKSPACE_ROUTES"
+      :show-node-history-controls="isKnowledgeMode"
+      :can-go-back-node-history="documentStore.canGoBackNodeHistory"
+      :can-go-forward-node-history="documentStore.canGoForwardNodeHistory"
       @navigate-workspace="onNavigateWorkspace"
+      @go-back-node-history="onGoBackNodeHistory"
+      @go-forward-node-history="onGoForwardNodeHistory"
     />
     <main class="view-host">
       <DocumentWorkspaceView
@@ -104,6 +109,22 @@ async function onNavigateWorkspace(path: ChatRoutePath) {
     await chatStore.applyWorkspaceAgentContextSelection();
   }
   props.navigateTo(path);
+}
+
+async function onGoBackNodeHistory(): Promise<void> {
+  if (!isKnowledgeMode.value) {
+    return;
+  }
+
+  await documentStore.goBackNodeHistory();
+}
+
+async function onGoForwardNodeHistory(): Promise<void> {
+  if (!isKnowledgeMode.value) {
+    return;
+  }
+
+  await documentStore.goForwardNodeHistory();
 }
 
 watch(

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount } from '@vue/test-utils';
 import type { Conversation, IConversationPersistProvider, IModelProvider } from '@packages/core/src';
@@ -53,7 +53,7 @@ describe('DocumentWorkspaceView', () => {
         setActivePinia(createPinia());
     });
 
-    it('renders the three-pane document workspace shell', async () => {
+    it('renders the three-pane document workspace shell with the root agent editor selected', async () => {
         const wrapper = mount(DocumentWorkspaceView, {
             props: {
                 contextProvider: createMockContextProvider({
@@ -83,6 +83,16 @@ describe('DocumentWorkspaceView', () => {
                           />
                         `
                     },
+                    AgentView: {
+                        props: ['agentKey', 'ownerNode'],
+                        template: `
+                          <div
+                            data-testid="agent-view-stub"
+                            :data-agent-key="agentKey"
+                            :data-owner-path="ownerNode.path"
+                          />
+                        `
+                    },
                     DocumentEditorPane: {
                         template: '<div data-testid="document-editor" />'
                     }
@@ -95,9 +105,11 @@ describe('DocumentWorkspaceView', () => {
 
         expect(wrapper.get('[data-testid="document-workspace"]').exists()).toBe(true);
         expect(wrapper.get('[data-testid="document-file-tree"]').exists()).toBe(true);
-        expect(wrapper.get('[data-testid="document-editor"]').exists()).toBe(true);
+        expect(wrapper.find('[data-testid="document-editor"]').exists()).toBe(false);
+        expect(wrapper.get('[data-testid="agent-view-stub"]').attributes('data-owner-path')).toBe('/');
+        expect(wrapper.get('[data-testid="agent-view-stub"]').attributes('data-agent-key')).toBe('/');
         expect(wrapper.get('[data-testid="agent-pane"]').exists()).toBe(true);
-        expect(wrapper.get('[data-testid="agent-pane"]').attributes('data-agent-name')).toBe('Default Knowledge Agent');
+        expect(wrapper.get('[data-testid="agent-pane"]').attributes('data-agent-name')).toBe('Root Agent');
         expect(wrapper.get('.knowledge-grid').attributes('style')).toContain('100% - 8px');
         expect(wrapper.findAll('.grid-pane')).toHaveLength(3);
     });
@@ -129,7 +141,7 @@ describe('DocumentWorkspaceView', () => {
         expect(wrapper.get('[data-testid="assistant-slot"]').text()).toContain('custom pane');
     });
 
-    it('mounts AgentView in the middle pane only for selected owner directories', async () => {
+    it('mounts AgentView in the middle pane for the root and selected owner directories', async () => {
         const wrapper = mount(DocumentWorkspaceView, {
             props: {
                 contextProvider: createMockContextProvider({
@@ -160,6 +172,8 @@ describe('DocumentWorkspaceView', () => {
         });
 
         await flushPromises();
+        expect(wrapper.find('[data-testid="agent-view-stub"]').exists()).toBe(true);
+
         await wrapper.get('[data-path="/docs"]').trigger('click');
         await flushPromises();
         expect(wrapper.find('[data-testid="agent-view-stub"]').exists()).toBe(true);
@@ -214,45 +228,72 @@ describe('DocumentWorkspaceView', () => {
         expect(wrapper.get('[data-testid="agent-pane"]').attributes('data-agent-key')).toBe('/docs/');
     });
 
-    it('restores the assistant conversation detail when AgentView opens a conversation', async () => {
+    it('wires AgentView provider loading and save events to the workspace stores', async () => {
         const chatStore = useChatStore();
-        const storage = new MockConversationStorage([
+        chatStore.availableProviders = [
             {
-                id: 'conversation-docs',
-                title: 'Docs Chat',
-                origin: 'local',
-                updatedAt: 10,
-                messages: [],
-                agentKey: '/docs/'
+                id: 'mock-provider',
+                name: 'Mock Provider',
+                models: [{ id: 'mock-model', name: 'Mock Model' }],
+                defaultModel: 'mock-model',
+                supportedRuntimeModes: ['web']
             }
-        ]);
-        chatStore.setProviders(createMockModelProvider(), storage);
+        ];
+        chatStore.providerModelStates = {
+            'mock-provider': { loading: false, loaded: true }
+        };
+        const ensureSpy = vi.spyOn(chatStore, 'ensureProviderModelsLoaded');
+        const contextProvider = createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/docs/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/docs' },
+                { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' }
+            ],
+            documents: {
+                '/docs/.agent.json': JSON.stringify({
+                    name: 'Docs Agent',
+                    instructions: 'Handle docs.'
+                }),
+                '/docs/guide.md': '# Guide'
+            }
+        });
 
         const wrapper = mount(DocumentWorkspaceView, {
             props: {
-                contextProvider: createMockContextProvider({
-                    nodes: [
-                        { path: '/docs', name: 'docs', kind: 'directory' },
-                        { path: '/docs/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/docs' },
-                        { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' }
-                    ],
-                    documents: {
-                        '/docs/.agent.json': JSON.stringify({
-                            name: 'Docs Agent',
-                            instructions: 'Handle docs.'
-                        }),
-                        '/docs/guide.md': '# Guide'
-                    }
-                })
+                contextProvider
             },
             global: {
                 stubs: {
                     AgentPane: {
-                        props: ['restoreConversationId'],
-                        template: '<div data-testid="agent-pane" :data-restore-conversation-id="restoreConversationId ?? \'\'" />'
+                        template: '<div data-testid="agent-pane" />'
                     },
                     AgentView: {
-                        template: '<button data-testid="agent-view-open-conversation" @click="$emit(\'open-conversation\', \'conversation-docs\')" />'
+                        props: ['providers', 'modelLoadStates', 'builtinTools'],
+                        template: `
+                          <div
+                            data-testid="agent-view-editor-stub"
+                            :data-provider-count="providers.length"
+                            :data-provider-loaded="modelLoadStates['mock-provider']?.loaded === true"
+                            :data-builtin-tool-count="builtinTools.length"
+                          >
+                            <button data-testid="agent-view-load-provider" @click="$emit('load-provider-models', 'mock-provider')" />
+                            <button
+                              data-testid="agent-view-save-config"
+                              @click="$emit('save-agent-config', {
+                                description: 'Updated docs description',
+                                instructions: 'Updated docs prompt',
+                                modelProviderName: 'mock-provider',
+                                modelName: 'mock-model',
+                                inheritance: 'override',
+                                tools: [
+                                  { id: 'read_file' },
+                                  { id: 'search_in_scope' }
+                                ],
+                                inheritTools: false
+                              })"
+                            />
+                          </div>
+                        `
                     },
                     DocumentEditorPane: { template: '<div data-testid="document-editor" />' }
                 }
@@ -262,11 +303,31 @@ describe('DocumentWorkspaceView', () => {
         await flushPromises();
         await wrapper.get('[data-path="/docs"]').trigger('click');
         await flushPromises();
-        await wrapper.get('[data-testid="agent-view-open-conversation"]').trigger('click');
+
+        expect(wrapper.get('[data-testid="agent-view-editor-stub"]').attributes('data-provider-count')).toBe('1');
+        expect(wrapper.get('[data-testid="agent-view-editor-stub"]').attributes('data-provider-loaded')).toBe('true');
+        expect(wrapper.get('[data-testid="agent-view-editor-stub"]').attributes('data-builtin-tool-count')).toBe(String(9));
+
+        await wrapper.get('[data-testid="agent-view-load-provider"]').trigger('click');
+        expect(ensureSpy).toHaveBeenCalledWith('mock-provider');
+
+        await wrapper.get('[data-testid="agent-view-save-config"]').trigger('click');
         await flushPromises();
 
-        expect(chatStore.currentConversation?.id).toBe('conversation-docs');
-        expect(wrapper.get('[data-testid="agent-pane"]').attributes('data-restore-conversation-id')).toBe('conversation-docs');
+        const saved = await contextProvider.readDocument('/docs/.agent.json');
+        const parsed = JSON.parse(Buffer.from(saved.dataBase64, 'base64').toString('utf8'));
+        expect(parsed).toMatchObject({
+            name: 'Docs Agent',
+            description: 'Updated docs description',
+            instructions: 'Updated docs prompt',
+            modelProviderName: 'mock-provider',
+            modelName: 'mock-model',
+            inheritance: 'override'
+        });
+        expect(parsed.tools).toEqual([
+            { id: 'read_file' },
+            { id: 'search_in_scope' }
+        ]);
     });
 
     it('forwards workspace switch requests from the agent pane', async () => {
@@ -464,4 +525,5 @@ describe('DocumentWorkspaceView', () => {
         expect(documentStore.activePath).toBeNull();
         expect(documentStore.activeDocument).toBeNull();
     });
+
 });

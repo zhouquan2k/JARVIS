@@ -2,9 +2,12 @@ import { defineStore } from 'pinia';
 import { markRaw } from 'vue';
 import {
     DEFAULT_WORKSPACE_AGENT_KEY,
+    DEFAULT_SCOPED_AGENT_CONFIG,
+    type AgentToolBinding,
     type ContextDocument,
     type ContextNode,
     type CreateContextNodeInput,
+    type AgentInheritanceMode,
     type IContextProvider,
     type ResolvedAgentConfig,
     type WorkspaceContext,
@@ -19,6 +22,19 @@ type ActiveViewerCapabilities = {
     view: boolean;
     edit: boolean;
 } | null;
+
+export type SaveAgentConfigInput = {
+    ownerPath: string;
+    patch: {
+        description?: string;
+        instructions?: string;
+        modelProviderName?: string;
+        modelName?: string;
+        inheritance?: AgentInheritanceMode;
+        tools?: AgentToolBinding[];
+        inheritTools?: boolean;
+    };
+};
 
 export interface DocumentWorkspaceState {
     contextProvider: IContextProvider | null;
@@ -47,6 +63,8 @@ export interface DocumentWorkspaceState {
     activeDiffEntries: LineDiffEntry[];
     canUndoActiveFile: boolean;
     canRedoActiveFile: boolean;
+    nodeHistory: string[];
+    nodeHistoryIndex: number;
 }
 
 const AUTO_SAVE_DELAY_MS = 400;
@@ -235,6 +253,68 @@ function getEditableDocumentText(document: ContextDocument | null): string {
     return decodeTextDocument(document.dataBase64);
 }
 
+function normalizeDocumentPath(path: string): string {
+    const trimmed = path.trim();
+    if (!trimmed || trimmed === '/') {
+        return '/';
+    }
+
+    const withLeadingSlash = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+    return withLeadingSlash.replace(/\/+/g, '/').replace(/\/$/, '') || '/';
+}
+
+function getAgentConfigPath(ownerPath: string): string {
+    const normalizedOwnerPath = normalizeDocumentPath(ownerPath);
+    return normalizedOwnerPath === '/' ? '/.agent.json' : `${normalizedOwnerPath}/.agent.json`;
+}
+
+function parseJsonObject(content: string, path: string): Record<string, unknown> {
+    let parsed: unknown;
+
+    try {
+        parsed = JSON.parse(content.replace(/^\uFEFF/, ''));
+    } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new Error(`Failed to parse ${path}: ${reason}`);
+    }
+
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        throw new Error(`Invalid agent config in ${path}: expected a JSON object.`);
+    }
+
+    return { ...parsed };
+}
+
+function getErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
+
+function isMissingDocumentError(error: unknown): boolean {
+    return /节点不存在|node does not exist|not found|enoent|http 404/i.test(getErrorMessage(error));
+}
+
+function isRootAgentConfigBootstrapError(error: unknown): boolean {
+    return /invalid agent config in \/.agent\.json|failed to parse \/.agent\.json/i.test(getErrorMessage(error));
+}
+
+function patchOptionalStringField(
+    target: Record<string, unknown>,
+    patch: Record<string, unknown>,
+    fieldName: 'description' | 'instructions' | 'modelProviderName' | 'modelName'
+) {
+    if (!Object.prototype.hasOwnProperty.call(patch, fieldName)) {
+        return;
+    }
+
+    const value = typeof patch[fieldName] === 'string' ? patch[fieldName].trim() : '';
+    if (value) {
+        target[fieldName] = value;
+        return;
+    }
+
+    delete target[fieldName];
+}
+
 function clearActiveDocumentState(store: {
     activePath: string | null;
     activeDocument: ContextDocument | null;
@@ -249,6 +329,41 @@ function clearActiveDocumentState(store: {
     store.activeViewerCapabilities = null;
     store.activePaneMode = 'empty';
     store.draftContent = '';
+}
+
+function hasNodePath(path: string | null, nodes: ContextNode[]): boolean {
+    return !!path && (
+        path === '/'
+        || nodes.some((node) => node.path === path)
+    );
+}
+
+function sanitizeNodeHistory(
+    history: string[],
+    index: number,
+    nodes: ContextNode[]
+): { history: string[]; index: number } {
+    if (history.length === 0) {
+        return { history: [], index: -1 };
+    }
+
+    const currentPath = index >= 0 ? history[index] : null;
+    const nextHistory = history.filter((path) => hasNodePath(path, nodes));
+    if (nextHistory.length === 0) {
+        return { history: [], index: -1 };
+    }
+
+    if (currentPath && nextHistory.includes(currentPath)) {
+        return {
+            history: nextHistory,
+            index: nextHistory.indexOf(currentPath)
+        };
+    }
+
+    return {
+        history: nextHistory,
+        index: Math.min(Math.max(index, 0), nextHistory.length - 1)
+    };
 }
 
 export const useDocumentWorkspaceStore = defineStore('document-workspace', {
@@ -278,7 +393,9 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
         latestFileChange: null,
         activeDiffEntries: [],
         canUndoActiveFile: false,
-        canRedoActiveFile: false
+        canRedoActiveFile: false,
+        nodeHistory: [],
+        nodeHistoryIndex: -1
     }),
     getters: {
         activeNode(state): ContextNode | null {
@@ -286,6 +403,14 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             return targetPath && state.context
                 ? findNodeByPath(state.context.nodes, targetPath) ?? null
                 : null;
+        },
+
+        canGoBackNodeHistory(state): boolean {
+            return state.nodeHistoryIndex > 0;
+        },
+
+        canGoForwardNodeHistory(state): boolean {
+            return state.nodeHistoryIndex >= 0 && state.nodeHistoryIndex < state.nodeHistory.length - 1;
         }
     },
     actions: {
@@ -388,6 +513,8 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             this.activeDiffEntries = [];
             this.canUndoActiveFile = false;
             this.canRedoActiveFile = false;
+            this.nodeHistory = [];
+            this.nodeHistoryIndex = -1;
             clearAutoSaveTimer(this);
         },
 
@@ -419,19 +546,17 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             this.context = context;
             this.nodes = nextNodes;
             this.expandedPaths = filterExpandedPaths(nextNodes, this.expandedPaths);
+            const sanitizedHistory = sanitizeNodeHistory(this.nodeHistory, this.nodeHistoryIndex, nextNodes);
+            this.nodeHistory = sanitizedHistory.history;
+            this.nodeHistoryIndex = sanitizedHistory.index;
 
-            const hasPath = (path: string | null) => !!path && (
-                path === '/'
-                || nextNodes.some((node) => node.path === path)
-            );
-
-            if (this.activePath && !hasPath(this.activePath)) {
+            if (this.activePath && !hasNodePath(this.activePath, nextNodes)) {
                 clearActiveDocumentState(this);
                 this.syncActiveFileChange(null);
             }
 
-            if (this.selectedNodePath && this.selectedNodePath !== '/' && !hasPath(this.selectedNodePath)) {
-                this.selectedNodePath = this.activePath && hasPath(this.activePath) ? this.activePath : '/';
+            if (this.selectedNodePath && this.selectedNodePath !== '/' && !hasNodePath(this.selectedNodePath, nextNodes)) {
+                this.selectedNodePath = this.activePath && hasNodePath(this.activePath, nextNodes) ? this.activePath : '/';
             }
 
             if (!this.activePath) {
@@ -445,6 +570,67 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
 
         async refreshTree() {
             await this.refreshContext();
+        },
+
+        async saveAgentConfig(input: SaveAgentConfigInput): Promise<void> {
+            if (!this.contextProvider) {
+                return;
+            }
+
+            const configPath = getAgentConfigPath(input.ownerPath);
+            let document: ContextDocument | null = null;
+            let config: Record<string, unknown>;
+            try {
+                document = await this.contextProvider.readDocument(configPath);
+                config = parseJsonObject(decodeTextDocument(document.dataBase64), configPath);
+            } catch (error) {
+                if (configPath !== '/.agent.json' || !isMissingDocumentError(error)) {
+                    throw error;
+                }
+
+                config = { ...DEFAULT_SCOPED_AGENT_CONFIG };
+
+                try {
+                    await this.contextProvider.createNode({
+                        name: '.agent.json',
+                        kind: 'file'
+                    });
+                } catch (createError) {
+                    if (!isRootAgentConfigBootstrapError(createError)) {
+                        throw createError;
+                    }
+                }
+            }
+            const patch = input.patch as Record<string, unknown>;
+
+            patchOptionalStringField(config, patch, 'description');
+            patchOptionalStringField(config, patch, 'instructions');
+            patchOptionalStringField(config, patch, 'modelProviderName');
+            patchOptionalStringField(config, patch, 'modelName');
+
+            if (Object.prototype.hasOwnProperty.call(patch, 'inheritance')) {
+                const inheritance = patch.inheritance;
+                if (inheritance === 'override') {
+                    config.inheritance = inheritance;
+                } else {
+                    delete config.inheritance;
+                }
+            }
+
+            if (Object.prototype.hasOwnProperty.call(patch, 'inheritTools') && patch.inheritTools === true) {
+                delete config.tools;
+            } else if (Object.prototype.hasOwnProperty.call(patch, 'tools')) {
+                config.tools = normalizeToolBindings(patch.tools);
+            }
+
+            await this.contextProvider.writeDocument({
+                path: configPath,
+                mimeType: document?.mimeType || 'application/json',
+                dataBase64: encodeTextDocument(`${JSON.stringify(config, null, 2)}\n`),
+                expectedVersion: document?.version
+            });
+            await this.refreshContext();
+            this.syncActiveAgent(input.ownerPath);
         },
 
         syncActiveAgent(path: string) {
@@ -510,9 +696,26 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             await this.openNode(
                 restorePath,
                 shouldPreserveSelectedDirectory
-                    ? { selectedNodePath: selectedExactPath }
-                    : undefined
+                    ? { selectedNodePath: selectedExactPath, recordHistory: false }
+                    : { recordHistory: false }
             );
+        },
+
+        recordNodeHistory(path: string) {
+            if (!hasNodePath(path, this.nodes)) {
+                return;
+            }
+
+            const currentPath = this.nodeHistoryIndex >= 0 ? this.nodeHistory[this.nodeHistoryIndex] : null;
+            if (currentPath === path) {
+                return;
+            }
+
+            const retainedHistory = this.nodeHistoryIndex >= 0
+                ? this.nodeHistory.slice(0, this.nodeHistoryIndex + 1)
+                : [];
+            this.nodeHistory = [...retainedHistory, path];
+            this.nodeHistoryIndex = this.nodeHistory.length - 1;
         },
 
         toggleExpanded(path: string) {
@@ -524,17 +727,21 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             this.expandedPaths = [...this.expandedPaths, path];
         },
 
-        async openNode(path: string, options?: { selectedNodePath?: string | null }) {
+        async openNode(path: string, options?: { selectedNodePath?: string | null; recordHistory?: boolean }) {
             if (!this.contextProvider) {
                 return;
             }
 
+            const shouldRecordHistory = options?.recordHistory !== false;
             if (path === '/') {
                 this.selectedNodePath = '/';
                 this.expandedPaths = ensureRootExpanded(this.expandedPaths);
                 clearActiveDocumentState(this);
                 this.syncActiveFileChange(null);
                 this.syncActiveAgent('/');
+                if (shouldRecordHistory) {
+                    this.recordNodeHistory('/');
+                }
                 return;
             }
 
@@ -549,6 +756,9 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
                 clearActiveDocumentState(this);
                 this.syncActiveFileChange(null);
                 this.syncActiveAgent(selectedNodePath);
+                if (shouldRecordHistory) {
+                    this.recordNodeHistory(path);
+                }
                 return;
             }
 
@@ -570,6 +780,43 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             };
             this.syncActiveFileChange(path);
             this.syncActiveAgent(selectedNodePath);
+            if (shouldRecordHistory) {
+                this.recordNodeHistory(path);
+            }
+        },
+
+        async goBackNodeHistory() {
+            while (this.nodeHistoryIndex > 0) {
+                const nextIndex = this.nodeHistoryIndex - 1;
+                const path = this.nodeHistory[nextIndex];
+                if (!path || !hasNodePath(path, this.nodes)) {
+                    const sanitizedHistory = sanitizeNodeHistory(this.nodeHistory, this.nodeHistoryIndex, this.nodes);
+                    this.nodeHistory = sanitizedHistory.history;
+                    this.nodeHistoryIndex = sanitizedHistory.index;
+                    continue;
+                }
+
+                this.nodeHistoryIndex = nextIndex;
+                await this.openNode(path, { recordHistory: false });
+                return;
+            }
+        },
+
+        async goForwardNodeHistory() {
+            while (this.nodeHistoryIndex >= 0 && this.nodeHistoryIndex < this.nodeHistory.length - 1) {
+                const nextIndex = this.nodeHistoryIndex + 1;
+                const path = this.nodeHistory[nextIndex];
+                if (!path || !hasNodePath(path, this.nodes)) {
+                    const sanitizedHistory = sanitizeNodeHistory(this.nodeHistory, this.nodeHistoryIndex, this.nodes);
+                    this.nodeHistory = sanitizedHistory.history;
+                    this.nodeHistoryIndex = sanitizedHistory.index;
+                    continue;
+                }
+
+                this.nodeHistoryIndex = nextIndex;
+                await this.openNode(path, { recordHistory: false });
+                return;
+            }
         },
 
         updateActiveDocument(content: string) {
@@ -787,6 +1034,34 @@ function clearAutoSaveTimer(store: object) {
         clearTimeout(timer);
         autoSaveTimers.delete(store);
     }
+}
+
+function normalizeToolBindings(value: unknown): Array<{ id: string; description?: string }> {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+
+    return value.flatMap((binding) => {
+        if (!binding || typeof binding !== 'object' || Array.isArray(binding)) {
+            return [];
+        }
+
+        const id = typeof (binding as { id?: unknown }).id === 'string'
+            ? (binding as { id: string }).id.trim()
+            : '';
+        if (!id) {
+            return [];
+        }
+
+        const description = typeof (binding as { description?: unknown }).description === 'string'
+            ? (binding as { description: string }).description.trim()
+            : '';
+
+        return [{
+            id,
+            ...(description ? { description } : {})
+        }];
+    });
 }
 
 function scheduleAutoSave(store: ReturnType<typeof useDocumentWorkspaceStore>) {

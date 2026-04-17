@@ -25,6 +25,11 @@ vi.mock('localforage', () => ({
                 async removeItem(itemKey: string) {
                     delete target[itemKey];
                 },
+                async clear() {
+                    Object.keys(target).forEach((key) => {
+                        delete target[key];
+                    });
+                },
                 async iterate(iterator: (value: Conversation) => void) {
                     Object.values(target).forEach((value) => iterator(structuredClone(value)));
                 }
@@ -189,5 +194,20 @@ describe('IndexedDBStorageProvider', () => {
             agentKey: '/workspace/.agent.json',
             starred: true
         });
+    });
+
+    it('can clear all stored conversations for a fresh bootstrap', async () => {
+        const provider = new IndexedDBStorageProvider();
+        await provider.saveConversation({
+            id: 'conversation-to-clear',
+            title: 'Conversation to clear',
+            origin: 'local',
+            messages: [],
+            updatedAt: 1
+        });
+
+        await provider.clear();
+
+        await expect(provider.getAllConversations()).resolves.toEqual([]);
     });
 });

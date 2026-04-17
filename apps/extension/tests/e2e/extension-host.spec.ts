@@ -267,7 +267,7 @@ test('extension knowledge workspace negotiates text pdf and unsupported document
   }
 });
 
-test('extension knowledge workspace shows AgentView for owner directories and links documents plus conversations', async () => {
+test('extension knowledge workspace shows AgentView for owner directories and right-pane conversations', async () => {
   const session = await launchExtensionPage({ routeHash: '#/' });
   try {
     const { page } = session;
@@ -281,23 +281,24 @@ test('extension knowledge workspace shows AgentView for owner directories and li
     await expect(page.getByTestId('agent-view')).toBeVisible();
     await expect(page.getByTestId('agent-view-scope')).toContainText('/docs');
     await expect(page.getByTestId('agent-name')).toContainText('Docs Agent');
-    const overviewDocument = page.getByTestId('agent-view-document').filter({ hasText: 'overview.md' });
-    await expect(overviewDocument).toHaveCount(1);
+    await expect(page.getByTestId('agent-view-document')).toHaveCount(0);
 
     await page.getByTestId('agent-conversation-list-plus').click();
     await expect(page.getByTestId('normal-input')).toBeVisible();
     await page.getByTestId('normal-input').fill('Extension docs owner');
     await page.getByTestId('normal-send').click();
-    const docsConversation = page.getByTestId('agent-view-conversation').filter({ hasText: 'Extension docs owner' });
-    await expect(docsConversation).toHaveCount(1);
+    await page.getByTestId('agent-conversation-back').click();
+    await expect(page.getByTestId('agent-view-conversation')).toHaveCount(0);
+    await expect(page.getByTestId('agent-document-conversation-item')).toContainText('Extension docs owner');
 
-    await overviewDocument.click();
+    await docsNode.locator('.tree-toggle').click();
+    await page.getByTestId('document-node-file').filter({ hasText: 'overview.md' }).click();
     await expect(page.getByTestId('document-editor-input')).toBeVisible();
     await expect(page.getByTestId('agent-view')).toHaveCount(0);
 
     await docsNode.click();
     await expect(page.getByTestId('agent-view')).toBeVisible();
-    await docsConversation.click();
+    await page.getByTestId('agent-document-conversation-item').click();
     await expect(page.getByTestId('normal-messages')).toContainText('Extension docs owner');
 
     await page.getByTestId('document-node-file').filter({ hasText: 'guide.md' }).click();

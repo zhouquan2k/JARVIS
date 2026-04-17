@@ -85,6 +85,7 @@ export interface Conversation {
     id: string; // Our internal UUID
     backendId?: string; // Real remote provider conversation ID
     title: string;
+    boundNodeName?: string;
     origin?: ConversationOrigin;
     externalId?: string;
     agentKey?: string;
@@ -357,6 +358,9 @@ export function normalizeConversation(conversation: Conversation): Conversation 
 
     return {
         ...conversation,
+        boundNodeName: typeof conversation.boundNodeName === 'string' && conversation.boundNodeName.trim()
+            ? conversation.boundNodeName.trim()
+            : undefined,
         origin: conversation.origin ?? 'local',
         agentKey: typeof conversation.agentKey === 'string' && conversation.agentKey.trim()
             ? conversation.agentKey

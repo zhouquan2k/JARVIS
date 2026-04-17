@@ -133,7 +133,7 @@
             @click="handleSelectLocal(item.id)"
           >
             <span v-if="item.starred" class="history-star-marker" aria-hidden="true">★</span>
-            <span class="title">{{ item.title || t('shared.untitled') }}</span>
+            <span class="title">{{ formatConversationTitle(item.title, item.boundNodeName, t('shared.untitled')) }}</span>
             <span v-if="resolveConversationAgentLabel(item.agentKey)" class="history-agent-tag">
               {{ resolveConversationAgentLabel(item.agentKey) }}
             </span>
@@ -162,7 +162,7 @@
                 type="button"
                 class="history-action"
                 data-testid="local-history-agent-binding-close"
-                :aria-label="`${t('shared.cancel')} ${item.title || t('shared.untitled')} ${t('shared.agentBindingPanel')}`"
+                :aria-label="`${t('shared.cancel')} ${formatConversationTitle(item.title, item.boundNodeName, t('shared.untitled'))} ${t('shared.agentBindingPanel')}`"
                 @click.stop="closeLocalAgentBinding"
               >
                 {{ t('shared.cancel') }}
@@ -307,6 +307,7 @@ import type {
 } from '@packages/core/src';
 import type { LocalConversationFilter, WorkspaceHistorySource } from '../store/chat';
 import { useWorkspaceI18n } from '../i18n';
+import { formatConversationTitle } from '../utils/conversationTitle';
 
 const props = defineProps<{
   collapsed: boolean;

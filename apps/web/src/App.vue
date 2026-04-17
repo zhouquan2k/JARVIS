@@ -17,7 +17,7 @@ import {
 import { currentRoute, navigateTo } from './router';
 import { createWebContextProvider } from './context/createWebContextProvider';
 import { agentRuntime, createWebHistoryProviders, modelProviderRuntime } from './modelProviderRuntime';
-import { createWebSyncStorageProvider } from './sync';
+import { createWebSyncStorageProvider, resetWebSyncCache } from './sync';
 
 const chatStore = useChatStore();
 const compareStore = useCompareStore();
@@ -29,6 +29,16 @@ const contextProvider = createWebContextProvider({
 onMounted(() => {
   void (async () => {
     try {
+      if (import.meta.env.DEV) {
+        (window as Window & {
+          __CHATPRISM_RESET_WEB_SYNC_CACHE__?: () => Promise<void>;
+        }).__CHATPRISM_RESET_WEB_SYNC_CACHE__ = () => resetWebSyncCache({
+          storage: typeof localStorage !== 'undefined' ? localStorage : undefined,
+          env: import.meta.env as Record<string, string | undefined>,
+          isDevelopment: import.meta.env.DEV
+        });
+      }
+
       const providerCatalog = modelProviderRuntime.getProviderCatalog();
       await compareStore.setRuntime(modelProviderRuntime);
 

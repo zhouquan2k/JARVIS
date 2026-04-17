@@ -27,4 +27,27 @@ describe('AppTopBar', () => {
         await chatButton.trigger('click');
         expect(wrapper.emitted('navigate-workspace')).toEqual([[ '/chat' ]]);
     });
+
+    it('renders top-level node history controls when enabled', async () => {
+        const wrapper = mount(AppTopBar, {
+            props: {
+                isCompareMode: false,
+                compareStage: 'idle',
+                activeWorkspacePath: '/',
+                workspaceOptions: PRIMARY_WORKSPACE_ROUTES,
+                showNodeHistoryControls: true,
+                canGoBackNodeHistory: true,
+                canGoForwardNodeHistory: false
+            }
+        });
+
+        expect(wrapper.get('[data-testid="topbar-node-history-controls"]').exists()).toBe(true);
+        expect(wrapper.get('[data-testid="topbar-node-history-back"]').attributes('title')).toBe('Back to previous node');
+        expect(wrapper.get('[data-testid="topbar-node-history-back"]').attributes('disabled')).toBeUndefined();
+        expect(wrapper.get('[data-testid="topbar-node-history-forward"]').attributes('disabled')).toBeDefined();
+
+        await wrapper.get('[data-testid="topbar-node-history-back"]').trigger('click');
+        expect(wrapper.emitted('go-back-node-history')).toHaveLength(1);
+        expect(wrapper.emitted('go-forward-node-history')).toBeUndefined();
+    });
 });

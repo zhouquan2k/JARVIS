@@ -1,6 +1,7 @@
 import type { IContextProvider } from '../../interfaces/IContextProvider';
 import type {
     AgentConfig,
+    AgentInheritanceMode,
     AgentSkillBinding,
     AgentToolBinding,
     ResolvedAgentConfig
@@ -78,7 +79,8 @@ function cloneAgentConfig(config: AgentConfig): AgentConfig {
         modelProviderName: config.modelProviderName,
         modelName: config.modelName,
         tools: cloneBindings(config.tools),
-        skills: cloneBindings(config.skills)
+        skills: cloneBindings(config.skills),
+        inheritance: config.inheritance
     };
 }
 
@@ -116,24 +118,47 @@ function mergeAgentConfigs(parent: AgentConfig, child: AgentConfig): AgentConfig
         modelProviderName: child.modelProviderName ?? parent.modelProviderName,
         modelName: child.modelName ?? parent.modelName,
         tools: mergeBindings(parent.tools, child.tools),
-        skills: mergeBindings(parent.skills, child.skills)
+        skills: mergeBindings(parent.skills, child.skills),
+        inheritance: child.inheritance
     };
 }
 
-function createResolvedAgentConfig(
+export function createResolvedAgentConfig(
     scopePath: string,
     sourcePaths: string[],
-    config: AgentConfig
+    config: AgentConfig,
+    editableConfig: AgentConfig = config
 ): ResolvedAgentConfig {
     const instructions = normalizeInstructions(config.instructions);
+    const editableInstructions = normalizeInstructions(editableConfig.instructions);
 
     return {
         ...cloneAgentConfig(config),
         scopePath,
         sourcePaths: [...sourcePaths],
         effectiveInstructions: instructions,
-        instructions: instructions || undefined
+        instructions: editableInstructions || undefined
     };
+}
+
+export function resolveChildAgentConfig(
+    parent: ResolvedAgentConfig,
+    scopePath: string,
+    configPath: string,
+    config: AgentConfig
+): ResolvedAgentConfig {
+    const effectiveParent: AgentConfig = {
+        ...parent,
+        instructions: parent.effectiveInstructions
+    };
+    const merged = config.inheritance === 'override'
+        ? cloneAgentConfig(config)
+        : mergeAgentConfigs(effectiveParent, config);
+    const sourcePaths = config.inheritance === 'override'
+        ? [configPath]
+        : [...parent.sourcePaths, configPath];
+
+    return createResolvedAgentConfig(scopePath, sourcePaths, merged, config);
 }
 
 function isMissingDocumentError(error: unknown): boolean {
@@ -186,6 +211,18 @@ function parseBindings<T extends AgentBinding>(
     });
 }
 
+function parseInheritance(value: unknown, configPath: string): AgentInheritanceMode | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+
+    if (value === 'merge' || value === 'override') {
+        return value;
+    }
+
+    throw new Error(`Invalid agent config in ${configPath}: "inheritance" must be "merge" or "override".`);
+}
+
 function parseAgentConfig(content: string, configPath: string): AgentConfig {
     let parsed: unknown;
 
@@ -221,6 +258,8 @@ function parseAgentConfig(content: string, configPath: string): AgentConfig {
         throw new Error(`Invalid agent config in ${configPath}: "modelName" must be a string.`);
     }
 
+    const inheritance = parseInheritance(parsed.inheritance, configPath);
+
     return {
         name,
         description: parsed.description,
@@ -228,7 +267,8 @@ function parseAgentConfig(content: string, configPath: string): AgentConfig {
         modelProviderName: parsed.modelProviderName,
         modelName: parsed.modelName,
         tools: parseBindings<AgentToolBinding>(parsed.tools, configPath, 'tools'),
-        skills: parseBindings<AgentSkillBinding>(parsed.skills, configPath, 'skills')
+        skills: parseBindings<AgentSkillBinding>(parsed.skills, configPath, 'skills'),
+        inheritance
     };
 }
 
@@ -292,13 +332,8 @@ export async function resolveScopedAgentConfig(
     }
 
     const orderedMatches = [...matches].reverse();
-    const merged = orderedMatches.reduce<AgentConfig>((current, match) => {
-        return mergeAgentConfigs(current, match.config);
-    }, cloneAgentConfig(fallback));
-
-    return createResolvedAgentConfig(
-        scopePath,
-        orderedMatches.map((match) => match.configPath),
-        merged
-    );
+    const fallbackResolved = createResolvedAgentConfig(scopePath, [], fallback);
+    return orderedMatches.reduce<ResolvedAgentConfig>((current, match) => {
+        return resolveChildAgentConfig(current, match.scopePath, match.configPath, match.config);
+    }, fallbackResolved);
 }

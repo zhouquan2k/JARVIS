@@ -67,17 +67,18 @@ describe('LocalFileContextProvider.getContext', () => {
         expect(context.agentConfigs['/']).toMatchObject({
             name: 'Default Knowledge Agent',
             scopePath: '/',
-            sourcePaths: []
+            sourcePaths: ['/.agent.json']
         });
         expect(context.agentConfigs['/workspace/']).toMatchObject({
             name: 'Workspace Agent',
             scopePath: '/workspace',
-            sourcePaths: ['/workspace/.agent.json']
+            sourcePaths: ['/.agent.json', '/workspace/.agent.json']
         });
         expect(context.agentConfigs['/workspace/archive/']).toMatchObject({
             name: 'Archive Agent',
             scopePath: '/workspace/archive',
-            sourcePaths: ['/workspace/.agent.json', '/workspace/archive/.agent.json']
+            instructions: 'Handle archived docs.',
+            sourcePaths: ['/.agent.json', '/workspace/.agent.json', '/workspace/archive/.agent.json']
         });
         expect(context.agentConfigs['/workspace/archive/']?.effectiveInstructions).toContain('Handle workspace docs.');
         expect(context.agentConfigs['/workspace/archive/']?.effectiveInstructions).toContain('Handle archived docs.');
@@ -186,12 +187,12 @@ describe('LocalFileContextProvider.getContext', () => {
         expect(context.agentConfigs['/reports/']).toMatchObject({
             name: 'Reports Mount',
             scopePath: '/reports',
-            sourcePaths: ['/reports/.agent.json']
+            sourcePaths: ['/.agent.json', '/reports/.agent.json']
         });
         expect(context.agentConfigs['/reports/archive/']).toMatchObject({
             name: 'Archive Agent',
             scopePath: '/reports/archive',
-            sourcePaths: ['/reports/.agent.json', '/reports/archive/.agent.json']
+            sourcePaths: ['/.agent.json', '/reports/.agent.json', '/reports/archive/.agent.json']
         });
 
         const initialSummary = await provider.readDocument('/reports/summary.md');

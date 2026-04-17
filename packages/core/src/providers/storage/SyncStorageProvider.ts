@@ -15,11 +15,13 @@ import type { IConversationPersistProvider } from '../../interfaces/IConversatio
 export interface SyncStateStore {
     getCursor(syncKey: string): Promise<number | null>;
     setCursor(syncKey: string, cursor: number | null): Promise<void>;
+    clear?(): Promise<void>;
 }
 
 export interface DeletedConversationStateStore {
     getDeletedConversations(syncKey: string): Promise<SyncDeletedConversation[]>;
     setDeletedConversations(syncKey: string, conversations: SyncDeletedConversation[]): Promise<void>;
+    clear?(): Promise<void>;
 }
 
 export interface SyncStorageProviderOptions {
@@ -95,6 +97,10 @@ class LocalForageSyncStateStore implements SyncStateStore {
     async setCursor(syncKey: string, cursor: number | null): Promise<void> {
         await this.store.setItem(`cursor:${syncKey}`, cursor);
     }
+
+    async clear(): Promise<void> {
+        await this.store.clear();
+    }
 }
 
 class LocalForageDeletedConversationStateStore implements DeletedConversationStateStore {
@@ -114,6 +120,10 @@ class LocalForageDeletedConversationStateStore implements DeletedConversationSta
 
     async setDeletedConversations(syncKey: string, conversations: SyncDeletedConversation[]): Promise<void> {
         await this.store.setItem(`deleted:${syncKey}`, dedupeDeletedConversations(conversations));
+    }
+
+    async clear(): Promise<void> {
+        await this.store.clear();
     }
 }
 
@@ -206,6 +216,17 @@ export class SyncStorageProvider implements IConversationPersistProvider {
         });
 
         return this.activeSync;
+    }
+
+    async clearLocalState(): Promise<void> {
+        await Promise.all([
+            this.localStore.clear?.(),
+            this.stateStore.clear?.(),
+            this.deletedConversationStore.clear?.()
+        ]);
+        this.cursorLoaded = false;
+        this.cursor = null;
+        this.pendingSync = false;
     }
 
     private async performSync(): Promise<void> {

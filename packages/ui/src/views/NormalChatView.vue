@@ -295,7 +295,9 @@ const isAuthenticated = ref(false);
 const inputRef = ref<HTMLTextAreaElement | null>(null);
 const messagesRef = ref<HTMLElement | null>(null);
 const isTopToolbarCollapsed = ref(false);
+const forceNextMessageScroll = ref(false);
 let scrollSyncFrame: number | null = null;
+const MESSAGE_BOTTOM_THRESHOLD_PX = 32;
 
 async function refreshAuthStatus() {
   isAuthenticated.value = await chatStore.checkAuth();
@@ -412,9 +414,11 @@ watch(() => renderedMessages.value, () => {
   if (isPreviewing.value) {
     return;
   }
+  const shouldScrollToLatest = forceNextMessageScroll.value || isMessagesNearBottom();
+  forceNextMessageScroll.value = false;
   nextTick(() => {
-    if (messagesRef.value) {
-      messagesRef.value.scrollTop = messagesRef.value.scrollHeight;
+    if (shouldScrollToLatest) {
+      scrollMessagesToBottom();
     }
     syncActiveQuestionFromScroll();
   });
@@ -428,7 +432,8 @@ watch(
         return;
       }
 
-      messagesRef.value.scrollTop = isPreviewing.value ? 0 : messagesRef.value.scrollHeight;
+      forceNextMessageScroll.value = false;
+      messagesRef.value.scrollTop = 0;
       syncActiveQuestionFromScroll();
     });
   }
@@ -506,6 +511,7 @@ async function send(e?: Event) {
     return;
   }
 
+  forceNextMessageScroll.value = true;
   await chatStore.sendDraft();
 }
 
@@ -536,6 +542,24 @@ function resolveMessageAttachments(message: ConversationMessage) {
   }
 
   return message.requestSnapshot?.attachments || [];
+}
+
+function isMessagesNearBottom(): boolean {
+  const container = messagesRef.value;
+  if (!container) {
+    return false;
+  }
+
+  return container.scrollHeight - container.scrollTop - container.clientHeight <= MESSAGE_BOTTOM_THRESHOLD_PX;
+}
+
+function scrollMessagesToBottom(): void {
+  const container = messagesRef.value;
+  if (!container) {
+    return;
+  }
+
+  container.scrollTop = container.scrollHeight;
 }
 
 function syncActiveQuestionFromScroll() {

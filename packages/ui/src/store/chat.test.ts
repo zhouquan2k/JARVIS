@@ -645,6 +645,25 @@ describe('useChatStore workspace history flow', () => {
         });
     });
 
+    it('binds a new conversation to the saved selected node name when available', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+
+        await store.initializeProviderCatalog(providerCatalog);
+        store.saveAgentViewStatus({
+            selectedNodePath: '/docs/archive',
+            activePath: '/docs/archive/note.md',
+            activeConversationId: null
+        });
+
+        await store.startNewConversation();
+
+        expect(store.currentConversation?.boundNodeName).toBe('archive');
+        expect((await storage.getAllConversations())).toHaveLength(0);
+    });
+
     it('resets inherited workspace agent selection when starting a new chat in conversation mode', async () => {
         const provider = new MockModelProvider();
         const storage = new MockStorageProvider([]);
@@ -1707,6 +1726,114 @@ describe('useChatStore workspace history flow', () => {
         expect(store.visibleMessages.map((message) => message.id)).toEqual(['fresh-user', 'fresh-assistant']);
         expect(store.activeQuestionId).toBeNull();
         expect(store.pendingScrollQuestionId).toBeNull();
+    });
+
+    it('restores the last question into the draft when deleting the final question', async () => {
+        const storage = new MockStorageProvider([
+            {
+                id: 'conversation-final-question',
+                title: 'Final question',
+                origin: 'local',
+                updatedAt: 10,
+                messages: [
+                    {
+                        id: 'first-user',
+                        role: 'user',
+                        content: '第一条问题',
+                        questionId: 'question-1',
+                        createdAt: 1
+                    },
+                    {
+                        id: 'first-assistant',
+                        role: 'assistant',
+                        content: '第一条回答',
+                        questionId: 'question-1',
+                        createdAt: 2
+                    },
+                    {
+                        id: 'last-user',
+                        role: 'user',
+                        content: '最后一个问题',
+                        questionId: 'question-2',
+                        createdAt: 3
+                    },
+                    {
+                        id: 'last-assistant',
+                        role: 'assistant',
+                        content: '最后一个回答',
+                        questionId: 'question-2',
+                        createdAt: 4
+                    }
+                ]
+            }
+        ]);
+        const store = useChatStore();
+        store.setProviders(new MockModelProvider(), storage);
+
+        await store.init();
+        await store.selectLocalConversation('conversation-final-question');
+        store.setDraftPrompt('');
+
+        await store.softDeleteQuestionPair('question-2');
+
+        expect(store.draftPrompt).toBe('最后一个问题');
+        expect(store.draftFocusRequestKey).toBe(1);
+        expect(store.currentConversation?.messages[2]?.deleted).toBe(true);
+        expect(store.currentConversation?.messages[3]?.deleted).toBe(true);
+    });
+
+    it('does not restore the draft when deleting a non-final question', async () => {
+        const storage = new MockStorageProvider([
+            {
+                id: 'conversation-non-final-question',
+                title: 'Non final question',
+                origin: 'local',
+                updatedAt: 10,
+                messages: [
+                    {
+                        id: 'first-user',
+                        role: 'user',
+                        content: '第一条问题',
+                        questionId: 'question-1',
+                        createdAt: 1
+                    },
+                    {
+                        id: 'first-assistant',
+                        role: 'assistant',
+                        content: '第一条回答',
+                        questionId: 'question-1',
+                        createdAt: 2
+                    },
+                    {
+                        id: 'last-user',
+                        role: 'user',
+                        content: '最后一个问题',
+                        questionId: 'question-2',
+                        createdAt: 3
+                    },
+                    {
+                        id: 'last-assistant',
+                        role: 'assistant',
+                        content: '最后一个回答',
+                        questionId: 'question-2',
+                        createdAt: 4
+                    }
+                ]
+            }
+        ]);
+        const store = useChatStore();
+        store.setProviders(new MockModelProvider(), storage);
+
+        await store.init();
+        await store.selectLocalConversation('conversation-non-final-question');
+        store.setDraftPrompt('原始草稿');
+
+        await store.softDeleteQuestionPair('question-1');
+
+        expect(store.draftPrompt).toBe('原始草稿');
+        expect(store.draftFocusRequestKey).toBe(0);
+        expect(store.currentConversation?.messages[0]?.deleted).toBe(true);
+        expect(store.currentConversation?.messages[1]?.deleted).toBe(true);
     });
 
     it('restores the submitted draft when aborting generation', async () => {

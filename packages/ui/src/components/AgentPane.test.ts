@@ -314,6 +314,7 @@ describe('AgentPane', () => {
         await storage.saveConversation({
             id: 'conversation-1',
             title: 'Guide discussion',
+            boundNodeName: 'guide.md',
             origin: 'local',
             agentKey: '/docs/',
             documentPaths: ['/docs/guide.md'],
@@ -342,6 +343,7 @@ describe('AgentPane', () => {
                     {
                         id: 'conversation-1',
                         title: 'Guide discussion',
+                        boundNodeName: 'guide.md',
                         origin: 'local',
                         agentKey: '/docs/',
                         documentPaths: ['/docs/guide.md'],
@@ -361,11 +363,13 @@ describe('AgentPane', () => {
         });
 
         await nextTick();
+        expect(wrapper.get('[data-testid="agent-document-conversation-item"]').text()).toContain('guide.md - Guide discussion');
+        expect(wrapper.get('[data-testid="agent-document-conversation-item"]').attributes('title')).toBe('guide.md - Guide discussion');
         await wrapper.get('[data-testid="agent-document-conversation-item"]').trigger('click');
         await flushPromises();
 
         expect(wrapper.get('[data-testid="agent-conversation-toolbar"]').exists()).toBe(true);
-        expect(wrapper.get('[data-testid="agent-conversation-title"]').text()).toBe('Guide discussion');
+        expect(wrapper.get('[data-testid="agent-conversation-title"]').text()).toBe('guide.md - Guide discussion');
         expect(wrapper.get('[data-testid="normal-chat-stub"]').exists()).toBe(true);
     });
 

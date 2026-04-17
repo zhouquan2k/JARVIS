@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
-import { createMockContextProvider, decodeTextDocument } from '@packages/core/src';
+import { createMockContextProvider, decodeTextDocument, DEFAULT_SCOPED_AGENT_CONFIG } from '@packages/core/src';
 import { useDocumentWorkspaceStore } from './documentWorkspace';
 
 describe('useDocumentWorkspaceStore', () => {
@@ -380,6 +380,82 @@ describe('useDocumentWorkspaceStore', () => {
         expect(store.draftContent).toBe('');
     });
 
+    it('records node history, navigates back and forward, and truncates forward history after a new visit', async () => {
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(createMockContextProvider({
+            nodes: [
+                { path: '/alpha.md', name: 'alpha.md', kind: 'file' },
+                { path: '/beta.md', name: 'beta.md', kind: 'file' },
+                { path: '/gamma', name: 'gamma', kind: 'directory' }
+            ],
+            documents: {
+                '/alpha.md': '# Alpha',
+                '/beta.md': '# Beta'
+            }
+        }));
+
+        await store.hydrateWorkspace();
+        await store.openNode('/alpha.md');
+        await store.openNode('/beta.md');
+
+        expect(store.nodeHistory).toEqual(['/alpha.md', '/beta.md']);
+        expect(store.nodeHistoryIndex).toBe(1);
+        expect(store.canGoBackNodeHistory).toBe(true);
+        expect(store.canGoForwardNodeHistory).toBe(false);
+
+        await store.goBackNodeHistory();
+        expect(store.activePath).toBe('/alpha.md');
+        expect(store.nodeHistory).toEqual(['/alpha.md', '/beta.md']);
+        expect(store.nodeHistoryIndex).toBe(0);
+        expect(store.canGoForwardNodeHistory).toBe(true);
+
+        await store.goForwardNodeHistory();
+        expect(store.activePath).toBe('/beta.md');
+        expect(store.nodeHistoryIndex).toBe(1);
+
+        await store.goBackNodeHistory();
+        await store.openNode('/gamma');
+        expect(store.selectedNodePath).toBe('/gamma');
+        expect(store.activePath).toBeNull();
+        expect(store.nodeHistory).toEqual(['/alpha.md', '/gamma']);
+        expect(store.nodeHistoryIndex).toBe(1);
+        expect(store.canGoForwardNodeHistory).toBe(false);
+    });
+
+    it('does not record restore navigation and removes missing nodes from history on refresh', async () => {
+        const provider = createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' },
+                { path: '/notes.md', name: 'notes.md', kind: 'file' }
+            ],
+            documents: {
+                '/docs/guide.md': '# Guide',
+                '/notes.md': '# Notes'
+            }
+        });
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(provider);
+
+        await store.hydrateWorkspace();
+        await store.openNode('/docs/guide.md');
+        await store.openNode('/notes.md');
+        await store.restoreSelection({
+            selectedNodePath: '/docs',
+            activePath: '/docs/guide.md'
+        });
+
+        expect(store.nodeHistory).toEqual(['/docs/guide.md', '/notes.md']);
+        expect(store.nodeHistoryIndex).toBe(1);
+
+        await provider.deleteNode('/notes.md');
+        await store.refreshTree();
+
+        expect(store.nodeHistory).toEqual(['/docs/guide.md']);
+        expect(store.nodeHistoryIndex).toBe(0);
+        expect(store.canGoBackNodeHistory).toBe(false);
+    });
+
     it('falls back to the default agent when no scoped config exists', async () => {
         const store = useDocumentWorkspaceStore();
         store.setContextProvider(createMockContextProvider({
@@ -397,6 +473,179 @@ describe('useDocumentWorkspaceStore', () => {
         expect(store.activeAgent?.name).toBe('Default Knowledge Agent');
         expect(store.activeAgent?.scopePath).toBe('/');
         expect(store.agentResolutionError).toBeNull();
+    });
+
+    it('creates and saves the root default agent config when the root agent is edited', async () => {
+        const provider = createMockContextProvider({
+            nodes: [
+                { path: '/notes', name: 'notes', kind: 'directory' },
+                { path: '/notes/day-1.md', name: 'day-1.md', kind: 'file', parentPath: '/notes' }
+            ],
+            documents: {
+                '/notes/day-1.md': '# Day 1'
+            }
+        });
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(provider);
+
+        await store.hydrateWorkspace();
+        await store.openNode('/');
+        await store.saveAgentConfig({
+            ownerPath: '/',
+            patch: {
+                instructions: 'Root prompt',
+                modelProviderName: 'gemini-api',
+                modelName: 'gemini-2.5-flash'
+            }
+        });
+
+        const saved = await provider.readDocument('/.agent.json');
+        const parsed = JSON.parse(decodeTextDocument(saved.dataBase64));
+        expect(parsed).toMatchObject({
+            ...DEFAULT_SCOPED_AGENT_CONFIG,
+            instructions: 'Root prompt',
+            modelProviderName: 'gemini-api',
+            modelName: 'gemini-2.5-flash'
+        });
+        expect(store.selectedNodePath).toBe('/');
+        expect(store.activeAgentKey).toBe('/');
+        expect(store.activeAgent?.name).toBe('Default Knowledge Agent');
+        expect(store.activeAgent?.effectiveInstructions).toContain('Root prompt');
+        expect(store.activeAgent?.modelProviderName).toBe('gemini-api');
+        expect(store.activeAgent?.modelName).toBe('gemini-2.5-flash');
+    });
+
+    it('saves editable agent config fields while preserving unsupported fields and refreshing the active agent', async () => {
+        const provider = createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/docs/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/docs' }
+            ],
+            documents: {
+                '/docs/.agent.json': JSON.stringify({
+                    name: 'Docs Agent',
+                    description: 'Keep this description',
+                    instructions: 'Old prompt',
+                    modelProviderName: 'gemini-api',
+                    modelName: 'old-model',
+                    tools: [{ id: 'read_file' }],
+                    skills: [{ id: 'summarize' }],
+                    linkDir: './linked',
+                    customFlag: true
+                })
+            }
+        });
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(provider);
+
+        await store.hydrateWorkspace();
+        await store.openNode('/docs');
+        await store.saveAgentConfig({
+            ownerPath: '/docs',
+            patch: {
+                description: 'Updated description',
+                instructions: 'New prompt',
+                modelProviderName: 'openai',
+                modelName: 'gpt-5.4',
+                inheritance: 'override',
+                tools: [
+                    { id: 'read_file' },
+                    { id: 'write_file' }
+                ]
+            }
+        });
+
+        const saved = await provider.readDocument('/docs/.agent.json');
+        const parsed = JSON.parse(decodeTextDocument(saved.dataBase64));
+        expect(parsed).toMatchObject({
+            name: 'Docs Agent',
+            description: 'Updated description',
+            instructions: 'New prompt',
+            modelProviderName: 'openai',
+            modelName: 'gpt-5.4',
+            inheritance: 'override',
+            linkDir: './linked',
+            customFlag: true
+        });
+        expect(parsed.tools).toEqual([
+            { id: 'read_file' },
+            { id: 'write_file' }
+        ]);
+        expect(parsed.skills).toEqual([{ id: 'summarize' }]);
+        expect(store.activeAgent?.name).toBe('Docs Agent');
+        expect(store.activeAgent?.effectiveInstructions).toBe('New prompt');
+        expect(store.activeAgent?.modelProviderName).toBe('openai');
+        expect(store.activeAgent?.modelName).toBe('gpt-5.4');
+    });
+
+    it('removes tools when saving full inheritance for an owner agent config', async () => {
+        const provider = createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/docs/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/docs' }
+            ],
+            documents: {
+                '/docs/.agent.json': JSON.stringify({
+                    name: 'Docs Agent',
+                    instructions: 'Old prompt',
+                    tools: [{ id: 'read_file' }, { id: 'write_file' }],
+                    customFlag: true
+                })
+            }
+        });
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(provider);
+
+        await store.hydrateWorkspace();
+        await store.saveAgentConfig({
+            ownerPath: '/docs',
+            patch: {
+                inheritTools: true
+            }
+        });
+
+        const saved = await provider.readDocument('/docs/.agent.json');
+        const parsed = JSON.parse(decodeTextDocument(saved.dataBase64));
+        expect(parsed).toEqual({
+            name: 'Docs Agent',
+            instructions: 'Old prompt',
+            customFlag: true
+        });
+    });
+
+    it('normalizes blank agent config fields and removes default merge inheritance', async () => {
+        const provider = createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/docs/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/docs' }
+            ],
+            documents: {
+                '/docs/.agent.json': JSON.stringify({
+                    name: 'Docs Agent',
+                    instructions: 'Old prompt',
+                    modelProviderName: 'gemini-api',
+                    modelName: 'old-model',
+                    inheritance: 'override'
+                })
+            }
+        });
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(provider);
+
+        await store.hydrateWorkspace();
+        await store.saveAgentConfig({
+            ownerPath: '/docs',
+            patch: {
+                instructions: '  ',
+                modelProviderName: '',
+                modelName: '',
+                inheritance: 'merge'
+            }
+        });
+
+        const saved = await provider.readDocument('/docs/.agent.json');
+        const parsed = JSON.parse(decodeTextDocument(saved.dataBase64));
+        expect(parsed).toEqual({ name: 'Docs Agent' });
     });
 
     it('surfaces workspace context errors when getContext fails', async () => {

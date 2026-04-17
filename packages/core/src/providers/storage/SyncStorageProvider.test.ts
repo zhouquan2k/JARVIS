@@ -41,6 +41,10 @@ class MemoryStorageProvider implements IConversationPersistProvider {
     async deleteConversation(id: string): Promise<void> {
         this.conversations.delete(id);
     }
+
+    async clear(): Promise<void> {
+        this.conversations.clear();
+    }
 }
 
 class MemorySyncStateStore implements SyncStateStore {
@@ -53,6 +57,10 @@ class MemorySyncStateStore implements SyncStateStore {
     async setCursor(syncKey: string, cursor: number | null): Promise<void> {
         this.cursors.set(syncKey, cursor);
     }
+
+    async clear(): Promise<void> {
+        this.cursors.clear();
+    }
 }
 
 class MemoryDeletedConversationStateStore implements DeletedConversationStateStore {
@@ -64,6 +72,10 @@ class MemoryDeletedConversationStateStore implements DeletedConversationStateSto
 
     async setDeletedConversations(syncKey: string, conversations: SyncDeletedConversation[]): Promise<void> {
         this.deletedConversations.set(syncKey, conversations.map((conversation) => ({ ...conversation })));
+    }
+
+    async clear(): Promise<void> {
+        this.deletedConversations.clear();
     }
 }
 
@@ -586,5 +598,42 @@ describe('SyncStorageProvider', () => {
 
         const freshConversation = await provider.getConversation('fresh-1');
         expect(freshConversation?.sync?.dirty).toBe(false);
+    });
+
+    it('clears local conversations and sync metadata for a full local reset', async () => {
+        const localStore = new MemoryStorageProvider([
+            createConversation({
+                id: 'local-1',
+                updatedAt: 100,
+                sync: {
+                    dirty: true,
+                    deleted: false,
+                    syncedAt: 50
+                }
+            })
+        ]);
+        const stateStore = new MemorySyncStateStore();
+        const deletedConversationStore = new MemoryDeletedConversationStateStore();
+        await stateStore.setCursor('workspace-reset', 42);
+        await deletedConversationStore.setDeletedConversations('workspace-reset', [
+            {
+                id: 'deleted-1',
+                updatedAt: 10
+            }
+        ]);
+
+        const provider = new SyncStorageProvider({
+            localStore,
+            transport: new MockSyncTransport(),
+            syncKey: 'workspace-reset',
+            stateStore,
+            deletedConversationStore
+        });
+
+        await provider.clearLocalState();
+
+        await expect(provider.getAllConversations()).resolves.toEqual([]);
+        await expect(stateStore.getCursor('workspace-reset')).resolves.toBeNull();
+        await expect(deletedConversationStore.getDeletedConversations('workspace-reset')).resolves.toEqual([]);
     });
 });

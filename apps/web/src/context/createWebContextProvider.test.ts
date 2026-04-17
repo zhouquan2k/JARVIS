@@ -305,7 +305,7 @@ describe('createWebContextProvider', () => {
         '/': expect.objectContaining({
           name: 'Default Knowledge Agent',
           scopePath: '/',
-          sourcePaths: []
+          sourcePaths: ['/.agent.json']
         })
       }
     });

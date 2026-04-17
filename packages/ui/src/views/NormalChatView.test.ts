@@ -56,6 +56,18 @@ function mountView(props: Record<string, unknown> = {}) {
     });
 }
 
+function setScrollMetrics(element: HTMLElement, metrics: { scrollTop: number; scrollHeight: number; clientHeight: number }) {
+    Object.defineProperty(element, 'scrollHeight', {
+        configurable: true,
+        value: metrics.scrollHeight
+    });
+    Object.defineProperty(element, 'clientHeight', {
+        configurable: true,
+        value: metrics.clientHeight
+    });
+    element.scrollTop = metrics.scrollTop;
+}
+
 describe('NormalChatView', () => {
     beforeEach(() => {
         setActivePinia(createPinia());
@@ -563,5 +575,90 @@ describe('NormalChatView', () => {
 
         expect(wrapper.find('[data-testid="normal-auth-warning"]').exists()).toBe(false);
         expect((wrapper.get('[data-testid="normal-input"]').element as HTMLTextAreaElement).disabled).toBe(false);
+    });
+
+    it('preserves scroll position when assistant content updates after the user scrolls upward', async () => {
+        const store = useChatStore();
+        store.workspaceMode = 'conversation';
+        store.currentConversation = createConversation([
+            {
+                id: 'user-1',
+                role: 'user',
+                content: '问题',
+                questionId: 'question-1',
+                createdAt: 1
+            },
+            {
+                id: 'assistant-1',
+                role: 'assistant',
+                content: '旧回答',
+                questionId: 'question-1',
+                createdAt: 2
+            }
+        ]);
+        store.init = vi.fn().mockResolvedValue(undefined);
+        store.checkAuth = vi.fn().mockResolvedValue(true);
+
+        const wrapper = mountView();
+        await flushPromises();
+
+        const messages = wrapper.get('[data-testid="normal-messages"]').element as HTMLElement;
+        setScrollMetrics(messages, {
+            scrollTop: 120,
+            scrollHeight: 1000,
+            clientHeight: 240
+        });
+
+        store.currentConversation.messages[1].content = '新回答';
+        await wrapper.vm.$nextTick();
+        await wrapper.vm.$nextTick();
+
+        expect(messages.scrollTop).toBe(120);
+    });
+
+    it('starts at the top when the displayed conversation changes', async () => {
+        const store = useChatStore();
+        store.workspaceMode = 'conversation';
+        store.currentConversation = createConversation([
+            {
+                id: 'user-1',
+                role: 'user',
+                content: '第一段问题',
+                questionId: 'question-1',
+                createdAt: 1
+            }
+        ]);
+        store.init = vi.fn().mockResolvedValue(undefined);
+        store.checkAuth = vi.fn().mockResolvedValue(true);
+
+        const wrapper = mountView();
+        await flushPromises();
+
+        const messages = wrapper.get('[data-testid="normal-messages"]').element as HTMLElement;
+        setScrollMetrics(messages, {
+            scrollTop: 760,
+            scrollHeight: 1000,
+            clientHeight: 240
+        });
+
+        store.currentConversation = {
+            id: 'conversation-2',
+            title: 'Next conversation',
+            origin: 'local',
+            updatedAt: 20,
+            messages: [
+                {
+                    id: 'user-2',
+                    role: 'user',
+                    content: '第二段问题',
+                    questionId: 'question-2',
+                    createdAt: 3
+                }
+            ]
+        };
+        await wrapper.vm.$nextTick();
+        await wrapper.vm.$nextTick();
+
+        expect(messages.scrollTop).toBe(0);
     });
 });

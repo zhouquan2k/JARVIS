@@ -9,6 +9,7 @@ function createLocalConversation(id: string, title: string): Conversation {
     return {
         id,
         title,
+        boundNodeName: 'docs',
         origin: 'local',
         updatedAt: 1,
         messages: []
@@ -52,6 +53,29 @@ describe('ConversationSidebar', () => {
 
         await wrapper.get('[data-testid="local-history-delete-confirm"]').trigger('click');
         expect(wrapper.emitted('delete-local')).toEqual([['local-1']]);
+    });
+
+    it('prefixes local history titles with the bound node name', () => {
+        const wrapper = mount(ConversationSidebar, {
+            props: {
+                collapsed: false,
+                historySource: 'local',
+                localItems: [
+                    {
+                        ...createLocalConversation('local-1', '第一条会话'),
+                        boundNodeName: 'docs'
+                    }
+                ],
+                externalProviders,
+                externalItems: [],
+                externalHistoryLoading: false,
+                externalHistoryQuery: '',
+                activeExternalProviderId: 'chatgpt-web',
+                isCompareMode: false
+            }
+        });
+
+        expect(wrapper.get('[data-testid="local-history-item"]').text()).toContain('docs - 第一条会话');
     });
 
     it('does not render local delete actions in external history mode', () => {

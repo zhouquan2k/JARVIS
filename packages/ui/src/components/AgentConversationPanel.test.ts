@@ -75,6 +75,8 @@ describe('AgentConversationPanel', () => {
                 activeDocument: null,
                 showAgentConversationList: true,
                 contextProvider: createContextProvider()
+                ,
+                restoreConversationId: 'conversation-1'
             },
             global: {
                 stubs: {
@@ -92,6 +94,45 @@ describe('AgentConversationPanel', () => {
         await wrapper.get('[data-testid="agent-conversation-expand"]').trigger('click');
 
         expect(wrapper.emitted('request-workspace-switch')).toEqual([['/chat']]);
+    });
+
+    it('prefixes the conversation title with the bound node name in detail mode', async () => {
+        const chatStore = useChatStore();
+        chatStore.currentConversation = {
+            id: 'conversation-1',
+            title: 'Shared Conversation',
+            boundNodeName: 'docs',
+            origin: 'local',
+            updatedAt: 1,
+            messages: []
+        };
+
+        const wrapper = mount(AgentConversationPanel, {
+            props: {
+                activeAgentKey: '/docs/',
+                activePath: null,
+                selectedNodePath: '/docs',
+                activeDocument: null,
+                showAgentConversationList: true,
+                contextProvider: createContextProvider(),
+                restoreConversationId: 'conversation-1'
+            },
+            global: {
+                stubs: {
+                    AgentDocumentConversationList: {
+                        template: '<div data-testid="agent-document-conversation-list-stub" />'
+                    },
+                    NormalChatView: {
+                        template: '<div data-testid="normal-chat-stub" />'
+                    }
+                }
+            }
+        });
+
+        await flushPromises();
+        await wrapper.vm.$nextTick();
+
+        expect(wrapper.get('[data-testid="agent-conversation-title"]').text()).toContain('docs - Shared Conversation');
     });
 
     it('restores the previous conversation detail when returning from chat mode on an agent directory', async () => {

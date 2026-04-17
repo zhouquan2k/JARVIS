@@ -181,7 +181,7 @@ test('normal chat can bind a local conversation to an agent and surface it in th
 
   await page.locator('[data-path="/docs"]').click();
   await expect(page.getByTestId('agent-view')).toBeVisible();
-  await expect(page.getByTestId('agent-view-conversation')).toContainText(prompt);
+  await expect(page.getByTestId('agent-view-conversation')).toHaveCount(0);
   await expect(page.getByTestId('agent-document-conversation-item')).toContainText(prompt);
 });
 

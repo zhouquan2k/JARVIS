@@ -68,7 +68,8 @@ vi.mock('./modelProviderRuntime', () => ({
 vi.mock('./sync', () => ({
     createWebSyncStorageProvider: vi.fn(() => ({
         hydrate: vi.fn().mockResolvedValue(undefined)
-    }))
+    })),
+    resetWebSyncCache: vi.fn().mockResolvedValue(undefined)
 }));
 
 describe('Web App workspace navigation', () => {

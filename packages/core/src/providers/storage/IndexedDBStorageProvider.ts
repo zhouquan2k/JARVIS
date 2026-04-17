@@ -35,4 +35,8 @@ export class IndexedDBStorageProvider implements IConversationPersistProvider {
     async deleteConversation(id: string): Promise<void> {
         await this.store.removeItem(id);
     }
+
+    async clear(): Promise<void> {
+        await this.store.clear();
+    }
 }

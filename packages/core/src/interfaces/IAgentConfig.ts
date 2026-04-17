@@ -8,6 +8,8 @@ export interface AgentSkillBinding {
     description?: string;
 }
 
+export type AgentInheritanceMode = 'merge' | 'override';
+
 export interface AgentConfig {
     name: string;
     description?: string;
@@ -16,6 +18,7 @@ export interface AgentConfig {
     modelName?: string;
     tools?: AgentToolBinding[];
     skills?: AgentSkillBinding[];
+    inheritance?: AgentInheritanceMode;
 }
 
 export interface ResolvedAgentConfig extends AgentConfig {

@@ -3,7 +3,9 @@ import path from 'node:path';
 import type { Conversation } from '../../../core/src/interfaces/Conversation.ts';
 import type { ConversationQuery, IConversationQueryProvider } from '../../../core/src/interfaces/IConversationPersistProvider.ts';
 import {
+    DEFAULT_SCOPED_AGENT_CONFIG,
     type AgentConfig,
+    type AgentInheritanceMode,
     type AgentSkillBinding,
     type AgentToolBinding,
     type ContextDocument,
@@ -14,7 +16,9 @@ import {
     type IContextProvider,
     type ResolvedAgentConfig,
     type WorkspaceContext,
-    type WriteContextDocumentInput
+    type WriteContextDocumentInput,
+    createResolvedAgentConfig,
+    resolveChildAgentConfig
 } from '../coreRuntime.ts';
 
 const DEFAULT_WORKSPACE_AGENT_KEY = '/' as const;
@@ -41,29 +45,6 @@ const MIME_TYPES_BY_EXTENSION: Record<string, string> = {
     htm: 'text/html'
 };
 
-const DEFAULT_SCOPED_AGENT_CONFIG: AgentConfig = Object.freeze({
-    name: 'Default Knowledge Agent',
-    description: 'General-purpose assistant for the knowledge workspace.',
-    modelProviderName: 'gemini-api',
-    modelName: 'Gemini Pro Latest',
-    instructions: [
-        'Treat the active file as the primary context for the current request when it is provided.',
-        'Use workspace tools to gather additional relevant information from the current scope only when needed.',
-        'Do not claim to have used tools that are not available, and do not infer facts outside the current scope without checking.'
-    ].join(' '),
-    tools: [
-        { id: 'read_current_file', description: 'Read the currently active file.' },
-        { id: 'list_directory', description: 'List files and directories within the knowledge workspace.' },
-        { id: 'read_file', description: 'Read a file within the current knowledge workspace.' },
-        { id: 'search_in_scope', description: 'Search for relevant text within the current agent scope.' },
-        { id: 'replace_text_in_file', description: 'Replace an exact text match in a file.' },
-        { id: 'replace_range_in_file', description: 'Replace text within a specific line and column range.' },
-        { id: 'insert_text_in_file', description: 'Insert text at a specific position in a file.' },
-        { id: 'delete_range_in_file', description: 'Delete text within a specific line and column range.' },
-        { id: 'write_file', description: 'Create or overwrite an entire file.' }
-    ]
-});
-
 interface SearchableScopedFile {
     path: string;
     readContent: () => Promise<string>;
@@ -74,7 +55,6 @@ export interface FileSystemContextProviderOptions {
     conversationQueryProvider?: IConversationQueryProvider | null;
 }
 
-type AgentInheritanceMode = 'merge' | 'override';
 type AgentBinding = AgentToolBinding | AgentSkillBinding;
 type ParsedAgentConfig = AgentConfig & { inheritance?: AgentInheritanceMode; linkDir?: string };
 
@@ -116,6 +96,10 @@ function inferDocumentMimeType(targetPath: string): string {
     const fileName = targetPath.split('/').pop() ?? targetPath;
     const extension = fileName.includes('.') ? fileName.split('.').pop()?.toLowerCase() ?? '' : '';
     return MIME_TYPES_BY_EXTENSION[extension] ?? 'application/octet-stream';
+}
+
+function serializeDefaultAgentConfig(): string {
+    return `${JSON.stringify(DEFAULT_SCOPED_AGENT_CONFIG, null, 2)}\n`;
 }
 
 function isTextDocumentMimeType(mimeType: string): boolean {
@@ -161,6 +145,15 @@ function isPathWithinScope(targetPath: string, scopePath?: string): boolean {
     }
 
     return targetPath === normalizedScope || targetPath.startsWith(`${normalizedScope}/`);
+}
+
+async function ensureRootAgentConfigFile(rootDirectory: string): Promise<void> {
+    const rootAgentConfigPath = path.join(rootDirectory, '.agent.json');
+    if (await exists(rootAgentConfigPath)) {
+        return;
+    }
+
+    await fs.writeFile(rootAgentConfigPath, serializeDefaultAgentConfig(), 'utf8');
 }
 
 function collectSearchMatches(filePath: string, content: string, query: string): ContextSearchMatch[] {
@@ -267,72 +260,6 @@ async function exists(targetPath: string): Promise<boolean> {
 
 function getConfigPath(scopePath: string): string {
     return scopePath === '/' ? '/.agent.json' : `${scopePath}/.agent.json`;
-}
-
-function normalizeInstructions(value?: string): string {
-    return value?.trim() ?? '';
-}
-
-function mergeInstructions(parent?: string, child?: string): string | undefined {
-    const merged = [normalizeInstructions(parent), normalizeInstructions(child)].filter(Boolean).join('\n\n');
-    return merged || undefined;
-}
-
-function cloneBindings<T extends AgentBinding>(bindings?: T[]): T[] | undefined {
-    return bindings?.map((binding) => ({ ...binding }));
-}
-
-function mergeBindings<T extends AgentBinding>(parent?: T[], child?: T[]): T[] | undefined {
-    const merged = new Map<string, T>();
-
-    parent?.forEach((binding) => {
-        merged.set(binding.id, { ...binding });
-    });
-    child?.forEach((binding) => {
-        merged.set(binding.id, { ...binding });
-    });
-
-    return merged.size > 0 ? Array.from(merged.values()) : undefined;
-}
-
-function cloneAgentConfig(config: AgentConfig): AgentConfig {
-    return {
-        name: config.name,
-        description: config.description,
-        instructions: config.instructions,
-        modelProviderName: config.modelProviderName,
-        modelName: config.modelName,
-        tools: cloneBindings(config.tools),
-        skills: cloneBindings(config.skills)
-    };
-}
-
-function mergeAgentConfigs(parent: AgentConfig, child: AgentConfig): AgentConfig {
-    return {
-        name: child.name || parent.name,
-        description: child.description ?? parent.description,
-        instructions: mergeInstructions(parent.instructions, child.instructions),
-        modelProviderName: child.modelProviderName ?? parent.modelProviderName,
-        modelName: child.modelName ?? parent.modelName,
-        tools: mergeBindings(parent.tools, child.tools),
-        skills: mergeBindings(parent.skills, child.skills)
-    };
-}
-
-function createResolvedAgentConfig(
-    scopePath: string,
-    sourcePaths: string[],
-    config: AgentConfig
-): ResolvedAgentConfig {
-    const instructions = normalizeInstructions(config.instructions);
-
-    return {
-        ...cloneAgentConfig(config),
-        scopePath,
-        sourcePaths: [...sourcePaths],
-        effectiveInstructions: instructions,
-        instructions: instructions || undefined
-    };
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -511,19 +438,11 @@ function resolveEffectiveAgentBinding(
     configPath: string,
     config: ParsedAgentConfig
 ): EffectiveAgentBinding {
-    const parentConfig = parent.config;
-    const merged = config.inheritance === 'override'
-        ? cloneAgentConfig(config)
-        : mergeAgentConfigs(parentConfig, config);
-    const sourcePaths = config.inheritance === 'override'
-        ? [configPath]
-        : [...parentConfig.sourcePaths, configPath];
-
     const normalizedAgentKey = scopePath.endsWith('/') ? scopePath : `${scopePath}/`;
 
     return {
         agentKey: normalizedAgentKey,
-        config: createResolvedAgentConfig(scopePath, sourcePaths, merged)
+        config: resolveChildAgentConfig(parent.config, scopePath, configPath, config)
     };
 }
 
@@ -543,6 +462,7 @@ export class FileSystemContextProvider implements IContextProvider {
 
     async getContext(): Promise<WorkspaceContext> {
         const rootDirectory = await this.resolveRootDirectory();
+        await ensureRootAgentConfigFile(rootDirectory);
         const mountBindings = await this.resolveMountedDirectoryBindings(rootDirectory);
         const agentConfigs = new Map<string, ResolvedAgentConfig>();
         const rootAgent = await this.resolveDirectoryAgentBinding(rootDirectory, '/', createDefaultAgentBinding());
@@ -918,6 +838,13 @@ export class FileSystemContextProvider implements IContextProvider {
 
         const content = await fs.readFile(realConfigPath, 'utf8');
         const config = parseAgentConfig(content, configPath);
+        if (scopePath === '/') {
+            return {
+                agentKey: DEFAULT_WORKSPACE_AGENT_KEY,
+                config: createResolvedAgentConfig(scopePath, [configPath], config)
+            };
+        }
+
         return resolveEffectiveAgentBinding(inheritedAgent, scopePath, configPath, config);
     }
 

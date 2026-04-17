@@ -7,7 +7,7 @@ import type {
     SyncStateStore
 } from '@packages/core/src';
 import { createApp } from '../../server/src/app.js';
-import { createWebSyncStorageProvider } from './sync';
+import { createWebSyncStorageProvider, resetWebSyncCache } from './sync';
 
 class MemoryStorageProvider implements IConversationPersistProvider {
     id = 'memory-storage';
@@ -35,6 +35,10 @@ class MemoryStorageProvider implements IConversationPersistProvider {
     async deleteConversation(id: string): Promise<void> {
         this.conversations.delete(id);
     }
+
+    async clear(): Promise<void> {
+        this.conversations.clear();
+    }
 }
 
 class MemorySyncStateStore implements SyncStateStore {
@@ -47,6 +51,10 @@ class MemorySyncStateStore implements SyncStateStore {
     async setCursor(syncKey: string, cursor: number | null): Promise<void> {
         this.cursors.set(syncKey, cursor);
     }
+
+    async clear(): Promise<void> {
+        this.cursors.clear();
+    }
 }
 
 class MemoryDeletedConversationStateStore implements DeletedConversationStateStore {
@@ -58,6 +66,10 @@ class MemoryDeletedConversationStateStore implements DeletedConversationStateSto
 
     async setDeletedConversations(syncKey: string, conversations: SyncDeletedConversation[]): Promise<void> {
         this.deletedConversations.set(syncKey, conversations.map((conversation) => ({ ...conversation })));
+    }
+
+    async clear(): Promise<void> {
+        this.deletedConversations.clear();
     }
 }
 
@@ -166,7 +178,38 @@ describe('web sync bootstrap', () => {
             localStore: new MemoryStorageProvider(),
             stateStore: new MemorySyncStateStore(),
             deletedConversationStore: new MemoryDeletedConversationStateStore()
-        })).toThrow('syncKey=0 仅允许在开发环境使用');
+        })).toThrow('syncKey=0 is only allowed in development; configure a real syncKey first.');
+    });
+
+    it('resets local web sync cache including conversations and sync metadata', async () => {
+        const localStore = new MemoryStorageProvider([
+            createConversation('cached-1', 100)
+        ]);
+        const stateStore = new MemorySyncStateStore();
+        const deletedConversationStore = new MemoryDeletedConversationStateStore();
+        await stateStore.setCursor('web-reset', 17);
+        await deletedConversationStore.setDeletedConversations('web-reset', [
+            {
+                id: 'deleted-1',
+                updatedAt: 12
+            }
+        ]);
+
+        await resetWebSyncCache({
+            env: {
+                VITE_E2E: '1',
+                VITE_USE_MOCK_SYNC: '1',
+                VITE_SYNC_KEY: 'web-reset'
+            },
+            isDevelopment: true,
+            localStore,
+            stateStore,
+            deletedConversationStore
+        });
+
+        expect(await localStore.getAllConversations()).toEqual([]);
+        expect(await stateStore.getCursor('web-reset')).toBeNull();
+        expect(await deletedConversationStore.getDeletedConversations('web-reset')).toEqual([]);
     });
 
     it('pushes pre-existing local unsynced conversations to the server on startup', async () => {

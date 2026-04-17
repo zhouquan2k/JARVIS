@@ -20,11 +20,11 @@
         type="button"
         class="agent-document-list__item"
         :class="{ 'agent-document-list__item--active': conversation.id === activeConversationId }"
-        :title="conversation.title"
+        :title="getConversationTitle(conversation)"
         data-testid="agent-document-conversation-item"
         @click="emit('open', conversation.id)"
       >
-        <span class="agent-document-list__item-title">{{ conversation.title }}</span>
+        <span class="agent-document-list__item-title">{{ getConversationTitle(conversation) }}</span>
         <span class="agent-document-list__item-time">
           <span class="agent-document-list__item-date">{{ formatUpdatedDate(conversation.updatedAt) }}</span>
           <span class="agent-document-list__item-clock">{{ formatUpdatedTime(conversation.updatedAt) }}</span>
@@ -37,6 +37,7 @@
 <script setup lang="ts">
 import type { Conversation } from '@packages/core/src';
 import { useWorkspaceI18n } from '../i18n';
+import { formatConversationTitle } from '../utils/conversationTitle';
 
 defineProps<{
   conversations: Conversation[];
@@ -51,6 +52,14 @@ const { t } = useWorkspaceI18n();
 const emit = defineEmits<{
   (event: 'open', conversationId: string): void;
 }>();
+
+function getConversationTitle(conversation: Conversation): string {
+  return formatConversationTitle(
+    conversation.title,
+    conversation.boundNodeName,
+    t('shared.untitled')
+  );
+}
 
 function formatUpdatedDate(timestamp: number): string {
   return new Intl.DateTimeFormat('zh-CN', {

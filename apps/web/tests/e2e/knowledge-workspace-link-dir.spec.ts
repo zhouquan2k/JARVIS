@@ -67,7 +67,9 @@ test.describe.serial('web knowledge workspace linkDir', () => {
     await expect(page.getByTestId('agent-view')).toBeVisible();
     await expect(page.getByTestId('agent-view-scope')).toContainText('/reports');
     await expect(page.getByTestId('agent-name')).toContainText('Reports Mount');
-    await expect(page.getByTestId('agent-view-document').filter({ hasText: 'summary.md' })).toHaveCount(1);
+    await expect(page.getByTestId('agent-view-document')).toHaveCount(0);
+    await reportsNode.locator('.tree-toggle').click();
+    await expect(page.getByTestId('document-node-file').filter({ hasText: 'summary.md' })).toHaveCount(1);
   });
 
   test('writes to a mounted document and keeps the update after reload', async ({ page }) => {

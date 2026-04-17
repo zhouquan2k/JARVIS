@@ -30,10 +30,11 @@
           :agent-key="documentStore.activeAgentKey"
           :agent="documentStore.activeAgent"
           :owner-node="selectedOwnerNode"
-          :documents="agentViewDocuments"
-          :conversations="agentViewConversations"
-          @open-document="documentStore.openNode"
-          @open-conversation="openAgentViewConversation"
+          :providers="chatStore.availableProviders"
+          :builtin-tools="builtinTools"
+          :model-load-states="chatStore.providerModelStates"
+          @load-provider-models="chatStore.ensureProviderModelsLoaded"
+          @save-agent-config="saveSelectedAgentConfig"
         />
         <DocumentEditorPane
           v-else
@@ -81,7 +82,14 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import { encodeTextDocument, type IContextProvider } from '@packages/core/src';
+import {
+  DEFAULT_WORKSPACE_AGENT_KEY,
+  createBuiltinWorkspaceToolDefinitions,
+  encodeTextDocument,
+  type AgentInheritanceMode,
+  type ContextNode,
+  type IContextProvider
+} from '@packages/core/src';
 import AgentView from '../components/AgentView.vue';
 import AgentPane from '../components/AgentPane.vue';
 import DocumentEditorPane from '../components/DocumentEditorPane.vue';
@@ -99,6 +107,7 @@ const props = withDefaults(defineProps<{
 
 const documentStore = useDocumentWorkspaceStore();
 const chatStore = useChatStore();
+const builtinTools = createBuiltinWorkspaceToolDefinitions();
 const emit = defineEmits<{
   (event: 'request-workspace-switch', path: ChatRoutePath): void;
 }>();
@@ -106,19 +115,19 @@ const shellRef = ref<HTMLElement | null>(null);
 const panelSizes = computed(() => documentStore.panelSizes);
 const draftContent = computed(() => documentStore.draftContent);
 const isWorkspaceSelectionReady = ref(false);
-const selectedOwnerNode = computed(() => {
+const selectedOwnerNode = computed<ContextNode | null>(() => {
+  if (documentStore.selectedNodePath === '/' && documentStore.activeAgent) {
+    return {
+      path: '/',
+      name: 'Root',
+      kind: 'directory',
+      agentKey: documentStore.activeAgentKey ?? DEFAULT_WORKSPACE_AGENT_KEY,
+      isAgentOwner: true
+    };
+  }
+
   const activeNode = documentStore.activeNode;
   return activeNode?.kind === 'directory' && activeNode.isAgentOwner ? activeNode : null;
-});
-const agentViewDocuments = computed(() => {
-  return selectedOwnerNode.value
-    ? documentStore.collectMarkdownDocuments(selectedOwnerNode.value.path)
-    : [];
-});
-const agentViewConversations = computed(() => {
-  return documentStore.activeAgentKey
-    ? chatStore.getConversationsByAgent(documentStore.activeAgentKey)
-    : [];
 });
 const restoredAgentConversationId = computed(() => {
   const savedAgentViewStatus = chatStore.restoreAgentViewStatus();
@@ -199,12 +208,22 @@ async function onOpenNode(path: string) {
   await syncWorkspaceConversationSelection();
 }
 
-async function openAgentViewConversation(conversationId: string): Promise<void> {
-  await chatStore.selectLocalConversation(conversationId);
-  chatStore.saveAgentViewStatus({
-    selectedNodePath: documentStore.selectedNodePath,
-    activePath: documentStore.activePath,
-    activeConversationId: conversationId
+async function saveSelectedAgentConfig(patch: {
+  description?: string;
+  instructions?: string;
+  modelProviderName?: string;
+  modelName?: string;
+  inheritance?: AgentInheritanceMode;
+  tools?: Array<{ id: string; description?: string }>;
+  inheritTools?: boolean;
+}): Promise<void> {
+  if (!selectedOwnerNode.value) {
+    return;
+  }
+
+  await documentStore.saveAgentConfig({
+    ownerPath: selectedOwnerNode.value.path,
+    patch
   });
 }
 

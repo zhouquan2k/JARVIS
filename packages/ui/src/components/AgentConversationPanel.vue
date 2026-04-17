@@ -67,6 +67,7 @@ import NormalChatView from '../views/NormalChatView.vue';
 import { useChatStore } from '../store/chat';
 import type { ChatRoutePath } from '../routes';
 import { useWorkspaceI18n } from '../i18n';
+import { formatConversationTitle, extractNodeNameFromPath } from '../utils/conversationTitle';
 
 type PanelMode = 'list' | 'detail';
 
@@ -97,7 +98,13 @@ const isDocumentSelection = computed(() => !!activeDocumentPath.value);
 const activeAgentKey = computed(() => props.activeAgentKey?.trim() || '');
 const isAgentDirectorySelection = computed(() => !activeDocumentPath.value && !!activeAgentKey.value && props.showAgentConversationList === true);
 const hasConversationListContext = computed(() => isDocumentSelection.value || isAgentDirectorySelection.value);
-const currentConversationTitle = computed(() => chatStore.currentConversation?.title || t('shared.newChat'));
+const currentConversationTitle = computed(() => {
+  return formatConversationTitle(
+    chatStore.currentConversation?.title,
+    chatStore.currentConversation?.boundNodeName,
+    t('shared.newChat')
+  );
+});
 const showToolbar = computed(() => hasConversationListContext.value);
 const showBackButton = computed(() => panelMode.value === 'detail' && hasConversationListContext.value);
 const toolbarTitle = computed(() => panelMode.value === 'detail' && hasConversationListContext.value ? currentConversationTitle.value : '');
@@ -198,7 +205,9 @@ async function openConversationDetail(conversationId: string): Promise<void> {
 }
 
 async function createDocumentConversation(): Promise<void> {
-  await chatStore.startNewConversation();
+  await chatStore.startNewConversation({
+    boundNodeName: extractNodeNameFromPath(props.selectedNodePath ?? props.activeDocument?.path ?? props.activePath ?? null)
+  });
   panelMode.value = 'detail';
 }
 

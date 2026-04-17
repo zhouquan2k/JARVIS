@@ -23,6 +23,7 @@ function createConversation(
         id,
         title: overrides.title ?? `Conversation ${id}`,
         agentKey: overrides.agentKey,
+        boundNodeName: overrides.boundNodeName,
         updatedAt,
         messages: overrides.messages ?? [
             {
@@ -220,6 +221,33 @@ describe('SyncRepository', () => {
         expect(rawRow?.agent_key).toBe('/workspace/archive/.agent.json');
         expect(JSON.parse(rawRow!.payload_json)).toEqual(expect.objectContaining({
             agentKey: '/workspace/archive/.agent.json'
+        }));
+    });
+
+    it('preserves boundNodeName in the persisted payload json', () => {
+        const database = createDatabase(createConfig());
+        const repository = new SyncRepository(database);
+
+        repository.runInTransaction(() => {
+            const cursor = repository.allocateNextCursor('alpha', 100);
+            repository.saveConversation({
+                syncKey: 'alpha',
+                conversation: createConversation('conv-bound-node', 100, false, {
+                    boundNodeName: 'guide.md'
+                }),
+                serverCursor: cursor,
+                receivedAt: 100,
+                createdAt: 100
+            });
+        });
+
+        const rawRow = database
+            .prepare('SELECT payload_json FROM synced_conversations WHERE sync_key = ? AND conversation_id = ?')
+            .get('alpha', 'conv-bound-node') as { payload_json: string } | undefined;
+
+        expect(rawRow).toBeDefined();
+        expect(JSON.parse(rawRow!.payload_json)).toEqual(expect.objectContaining({
+            boundNodeName: 'guide.md'
         }));
     });
 

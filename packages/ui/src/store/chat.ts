@@ -24,6 +24,7 @@ import {
 import type { ModelConfig, ModelOptionDefinition, ProviderConfig, ProviderModelCatalog } from '@packages/core/config';
 import { markRaw, toRaw } from 'vue';
 import { translateWorkspaceMessage } from '../i18n';
+import { extractNodeNameFromPath } from '../utils/conversationTitle';
 
 export type WorkspaceHistorySource = 'local' | 'external';
 export type WorkspaceMode = 'agent' | 'conversation';
@@ -395,6 +396,17 @@ function resolveQuestionPairIndices(messages: ConversationMessage[], questionId:
     }
 
     return indices;
+}
+
+function resolveLastVisibleQuestionMessage(messages: ConversationMessage[]): ConversationMessage | null {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index];
+        if (message.role === 'user' && message.deleted !== true) {
+            return message;
+        }
+    }
+
+    return null;
 }
 
 function buildQuestionIndexItems(
@@ -1052,6 +1064,21 @@ export const useChatStore = defineStore('chat', {
             this.onWorkspaceFileChanged = input.onFileChanged ? markRaw(input.onFileChanged) : null;
         },
 
+        resolveConversationBoundNodeName(input?: {
+            selectedNodePath?: string | null;
+            activePath?: string | null;
+            activeDocumentPath?: string | null;
+        }): string | undefined {
+            const candidatePath = input?.selectedNodePath?.trim()
+                || input?.activeDocumentPath?.trim()
+                || input?.activePath?.trim()
+                || this.agentViewStatus?.selectedNodePath?.trim()
+                || this.agentViewStatus?.activePath?.trim()
+                || null;
+
+            return extractNodeNameFromPath(candidatePath) || undefined;
+        },
+
         saveAgentViewStatus(input: {
             selectedNodePath: string | null;
             activePath: string | null;
@@ -1378,15 +1405,19 @@ export const useChatStore = defineStore('chat', {
             }
         },
 
-        async startNewConversation() {
+        async startNewConversation(input?: { boundNodeName?: string | null }) {
             const hasWorkspaceAgentContext = this.workspaceAgentContext !== null;
             if (hasWorkspaceAgentContext) {
                 this.clearWorkspaceAgentContext();
             }
 
+            const boundNodeName = typeof input?.boundNodeName === 'string' && input.boundNodeName.trim()
+                ? input.boundNodeName.trim()
+                : this.resolveConversationBoundNodeName();
             this.currentConversation = {
                 id: crypto.randomUUID(),
                 title: 'New Chat',
+                boundNodeName,
                 origin: 'local',
                 messages: [],
                 updatedAt: Date.now(),
@@ -1966,6 +1997,12 @@ export const useChatStore = defineStore('chat', {
             const indices = resolveQuestionPairIndices(this.currentConversation.messages, questionId);
             if (indices.length === 0) {
                 return;
+            }
+
+            const lastVisibleQuestion = resolveLastVisibleQuestionMessage(this.currentConversation.messages);
+            if (lastVisibleQuestion && getQuestionKey(lastVisibleQuestion) === questionId) {
+                this.draftPrompt = lastVisibleQuestion.content || lastVisibleQuestion.requestSnapshot?.prompt || '';
+                this.draftFocusRequestKey += 1;
             }
 
             indices.forEach((index) => {

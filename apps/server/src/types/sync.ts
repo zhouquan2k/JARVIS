@@ -72,6 +72,7 @@ export interface SyncConversation {
     backendId?: string;
     title: string;
     agentKey?: string;
+    boundNodeName?: string;
     starred?: boolean;
     origin?: string;
     externalId?: string;
@@ -339,6 +340,7 @@ export function normalizeConversation(value: unknown): SyncConversation {
         backendId: readOptionalString(value, 'backendId'),
         title: readRequiredString(value, 'title', 'conversation.title'),
         agentKey: readOptionalString(value, 'agentKey'),
+        boundNodeName: readOptionalString(value, 'boundNodeName'),
         starred: value.starred === true ? true : undefined,
         origin: readOptionalString(value, 'origin'),
         externalId: readOptionalString(value, 'externalId'),

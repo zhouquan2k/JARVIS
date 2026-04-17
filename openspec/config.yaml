@@ -9,10 +9,10 @@ schema: my-workflow
 #     We use conventional commits
 #     Domain: e-commerce platform
 context: |
-  we need both openspec docs for English and Chinese
+  we need both openspec docs(proposal,design,specs) for English and Chinese
   对于浏览器插件extension的e2e测试用例，因为codex沙盒的限制，请申请提权运行。注意：MV3 扩展测试需要走 channel: 'chromium'，否则 Playwright 默认的 headless shell 拉不起扩展 service worker。
   extension e2e测试通过后，请运行pnpm --filter extension build
-  在归档时，应该把design中的类图合并到全局类图中
+  在归档时，应该把design中的类图合并到全局类图中(workspace.dsl, 增加或合并到已有类图)
   在归档时，需要同时提供英文和中文的版本
   
 # Per-artifact rules (optional)

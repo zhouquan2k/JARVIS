@@ -97,6 +97,7 @@ describe('resolveScopedAgentConfig', () => {
 
         expect(resolved.name).toBe('Docs Agent');
         expect(resolved.description).toBe('Parent description');
+        expect(resolved.instructions).toBe('Child rule');
         expect(resolved.effectiveInstructions).toBe('Help the user with the current workspace.\n\nParent rule\n\nChild rule');
         expect(resolved.modelProviderName).toBe('gemini-api');
         expect(resolved.modelName).toBe('Gemini Pro Latest');
@@ -113,6 +114,126 @@ describe('resolveScopedAgentConfig', () => {
             { id: 'summarize', description: 'Summarize long docs' },
             { id: 'outline', description: 'Draft outlines' }
         ]);
+    });
+
+    it('treats explicit merge inheritance the same as missing inheritance', async () => {
+        const provider = createMockContextProvider(createSnapshot(
+            [
+                { path: '/project', name: 'project', kind: 'directory' },
+                { path: '/project/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/project' },
+                { path: '/project/docs', name: 'docs', kind: 'directory', parentPath: '/project' },
+                { path: '/project/docs/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/project/docs' },
+                { path: '/project/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/project/docs' }
+            ],
+            {
+                '/project/.agent.json': JSON.stringify({
+                    name: 'Workspace Agent',
+                    instructions: 'Parent rule',
+                    modelName: 'parent-model'
+                }),
+                '/project/docs/.agent.json': JSON.stringify({
+                    name: 'Docs Agent',
+                    instructions: 'Child rule',
+                    inheritance: 'merge'
+                }),
+                '/project/docs/guide.md': '# Guide'
+            }
+        ));
+
+        const resolved = await resolveScopedAgentConfig(provider, '/project/docs/guide.md', fallbackAgent);
+
+        expect(resolved).toMatchObject({
+            name: 'Docs Agent',
+            modelName: 'parent-model',
+            inheritance: 'merge',
+            effectiveInstructions: 'Help the user with the current workspace.\n\nParent rule\n\nChild rule'
+        });
+    });
+
+    it('uses only the override config when inheritance is override', async () => {
+        const provider = createMockContextProvider(createSnapshot(
+            [
+                { path: '/project', name: 'project', kind: 'directory' },
+                { path: '/project/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/project' },
+                { path: '/project/docs', name: 'docs', kind: 'directory', parentPath: '/project' },
+                { path: '/project/docs/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/project/docs' },
+                { path: '/project/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/project/docs' }
+            ],
+            {
+                '/project/.agent.json': JSON.stringify({
+                    name: 'Workspace Agent',
+                    instructions: 'Parent rule',
+                    modelProviderName: 'gemini-api',
+                    modelName: 'parent-model',
+                    tools: [{ id: 'parent_tool' }],
+                    skills: [{ id: 'parent_skill' }]
+                }),
+                '/project/docs/.agent.json': JSON.stringify({
+                    name: 'Docs Agent',
+                    instructions: 'Child rule',
+                    inheritance: 'override'
+                }),
+                '/project/docs/guide.md': '# Guide'
+            }
+        ));
+
+        const resolved = await resolveScopedAgentConfig(provider, '/project/docs/guide.md', fallbackAgent);
+
+        expect(resolved).toMatchObject({
+            name: 'Docs Agent',
+            inheritance: 'override',
+            instructions: 'Child rule',
+            effectiveInstructions: 'Child rule'
+        });
+        expect(resolved.modelProviderName).toBeUndefined();
+        expect(resolved.modelName).toBeUndefined();
+        expect(resolved.tools).toBeUndefined();
+        expect(resolved.skills).toBeUndefined();
+    });
+
+    it('allows deeper children to merge from an override ancestor without recovering truncated config', async () => {
+        const provider = createMockContextProvider(createSnapshot(
+            [
+                { path: '/project', name: 'project', kind: 'directory' },
+                { path: '/project/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/project' },
+                { path: '/project/docs', name: 'docs', kind: 'directory', parentPath: '/project' },
+                { path: '/project/docs/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/project/docs' },
+                { path: '/project/docs/reference', name: 'reference', kind: 'directory', parentPath: '/project/docs' },
+                { path: '/project/docs/reference/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/project/docs/reference' },
+                { path: '/project/docs/reference/guide.md', name: 'guide.md', kind: 'file', parentPath: '/project/docs/reference' }
+            ],
+            {
+                '/project/.agent.json': JSON.stringify({
+                    name: 'Workspace Agent',
+                    instructions: 'Parent rule',
+                    modelName: 'parent-model',
+                    tools: [{ id: 'parent_tool' }]
+                }),
+                '/project/docs/.agent.json': JSON.stringify({
+                    name: 'Docs Agent',
+                    instructions: 'Override rule',
+                    modelProviderName: 'gemini-api',
+                    inheritance: 'override'
+                }),
+                '/project/docs/reference/.agent.json': JSON.stringify({
+                    name: 'Reference Agent',
+                    instructions: 'Reference rule',
+                    tools: [{ id: 'reference_tool' }]
+                }),
+                '/project/docs/reference/guide.md': '# Guide'
+            }
+        ));
+
+        const resolved = await resolveScopedAgentConfig(provider, '/project/docs/reference/guide.md', fallbackAgent);
+
+        expect(resolved).toMatchObject({
+            name: 'Reference Agent',
+            modelProviderName: 'gemini-api',
+            effectiveInstructions: 'Override rule\n\nReference rule'
+        });
+        expect(resolved.inheritance).toBeUndefined();
+        expect(resolved.modelName).toBeUndefined();
+        expect(resolved.tools).toEqual([{ id: 'reference_tool' }]);
     });
 
     it('inherits missing array configs from fallback automatically', async () => {
@@ -179,6 +300,27 @@ describe('resolveScopedAgentConfig', () => {
 
         await expect(resolveScopedAgentConfig(provider, '/broken/note.md', fallbackAgent)).rejects.toThrow(
             'Failed to parse /broken/.agent.json'
+        );
+    });
+
+    it('throws a diagnostic error for invalid inheritance values', async () => {
+        const provider = createMockContextProvider(createSnapshot(
+            [
+                { path: '/broken', name: 'broken', kind: 'directory' },
+                { path: '/broken/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/broken' },
+                { path: '/broken/note.md', name: 'note.md', kind: 'file', parentPath: '/broken' }
+            ],
+            {
+                '/broken/.agent.json': JSON.stringify({
+                    name: 'Broken Agent',
+                    inheritance: 'nearest'
+                }),
+                '/broken/note.md': '# Broken'
+            }
+        ));
+
+        await expect(resolveScopedAgentConfig(provider, '/broken/note.md', fallbackAgent)).rejects.toThrow(
+            'Invalid agent config in /broken/.agent.json: "inheritance" must be "merge" or "override".'
         );
     });
 
