@@ -905,7 +905,7 @@ export class ChatGPTWebProvider implements IModelProvider, IExternalConversation
 
     async getDocumentCapability() {
         return {
-            acceptedMimeTypes: ['text/plain', 'text/markdown', 'application/pdf']
+            acceptedMimeTypes: []
         };
     }
 
@@ -1108,6 +1108,9 @@ export class ChatGPTWebProvider implements IModelProvider, IExternalConversation
         const parentMessageId = context.parentMessageId || generateUUID();
         const messageId = generateUUID();
         const attachments = options.attachments || [];
+        if (attachments.length > 0) {
+            throw new Error('ChatGPT Web provider does not support file attachments.');
+        }
 
         const payload: any = {
             action: 'next',

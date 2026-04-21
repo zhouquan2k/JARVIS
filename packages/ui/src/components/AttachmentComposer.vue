@@ -13,12 +13,14 @@
         class="attach-btn"
         type="button"
         :disabled="disabled"
+        :title="disabledReason || undefined"
         data-testid="attachment-trigger"
         @click="fileInputRef?.click()"
       >
         <span class="attach-btn-icon">+</span>
         <span>{{ t('shared.attachments') }}</span>
       </button>
+      <p v-if="disabledReason" class="hint-text" data-testid="attachment-disabled-reason">{{ disabledReason }}</p>
       <p v-if="error" class="error-text" data-testid="attachment-error">{{ error }}</p>
     </div>
 
@@ -50,6 +52,7 @@ import { useWorkspaceI18n } from '../i18n';
 defineProps<{
   attachments: MessageAttachment[];
   disabled?: boolean;
+  disabledReason?: string | null;
   error?: string | null;
 }>();
 
@@ -168,5 +171,11 @@ function formatSize(size: number): string {
   margin: 0;
   font-size: 12px;
   color: #fca5a5;
+}
+
+.hint-text {
+  margin: 0;
+  font-size: 12px;
+  color: var(--cp-text-muted);
 }
 </style>

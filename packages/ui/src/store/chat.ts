@@ -19,6 +19,7 @@ import {
     type IExternalConversationProvider,
     type IModelProvider,
     type MessageAttachment,
+    type ProviderDocumentCapability,
     type ResolvedAgentConfig
 } from '@packages/core/src';
 import type { ModelConfig, ModelOptionDefinition, ProviderConfig, ProviderModelCatalog } from '@packages/core/config';
@@ -57,6 +58,8 @@ export interface ChatState {
     providerCatalog: ProviderConfig[];
     availableProviders: ProviderConfig[];
     providerModelStates: Record<string, ProviderModelLoadState>;
+    providerDocumentCapabilities: Record<string, ProviderDocumentCapability | null>;
+    providerDocumentCapabilityLoading: Record<string, boolean>;
     conversations: Conversation[];
     currentConversation: Conversation | null;
     agentViewStatus: {
@@ -556,6 +559,8 @@ export const useChatStore = defineStore('chat', {
         providerCatalog: [],
         availableProviders: [],
         providerModelStates: {},
+        providerDocumentCapabilities: {},
+        providerDocumentCapabilityLoading: {},
         conversations: [],
         currentConversation: null,
         agentViewStatus: null,
@@ -655,6 +660,24 @@ export const useChatStore = defineStore('chat', {
 
         currentModelOptionDefinitions(): ModelOptionDefinition[] {
             return cloneModelOptionDefinitions(this.currentModelConfig?.options) || [];
+        },
+
+        attachmentProviderId(state): string {
+            return state.activeAgentContext?.modelProviderName?.trim() || state.currentProviderId;
+        },
+
+        currentProviderSupportsAttachments(): boolean {
+            const providerId = this.attachmentProviderId;
+            if (!providerId) {
+                return false;
+            }
+
+            return (this.providerDocumentCapabilities[providerId]?.acceptedMimeTypes.length ?? 0) > 0;
+        },
+
+        isAttachmentCapabilityLoading(): boolean {
+            const providerId = this.attachmentProviderId;
+            return !!providerId && this.providerDocumentCapabilityLoading[providerId] === true;
         }
     },
 
@@ -816,6 +839,8 @@ export const useChatStore = defineStore('chat', {
             this.providerCatalog = nextCatalog;
             this.availableProviders = cloneProviders(nextCatalog);
             this.providerModelStates = buildProviderModelStates(nextCatalog);
+            this.providerDocumentCapabilities = {};
+            this.providerDocumentCapabilityLoading = {};
 
             if (nextCatalog.length === 0) {
                 this.currentProviderId = '';
@@ -991,6 +1016,11 @@ export const useChatStore = defineStore('chat', {
                 : this.currentModelOptions;
 
             this.applyCurrentModelState(nextModelId, sourceOptions);
+            await this.ensureAttachmentCapabilityLoaded(providerId);
+            if (!this.currentProviderSupportsAttachments && this.draftAttachments.length > 0) {
+                this.draftAttachments = [];
+                this.setAttachmentUnsupportedError();
+            }
         },
 
         setCurrentModel(modelId: string) {
@@ -1014,6 +1044,50 @@ export const useChatStore = defineStore('chat', {
 
         setDraftPrompt(prompt: string) {
             this.draftPrompt = prompt;
+        },
+
+        setAttachmentUnsupportedError() {
+            this.attachmentError = translateWorkspaceMessage('shared.providerAttachmentsUnsupported');
+        },
+
+        async ensureAttachmentCapabilityLoaded(providerId?: string): Promise<void> {
+            const targetProviderId = providerId || this.attachmentProviderId;
+            if (!targetProviderId) {
+                return;
+            }
+
+            if (
+                Object.prototype.hasOwnProperty.call(this.providerDocumentCapabilities, targetProviderId)
+                || this.providerDocumentCapabilityLoading[targetProviderId] === true
+            ) {
+                return;
+            }
+
+            this.providerDocumentCapabilityLoading = {
+                ...this.providerDocumentCapabilityLoading,
+                [targetProviderId]: true
+            };
+
+            try {
+                const provider = this.resolveModelProvider(targetProviderId);
+                const capability = await provider?.getDocumentCapability?.();
+                this.providerDocumentCapabilities = {
+                    ...this.providerDocumentCapabilities,
+                    [targetProviderId]: capability
+                        ? { acceptedMimeTypes: [...capability.acceptedMimeTypes] }
+                        : null
+                };
+            } catch {
+                this.providerDocumentCapabilities = {
+                    ...this.providerDocumentCapabilities,
+                    [targetProviderId]: null
+                };
+            } finally {
+                this.providerDocumentCapabilityLoading = {
+                    ...this.providerDocumentCapabilityLoading,
+                    [targetProviderId]: false
+                };
+            }
         },
 
         setActiveAgentContext(agent: ResolvedAgentConfig | null) {
@@ -1948,6 +2022,12 @@ export const useChatStore = defineStore('chat', {
             }
 
             this.attachmentError = null;
+            await this.ensureAttachmentCapabilityLoaded();
+            if (!this.currentProviderSupportsAttachments) {
+                this.setAttachmentUnsupportedError();
+                return;
+            }
+
             const nextAttachments: MessageAttachment[] = [];
             for (const file of files) {
                 if (file.size > MAX_ATTACHMENT_SIZE) {

@@ -1,3 +1,4 @@
+import type { Component } from 'vue';
 import type { ContextDocument } from '@packages/core/src';
 
 export interface DocumentViewerDefinition {
@@ -7,6 +8,7 @@ export interface DocumentViewerDefinition {
     view: boolean;
     edit: boolean;
   };
+  component: Component;
 }
 
 export function supportsDocumentMimeType(

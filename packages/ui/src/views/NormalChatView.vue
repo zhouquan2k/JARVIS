@@ -92,7 +92,8 @@
           >
             <AttachmentComposer
               :attachments="chatStore.draftAttachments"
-              :disabled="isInputDisabled"
+              :disabled="attachmentsDisabled"
+              :disabled-reason="attachmentDisabledReason"
               :error="chatStore.attachmentError"
               @select-files="onSelectFiles"
               @remove="chatStore.removeDraftAttachment"
@@ -351,6 +352,22 @@ const authUnavailableText = computed(() => props.authUnavailableMessage || t('sh
 const isInputDisabled = computed(() => {
   return chatStore.isGenerating || !effectiveIsAuthenticated.value || chatStore.isCurrentProviderModelsLoading || !chatStore.currentModelId;
 });
+const attachmentDisabledReason = computed(() => {
+  if (isInputDisabled.value) {
+    return null;
+  }
+
+  if (!chatStore.currentProviderSupportsAttachments) {
+    return chatStore.isAttachmentCapabilityLoading
+      ? t('shared.checkingAttachmentSupport')
+      : t('shared.providerAttachmentsUnsupported');
+  }
+
+  return null;
+});
+const attachmentsDisabled = computed(() => {
+  return isInputDisabled.value || !!attachmentDisabledReason.value;
+});
 const messageQuestionMeta = computed(() => {
   const meta = new Map<string, { questionKey: string; starred: boolean; root: boolean }>();
   if (isPreviewing.value || !chatStore.currentConversation) {
@@ -498,6 +515,16 @@ watch(() => chatStore.pendingScrollQuestionId, (questionId) => {
   });
 });
 
+watch(
+  () => chatStore.attachmentProviderId,
+  (providerId) => {
+    if (providerId) {
+      void chatStore.ensureAttachmentCapabilityLoaded(providerId);
+    }
+  },
+  { immediate: true }
+);
+
 async function send(e?: Event) {
   if (e) e.preventDefault();
   if (
@@ -619,6 +646,16 @@ async function onSelectFiles(files: File[]) {
   await chatStore.queueAttachments(files);
 }
 
+async function rejectUnsupportedAttachmentInput() {
+  await chatStore.ensureAttachmentCapabilityLoaded();
+  if (chatStore.currentProviderSupportsAttachments) {
+    return false;
+  }
+
+  chatStore.setAttachmentUnsupportedError();
+  return true;
+}
+
 async function onPaste(event: ClipboardEvent) {
   const files = Array.from(event.clipboardData?.files || []);
   if (files.length === 0) {
@@ -626,12 +663,20 @@ async function onPaste(event: ClipboardEvent) {
   }
 
   event.preventDefault();
+  if (await rejectUnsupportedAttachmentInput()) {
+    return;
+  }
+
   await onSelectFiles(files);
 }
 
 async function onDrop(event: DragEvent) {
   const files = Array.from(event.dataTransfer?.files || []);
   if (files.length === 0) {
+    return;
+  }
+
+  if (await rejectUnsupportedAttachmentInput()) {
     return;
   }
 

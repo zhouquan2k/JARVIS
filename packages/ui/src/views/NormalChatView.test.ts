@@ -26,7 +26,16 @@ function mountView(props: Record<string, unknown> = {}) {
         global: {
             stubs: {
                 AttachmentComposer: {
-                    template: '<div data-testid="attachment-composer-stub" />'
+                    props: ['disabled', 'disabledReason', 'error'],
+                    emits: ['select-files', 'remove'],
+                    template: `
+                      <div
+                        data-testid="attachment-composer-stub"
+                        :data-disabled="disabled === true"
+                        :data-disabled-reason="disabledReason || ''"
+                        :data-error="error || ''"
+                      />
+                    `
                 },
                 ProviderModelSelector: {
                     template: '<div data-testid="provider-selector-stub" />'
@@ -341,6 +350,68 @@ describe('NormalChatView', () => {
         expect(wrapper.find('[data-testid="selector-row"]').exists()).toBe(true);
         expect(wrapper.find('[data-testid="attachment-composer-stub"]').exists()).toBe(true);
         expect(wrapper.find('[data-testid="provider-selector-stub"]').exists()).toBe(true);
+    });
+
+    it('disables attachment entry when the current provider does not support uploads', async () => {
+        const store = useChatStore();
+        store.workspaceMode = 'conversation';
+        store.currentConversation = createConversation([]);
+        store.currentProviderId = 'chatgpt-web';
+        store.currentModelId = 'gpt-4o';
+        store.providerModelStates = {
+            'chatgpt-web': { loading: false, loaded: true }
+        };
+        store.providerDocumentCapabilities = {
+            'chatgpt-web': { acceptedMimeTypes: [] }
+        };
+        store.ensureAttachmentCapabilityLoaded = vi.fn().mockResolvedValue(undefined);
+        store.init = vi.fn().mockResolvedValue(undefined);
+        store.checkAuth = vi.fn().mockResolvedValue(true);
+
+        const wrapper = mountView();
+        await flushPromises();
+
+        const composer = wrapper.get('[data-testid="attachment-composer-stub"]');
+        expect(composer.attributes('data-disabled')).toBe('true');
+        expect(composer.attributes('data-disabled-reason')).toBe('The current provider does not support file uploads.');
+    });
+
+    it('shows an unsupported upload message when pasting files for a provider without upload support', async () => {
+        const store = useChatStore();
+        store.workspaceMode = 'conversation';
+        store.currentConversation = createConversation([]);
+        store.currentProviderId = 'chatgpt-web';
+        store.currentModelId = 'gpt-4o';
+        store.providerModelStates = {
+            'chatgpt-web': { loading: false, loaded: true }
+        };
+        store.providerDocumentCapabilities = {
+            'chatgpt-web': { acceptedMimeTypes: [] }
+        };
+        store.ensureAttachmentCapabilityLoaded = vi.fn().mockResolvedValue(undefined);
+        store.queueAttachments = vi.fn();
+        store.init = vi.fn().mockResolvedValue(undefined);
+        store.checkAuth = vi.fn().mockResolvedValue(true);
+
+        const wrapper = mountView();
+        await flushPromises();
+
+        await wrapper.get('[data-testid="normal-input"]').trigger('paste', {
+            clipboardData: {
+                files: [
+                    {
+                        name: 'diagram.png',
+                        type: 'image/png',
+                        size: 3
+                    }
+                ]
+            }
+        });
+        await wrapper.vm.$nextTick();
+
+        expect(store.queueAttachments).not.toHaveBeenCalled();
+        expect(store.attachmentError).toBe('The current provider does not support file uploads.');
+        expect(wrapper.get('[data-testid="attachment-composer-stub"]').attributes('data-error')).toBe('The current provider does not support file uploads.');
     });
 
     it('renders a new chat action below the send button and calls the existing store entry', async () => {

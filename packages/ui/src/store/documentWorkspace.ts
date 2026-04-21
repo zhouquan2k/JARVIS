@@ -16,7 +16,7 @@ import {
     isTextDocumentMimeType
 } from '@packages/core/src';
 import { buildLineDiffEntries, FileChangeService, type FileChangeRecord, type LineDiffEntry } from '../services/FileChangeService';
-import { resolveDocumentViewer } from '../document-viewers/registry';
+import { resolveDocumentViewer } from '../document-viewers';
 
 type ActiveViewerCapabilities = {
     view: boolean;
@@ -577,60 +577,66 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
                 return;
             }
 
+            this.currentError = null;
             const configPath = getAgentConfigPath(input.ownerPath);
             let document: ContextDocument | null = null;
             let config: Record<string, unknown>;
             try {
-                document = await this.contextProvider.readDocument(configPath);
-                config = parseJsonObject(decodeTextDocument(document.dataBase64), configPath);
-            } catch (error) {
-                if (configPath !== '/.agent.json' || !isMissingDocumentError(error)) {
-                    throw error;
-                }
-
-                config = { ...DEFAULT_SCOPED_AGENT_CONFIG };
-
                 try {
-                    await this.contextProvider.createNode({
-                        name: '.agent.json',
-                        kind: 'file'
-                    });
-                } catch (createError) {
-                    if (!isRootAgentConfigBootstrapError(createError)) {
-                        throw createError;
+                    document = await this.contextProvider.readDocument(configPath);
+                    config = parseJsonObject(decodeTextDocument(document.dataBase64), configPath);
+                } catch (error) {
+                    if (configPath !== '/.agent.json' || !isMissingDocumentError(error)) {
+                        throw error;
+                    }
+
+                    config = { ...DEFAULT_SCOPED_AGENT_CONFIG };
+
+                    try {
+                        await this.contextProvider.createNode({
+                            name: '.agent.json',
+                            kind: 'file'
+                        });
+                    } catch (createError) {
+                        if (!isRootAgentConfigBootstrapError(createError)) {
+                            throw createError;
+                        }
                     }
                 }
-            }
-            const patch = input.patch as Record<string, unknown>;
+                const patch = input.patch as Record<string, unknown>;
 
-            patchOptionalStringField(config, patch, 'description');
-            patchOptionalStringField(config, patch, 'instructions');
-            patchOptionalStringField(config, patch, 'modelProviderName');
-            patchOptionalStringField(config, patch, 'modelName');
+                patchOptionalStringField(config, patch, 'description');
+                patchOptionalStringField(config, patch, 'instructions');
+                patchOptionalStringField(config, patch, 'modelProviderName');
+                patchOptionalStringField(config, patch, 'modelName');
 
-            if (Object.prototype.hasOwnProperty.call(patch, 'inheritance')) {
-                const inheritance = patch.inheritance;
-                if (inheritance === 'override') {
-                    config.inheritance = inheritance;
-                } else {
-                    delete config.inheritance;
+                if (Object.prototype.hasOwnProperty.call(patch, 'inheritance')) {
+                    const inheritance = patch.inheritance;
+                    if (inheritance === 'override') {
+                        config.inheritance = inheritance;
+                    } else {
+                        delete config.inheritance;
+                    }
                 }
-            }
 
-            if (Object.prototype.hasOwnProperty.call(patch, 'inheritTools') && patch.inheritTools === true) {
-                delete config.tools;
-            } else if (Object.prototype.hasOwnProperty.call(patch, 'tools')) {
-                config.tools = normalizeToolBindings(patch.tools);
-            }
+                if (Object.prototype.hasOwnProperty.call(patch, 'inheritTools') && patch.inheritTools === true) {
+                    delete config.tools;
+                } else if (Object.prototype.hasOwnProperty.call(patch, 'tools')) {
+                    config.tools = normalizeToolBindings(patch.tools);
+                }
 
-            await this.contextProvider.writeDocument({
-                path: configPath,
-                mimeType: document?.mimeType || 'application/json',
-                dataBase64: encodeTextDocument(`${JSON.stringify(config, null, 2)}\n`),
-                expectedVersion: document?.version
-            });
-            await this.refreshContext();
-            this.syncActiveAgent(input.ownerPath);
+                await this.contextProvider.writeDocument({
+                    path: configPath,
+                    mimeType: document?.mimeType || 'application/json',
+                    dataBase64: encodeTextDocument(`${JSON.stringify(config, null, 2)}\n`),
+                    expectedVersion: document?.version
+                });
+                await this.refreshContext();
+                this.syncActiveAgent(input.ownerPath);
+            } catch (error) {
+                this.currentError = getErrorMessage(error) || '保存 Agent 配置失败，请稍后重试。';
+                throw error;
+            }
         },
 
         syncActiveAgent(path: string) {

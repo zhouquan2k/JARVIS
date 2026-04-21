@@ -151,6 +151,28 @@ class AgentProvider extends BasicProvider implements IAgentCapableProvider {
     }
 }
 
+class CloneCheckingAgentProvider extends BasicProvider implements IAgentCapableProvider {
+    public runAgent = vi.fn(async (
+        request: AgentRunRequest,
+        onUpdate: (update: ProviderStreamUpdate) => void
+    ): Promise<ProviderSendResult> => {
+        structuredClone(request);
+        onUpdate({ text: 'native:cloneable' });
+        return {
+            text: 'native:cloneable',
+            conversationId: 'conversation-id',
+            messageId: 'message-id'
+        };
+    });
+
+    getAgentCapabilities(): AgentCapabilities {
+        return {
+            nativeAgent: true,
+            toolLoop: 'application-managed'
+        };
+    }
+}
+
 class MultiToolAgentProvider extends BasicProvider implements IAgentCapableProvider {
     private iteration = 0;
     public runAgent = vi.fn(async (
@@ -442,6 +464,37 @@ describe('createAgentRuntime', () => {
                 base64Data: encodeTextDocument('# Guide')
             })
         ]);
+    });
+
+    it('passes a structured-cloneable agent request to native providers', async () => {
+        const provider = new CloneCheckingAgentProvider();
+        const runtime = createAgentRuntime({
+            modelProviderRuntime: createRuntime(provider)
+        });
+        const proxiedAgent = new Proxy(scopedAgent, {});
+
+        const result = await runtime.run(
+            {
+                prompt: '请总结文档',
+                agent: proxiedAgent,
+                workspace: {
+                    activePath: '/docs/guide.md',
+                    contextProvider: null
+                },
+                providerId: 'gemini-api',
+                modelId: 'gemini-2.5-pro'
+            },
+            () => undefined
+        );
+
+        expect(result.text).toBe('native:cloneable');
+        expect(provider.runAgent).toHaveBeenCalledTimes(1);
+        expect(provider.runAgent.mock.calls[0]?.[0]?.agent).toEqual({
+            ...scopedAgent,
+            sourcePaths: ['/docs/.agent.json'],
+            tools: [{ id: 'read_file', description: 'Read docs' }]
+        });
+        expect(provider.runAgent.mock.calls[0]?.[0]?.agent).not.toBe(proxiedAgent);
     });
 
     it('attaches active pdf documents for providers that accept application/pdf', async () => {

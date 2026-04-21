@@ -667,7 +667,9 @@ export class FileSystemContextProvider implements IContextProvider {
             const suffix = normalizedPath.length === mountedBinding.aliasPath.length
                 ? ''
                 : normalizedPath.slice(mountedBinding.aliasPath.length);
-            const candidatePath = suffix
+            const candidatePath = suffix === '/.agent.json'
+                ? path.join(mountedBinding.aliasRealPath, '.agent.json')
+                : suffix
                 ? path.resolve(mountedBinding.targetRealPath, `.${suffix}`)
                 : mountedBinding.targetRealPath;
 

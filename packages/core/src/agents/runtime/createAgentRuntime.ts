@@ -28,6 +28,19 @@ function createAbortError() {
     return error;
 }
 
+function cloneAgentConfig(agent: AgentRuntimeRequest['agent']): NonNullable<AgentRuntimeRequest['agent']> {
+    if (!agent) {
+        throw new Error('Native agent execution requires an active agent context.');
+    }
+
+    return {
+        ...agent,
+        sourcePaths: [...agent.sourcePaths],
+        tools: agent.tools?.map((tool) => ({ ...tool })),
+        skills: agent.skills?.map((skill) => ({ ...skill }))
+    };
+}
+
 function joinAgentTexts(segments: string[]): string {
     return segments
         .map((segment) => segment.trim())
@@ -98,6 +111,7 @@ async function runNativeAgentLoop(
     if (!agent) {
         throw new Error('Native agent execution requires an active agent context.');
     }
+    const serializableAgent = cloneAgentConfig(agent);
 
     const toolExchanges: AgentToolExchange[] = [];
     const completedTexts: string[] = [];
@@ -115,7 +129,7 @@ async function runNativeAgentLoop(
         const result = await provider.runAgent(
             {
                 prompt: request.prompt,
-                agent,
+                agent: serializableAgent,
                 context: {
                     ...request.context,
                     conversationId

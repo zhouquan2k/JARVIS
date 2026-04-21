@@ -83,7 +83,8 @@ describe('DocumentEditorPane', () => {
             mode: 'viewer',
             documentPath: '/notes/today.md'
         }));
-        expect(wrapper.get('[data-testid="markdown-mode-switch"]').text()).toContain('Viewer');
+        expect(wrapper.get('[data-testid="markdown-mode-viewer"]').text()).toContain('View');
+        expect(wrapper.get('[data-testid="markdown-mode-edit"]').text()).toContain('Edit');
         onChange?.('# Updated');
         await wrapper.vm.$nextTick();
 
@@ -123,6 +124,8 @@ describe('DocumentEditorPane', () => {
         await wrapper.vm.$nextTick();
 
         await wrapper.get('[data-testid="markdown-mode-edit"]').trigger('click');
+        await Promise.resolve();
+        await wrapper.vm.$nextTick();
         await Promise.resolve();
         await wrapper.vm.$nextTick();
 
@@ -256,6 +259,8 @@ describe('DocumentEditorPane', () => {
         await wrapper.get('[data-testid="markdown-mode-edit"]').trigger('click');
         await Promise.resolve();
         await wrapper.vm.$nextTick();
+        await Promise.resolve();
+        await wrapper.vm.$nextTick();
 
         // Edit mode must receive the original wiki-embed source, not the display-normalised form.
         expect(createMarkdownEditor.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({
@@ -301,9 +306,13 @@ describe('DocumentEditorPane', () => {
         await wrapper.get('[data-testid="markdown-mode-edit"]').trigger('click');
         await Promise.resolve();
         await wrapper.vm.$nextTick();
+        await Promise.resolve();
+        await wrapper.vm.$nextTick();
 
         secondEditor.content = '# Draft from editor';
         await wrapper.get('[data-testid="markdown-mode-viewer"]').trigger('click');
+        await Promise.resolve();
+        await wrapper.vm.$nextTick();
         await Promise.resolve();
         await wrapper.vm.$nextTick();
 

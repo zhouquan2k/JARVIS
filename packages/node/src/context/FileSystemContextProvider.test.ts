@@ -148,6 +148,33 @@ describe('FileSystemContextProvider', () => {
             sourcePaths: ['/.agent.json', '/reports/.agent.json', '/reports/archive/.agent.json']
         });
 
+        const initialMountAgentConfig = await provider.readDocument('/reports/.agent.json');
+        expect(Buffer.from(initialMountAgentConfig.dataBase64, 'base64').toString('utf8')).toContain('Reports Mount');
+
+        await provider.writeDocument({
+            path: '/reports/.agent.json',
+            mimeType: 'application/json',
+            dataBase64: Buffer.from(JSON.stringify({
+                name: 'Updated Reports Mount',
+                instructions: 'Use the alias-local agent config.',
+                linkDir: path.relative(reportsPath, targetPath)
+            }, null, 2), 'utf8').toString('base64')
+        });
+
+        const updatedMountAgentConfig = await readFile(path.join(reportsPath, '.agent.json'), 'utf8');
+        expect(JSON.parse(updatedMountAgentConfig)).toMatchObject({
+            name: 'Updated Reports Mount',
+            instructions: 'Use the alias-local agent config.'
+        });
+        await expect(readFile(path.join(targetPath, '.agent.json'), 'utf8')).rejects.toThrow();
+
+        const updatedMountContext = await provider.getContext();
+        expect(updatedMountContext.agentConfigs['/reports/']).toMatchObject({
+            name: 'Updated Reports Mount',
+            scopePath: '/reports',
+            sourcePaths: ['/.agent.json', '/reports/.agent.json']
+        });
+
         const initialSummary = await provider.readDocument('/reports/summary.md');
         expect(initialSummary.path).toBe('/reports/summary.md');
         expect(Buffer.from(initialSummary.dataBase64, 'base64').toString('utf8')).toContain('Mounted Summary');

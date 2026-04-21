@@ -564,6 +564,30 @@ describe('useChatStore workspace history flow', () => {
         ]);
     });
 
+    it('rejects queued attachments when the current provider does not support uploads', async () => {
+        const provider = new MockModelProvider();
+        provider.acceptedMimeTypes = [];
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+
+        const file = {
+            name: 'diagram.png',
+            type: 'image/png',
+            size: 3,
+            async arrayBuffer() {
+                throw new Error('file should not be read');
+            }
+        } as File;
+
+        await store.queueAttachments([file]);
+
+        expect(store.draftAttachments).toEqual([]);
+        expect(store.attachmentError).toBe('The current provider does not support file uploads.');
+        expect(store.currentProviderSupportsAttachments).toBe(false);
+    });
+
     it('infers markdown mime type when the browser does not provide one', async () => {
         const provider = new MockModelProvider();
         const storage = new MockStorageProvider([]);

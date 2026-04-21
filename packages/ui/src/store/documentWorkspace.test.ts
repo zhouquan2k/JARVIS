@@ -613,6 +613,36 @@ describe('useDocumentWorkspaceStore', () => {
         });
     });
 
+    it('surfaces agent config save failures as workspace errors', async () => {
+        const provider = createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/docs/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/docs' }
+            ],
+            documents: {
+                '/docs/.agent.json': JSON.stringify({
+                    name: 'Docs Agent',
+                    instructions: 'Old prompt'
+                })
+            }
+        });
+        provider.writeDocument = async () => {
+            throw new Error('Failed to write document.');
+        };
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(provider);
+
+        await store.hydrateWorkspace();
+        await expect(store.saveAgentConfig({
+            ownerPath: '/docs',
+            patch: {
+                instructions: 'New prompt'
+            }
+        })).rejects.toThrow('Failed to write document.');
+
+        expect(store.currentError).toBe('Failed to write document.');
+    });
+
     it('normalizes blank agent config fields and removes default merge inheritance', async () => {
         const provider = createMockContextProvider({
             nodes: [

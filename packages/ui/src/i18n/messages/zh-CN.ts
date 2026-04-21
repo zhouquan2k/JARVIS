@@ -43,6 +43,8 @@ export const zhCNMessages = {
         searching: '搜索中...',
         clearSearch: '清空搜索',
         attachments: '附件',
+        providerAttachmentsUnsupported: '当前 Provider 不支持文件上传。',
+        checkingAttachmentSupport: '正在检测当前 Provider 的文件上传能力...',
         chatInputPlaceholder: '输入内容，按 Enter 换行，Ctrl/Cmd + Enter 发送',
         chatSendHint: 'Enter 换行，Ctrl/Cmd + Enter 发送',
         save: '保存',

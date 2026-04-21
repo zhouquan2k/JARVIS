@@ -380,7 +380,8 @@ describe('normalizeChatGPTConversationDetail', () => {
             models: [
                 {
                     id: 'auto',
-                    name: 'Auto (默认)',
+                    name: 'Auto (Default)',
+                    nameKey: 'model.autoDefault',
                     options: [
                         expect.objectContaining({ key: 'web_search', type: 'boolean' }),
                         expect.objectContaining({ key: 'deep_research', type: 'boolean' })
@@ -389,6 +390,7 @@ describe('normalizeChatGPTConversationDetail', () => {
                 {
                     id: 'gpt-4o',
                     name: 'GPT-4o',
+                    nameKey: 'model.gpt4o',
                     options: [
                         expect.objectContaining({ key: 'web_search', type: 'boolean' }),
                         expect.objectContaining({ key: 'deep_research', type: 'boolean' })
@@ -477,7 +479,47 @@ describe('normalizeChatGPTConversationDetail', () => {
         );
     });
 
-    it('sends multimodal payload and normalizes cite/image_group updates', async () => {
+    it('declares no document upload capability', async () => {
+        const provider = new ChatGPTWebProvider();
+
+        await expect(provider.getDocumentCapability()).resolves.toEqual({
+            acceptedMimeTypes: []
+        });
+    });
+
+    it('rejects file attachments before sending a conversation request', async () => {
+        const provider = new ChatGPTWebProvider();
+        (provider as { accessToken: string }).accessToken = 'token';
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ token: 'requirements-token' })
+        });
+        vi.stubGlobal('fetch', fetchMock);
+
+        await expect(provider.sendMessage(
+            '看看附件',
+            {
+                attachments: [
+                    {
+                        id: 'attachment-1',
+                        type: 'image',
+                        name: 'diagram.png',
+                        mimeType: 'image/png',
+                        size: 42,
+                        base64Data: 'c25hcHNob3Q='
+                    }
+                ]
+            },
+            () => undefined
+        )).rejects.toThrow('ChatGPT Web provider does not support file attachments.');
+
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(fetchMock.mock.calls[0]?.[0]).toBe('https://chatgpt.com/backend-api/sentinel/chat-requirements');
+
+        vi.unstubAllGlobals();
+    });
+
+    it('sends text payload and normalizes cite/image_group updates', async () => {
         const provider = new ChatGPTWebProvider();
         (provider as { accessToken: string }).accessToken = 'token';
         const fetchMock = vi.fn()
@@ -526,21 +568,10 @@ describe('normalizeChatGPTConversationDetail', () => {
 
         const updates: Array<{ text: string; annotations?: unknown[] }> = [];
         const result = await provider.sendMessage(
-            '看看附件',
+            '看看来源',
             {
                 modelId: 'gpt-4o',
-                modelOptions: { web_search: true },
-                attachments: [
-                    {
-                        id: 'attachment-1',
-                        type: 'image',
-                        name: 'diagram.png',
-                        mimeType: 'image/png',
-                        size: 42,
-                        base64Data: 'data:image/png;base64,c25hcHNob3Q=',
-                        previewBase64: 'data:image/png;base64,cHJldmlldw=='
-                    }
-                ]
+                modelOptions: { web_search: true }
             },
             (update) => updates.push(update)
         );
@@ -550,12 +581,9 @@ describe('normalizeChatGPTConversationDetail', () => {
         expect(requestBody.model).toBe('gpt-4o');
         expect(requestBody.conversation_mode).toEqual({ kind: 'primary_assistant' });
         expect(requestBody.client_contextual_info).toEqual({ use_search: true });
-        expect(requestBody.messages[0]?.content?.content_type).toBe('multimodal_text');
-        expect(requestBody.messages[0]?.content?.parts[1]).toMatchObject({
-            id: 'attachment-1',
-            type: 'image',
-            mimeType: 'image/png',
-            base64Data: 'c25hcHNob3Q='
+        expect(requestBody.messages[0]?.content).toEqual({
+            content_type: 'text',
+            parts: ['看看来源']
         });
 
         expect(updates[0]?.text).toBe('答案如下 [1]');
