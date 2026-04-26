@@ -226,8 +226,8 @@ export function createContextRouter(options: { service: HttpContextService; conf
     app.post('/write-document', async (c) => {
         try {
             const body = normalizeObjectBody(await readJsonBody(c));
-            await service.writeDocument(normalizeWriteDocumentInput(body));
-            return c.json({ ok: true });
+            const result = await service.writeDocument(normalizeWriteDocumentInput(body));
+            return c.json({ ok: true, result });
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to write document.';
             return c.json({ error: message }, 400);

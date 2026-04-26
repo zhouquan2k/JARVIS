@@ -84,7 +84,7 @@ function createPaneContextProvider(conversations: Conversation[] = []): IContext
             query.documentPath ? conversation.documentPaths?.includes(query.documentPath) : true
         ))),
         readDocument: async (path: string) => ({ path, mimeType: 'text/markdown', dataBase64: encodeTextDocument('') }),
-        writeDocument: async () => undefined,
+        writeDocument: async () => ({}),
         createNode: async () => ({ path: '/draft.md', name: 'draft.md', kind: 'file', agentKey: '/' }),
         deleteNode: async () => undefined,
         renameNode: async (input: { path: string; name: string }) => ({
@@ -103,6 +103,13 @@ const paneProviderCatalog: ProviderConfig[] = [
         name: 'Pane Test Provider',
         models: [{ id: 'pane-model', name: 'Pane Model' }],
         defaultModel: 'pane-model',
+        supportedRuntimeModes: ['web']
+    },
+    {
+        id: 'agent-pane-provider',
+        name: 'Agent Pane Provider',
+        models: [{ id: 'agent-pane-model', name: 'Agent Pane Model' }],
+        defaultModel: 'agent-pane-model',
         supportedRuntimeModes: ['web']
     }
 ];
@@ -304,6 +311,43 @@ describe('AgentPane', () => {
         expect(chatStore.activeAgentContext).toBeNull();
         expect(chatStore.activeWorkspacePath).toBeNull();
         expect(chatStore.activeWorkspaceDocument).toBeNull();
+    });
+
+    it('syncs the active agent model into the chat selector state', async () => {
+        setActivePinia(createPinia());
+        const chatStore = useChatStore();
+        const provider = new PaneTestProvider();
+        const storage = new PaneTestStorageProvider();
+        chatStore.setProviders(provider, storage);
+        await chatStore.initializeProviderCatalog(paneProviderCatalog);
+
+        mount(AgentPane, {
+            props: {
+                activeAgent: {
+                    name: 'Docs Agent',
+                    effectiveInstructions: 'Use docs context',
+                    modelProviderName: 'agent-pane-provider',
+                    modelName: 'Agent Pane Model',
+                    scopePath: '/docs',
+                    sourcePaths: ['/docs/.agent.json']
+                },
+                activePath: '/docs/guide.md',
+                contextProvider: createPaneContextProvider(),
+                onFileChanged: async () => undefined
+            },
+            global: {
+                stubs: {
+                    NormalChatView: {
+                        template: '<div data-testid="normal-chat-stub" />'
+                    }
+                }
+            }
+        });
+
+        await flushPromises();
+
+        expect(chatStore.currentProviderId).toBe('agent-pane-provider');
+        expect(chatStore.currentModelId).toBe('agent-pane-model');
     });
 
     it('opens detail mode from the document conversation list and shows the outer toolbar', async () => {

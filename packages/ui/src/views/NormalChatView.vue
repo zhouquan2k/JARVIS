@@ -136,6 +136,14 @@
           </div>
         </div>
 
+        <div
+          v-if="chatStore.archiveFeedback"
+          :class="['archive-feedback', `tone-${chatStore.archiveFeedback.tone}`]"
+          data-testid="archive-feedback"
+        >
+          {{ chatStore.archiveFeedback.message }}
+        </div>
+
         <div class="input-row">
           <textarea
             ref="inputRef"
@@ -182,6 +190,25 @@
                 @click="startNewChat"
               >
                 <SquarePen class="action-icon" :size="16" aria-hidden="true" />
+              </button>
+              <span
+                v-if="showArchiveAction"
+                class="archive-status"
+                data-testid="archive-status"
+              >
+                {{ archiveStatusText }}
+              </span>
+              <button
+                v-if="showArchiveAction"
+                type="button"
+                class="secondary-action-btn"
+                data-testid="archive-conversation"
+                :title="t('shared.archiveConversation')"
+                :aria-label="t('shared.archiveConversation')"
+                :disabled="isArchiveActionDisabled"
+                @click="archiveConversation"
+              >
+                <Archive class="action-icon" :size="16" aria-hidden="true" />
               </button>
             </div>
             <button
@@ -238,7 +265,7 @@
 <script setup lang="ts">
 import type { ConversationMessage } from '@packages/core/src';
 import { computed, nextTick, onMounted, ref, watch, type PropType } from 'vue';
-import { ArrowUp, PanelLeftOpen, PanelTopOpen, SquarePen } from 'lucide-vue-next';
+import { Archive, ArrowUp, PanelLeftOpen, PanelTopOpen, SquarePen } from 'lucide-vue-next';
 import AttachmentComposer from '../components/AttachmentComposer.vue';
 import MarkdownContent from '../components/MarkdownContent.vue';
 import MessageAttachmentStrip from '../components/MessageAttachmentStrip.vue';
@@ -311,6 +338,17 @@ const modelOptionDefinitions = computed(() => chatStore.currentModelOptionDefini
 const isAgentMode = computed(() => chatStore.workspaceMode === 'agent');
 const hasDraftAttachments = computed(() => chatStore.draftAttachments.length > 0);
 const showSelectorRow = computed(() => !isTopToolbarCollapsed.value || hasDraftAttachments.value);
+const showArchiveAction = computed(() => chatStore.canArchiveCurrentConversation());
+const archiveStatusText = computed(() => {
+  switch (chatStore.currentConversationArchiveStatus.state) {
+    case 'archived':
+      return t('shared.archiveConversationStatusArchived');
+    case 'stale':
+      return t('shared.archiveConversationStatusStale');
+    default:
+      return t('shared.archiveConversationStatusIdle');
+  }
+});
 const draftPrompt = computed({
   get: () => chatStore.draftPrompt,
   set: (value: string) => chatStore.setDraftPrompt(value)
@@ -351,6 +389,9 @@ const effectiveIsAuthenticated = computed(() => {
 const authUnavailableText = computed(() => props.authUnavailableMessage || t('shared.currentProviderUnavailable'));
 const isInputDisabled = computed(() => {
   return chatStore.isGenerating || !effectiveIsAuthenticated.value || chatStore.isCurrentProviderModelsLoading || !chatStore.currentModelId;
+});
+const isArchiveActionDisabled = computed(() => {
+  return isInputDisabled.value || isPreviewing.value || chatStore.isArchivingConversation;
 });
 const attachmentDisabledReason = computed(() => {
   if (isInputDisabled.value) {
@@ -443,7 +484,13 @@ watch(() => renderedMessages.value, () => {
 
 watch(
   () => [displayConversation.value?.id, isPreviewing.value] as const,
-  () => {
+  ([conversationId, previewing], previous) => {
+    const [previousConversationId, wasPreviewing] = previous ?? [null, false];
+    const shouldResetScroll = conversationId !== previousConversationId || previewing !== wasPreviewing;
+    if (!shouldResetScroll) {
+      return;
+    }
+
     nextTick(() => {
       if (!messagesRef.value) {
         return;
@@ -700,7 +747,11 @@ function toggleTopToolbarCollapsed() {
 }
 
 async function startNewChat() {
-  await chatStore.startNewConversation();
+  await chatStore.startNewConversation({ boundNodeName: null });
+}
+
+async function archiveConversation() {
+  await chatStore.archiveCurrentConversationToDocument();
 }
 </script>
 
@@ -990,6 +1041,36 @@ async function startNewChat() {
 .auth-recovery-btn:not(:disabled):focus-visible {
   background: rgba(250, 204, 21, 0.28);
   border-color: rgba(252, 211, 77, 0.42);
+}
+
+.archive-feedback {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.archive-feedback.tone-success {
+  background: rgba(34, 197, 94, 0.16);
+  color: #bbf7d0;
+}
+
+.archive-feedback.tone-info {
+  background: rgba(59, 130, 246, 0.14);
+  color: #bfdbfe;
+}
+
+.archive-feedback.tone-error {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fecaca;
+}
+
+.archive-status {
+  color: rgba(226, 232, 240, 0.82);
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .input-row,

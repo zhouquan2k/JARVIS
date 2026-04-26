@@ -16,6 +16,7 @@ export interface AgentToolExecutionContext {
         path: string;
         beforeContent: string;
         afterContent: string;
+        alreadyPersisted?: boolean;
     }) => Promise<void> | void;
 }
 

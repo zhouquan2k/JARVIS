@@ -100,7 +100,7 @@ export function registerContextIpc(options: RegisterContextIpcOptions = {}) {
         return provider.readDocument(targetPath);
     });
     ipc.handle(DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL, async (_event, input: WriteContextDocumentInput) => {
-        await provider.writeDocument(input);
+        return provider.writeDocument(input);
     });
     ipc.handle(DESKTOP_CONTEXT_CREATE_NODE_CHANNEL, async (_event, input: { parentPath?: string; name: string; kind: 'file' | 'directory' }) => {
         return provider.createNode(input);

@@ -38,7 +38,7 @@ export function createDesktopContextProvider(): IContextProvider {
                 throw new Error('Desktop context bridge is unavailable');
             }
 
-            await window.chatprismDesktop.writeContextDocument(input);
+            return window.chatprismDesktop.writeContextDocument(input);
         },
         async createNode(input: CreateContextNodeInput) {
             if (!window.chatprismDesktop) {

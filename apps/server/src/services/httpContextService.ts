@@ -8,7 +8,8 @@ import type {
     CreateContextNodeInput,
     RenameContextNodeInput,
     WorkspaceContext,
-    WriteContextDocumentInput
+    WriteContextDocumentInput,
+    WriteContextDocumentResult
 } from '../types/context.js';
 
 export class HttpContextService {
@@ -30,8 +31,8 @@ export class HttpContextService {
         return this.provider.readDocument(path);
     }
 
-    async writeDocument(input: WriteContextDocumentInput): Promise<void> {
-        await this.provider.writeDocument(input);
+    async writeDocument(input: WriteContextDocumentInput): Promise<WriteContextDocumentResult> {
+        return this.provider.writeDocument(input);
     }
 
     async createNode(input: CreateContextNodeInput): Promise<ContextNode> {

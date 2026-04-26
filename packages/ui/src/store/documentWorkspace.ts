@@ -11,6 +11,7 @@ import {
     type IContextProvider,
     type ResolvedAgentConfig,
     type WorkspaceContext,
+    type WriteContextDocumentResult,
     decodeTextDocument,
     encodeTextDocument,
     isTextDocumentMimeType
@@ -67,7 +68,7 @@ export interface DocumentWorkspaceState {
     nodeHistoryIndex: number;
 }
 
-const AUTO_SAVE_DELAY_MS = 400;
+const AUTO_SAVE_DELAY_MS = 60_000;
 
 function flattenVisibleNodes(nodes: ContextNode[]): ContextNode[] {
     const flattened: ContextNode[] = [];
@@ -485,14 +486,72 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             };
         },
 
-        recordFileChange(change: { path: string; beforeContent: string; afterContent: string }) {
+        recordFileChange(
+            change: { path: string; beforeContent: string; afterContent: string },
+            writeResult?: WriteContextDocumentResult
+        ) {
             const record = this.fileChangeService.recordChange(change);
             this.applyActiveContent(change.afterContent, change.path);
             this.syncActiveFileChange(change.path);
-            void this.refreshDocumentVersion(change.path).catch((error) => {
-                this.currentError = error instanceof Error ? error.message : String(error);
-            });
+            if (writeResult) {
+                this.applyDocumentWriteMetadata(change.path, writeResult);
+            } else {
+                void this.refreshDocumentVersion(change.path).catch((error) => {
+                    this.currentError = error instanceof Error ? error.message : String(error);
+                });
+            }
             return record;
+        },
+
+        async applyGeneratedDocumentChange(input: { path: string; beforeContent: string; afterContent: string }): Promise<void> {
+            const targetPath = input.path.trim();
+            if (!targetPath || input.afterContent === input.beforeContent) {
+                return;
+            }
+
+            if (!this.contextProvider) {
+                return;
+            }
+
+            if (this.activePath === targetPath && this.dirtyPaths[targetPath]) {
+                await this.flushActiveDocument();
+            }
+
+            const beforeContent = this.activePath === targetPath
+                && this.activeViewerCapabilities?.edit
+                ? this.draftContent
+                : input.beforeContent;
+
+            if (beforeContent === input.afterContent) {
+                return;
+            }
+
+            const currentDocument = await this.contextProvider.readDocument(targetPath);
+            const currentContent = getEditableDocumentText(currentDocument);
+            if (currentContent === input.afterContent) {
+                this.recordFileChange({
+                    path: targetPath,
+                    beforeContent,
+                    afterContent: input.afterContent
+                }, {
+                    updatedAt: currentDocument.updatedAt,
+                    version: currentDocument.version
+                });
+                return;
+            }
+
+            const writeResult = await this.contextProvider.writeDocument({
+                path: targetPath,
+                mimeType: currentDocument.mimeType ?? 'text/markdown',
+                dataBase64: encodeTextDocument(input.afterContent),
+                expectedVersion: currentDocument.version
+            });
+
+            this.recordFileChange({
+                path: targetPath,
+                beforeContent,
+                afterContent: input.afterContent
+            }, writeResult);
         },
 
         setContextProvider(provider: IContextProvider | null) {
@@ -845,24 +904,35 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
                 || !this.activeDocument
                 || !this.activeViewerCapabilities?.edit
                 || !this.dirtyPaths[this.activePath]
+                || this.isSaving
             ) {
                 return;
             }
 
             clearAutoSaveTimer(this);
+            const activePath = this.activePath;
+            const activeDocument = this.activeDocument;
+            const savedContent = this.draftContent;
+            let shouldScheduleNextSave = false;
             this.isSaving = true;
             try {
-                const activePath = this.activePath;
-                const activeDocument = this.activeDocument;
-                await this.contextProvider.writeDocument({
+                const writeResult = await this.contextProvider.writeDocument({
                     path: activePath,
                     mimeType: activeDocument.mimeType,
-                    dataBase64: encodeTextDocument(this.draftContent),
+                    dataBase64: encodeTextDocument(savedContent),
                     expectedVersion: activeDocument.version
                 });
-                await this.refreshDocumentVersion(activePath);
+                shouldScheduleNextSave = this.applyActiveDocumentWriteResult({
+                    path: activePath,
+                    document: activeDocument,
+                    savedContent,
+                    writeResult
+                });
             } finally {
                 this.isSaving = false;
+                if (shouldScheduleNextSave) {
+                    scheduleAutoSave(this);
+                }
             }
         },
 
@@ -978,7 +1048,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             }
 
             this.applyActiveContent(result.content, this.activePath);
-            await this.refreshDocumentVersion(this.activePath);
+            this.applyDocumentWriteMetadata(this.activePath, result.writeResult);
             this.syncActiveFileChange(this.activePath);
         },
 
@@ -993,7 +1063,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             }
 
             this.applyActiveContent(result.content, this.activePath);
-            await this.refreshDocumentVersion(this.activePath);
+            this.applyDocumentWriteMetadata(this.activePath, result.writeResult);
             this.syncActiveFileChange(this.activePath);
         },
 
@@ -1026,8 +1096,59 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
                 : '';
         },
 
+        applyDocumentWriteMetadata(path: string, writeResult: WriteContextDocumentResult) {
+            const updatedAt = writeResult.updatedAt ?? Date.now();
+            this.nodes = this.nodes.map((node) => node.path === path
+                ? { ...node, updatedAt }
+                : node);
+
+            if (this.activePath !== path || !this.activeDocument) {
+                return;
+            }
+
+            this.activeDocument = {
+                ...this.activeDocument,
+                updatedAt,
+                version: writeResult.version ?? this.activeDocument.version
+            };
+        },
+
         setPanelSizes(sizes: [number, number, number]) {
             this.panelSizes = normalizeSizes(sizes);
+        },
+
+        applyActiveDocumentWriteResult(input: {
+            path: string;
+            document: ContextDocument;
+            savedContent: string;
+            writeResult: WriteContextDocumentResult;
+        }): boolean {
+            const updatedAt = input.writeResult.updatedAt ?? input.document.updatedAt ?? Date.now();
+            this.nodes = this.nodes.map((node) => node.path === input.path
+                ? { ...node, updatedAt }
+                : node);
+
+            if (this.activePath !== input.path) {
+                this.dirtyPaths = {
+                    ...this.dirtyPaths,
+                    [input.path]: false
+                };
+                return false;
+            }
+
+            const hasNewerLocalDraft = this.draftContent !== input.savedContent;
+            this.activeDocument = {
+                ...input.document,
+                dataBase64: encodeTextDocument(input.savedContent),
+                updatedAt,
+                version: input.writeResult.version ?? input.document.version
+            };
+            this.dirtyPaths = {
+                ...this.dirtyPaths,
+                [input.path]: hasNewerLocalDraft
+            };
+
+            return hasNewerLocalDraft;
         }
     }
 });

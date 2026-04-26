@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { createMockContextProvider, decodeTextDocument, DEFAULT_SCOPED_AGENT_CONFIG } from '@packages/core/src';
 import { useDocumentWorkspaceStore } from './documentWorkspace';
@@ -6,6 +6,10 @@ import { useDocumentWorkspaceStore } from './documentWorkspace';
 describe('useDocumentWorkspaceStore', () => {
     beforeEach(() => {
         setActivePinia(createPinia());
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
     });
 
     it('hydrates the tree without opening a file and resolves the root agent context', async () => {
@@ -734,6 +738,107 @@ describe('useDocumentWorkspaceStore', () => {
         await store.redoActiveFileChange();
         expect(store.draftContent).toBe('# After');
         expect(store.canUndoActiveFile).toBe(true);
+    });
+
+    it('applies generated document changes through the provider before recording diff history', async () => {
+        const provider = createMockContextProvider({
+            nodes: [
+                { path: '/notes.md', name: 'notes.md', kind: 'file' }
+            ],
+            documents: {
+                '/notes.md': '# Before'
+            }
+        });
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(provider);
+
+        await store.hydrateWorkspace();
+        await store.openNode('/notes.md');
+        await store.applyGeneratedDocumentChange({
+            path: '/notes.md',
+            beforeContent: '# Before',
+            afterContent: '# After'
+        });
+
+        expect(decodeTextDocument((await provider.readDocument('/notes.md')).dataBase64)).toBe('# After');
+        expect(store.latestFileChange?.beforeContent).toBe('# Before');
+        expect(store.latestFileChange?.afterContent).toBe('# After');
+    });
+
+    it('keeps newer local edits after an in-flight save returns version metadata', async () => {
+        const provider = createMockContextProvider({
+            nodes: [
+                { path: '/notes.md', name: 'notes.md', kind: 'file' }
+            ],
+            documents: {
+                '/notes.md': '# Before'
+            }
+        });
+        const originalWriteDocument = provider.writeDocument.bind(provider);
+        let releaseFirstWrite: (() => void) | null = null;
+        let writeCount = 0;
+        provider.writeDocument = vi.fn(async (input) => {
+            writeCount += 1;
+            if (writeCount === 1) {
+                await new Promise<void>((resolve) => {
+                    releaseFirstWrite = resolve;
+                });
+            }
+            return originalWriteDocument(input);
+        });
+
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(provider);
+
+        await store.hydrateWorkspace();
+        await store.openNode('/notes.md');
+
+        store.updateActiveDocument('# First save');
+        const firstSave = store.flushActiveDocument();
+        await Promise.resolve();
+
+        store.updateActiveDocument('# Second save');
+        releaseFirstWrite?.();
+        await firstSave;
+
+        expect(store.draftContent).toBe('# Second save');
+        expect(store.dirtyPaths['/notes.md']).toBe(true);
+        expect(decodeTextDocument(store.activeDocument?.dataBase64 ?? '')).toBe('# First save');
+        expect(store.activeDocument?.version).toBeTruthy();
+
+        await store.flushActiveDocument();
+
+        expect(store.draftContent).toBe('# Second save');
+        expect(store.dirtyPaths['/notes.md']).toBe(false);
+        expect(decodeTextDocument((await provider.readDocument('/notes.md')).dataBase64)).toBe('# Second save');
+    });
+
+    it('debounces automatic document saves for one minute', async () => {
+        vi.useFakeTimers();
+        const provider = createMockContextProvider({
+            nodes: [
+                { path: '/notes.md', name: 'notes.md', kind: 'file' }
+            ],
+            documents: {
+                '/notes.md': '# Before'
+            }
+        });
+        const writeDocument = vi.spyOn(provider, 'writeDocument');
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(provider);
+
+        await store.hydrateWorkspace();
+        await store.openNode('/notes.md');
+
+        store.updateActiveDocument('# After');
+        await vi.advanceTimersByTimeAsync(59_999);
+
+        expect(writeDocument).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(1);
+
+        expect(writeDocument).toHaveBeenCalledTimes(1);
+        expect(decodeTextDocument((await provider.readDocument('/notes.md')).dataBase64)).toBe('# After');
     });
 
     it('refreshes document versions after save, agent changes, undo, and redo', async () => {

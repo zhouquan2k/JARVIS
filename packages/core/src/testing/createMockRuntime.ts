@@ -141,6 +141,55 @@ function buildAttachmentEchoText(
     ].join('\n');
 }
 
+function extractTaggedSection(text: string, tagName: string): string {
+    const match = text.match(new RegExp(`<${tagName}>\\n([\\s\\S]*?)\\n<\\/${tagName}>`, 'u'));
+    return match?.[1]?.trim() || '';
+}
+
+function buildArchiveMockResponse(prompt: string): string | null {
+    if (!prompt.includes('Visible conversation transcript:') || !prompt.includes('<Q>') || !prompt.includes('<A>')) {
+        return null;
+    }
+
+    const originalQ = extractTaggedSection(prompt, 'Q');
+    const originalA = extractTaggedSection(prompt, 'A');
+    const transcript = extractTaggedSection(prompt, 'TRANSCRIPT');
+    const transcriptBlocks = Array.from(transcript.matchAll(/\[(USER|ASSISTANT)\]\n([\s\S]*?)(?=\n\n\[(?:USER|ASSISTANT)\]\n|$)/gu));
+    const userMessages = transcriptBlocks
+        .filter((match) => match[1] === 'USER')
+        .map((match) => match[2]?.trim() || '')
+        .filter((value) => value && value !== '[EMPTY]');
+    const assistantMessages = transcriptBlocks
+        .filter((match) => match[1] === 'ASSISTANT')
+        .map((match) => match[2]?.trim() || '')
+        .filter((value) => value && value !== '[EMPTY]');
+
+    const dedupeKeepLast = (items: string[]) => {
+        const seen = new Set<string>();
+        const next: string[] = [];
+        for (let index = items.length - 1; index >= 0; index -= 1) {
+            const item = items[index];
+            if (!item || seen.has(item)) {
+                continue;
+            }
+            seen.add(item);
+            next.unshift(item);
+        }
+        return next;
+    };
+
+    const q = dedupeKeepLast([
+        originalQ === '[EMPTY]' ? '' : originalQ,
+        ...userMessages
+    ].filter(Boolean)).join('\n\n').trim();
+    const a = dedupeKeepLast([
+        originalA === '[EMPTY]' ? '' : originalA,
+        ...assistantMessages
+    ].filter(Boolean)).join('\n\n').trim();
+
+    return JSON.stringify({ q, a });
+}
+
 class MockStreamingProvider implements IAgentCapableProvider {
     public id: string;
     private aborted = false;
@@ -202,9 +251,10 @@ class MockStreamingProvider implements IAgentCapableProvider {
         const attachmentEchoText = prompt.includes('TRIGGER_ATTACHMENT_ECHO')
             ? buildAttachmentEchoText(this.id, options.modelId, options.attachments || [])
             : null;
+        const archiveResponseText = buildArchiveMockResponse(prompt);
         const finalText = isAnalysisPrompt
             ? this.buildAnalysisText(userPrompt, outputA, outputB)
-            : structuredResponse?.text || attachmentEchoText || this.buildNativeText(prompt, options.modelId);
+            : structuredResponse?.text || attachmentEchoText || archiveResponseText || this.buildNativeText(prompt, options.modelId);
 
         const charDelay = prompt.includes(this.options.slowStreamTrigger)
             ? this.options.slowCharDelayMs

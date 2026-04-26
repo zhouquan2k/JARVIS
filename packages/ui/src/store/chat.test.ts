@@ -129,6 +129,27 @@ class AbortableMockModelProvider extends MockModelProvider {
     }
 }
 
+class ArchiveResultProvider extends MockModelProvider {
+    constructor(private readonly archiveResponseText: string) {
+        super();
+    }
+
+    override async sendMessage(
+        prompt: string,
+        options = {},
+        onUpdate: (update: { text: string }) => void
+    ): Promise<{ text: string; conversationId: string; messageId: string }> {
+        this.promptsUsed.push(prompt);
+        this.optionsUsed.push(options as Record<string, unknown>);
+        onUpdate({ text: this.archiveResponseText });
+        return {
+            text: this.archiveResponseText,
+            conversationId: 'archive-conversation-id',
+            messageId: 'archive-message-id'
+        };
+    }
+}
+
 class MockStorageProvider implements IConversationPersistProvider {
     id = 'mock-storage';
     syncNowCalls = 0;
@@ -669,13 +690,14 @@ describe('useChatStore workspace history flow', () => {
         });
     });
 
-    it('binds a new conversation to the saved selected node name when available', async () => {
+    it('binds a new agent-mode conversation to the saved selected node name when available', async () => {
         const provider = new MockModelProvider();
         const storage = new MockStorageProvider([]);
         const store = useChatStore();
         store.setProviders(provider, storage);
 
         await store.initializeProviderCatalog(providerCatalog);
+        store.setWorkspaceMode('agent');
         store.saveAgentViewStatus({
             selectedNodePath: '/docs/archive',
             activePath: '/docs/archive/note.md',
@@ -703,7 +725,7 @@ describe('useChatStore workspace history flow', () => {
         store.currentProviderId = 'other-provider';
         store.currentModelId = 'other-static';
 
-        await store.startNewConversation();
+        await store.startNewConversation({ boundNodeName: null });
 
         expect(store.workspaceAgentContext).toBeNull();
         expect(store.currentProviderId).toBe('mock-provider');
@@ -713,6 +735,60 @@ describe('useChatStore workspace history flow', () => {
             modelId: 'static-model',
             modelOptions: {}
         });
+    });
+
+    it('clears active agent and document context when starting a new chat in conversation mode', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+
+        await store.initializeProviderCatalog(providerCatalog);
+        store.setActiveAgentContext(scopedAgent);
+        store.saveWorkspaceAgentContext({
+            ...scopedAgent,
+            modelProviderName: 'other-provider',
+            modelName: 'other-static'
+        });
+        store.setWorkspaceContext({
+            activeAgentKey: '/docs/.agent.json',
+            selectedNodePath: '/docs/guide.md',
+            activePath: '/docs/guide.md',
+            activeDocument: {
+                path: '/docs/guide.md',
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('# Guide'),
+                updatedAt: 1,
+                version: 'v1',
+                canWrite: true
+            },
+            contextProvider: null
+        });
+        store.saveAgentViewStatus({
+            selectedNodePath: '/docs/archive',
+            activePath: '/docs/archive/note.md',
+            activeConversationId: null
+        });
+
+        await store.startNewConversation({ boundNodeName: null });
+
+        expect(store.activeAgentContext).toBeNull();
+        expect(store.workspaceAgentContext).toBeNull();
+        expect(store.activeWorkspaceAgentKey).toBeNull();
+        expect(store.activeWorkspaceSelectedNodePath).toBeNull();
+        expect(store.activeWorkspacePath).toBeNull();
+        expect(store.activeWorkspaceDocument).toBeNull();
+        expect(store.activeWorkspaceContextProvider).toBeNull();
+        expect(store.currentConversation?.boundNodeName).toBeUndefined();
+        expect(store.currentConversation?.agentKey).toBeUndefined();
+        expect(store.currentConversation?.documentPaths).toBeUndefined();
+
+        await store.sendMessage('普通聊天');
+
+        expect(provider.promptsUsed[0]).toBe('普通聊天');
+        expect(provider.optionsUsed[0]?.attachments).toEqual([]);
+        expect(store.currentConversation?.agentKey).toBeUndefined();
+        expect(store.currentConversation?.documentPaths).toBeUndefined();
     });
 
     it('applies the saved workspace agent selection to the current model state', async () => {
@@ -729,6 +805,40 @@ describe('useChatStore workspace history flow', () => {
         });
 
         await store.applyWorkspaceAgentContextSelection();
+
+        expect(store.currentProviderId).toBe('other-provider');
+        expect(store.currentModelId).toBe('other-static');
+    });
+
+    it('applies the active agent selection to the current model state by display name', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+
+        await store.initializeProviderCatalog([
+            {
+                id: 'mock-provider',
+                name: 'Mock Provider',
+                models: [{ id: 'static-model', name: 'Static Model' }],
+                defaultModel: 'static-model',
+                supportedRuntimeModes: ['web']
+            },
+            {
+                id: 'other-provider',
+                name: 'Other Provider',
+                models: [{ id: 'other-static', name: 'Other Static' }],
+                defaultModel: 'other-static',
+                supportedRuntimeModes: ['web']
+            }
+        ]);
+        store.setActiveAgentContext({
+            ...scopedAgent,
+            modelProviderName: 'other-provider',
+            modelName: 'Other Static'
+        });
+
+        await store.applyActiveAgentContextSelection();
 
         expect(store.currentProviderId).toBe('other-provider');
         expect(store.currentModelId).toBe('other-static');
@@ -1284,7 +1394,7 @@ describe('useChatStore workspace history flow', () => {
                 initializeAccess: vi.fn(async () => undefined),
                 listTree: vi.fn(async () => []),
                 readDocument: vi.fn(async (path: string) => ({ path, mimeType: 'text/markdown', dataBase64: encodeTextDocument('# Guide') })),
-                writeDocument: vi.fn(async () => undefined),
+                writeDocument: vi.fn(async () => ({})),
                 createNode: vi.fn(async () => ({ path: '/docs/draft.md', name: 'draft.md', kind: 'file' as const })),
                 searchInScope: vi.fn(async () => []),
                 resolveScopedAgentConfig: vi.fn(async () => scopedAgent)
@@ -1408,6 +1518,11 @@ describe('useChatStore workspace history flow', () => {
         expect(defaultProvider.promptsUsed).toHaveLength(0);
         expect(agentProvider.promptsUsed[0]).toBe('用 Agent 指定模型发送');
         expect(agentProvider.optionsUsed[0]).toMatchObject({
+            modelId: 'other-dynamic',
+            modelOptions: {}
+        });
+        expect(store.currentConversation?.modelSelection).toEqual({
+            providerId: 'other-provider',
             modelId: 'other-dynamic',
             modelOptions: {}
         });
@@ -2060,5 +2175,263 @@ describe('useChatStore workspace history flow', () => {
         expect(store.historySource).toBe('local');
         expect(await storage.getConversation('conversation-only')).toBeNull();
         expect(store.conversations).toHaveLength(0);
+    });
+
+    it('archives only in eligible agent-mode markdown document contexts', async () => {
+        const provider = new ArchiveResultProvider('{"q":"# Q","a":"# A"}');
+        const store = useChatStore();
+        store.setProviders(provider, new MockStorageProvider([]));
+        await store.initializeProviderCatalog(providerCatalog);
+
+        store.currentConversation = {
+            id: 'archive-conversation',
+            title: 'Archive conversation',
+            origin: 'local',
+            updatedAt: 1,
+            messages: [
+                { id: 'user-1', role: 'user', content: 'Need archive' }
+            ]
+        };
+        store.workspaceMode = 'conversation';
+        store.setWorkspaceContext({
+            selectedNodePath: '/docs/guide.md',
+            activePath: '/docs/guide.md',
+            activeDocument: {
+                path: '/docs/guide.md',
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('# Q')
+            },
+            contextProvider: null,
+            onFileChanged: vi.fn()
+        });
+
+        expect(store.canArchiveCurrentConversation()).toBe(false);
+
+        store.workspaceMode = 'agent';
+        expect(store.canArchiveCurrentConversation()).toBe(true);
+
+        store.setWorkspaceContext({
+            selectedNodePath: '/docs',
+            activePath: '/docs/guide.md',
+            activeDocument: {
+                path: '/docs/guide.md',
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('# Q')
+            },
+            contextProvider: null,
+            onFileChanged: vi.fn()
+        });
+        expect(store.canArchiveCurrentConversation()).toBe(false);
+    });
+
+    it('archives the current conversation into the active markdown document', async () => {
+        const provider = new ArchiveResultProvider('{"q":"# Q\\n\\nUpdated question","a":"# A\\n\\nUpdated answer"}');
+        const onFileChanged = vi.fn(async () => undefined);
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+
+        store.workspaceMode = 'agent';
+        store.currentConversation = {
+            id: 'archive-conversation',
+            title: 'Archive conversation',
+            origin: 'local',
+            updatedAt: 1,
+            messages: [
+                { id: 'user-1', role: 'user', content: 'Please update the question.' },
+                { id: 'assistant-1', role: 'assistant', content: 'Question updated.' }
+            ]
+        };
+        store.setWorkspaceContext({
+            selectedNodePath: '/docs/guide.md',
+            activePath: '/docs/guide.md',
+            activeDocument: {
+                path: '/docs/guide.md',
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('# Q\n\nOriginal question\n\n---\n\n# A\n\nOriginal answer')
+            },
+            contextProvider: null,
+            onFileChanged
+        });
+
+        await store.archiveCurrentConversationToDocument();
+
+        expect(onFileChanged).toHaveBeenCalledWith({
+            path: '/docs/guide.md',
+            beforeContent: '# Q\n\nOriginal question\n\n---\n\n# A\n\nOriginal answer',
+            afterContent: '# Q\n\nUpdated question\n\n---\n\n# A\n\nUpdated answer'
+        });
+        expect(provider.optionsUsed[0]).toMatchObject({
+            modelId: 'static-model',
+            modelOptions: {}
+        });
+        expect(store.archiveFeedback).toEqual({
+            tone: 'success',
+            message: 'Conversation archived into the current document.'
+        });
+        expect(store.currentConversation?.archive).toMatchObject({
+            documentPath: '/docs/guide.md',
+            sourceMessageCount: 2
+        });
+        expect(store.currentConversationArchiveStatus).toMatchObject({
+            state: 'archived',
+            documentPath: '/docs/guide.md',
+            sourceMessageCount: 2
+        });
+        expect(await storage.getConversation('archive-conversation')).toMatchObject({
+            archive: {
+                documentPath: '/docs/guide.md',
+                sourceMessageCount: 2
+            }
+        });
+        expect(store.isArchivingConversation).toBe(false);
+    });
+
+    it('reports archive no-change results without writing the document', async () => {
+        const provider = new ArchiveResultProvider('{"q":"# Q\\n\\nOriginal question","a":"# A\\n\\nOriginal answer"}');
+        const onFileChanged = vi.fn(async () => undefined);
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+
+        store.workspaceMode = 'agent';
+        store.currentConversation = {
+            id: 'archive-conversation',
+            title: 'Archive conversation',
+            origin: 'local',
+            updatedAt: 1,
+            messages: [
+                { id: 'user-1', role: 'user', content: 'Please update the question.' },
+                { id: 'assistant-1', role: 'assistant', content: 'Question updated.' }
+            ]
+        };
+        store.setWorkspaceContext({
+            selectedNodePath: '/docs/guide.md',
+            activePath: '/docs/guide.md',
+            activeDocument: {
+                path: '/docs/guide.md',
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('# Q\n\nOriginal question\n\n---\n\n# A\n\nOriginal answer')
+            },
+            contextProvider: null,
+            onFileChanged
+        });
+
+        await store.archiveCurrentConversationToDocument();
+
+        expect(onFileChanged).not.toHaveBeenCalled();
+        expect(store.archiveFeedback).toEqual({
+            tone: 'info',
+            message: 'No new content was archived.'
+        });
+        expect(store.currentConversationArchiveStatus).toMatchObject({
+            state: 'archived',
+            documentPath: '/docs/guide.md',
+            sourceMessageCount: 2
+        });
+        expect(await storage.getConversation('archive-conversation')).toMatchObject({
+            archive: {
+                documentPath: '/docs/guide.md',
+                sourceMessageCount: 2
+            }
+        });
+    });
+
+    it('marks persisted archive status stale after new turns and preserves it across reload', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([
+            {
+                id: 'archive-conversation',
+                title: 'Archive conversation',
+                origin: 'local',
+                updatedAt: 1,
+                archive: {
+                    documentPath: '/docs/guide.md',
+                    archivedAt: 10,
+                    sourceMessageCount: 2
+                },
+                messages: [
+                    { id: 'user-1', role: 'user', content: 'Archived question', questionId: 'q-1' },
+                    { id: 'assistant-1', role: 'assistant', content: 'Archived answer', questionId: 'q-1' }
+                ]
+            }
+        ]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+        await store.loadConversation('archive-conversation');
+        store.setWorkspaceContext({
+            selectedNodePath: '/docs/guide.md',
+            activePath: '/docs/guide.md',
+            activeDocument: {
+                path: '/docs/guide.md',
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('# Q\n\nArchived question\n\n---\n\n# A\n\nArchived answer')
+            },
+            contextProvider: null,
+            onFileChanged: vi.fn()
+        });
+
+        expect(store.currentConversationArchiveStatus).toMatchObject({
+            state: 'archived',
+            documentPath: '/docs/guide.md',
+            sourceMessageCount: 2
+        });
+
+        store.setDraftPrompt('Follow-up question');
+        await store.sendDraft();
+
+        expect(store.currentConversationArchiveStatus).toMatchObject({
+            state: 'stale',
+            documentPath: '/docs/guide.md',
+            sourceMessageCount: 2
+        });
+
+        await store.loadConversation('archive-conversation');
+        expect(store.currentConversationArchiveStatus).toMatchObject({
+            state: 'stale',
+            documentPath: '/docs/guide.md',
+            sourceMessageCount: 2
+        });
+    });
+
+    it('reports archive failures without mutating the document', async () => {
+        const provider = new ArchiveResultProvider('not-json');
+        const onFileChanged = vi.fn(async () => undefined);
+        const store = useChatStore();
+        store.setProviders(provider, new MockStorageProvider([]));
+        await store.initializeProviderCatalog(providerCatalog);
+
+        store.workspaceMode = 'agent';
+        store.currentConversation = {
+            id: 'archive-conversation',
+            title: 'Archive conversation',
+            origin: 'local',
+            updatedAt: 1,
+            messages: [
+                { id: 'user-1', role: 'user', content: 'Please update the question.' },
+                { id: 'assistant-1', role: 'assistant', content: 'Question updated.' }
+            ]
+        };
+        store.setWorkspaceContext({
+            selectedNodePath: '/docs/guide.md',
+            activePath: '/docs/guide.md',
+            activeDocument: {
+                path: '/docs/guide.md',
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('# Q\n\nOriginal question')
+            },
+            contextProvider: null,
+            onFileChanged
+        });
+
+        await store.archiveCurrentConversationToDocument();
+
+        expect(onFileChanged).not.toHaveBeenCalled();
+        expect(store.archiveFeedback?.tone).toBe('error');
+        expect(store.archiveFeedback?.message).toContain('Archive failed:');
+        expect(store.isArchivingConversation).toBe(false);
     });
 });

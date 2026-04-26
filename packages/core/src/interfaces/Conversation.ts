@@ -81,6 +81,19 @@ export interface ConversationModelSelection {
     modelOptions: Record<string, boolean>;
 }
 
+export interface ConversationArchiveMetadata {
+    documentPath: string;
+    archivedAt: number;
+    sourceMessageCount: number;
+}
+
+export type ConversationArchiveStatus = {
+    state: 'idle' | 'archived' | 'stale';
+    archivedAt?: number;
+    documentPath?: string;
+    sourceMessageCount?: number;
+};
+
 export interface Conversation {
     id: string; // Our internal UUID
     backendId?: string; // Real remote provider conversation ID
@@ -91,6 +104,7 @@ export interface Conversation {
     agentKey?: string;
     starred?: boolean;
     documentPaths?: string[];
+    archive?: ConversationArchiveMetadata;
     messages: ConversationMessage[];
     updatedAt: number;
     sync?: ConversationSyncState;
@@ -326,6 +340,13 @@ export function cloneConversation(conversation: Conversation): Conversation {
         agentKey: conversation.agentKey,
         starred: conversation.starred === true ? true : undefined,
         documentPaths: conversation.documentPaths ? [...conversation.documentPaths] : undefined,
+        archive: conversation.archive
+            ? {
+                documentPath: conversation.archive.documentPath,
+                archivedAt: conversation.archive.archivedAt,
+                sourceMessageCount: conversation.archive.sourceMessageCount
+            }
+            : undefined,
         sync: conversation.sync ? { ...conversation.sync } : undefined,
         modelSelection: conversation.modelSelection
             ? {
@@ -348,6 +369,9 @@ export function normalizeConversation(conversation: Conversation): Conversation 
     const modelSelection = conversation.modelSelection && typeof conversation.modelSelection === 'object'
         ? conversation.modelSelection
         : undefined;
+    const archive = conversation.archive && typeof conversation.archive === 'object'
+        ? conversation.archive
+        : undefined;
     const documentPaths = Array.isArray(conversation.documentPaths)
         ? Array.from(new Set(
             conversation.documentPaths.filter((path): path is string => {
@@ -367,6 +391,20 @@ export function normalizeConversation(conversation: Conversation): Conversation 
             : undefined,
         starred: conversation.starred === true ? true : undefined,
         documentPaths: documentPaths?.length ? documentPaths : undefined,
+        archive: archive
+            && typeof archive.documentPath === 'string'
+            && archive.documentPath.trim()
+            && typeof archive.archivedAt === 'number'
+            && Number.isFinite(archive.archivedAt)
+            && typeof archive.sourceMessageCount === 'number'
+            && Number.isFinite(archive.sourceMessageCount)
+            && archive.sourceMessageCount >= 0
+            ? {
+                documentPath: archive.documentPath.trim(),
+                archivedAt: archive.archivedAt,
+                sourceMessageCount: archive.sourceMessageCount
+            }
+            : undefined,
         sync: conversation.sync ? { ...conversation.sync } : undefined,
         modelSelection: modelSelection
             && typeof modelSelection.providerId === 'string'

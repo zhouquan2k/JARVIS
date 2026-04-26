@@ -1,4 +1,4 @@
-import { encodeTextDocument, type IContextProvider } from '@packages/core/src';
+import { encodeTextDocument, type IContextProvider, type WriteContextDocumentResult } from '@packages/core/src';
 
 export interface FileChangeRecord {
     id: string;
@@ -165,14 +165,17 @@ export class FileChangeService {
         return !!history && history.currentIndex + 1 < history.records.length;
     }
 
-    async undo(path: string, provider: IContextProvider): Promise<{ content: string; record: FileChangeRecord | null } | null> {
+    async undo(
+        path: string,
+        provider: IContextProvider
+    ): Promise<{ content: string; record: FileChangeRecord | null; writeResult: WriteContextDocumentResult } | null> {
         const history = this.historyByPath.get(path);
         if (!history || history.currentIndex < 0) {
             return null;
         }
 
         const current = history.records[history.currentIndex];
-        await provider.writeDocument({
+        const writeResult = await provider.writeDocument({
             path,
             mimeType: 'text/markdown',
             dataBase64: encodeTextDocument(current.beforeContent)
@@ -180,11 +183,15 @@ export class FileChangeService {
         history.currentIndex -= 1;
         return {
             content: current.beforeContent,
-            record: history.currentIndex >= 0 ? history.records[history.currentIndex] ?? null : null
+            record: history.currentIndex >= 0 ? history.records[history.currentIndex] ?? null : null,
+            writeResult
         };
     }
 
-    async redo(path: string, provider: IContextProvider): Promise<{ content: string; record: FileChangeRecord | null } | null> {
+    async redo(
+        path: string,
+        provider: IContextProvider
+    ): Promise<{ content: string; record: FileChangeRecord | null; writeResult: WriteContextDocumentResult } | null> {
         const history = this.historyByPath.get(path);
         if (!history || history.currentIndex + 1 >= history.records.length) {
             return null;
@@ -192,7 +199,7 @@ export class FileChangeService {
 
         const nextIndex = history.currentIndex + 1;
         const current = history.records[nextIndex];
-        await provider.writeDocument({
+        const writeResult = await provider.writeDocument({
             path,
             mimeType: 'text/markdown',
             dataBase64: encodeTextDocument(current.afterContent)
@@ -200,7 +207,8 @@ export class FileChangeService {
         history.currentIndex = nextIndex;
         return {
             content: current.afterContent,
-            record: current
+            record: current,
+            writeResult
         };
     }
 }

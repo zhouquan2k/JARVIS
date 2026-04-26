@@ -21,7 +21,7 @@ function createProvider(): ContextProvider {
             updatedAt: 100
         }]),
         readDocument: vi.fn(async (path: string) => ({ path, mimeType: 'text/markdown', dataBase64: encodeTextDocument('# hello') })),
-        writeDocument: vi.fn(async () => undefined),
+        writeDocument: vi.fn(async () => ({ version: 'v2', updatedAt: 2 })),
         createNode: vi.fn(async (input) => ({
             path: `${input.parentPath ?? ''}/${input.name}`.replace(/^$/, '/'),
             name: input.name,
@@ -65,7 +65,7 @@ describe('http context service', () => {
             path: '/welcome.md',
             mimeType: 'text/markdown',
             dataBase64: encodeTextDocument('# updated')
-        })).resolves.toBeUndefined();
+        })).resolves.toEqual({ version: 'v2', updatedAt: 2 });
         await expect(service.createNode({
             parentPath: '/notes',
             name: 'draft.md',

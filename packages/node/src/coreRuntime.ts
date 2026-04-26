@@ -8,7 +8,8 @@ export type {
     CreateContextNodeInput,
     IContextProvider,
     WorkspaceContext,
-    WriteContextDocumentInput
+    WriteContextDocumentInput,
+    WriteContextDocumentResult
 } from '../../core/src/interfaces/IContextProvider.ts';
 
 export type {

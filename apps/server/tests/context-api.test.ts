@@ -89,7 +89,13 @@ describe('context api', () => {
             })
         });
         expect(writeDocumentResponse.status).toBe(200);
-        await expect(writeDocumentResponse.json()).resolves.toEqual({ ok: true });
+        await expect(writeDocumentResponse.json()).resolves.toEqual({
+            ok: true,
+            result: {
+                updatedAt: expect.any(Number),
+                version: expect.any(String)
+            }
+        });
         await expect(readFile(path.join(rootPath, 'welcome.md'), 'utf8')).resolves.toBe('# Updated\n');
 
         const createNodeResponse = await app.request('/api/context/create-node', {
@@ -274,7 +280,7 @@ describe('context api', () => {
                 dataBase64: encodeTextDocument('virtual'),
                 canWrite: true
             })),
-            writeDocument: vi.fn(async () => undefined),
+            writeDocument: vi.fn(async () => ({ version: 'virtual-v2', updatedAt: 2 })),
             createNode: vi.fn(async (input) => ({
                 path: `/${input.name}`,
                 name: input.name,

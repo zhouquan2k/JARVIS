@@ -3,7 +3,7 @@ import type { ContextDocument, ContextNode, IContextProvider } from '../../inter
 import type { AgentToolDefinition, AgentToolExecutionContext } from './types';
 
 type ToolArgs = Record<string, unknown>;
-type FileChangeInput = { path: string; beforeContent: string; afterContent: string };
+type FileChangeInput = { path: string; beforeContent: string; afterContent: string; alreadyPersisted?: boolean };
 type RangeInput = {
     startLine: number;
     startColumn: number;
@@ -225,7 +225,10 @@ async function persistEdit(
         mimeType: change.mimeType ?? inferDocumentMimeType(change.path),
         dataBase64: encodeTextDocument(change.afterContent)
     });
-    await context.onFileChanged?.(change);
+    await context.onFileChanged?.({
+        ...change,
+        alreadyPersisted: true
+    });
 }
 
 async function ensureDirectoryExists(provider: IContextProvider, path: string): Promise<void> {

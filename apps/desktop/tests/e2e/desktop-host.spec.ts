@@ -110,8 +110,9 @@ async function waitForConversationWorkspaceReady(page: Awaited<ReturnType<typeof
     await expect(page.getByTestId('topbar-workspace-normal-chat')).toBeVisible();
     await page.getByTestId('topbar-workspace-normal-chat').click();
     await expect(page.getByTestId('conversation-workspace')).toBeVisible();
+    await page.getByTestId('sidebar-toggle').click();
     await expect(page.getByTestId('history-source-external')).toBeVisible();
-    await expect(page.getByTestId('normal-provider')).toHaveValue('chatgpt-web');
+    await page.getByTestId('normal-provider').selectOption('chatgpt-web');
     await expect(page.getByTestId('normal-provider').locator('option')).toContainText(['ChatGPT (Web)', 'Gemini (API)']);
 }
 
@@ -119,8 +120,8 @@ test('desktop host boots with proxy runtime and can send a chatgpt-web message',
     const { browser, page, electronProcess } = await launchDesktopApp();
     try {
         await waitForConversationWorkspaceReady(page);
-        await expect(page.getByTestId('normal-auth-warning')).toContainText('当前桌面宿主的 ChatGPT 登录态不可用');
-        await expect(page.getByTestId('normal-auth-recovery')).toHaveText('登录 ChatGPT');
+        await expect(page.getByTestId('normal-auth-warning')).toContainText('sign-in state is unavailable');
+        await expect(page.getByTestId('normal-auth-recovery')).toHaveText('Sign in to ChatGPT');
 
         await page.evaluate(() => {
             return window.chatprismDesktop?.openProviderLoginWindow('chatgpt-web');
@@ -137,7 +138,7 @@ test('desktop host shows Gemini login recovery when gemini external history requ
 
     try {
         await waitForConversationWorkspaceReady(page);
-        await expect(page.getByTestId('normal-auth-warning')).toContainText('当前桌面宿主的 ChatGPT 登录态不可用');
+        await expect(page.getByTestId('normal-auth-warning')).toContainText('sign-in state is unavailable');
 
         await page.getByTestId('history-source-external').click();
         await expect(page.getByTestId('external-provider-gemini-web')).toBeVisible();
@@ -145,7 +146,7 @@ test('desktop host shows Gemini login recovery when gemini external history requ
 
         try {
             await expect(page.getByTestId('normal-error')).toContainText('Gemini');
-            await expect(page.getByTestId('normal-host-recovery')).toHaveText('登录 Gemini');
+            await expect(page.getByTestId('normal-host-recovery')).toHaveText('Sign in to Gemini');
         } catch (error) {
             console.log('[gemini-auth-required] normal-error 文本:', await page.getByTestId('normal-error').allTextContents());
             console.log('[gemini-auth-required] normal-host-recovery 文本:', await page.getByTestId('normal-host-recovery').allTextContents());

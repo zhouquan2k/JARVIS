@@ -7,7 +7,9 @@ import type {
     ContextProvider,
     CreateContextNodeInput,
     RenameContextNodeInput,
-    WorkspaceContext
+    WorkspaceContext,
+    WriteContextDocumentInput,
+    WriteContextDocumentResult
 } from '../types/context.js';
 
 function notImplemented(): never {
@@ -33,7 +35,7 @@ export class DatabaseContextProvider implements ContextProvider {
         notImplemented();
     }
 
-    async writeDocument(_input: { path: string; mimeType: string; dataBase64: string; expectedVersion?: string }): Promise<void> {
+    async writeDocument(_input: WriteContextDocumentInput): Promise<WriteContextDocumentResult> {
         notImplemented();
     }
 

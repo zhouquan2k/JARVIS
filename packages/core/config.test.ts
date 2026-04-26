@@ -22,7 +22,7 @@ describe('sync key config', () => {
     it('allows default syncKey in development only', () => {
         expect(resolveSyncKey({ isDevelopment: true })).toBe(DEFAULT_SYNC_KEY);
         expect(() => validateSyncKey(DEFAULT_SYNC_KEY, { isDevelopment: false })).toThrow(
-            'syncKey=0 仅允许在开发环境使用，请先配置真实的 syncKey。'
+            'syncKey=0 is only allowed in development; configure a real syncKey first.'
         );
     });
 

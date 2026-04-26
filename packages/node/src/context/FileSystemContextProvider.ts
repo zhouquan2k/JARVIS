@@ -17,6 +17,7 @@ import {
     type ResolvedAgentConfig,
     type WorkspaceContext,
     type WriteContextDocumentInput,
+    type WriteContextDocumentResult,
     createResolvedAgentConfig,
     resolveChildAgentConfig
 } from '../coreRuntime.ts';
@@ -525,7 +526,7 @@ export class FileSystemContextProvider implements IContextProvider {
         };
     }
 
-    async writeDocument(input: WriteContextDocumentInput): Promise<void> {
+    async writeDocument(input: WriteContextDocumentInput): Promise<WriteContextDocumentResult> {
         const normalizedPath = normalizeVirtualPath(input.path, { allowRoot: false });
         if (!normalizedPath || normalizedPath === '/') {
             throw new Error('Document path must not be empty.');
@@ -544,6 +545,11 @@ export class FileSystemContextProvider implements IContextProvider {
         }
 
         await fs.writeFile(realPath, Buffer.from(decodeBase64(input.dataBase64)));
+        const stats = await fs.stat(realPath);
+        return {
+            updatedAt: stats.mtimeMs,
+            version: `${stats.mtimeMs}`
+        };
     }
 
     async createNode(input: CreateContextNodeInput): Promise<ContextNode> {

@@ -352,6 +352,111 @@ describe('NormalChatView', () => {
         expect(wrapper.find('[data-testid="provider-selector-stub"]').exists()).toBe(true);
     });
 
+    it('shows the archive action only for eligible agent markdown document contexts', async () => {
+        const store = useChatStore();
+        store.workspaceMode = 'agent';
+        store.currentConversation = createConversation([
+            {
+                id: 'user-1',
+                role: 'user',
+                content: 'Archive this',
+                createdAt: 1
+            }
+        ]);
+        store.activeWorkspaceSelectedNodePath = '/docs/guide.md';
+        store.activeWorkspaceDocument = {
+            path: '/docs/guide.md',
+            mimeType: 'text/markdown',
+            dataBase64: 'IyBHIQ==',
+            canWrite: true
+        };
+        store.currentModelId = 'gpt-4o';
+        store.init = vi.fn().mockResolvedValue(undefined);
+        store.checkAuth = vi.fn().mockResolvedValue(true);
+
+        const wrapper = mountView();
+        await flushPromises();
+
+        expect(wrapper.find('[data-testid="archive-conversation"]').exists()).toBe(true);
+        expect(wrapper.get('[data-testid="archive-status"]').text()).toContain('Not archived');
+
+        store.activeWorkspaceSelectedNodePath = '/docs';
+        await wrapper.vm.$nextTick();
+
+        expect(wrapper.find('[data-testid="archive-conversation"]').exists()).toBe(false);
+    });
+
+    it('renders archive feedback and disables the action while archiving', async () => {
+        const store = useChatStore();
+        store.canArchiveCurrentConversation = vi.fn(() => true);
+        store.currentConversationArchiveStatus = {
+            state: 'archived',
+            archivedAt: 123,
+            documentPath: '/docs/guide.md',
+            sourceMessageCount: 1
+        };
+        store.archiveCurrentConversationToDocument = vi.fn(async () => {
+            store.archiveFeedback = {
+                tone: 'success',
+                message: 'Archived'
+            };
+        });
+        store.workspaceMode = 'agent';
+        store.currentConversation = createConversation([
+            {
+                id: 'user-1',
+                role: 'user',
+                content: 'Archive this',
+                createdAt: 1
+            }
+        ]);
+        store.currentModelId = 'gpt-4o';
+        store.init = vi.fn().mockResolvedValue(undefined);
+        store.checkAuth = vi.fn().mockResolvedValue(true);
+
+        const wrapper = mountView();
+        await flushPromises();
+
+        await wrapper.get('[data-testid="archive-conversation"]').trigger('click');
+        await flushPromises();
+
+        expect(store.archiveCurrentConversationToDocument).toHaveBeenCalledTimes(1);
+        expect(wrapper.get('[data-testid="archive-feedback"]').text()).toContain('Archived');
+        expect(wrapper.get('[data-testid="archive-status"]').text()).toContain('Archived');
+
+        store.isArchivingConversation = true;
+        await wrapper.vm.$nextTick();
+        expect(wrapper.get('[data-testid="archive-conversation"]').attributes('disabled')).toBeDefined();
+    });
+
+    it('renders stale archive status when the persisted snapshot is outdated', async () => {
+        const store = useChatStore();
+        store.canArchiveCurrentConversation = vi.fn(() => true);
+        store.currentConversationArchiveStatus = {
+            state: 'stale',
+            archivedAt: 123,
+            documentPath: '/docs/guide.md',
+            sourceMessageCount: 2
+        };
+        store.workspaceMode = 'agent';
+        store.currentConversation = createConversation([
+            {
+                id: 'user-1',
+                role: 'user',
+                content: 'Archive this',
+                createdAt: 1
+            }
+        ]);
+        store.currentModelId = 'gpt-4o';
+        store.init = vi.fn().mockResolvedValue(undefined);
+        store.checkAuth = vi.fn().mockResolvedValue(true);
+
+        const wrapper = mountView();
+        await flushPromises();
+
+        expect(wrapper.get('[data-testid="archive-status"]').text()).toContain('Archive stale');
+    });
+
     it('disables attachment entry when the current provider does not support uploads', async () => {
         const store = useChatStore();
         store.workspaceMode = 'conversation';
@@ -685,6 +790,60 @@ describe('NormalChatView', () => {
         await wrapper.vm.$nextTick();
 
         expect(messages.scrollTop).toBe(120);
+    });
+
+    it('does not reset to the top when the active conversation is refreshed with the same id', async () => {
+        const store = useChatStore();
+        store.workspaceMode = 'conversation';
+        store.currentConversation = createConversation([
+            {
+                id: 'user-1',
+                role: 'user',
+                content: '问题',
+                questionId: 'question-1',
+                createdAt: 1
+            },
+            {
+                id: 'assistant-1',
+                role: 'assistant',
+                content: '旧回答',
+                questionId: 'question-1',
+                createdAt: 2
+            }
+        ]);
+        store.init = vi.fn().mockResolvedValue(undefined);
+        store.checkAuth = vi.fn().mockResolvedValue(true);
+
+        const wrapper = mountView();
+        await flushPromises();
+
+        const messages = wrapper.get('[data-testid="normal-messages"]').element as HTMLElement;
+        setScrollMetrics(messages, {
+            scrollTop: 760,
+            scrollHeight: 1000,
+            clientHeight: 240
+        });
+
+        store.currentConversation = createConversation([
+            {
+                id: 'user-1',
+                role: 'user',
+                content: '问题',
+                questionId: 'question-1',
+                createdAt: 1
+            },
+            {
+                id: 'assistant-1',
+                role: 'assistant',
+                content: '新回答',
+                questionId: 'question-1',
+                createdAt: 2
+            }
+        ]);
+        await wrapper.vm.$nextTick();
+        await wrapper.vm.$nextTick();
+
+        expect(messages.scrollTop).toBe(1000);
     });
 
     it('starts at the top when the displayed conversation changes', async () => {

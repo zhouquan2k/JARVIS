@@ -9,7 +9,8 @@ import type {
     ContextSearchRequest,
     CreateContextNodeInput,
     WorkspaceContext,
-    WriteContextDocumentInput
+    WriteContextDocumentInput,
+    WriteContextDocumentResult
 } from '@packages/core/src';
 import type { ProxyRequest, ProxyResponse } from '../shared/proxyProtocol';
 
@@ -27,7 +28,7 @@ declare global {
             getContext(): Promise<WorkspaceContext>;
             getConversations(query: ConversationQuery): Promise<Conversation[]>;
             readContextDocument(path: string): Promise<ContextDocument>;
-            writeContextDocument(input: WriteContextDocumentInput): Promise<void>;
+            writeContextDocument(input: WriteContextDocumentInput): Promise<WriteContextDocumentResult>;
             createContextNode(input: CreateContextNodeInput): Promise<ContextNode>;
             deleteContextNode(path: string): Promise<void>;
             renameContextNode(input: { path: string; name: string }): Promise<ContextNode>;

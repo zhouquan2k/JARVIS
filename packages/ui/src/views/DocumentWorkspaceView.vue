@@ -278,6 +278,7 @@ watch(
   ([activeAgentKey, activePath, activeDocument, contextProvider]) => {
     chatStore.setWorkspaceContext({
       activeAgentKey,
+      selectedNodePath: documentStore.selectedNodePath,
       activePath,
       activeDocument,
       contextProvider,
@@ -293,8 +294,13 @@ function onDraftChange(markdown: string) {
   documentStore.updateActiveDocument(markdown);
 }
 
-function handleAssistantFileChanged(change: { path: string; beforeContent: string; afterContent: string }) {
-  void documentStore.recordFileChange(change);
+function handleAssistantFileChanged(change: { path: string; beforeContent: string; afterContent: string; alreadyPersisted?: boolean }) {
+  if (change.alreadyPersisted) {
+    documentStore.recordFileChange(change);
+    return;
+  }
+
+  return documentStore.applyGeneratedDocumentChange(change);
 }
 
 function startResize(handleIndex: 0 | 1, event: PointerEvent) {

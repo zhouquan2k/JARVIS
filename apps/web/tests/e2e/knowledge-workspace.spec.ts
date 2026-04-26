@@ -13,16 +13,21 @@ async function readContextJson(request: APIRequestContext, path: string) {
   return JSON.parse(Buffer.from(payload.document.dataBase64, 'base64').toString('utf8'));
 }
 
+async function readContextText(request: APIRequestContext, path: string) {
+  const response = await request.post(`${contextApiBase}/read-document`, { data: { path } });
+  const payload = await response.json();
+  return Buffer.from(payload.document.dataBase64, 'base64').toString('utf8');
+}
+
 test('web knowledge workspace supports file browsing markdown editing diff undo redo and top-level workspace switching', async ({ page }) => {
   await page.goto('/#/');
   await expect(page.getByTestId('document-workspace')).toBeVisible();
   await expect(page.getByTestId('document-file-tree')).toBeVisible();
-  await expect(page.getByTestId('document-editor')).toBeVisible();
   await expect(page.getByTestId('agent-pane')).toBeVisible();
   await expect(page.getByTestId('normal-chat-view')).toBeVisible();
   await expect(page.getByTestId('agent-name')).toContainText('Default Knowledge Agent（/）');
   await expect(page.getByTestId('document-node-root')).toHaveClass(/active/);
-  await expect(page.getByTestId('document-editor-empty')).toBeVisible();
+  await expect(page.getByTestId('document-editor')).toHaveCount(0);
 
   await page.getByTestId('document-node-file').filter({ hasText: 'guide.md' }).click();
   await expect(page.getByTestId('agent-document-conversation-list')).toBeVisible();
@@ -105,6 +110,66 @@ test('web knowledge workspace preserves the shared conversation and restores the
   await expect(page.getByTestId('agent-conversation-toolbar')).toBeVisible();
   await expect(page.getByTestId('agent-conversation-title')).toContainText('Shared agent conversation');
   await expect(page.getByTestId('agent-document-conversation-list')).toHaveCount(0);
+});
+
+test('web knowledge workspace archives an agent conversation into a markdown document and keeps undo redo available', async ({ page, request }, testInfo) => {
+  const fileName = `archive-e2e-${testInfo.workerIndex}-${Date.now()}.md`;
+  const virtualPath = `/${fileName}`;
+  const diskPath = path.join(knowledgeFixtureRoot, fileName);
+  const initialContent = '# Playwright archive seed';
+
+  await writeFile(diskPath, `${initialContent}\n`, 'utf8');
+
+  try {
+    await page.goto('/#/');
+    await expect(page.getByTestId('document-workspace')).toBeVisible();
+
+    await page.locator(`[data-path="${virtualPath}"]`).click();
+    await expect(page.getByTestId('document-editor-input')).toBeVisible();
+    await expect(page.getByTestId('agent-document-conversation-list')).toBeVisible();
+
+    await page.getByTestId('agent-conversation-list-plus').click();
+    await expect(page.getByTestId('agent-conversation-toolbar')).toBeVisible();
+    await page.getByTestId('normal-input').fill('Playwright archive prompt');
+    await page.getByTestId('normal-send').click();
+    await expect(page.getByTestId('normal-messages')).toContainText('Playwright archive prompt');
+
+    await expect(page.getByTestId('archive-conversation')).toBeVisible();
+    await page.getByTestId('archive-conversation').click();
+    await expect(page.getByTestId('archive-feedback')).toContainText('Added a missing --- divider automatically.');
+    await expect(page.getByTestId('archive-status')).toContainText('Archived');
+    await expect(page.getByTestId('document-file-change')).toBeVisible();
+    await expect(page.getByTestId('document-file-diff')).toContainText('Playwright archive prompt');
+
+    let archivedContent = '';
+    await expect.poll(async () => {
+      archivedContent = await readContextText(request, virtualPath);
+      return archivedContent;
+    }).toContain('Playwright archive prompt');
+    expect(archivedContent).toContain('---');
+
+    await page.getByTestId('document-file-change-undo').click();
+    await expect.poll(async () => readContextText(request, virtualPath)).toBe(`${initialContent}\n`);
+
+    await page.getByTestId('document-file-change-redo').click();
+    await expect.poll(async () => readContextText(request, virtualPath)).toBe(archivedContent);
+    await expect(page.getByTestId('document-file-diff')).toContainText('Playwright archive prompt');
+    await expect(page.getByTestId('archive-status')).toContainText('Archived');
+
+    await page.getByTestId('normal-input').fill('Playwright archive follow-up');
+    await page.getByTestId('normal-send').click();
+    await expect(page.getByTestId('normal-messages')).toContainText('Playwright archive follow-up');
+    await expect(page.getByTestId('archive-status')).toContainText('Archive stale');
+
+    await page.reload();
+    await expect(page.getByTestId('document-workspace')).toBeVisible();
+    await page.getByTestId('topbar-workspace-normal-chat').click();
+    await expect(page.getByTestId('conversation-workspace')).toBeVisible();
+    await page.getByTestId('sidebar-toggle').click();
+    await expect(page.getByTestId('local-history-item').filter({ hasText: 'Playwright archive prompt' })).toBeVisible();
+  } finally {
+    await rm(diskPath, { force: true });
+  }
 });
 
 test('web knowledge workspace negotiates text pdf and unsupported document requests', async ({ page }) => {

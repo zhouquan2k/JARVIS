@@ -355,7 +355,7 @@ describe('resolveScopedAgentConfig', () => {
                 throw new Error(`节点不存在: ${path}`);
             },
             async writeDocument() {
-                return undefined;
+                return {};
             },
             async createNode() {
                 throw new Error('Not implemented');

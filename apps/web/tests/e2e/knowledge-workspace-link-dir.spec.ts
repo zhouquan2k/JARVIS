@@ -80,8 +80,12 @@ test.describe.serial('web knowledge workspace linkDir', () => {
 
     const editor = page.getByTestId('document-editor-input');
     await expect(editor).toBeVisible();
-    await editor.fill('# Playwright Mounted Summary\n');
-    await expect(page.getByTestId('document-save')).toBeEnabled();
+    await page.getByTestId('markdown-mode-edit').click();
+    await editor.click();
+    await editor.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+    await editor.type('# Playwright Mounted Summary\n');
+    await expect(editor).toContainText('Playwright Mounted Summary');
+    await page.getByTestId('markdown-mode-viewer').click();
     await page.getByTestId('document-save').click();
 
     await expect.poll(async () => {

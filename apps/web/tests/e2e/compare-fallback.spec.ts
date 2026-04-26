@@ -8,7 +8,7 @@ test('compare chat shows analysis fallback when analyzer returns invalid json', 
   await page.getByTestId('compare-send').click();
 
   await expect(page.getByTestId('analysis-error')).toBeVisible();
-  await expect(page.getByTestId('analysis-error')).toContainText('解析失败');
+  await expect(page.getByTestId('analysis-error')).toContainText('Analysis parsing failed');
 
   await page.getByTestId('tab-native').click();
   await expect(page.getByTestId('output-a')).toContainText('TRIGGER_BAD_ANALYSIS');

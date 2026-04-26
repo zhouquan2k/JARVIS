@@ -37,6 +37,11 @@ export interface WriteContextDocumentInput {
     expectedVersion?: string;
 }
 
+export interface WriteContextDocumentResult {
+    updatedAt?: number;
+    version?: string;
+}
+
 export interface CreateContextNodeInput {
     parentPath?: string;
     name: string;
@@ -67,7 +72,7 @@ export interface IContextProvider {
     getContext(): Promise<WorkspaceContext>;
     getConversations(query: ConversationQuery): Promise<Conversation[]>;
     readDocument(path: string): Promise<ContextDocument>;
-    writeDocument(input: WriteContextDocumentInput): Promise<void>;
+    writeDocument(input: WriteContextDocumentInput): Promise<WriteContextDocumentResult>;
     createNode(input: CreateContextNodeInput): Promise<ContextNode>;
     deleteNode(path: string): Promise<void>;
     renameNode(input: RenameContextNodeInput): Promise<ContextNode>;

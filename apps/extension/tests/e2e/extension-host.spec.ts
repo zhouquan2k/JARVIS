@@ -189,11 +189,10 @@ test('extension host exposes the knowledge workspace route with editable markdow
     const { page } = session;
     await expect(page.getByTestId('document-workspace')).toBeVisible();
     await expect(page.getByTestId('document-file-tree')).toBeVisible();
-    await expect(page.getByTestId('document-editor')).toBeVisible();
     await expect(page.getByTestId('agent-pane')).toBeVisible();
     await expect(page.getByTestId('normal-chat-view')).toBeVisible();
     await expect(page.getByTestId('document-node-root')).toHaveClass(/active/);
-    await expect(page.getByTestId('document-editor-empty')).toBeVisible();
+    await expect(page.getByTestId('document-editor')).toHaveCount(0);
 
     await page.getByTestId('document-node-file').filter({ hasText: 'guide.md' }).click();
     const editor = page.getByTestId('document-editor-input');
@@ -220,7 +219,7 @@ test('extension knowledge workspace renders agent metadata', async () => {
     await expect(page.getByTestId('document-workspace')).toBeVisible();
     await expect(page.getByTestId('agent-name')).toContainText('Default Knowledge Agent（/）');
     await expect(page.getByTestId('agent-model')).toContainText('gemini-api / Gemini Pro Latest');
-    await expect(page.getByTestId('document-editor')).toBeVisible();
+    await expect(page.getByTestId('agent-pane')).toBeVisible();
     await expect(page.getByTestId('normal-chat-view')).toBeVisible();
   } finally {
     await session.close();

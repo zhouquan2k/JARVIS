@@ -15,22 +15,22 @@ export interface CreateMarkdownEditorOptions {
     onChange: (markdown: string) => void;
 }
 
-const enabledFeatures: NonNullable<CrepeConfig['features']> = {
-    [CrepeFeature.BlockEdit]: false,
-    [CrepeFeature.CodeMirror]: true,
-    [CrepeFeature.Cursor]: true,
-    [CrepeFeature.ImageBlock]: true,
-    [CrepeFeature.Latex]: false,
-    [CrepeFeature.LinkTooltip]: false,
-    [CrepeFeature.ListItem]: false,
-    [CrepeFeature.Placeholder]: true,
-    [CrepeFeature.Table]: false,
-    [CrepeFeature.Toolbar]: false
-};
-
 const viewerControllers = new WeakMap<MarkdownEditor, AbortController>();
 
 export async function createMarkdownEditor(options: CreateMarkdownEditorOptions): Promise<MarkdownEditor> {
+    const enabledFeatures: NonNullable<CrepeConfig['features']> = {
+        [CrepeFeature.BlockEdit]: false,
+        [CrepeFeature.CodeMirror]: true,
+        [CrepeFeature.Cursor]: true,
+        [CrepeFeature.ImageBlock]: true,
+        [CrepeFeature.Latex]: false,
+        [CrepeFeature.LinkTooltip]: false,
+        [CrepeFeature.ListItem]: false,
+        [CrepeFeature.Placeholder]: true,
+        [CrepeFeature.Table]: true,
+        [CrepeFeature.Toolbar]: false
+    };
+
     const editor = new Crepe({
         root: options.root,
         defaultValue: options.content,

@@ -9,6 +9,7 @@ import type {
     CreateContextNodeInput,
     IContextProvider,
     RenameContextNodeInput,
+    WriteContextDocumentResult,
     WorkspaceContext,
     WriteContextDocumentInput
 } from '../../interfaces/IContextProvider';
@@ -95,8 +96,13 @@ export class HttpContextProvider implements IContextProvider {
         return (response as { document: ContextDocument }).document;
     }
 
-    async writeDocument(input: WriteContextDocumentInput): Promise<void> {
-        await this.post('/write-document', { ...input });
+    async writeDocument(input: WriteContextDocumentInput): Promise<WriteContextDocumentResult> {
+        const response = await this.post('/write-document', { ...input });
+        if (response && typeof response === 'object' && 'result' in response) {
+            return (response as { result: WriteContextDocumentResult }).result ?? {};
+        }
+
+        return {};
     }
 
     async createNode(input: CreateContextNodeInput): Promise<ContextNode> {

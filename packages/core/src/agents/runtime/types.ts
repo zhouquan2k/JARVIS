@@ -14,6 +14,7 @@ export interface AgentRuntimeRequest {
             path: string;
             beforeContent: string;
             afterContent: string;
+            alreadyPersisted?: boolean;
         }) => Promise<void> | void;
     };
     providerId?: string;

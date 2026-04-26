@@ -32,7 +32,7 @@ describe('createWebContextProvider', () => {
       const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {};
 
       if (url.endsWith('/initialize-access')) {
-        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+        return new Response(JSON.stringify({ ok: true, result: { version: 'v2', updatedAt: 2 } }), { status: 200 });
       }
       if (url.endsWith('/get-context')) {
         expect(body).toEqual({});
@@ -71,7 +71,7 @@ describe('createWebContextProvider', () => {
           mimeType: 'text/markdown',
           dataBase64: encodeTextDocument('# Updated')
         });
-        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+        return new Response(JSON.stringify({ ok: true, result: { version: 'v2', updatedAt: 2 } }), { status: 200 });
       }
       if (url.endsWith('/create-node')) {
         expect(body).toEqual({ parentPath: '/notes', name: 'draft.md', kind: 'file' });
@@ -123,7 +123,7 @@ describe('createWebContextProvider', () => {
       path: '/notes/today.md',
       mimeType: 'text/markdown',
       dataBase64: encodeTextDocument('# Updated')
-    })).resolves.toBeUndefined();
+    })).resolves.toEqual({ version: 'v2', updatedAt: 2 });
     await expect(provider.createNode({
       parentPath: '/notes',
       name: 'draft.md',
@@ -208,7 +208,10 @@ describe('createWebContextProvider', () => {
       path: '/welcome.md',
       mimeType: 'text/markdown',
       dataBase64: encodeTextDocument('# Updated\n')
-    })).resolves.toBeUndefined();
+    })).resolves.toEqual({
+      updatedAt: expect.any(Number),
+      version: expect.any(String)
+    });
     await expect(provider.createNode({
       parentPath: '/notes',
       name: 'draft.md',

@@ -12,5 +12,6 @@ export type {
     ResolvedAgentConfig,
     WorkspaceContext,
     WriteContextDocumentInput,
+    WriteContextDocumentResult,
     IContextProvider as ContextProvider
 } from '@packages/core/src';

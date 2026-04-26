@@ -59,6 +59,8 @@
 </template>
 
 <script setup lang="ts">
+import '@milkdown/crepe/theme/common/prosemirror.css';
+import '@milkdown/crepe/theme/common/table.css';
 import '@milkdown/crepe/theme/nord-dark.css';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import type { ContextDocument } from '@packages/core/src';
@@ -204,7 +206,7 @@ function syncEditorContent(content: string) {
 }
 
 function applyReadonlyCodeBlockLabels(content: string) {
-  if (!isMarkdownDocument.value || props.markdownViewerMode !== 'edit' || !editorRoot.value) {
+  if (!editorRoot.value) {
     return;
   }
 
@@ -213,8 +215,15 @@ function applyReadonlyCodeBlockLabels(content: string) {
       return;
     }
 
-    const labels = extractMarkdownCodeBlockLabels(content);
     const codeBlocks = editorRoot.value.querySelectorAll<HTMLElement>('.milkdown .milkdown-code-block');
+    if (!isMarkdownDocument.value || props.markdownViewerMode !== 'edit') {
+      codeBlocks.forEach((codeBlock) => {
+        delete codeBlock.dataset.readonlyLanguage;
+      });
+      return;
+    }
+
+    const labels = extractMarkdownCodeBlockLabels(content);
     codeBlocks.forEach((codeBlock, index) => {
       codeBlock.dataset.readonlyLanguage = labels[index] ?? 'text';
     });
@@ -373,6 +382,14 @@ function extractMarkdownCodeBlockLabels(content: string): string[] {
 .editor-input :deep(.milkdown .ProseMirror li > p),
 .editor-input :deep(.milkdown .ProseMirror blockquote p) {
   white-space: pre-wrap;
+}
+
+.editor-input :deep(.milkdown .ProseMirror table p),
+.editor-input :deep(.milkdown .ProseMirror table li),
+.editor-input :deep(.milkdown .ProseMirror table blockquote),
+.editor-input :deep(.milkdown .ProseMirror table li > p),
+.editor-input :deep(.milkdown .ProseMirror table blockquote p) {
+  white-space: normal;
 }
 
 .editor-input :deep(.milkdown .ProseMirror span[data-type='hardbreak'][data-is-inline='true']) {

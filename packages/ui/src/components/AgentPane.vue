@@ -50,7 +50,7 @@ const props = defineProps<{
   activeDocument?: ContextDocument | null;
   showAgentConversationList?: boolean;
   contextProvider?: IContextProvider | null;
-  onFileChanged?: ((change: { path: string; beforeContent: string; afterContent: string }) => void | Promise<void>) | null;
+  onFileChanged?: ((change: { path: string; beforeContent: string; afterContent: string; alreadyPersisted?: boolean }) => void | Promise<void>) | null;
   agentResolutionError?: string | null;
   restoreConversationId?: string | null;
 }>();
@@ -94,13 +94,15 @@ function resolveAgentDirectory(agent: ResolvedAgentConfig | null | undefined): s
 
 watch(() => props.activeAgent ?? null, (agent) => {
   chatStore.setActiveAgentContext(agent);
+  void chatStore.applyActiveAgentContextSelection(agent);
 }, { immediate: true, flush: 'sync' });
 
 watch(
-  () => [props.activeAgentKey ?? null, props.activePath ?? null, props.activeDocument ?? null, props.contextProvider ?? null, props.onFileChanged ?? null] as const,
-  ([activeAgentKey, activePath, activeDocument, contextProvider, onFileChanged]) => {
+  () => [props.activeAgentKey ?? null, props.selectedNodePath ?? null, props.activePath ?? null, props.activeDocument ?? null, props.contextProvider ?? null, props.onFileChanged ?? null] as const,
+  ([activeAgentKey, selectedNodePath, activePath, activeDocument, contextProvider, onFileChanged]) => {
     chatStore.setWorkspaceContext({
       activeAgentKey,
+      selectedNodePath,
       activePath,
       activeDocument,
       contextProvider,
@@ -114,6 +116,7 @@ onBeforeUnmount(() => {
   chatStore.setActiveAgentContext(null);
   chatStore.setWorkspaceContext({
     activeAgentKey: null,
+    selectedNodePath: null,
     activePath: null,
     activeDocument: null,
     contextProvider: null,

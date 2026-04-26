@@ -112,6 +112,7 @@ class MockSyncTransport implements ISyncTransport {
 function cloneConversation(conversation: Conversation): Conversation {
     return {
         ...conversation,
+        archive: conversation.archive ? { ...conversation.archive } : undefined,
         sync: conversation.sync ? { ...conversation.sync } : undefined,
         modelSelection: conversation.modelSelection
             ? {
@@ -139,6 +140,7 @@ function createConversation(
         origin: overrides.origin ?? 'local',
         agentKey: overrides.agentKey,
         starred: overrides.starred,
+        archive: overrides.archive ? { ...overrides.archive } : undefined,
         messages: overrides.messages ?? [],
         updatedAt: overrides.updatedAt,
         backendId: overrides.backendId,
@@ -161,6 +163,44 @@ function createConversation(
 }
 
 describe('SyncStorageProvider', () => {
+    it('preserves archive metadata across save load and sync push', async () => {
+        const transport = new MockSyncTransport();
+        transport.pushResult = { processedIds: ['sync-archive'], processedDeletedIds: [], nextCursor: 1 };
+        const provider = new SyncStorageProvider({
+            localStore: new MemoryStorageProvider(),
+            transport,
+            syncKey: 'workspace-archive',
+            stateStore: new MemorySyncStateStore(),
+            deletedConversationStore: new MemoryDeletedConversationStateStore()
+        });
+
+        await provider.saveConversation(createConversation({
+            id: 'sync-archive',
+            updatedAt: 100,
+            archive: {
+                documentPath: '/docs/archive.md',
+                archivedAt: 99,
+                sourceMessageCount: 4
+            }
+        }));
+
+        await expect(provider.getConversation('sync-archive')).resolves.toMatchObject({
+            id: 'sync-archive',
+            archive: {
+                documentPath: '/docs/archive.md',
+                archivedAt: 99,
+                sourceMessageCount: 4
+            }
+        });
+
+        await provider.syncNow();
+        expect(transport.pushes[0]?.[0]?.archive).toEqual({
+            documentPath: '/docs/archive.md',
+            archivedAt: 99,
+            sourceMessageCount: 4
+        });
+    });
+
     it('preserves conversation model selection across save load and sync push', async () => {
         const transport = new MockSyncTransport();
         transport.pushResult = { processedIds: ['sync-1'], processedDeletedIds: [], nextCursor: 2 };

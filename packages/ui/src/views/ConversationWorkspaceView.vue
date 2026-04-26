@@ -303,7 +303,7 @@ async function onNewChat() {
   if (props.isCompareMode) {
     requestWorkspaceSwitch('/chat');
   }
-  await chatStore.startNewConversation();
+  await chatStore.startNewConversation({ boundNodeName: null });
 }
 
 function onNewCompare() {

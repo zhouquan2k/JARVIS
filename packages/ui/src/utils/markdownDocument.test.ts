@@ -66,6 +66,50 @@ vi.mock('@milkdown/crepe', () => ({
 }));
 
 describe('markdownDocument', () => {
+    it('enables table support in viewer mode without rewriting markdown table source', async () => {
+        const { createMarkdownEditor, readMarkdownDocument } = await import('./markdownDocument');
+        const root = document.createElement('div');
+        const content = [
+            '| Name | Type |',
+            '| --- | --- |',
+            '| id | string |'
+        ].join('\n');
+
+        const editor = await createMarkdownEditor({
+            root,
+            content,
+            mode: 'viewer',
+            documentPath: '/notes/table.md',
+            onChange: vi.fn()
+        });
+
+        const crepeOptions = mocks.crepeInstances.at(-1)?.options;
+        expect(crepeOptions?.features?.table).toBe(true);
+        expect(readMarkdownDocument(editor)).toBe(content);
+    });
+
+    it('keeps table support enabled in edit mode', async () => {
+        const { createMarkdownEditor, readMarkdownDocument } = await import('./markdownDocument');
+        const root = document.createElement('div');
+        const content = [
+            '| Name | Type |',
+            '| --- | --- |',
+            '| id | string |'
+        ].join('\n');
+
+        const editor = await createMarkdownEditor({
+            root,
+            content,
+            mode: 'edit',
+            documentPath: '/notes/table.md',
+            onChange: vi.fn()
+        });
+
+        const crepeOptions = mocks.crepeInstances.at(-1)?.options;
+        expect(crepeOptions?.features?.table).toBe(true);
+        expect(readMarkdownDocument(editor)).toBe(content);
+    });
+
     it('wires Mermaid preview only in viewer mode', async () => {
         const { createMarkdownEditor } = await import('./markdownDocument');
         const root = document.createElement('div');

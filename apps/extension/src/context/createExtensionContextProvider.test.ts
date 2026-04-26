@@ -42,7 +42,7 @@ describe('createExtensionContextProvider', () => {
           mimeType: 'text/markdown',
           dataBase64: 'IyBTdW1tYXJ5'
         });
-        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+        return new Response(JSON.stringify({ ok: true, result: { version: 'summary-v2', updatedAt: 2 } }), { status: 200 });
       }
 
       return new Response(JSON.stringify({ error: 'not found' }), { status: 404 });
@@ -63,6 +63,6 @@ describe('createExtensionContextProvider', () => {
       path: '/notes/summary.md',
       mimeType: 'text/markdown',
       dataBase64: 'IyBTdW1tYXJ5'
-    })).resolves.toBeUndefined();
+    })).resolves.toEqual({ version: 'summary-v2', updatedAt: 2 });
   });
 });

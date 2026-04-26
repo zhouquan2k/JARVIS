@@ -11,7 +11,8 @@ import type {
     IContextProvider,
     RenameContextNodeInput,
     WorkspaceContext,
-    WriteContextDocumentInput
+    WriteContextDocumentInput,
+    WriteContextDocumentResult
 } from '../interfaces/IContextProvider';
 import { searchInScopedFiles } from '../providers/context/fileSearch';
 import {
@@ -264,7 +265,7 @@ export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): I
                 updatedAt: node.updatedAt
             };
         },
-        async writeDocument(input: WriteContextDocumentInput): Promise<void> {
+        async writeDocument(input: WriteContextDocumentInput): Promise<WriteContextDocumentResult> {
             const normalizedPath = normalizePath(input.path);
             if (!normalizedPath) {
                 throw new Error('Document path must not be empty.');
@@ -291,6 +292,10 @@ export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): I
                 canWrite: previous.canWrite ?? isTextDocumentMimeType(mimeType)
             };
             currentSnapshot.documents[normalizedPath] = nextDocument;
+            return {
+                updatedAt: nextDocument.updatedAt,
+                version: nextDocument.version
+            };
         },
         async createNode(input: CreateContextNodeInput): Promise<ContextNode> {
             const parentPath = normalizePath(input.parentPath);

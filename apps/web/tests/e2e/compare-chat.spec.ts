@@ -13,18 +13,18 @@ test('compare chat streams A/B and auto switches to analysis tab', async ({ page
   await expect(analysisTab).toHaveClass(/active/);
 
   await expect(page.getByTestId('analysis-grid')).toBeVisible();
-  await expect(page.getByTestId('analysis-grid')).toContainText('共识');
-  await expect(page.getByTestId('analysis-grid')).toContainText('Model A 分歧');
-  await expect(page.getByTestId('analysis-grid')).toContainText('Model B 分歧');
+  await expect(page.getByTestId('analysis-grid')).toContainText('Consensus');
+  await expect(page.getByTestId('analysis-grid')).toContainText('Model A conflicts');
+  await expect(page.getByTestId('analysis-grid')).toContainText('Model B conflicts');
 
   await page.getByTestId('tab-native').click();
   await expect(page.getByTestId('output-a')).toContainText('Compare this question with two models');
   await expect(page.getByTestId('output-b')).toContainText('Compare this question with two models');
 
   await page.getByTestId('compare-new').click();
-  await expect(page.getByTestId('output-a')).toContainText('等待输入...');
-  await expect(page.getByTestId('output-b')).toContainText('等待输入...');
-  await expect(page.getByText('当前问题：')).toBeHidden();
+  await expect(page.getByTestId('output-a')).toContainText('Waiting for input...');
+  await expect(page.getByTestId('output-b')).toContainText('Waiting for input...');
+  await expect(page.getByText('Current question:')).toBeHidden();
 
   await page.reload();
   await expect(page.getByTestId('compare-chat-view')).toBeVisible();

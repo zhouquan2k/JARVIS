@@ -109,6 +109,11 @@ describe('IndexedDBStorageProvider', () => {
                 }
             ],
             updatedAt: 123,
+            archive: {
+                documentPath: '/docs/archive.md',
+                archivedAt: 122,
+                sourceMessageCount: 2
+            },
             sync: {
                 dirty: true,
                 deleted: false,
