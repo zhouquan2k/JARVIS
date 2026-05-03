@@ -4,12 +4,15 @@ import type {
     Conversation,
     ConversationHistorySummary,
     HistoryListQueryOptions,
+    HttpApiError,
     IConversationPersistProvider,
+    IContextProvider,
     IExternalConversationProvider,
     IModelProvider,
-    ResolvedAgentConfig
+    ResolvedAgentConfig,
+    WorkspaceContext
 } from '@packages/core/src';
-import { encodeTextDocument } from '@packages/core/src';
+import { createMockContextProvider, encodeTextDocument } from '@packages/core/src';
 import type { ProviderConfig } from '@packages/core/config';
 import { useChatStore } from './chat';
 
@@ -129,6 +132,30 @@ class AbortableMockModelProvider extends MockModelProvider {
     }
 }
 
+class PendingMockModelProvider extends MockModelProvider {
+    resolvePending: (() => void) | null = null;
+
+    override async sendMessage(
+        prompt: string,
+        options = {},
+        onUpdate: (update: { text: string }) => void
+    ): Promise<{ text: string; conversationId: string; messageId: string }> {
+        this.promptsUsed.push(prompt);
+        this.optionsUsed.push(options as Record<string, unknown>);
+        onUpdate({ text: `reply:${prompt}` });
+
+        await new Promise<void>((resolve) => {
+            this.resolvePending = resolve;
+        });
+
+        return {
+            text: `reply:${prompt}`,
+            conversationId: 'pending-conversation-id',
+            messageId: 'pending-message-id'
+        };
+    }
+}
+
 class ArchiveResultProvider extends MockModelProvider {
     constructor(private readonly archiveResponseText: string) {
         super();
@@ -147,6 +174,50 @@ class ArchiveResultProvider extends MockModelProvider {
             conversationId: 'archive-conversation-id',
             messageId: 'archive-message-id'
         };
+    }
+}
+
+class FunctionalPartsProvider extends MockModelProvider {
+    override async sendMessage(
+        prompt: string,
+        options = {},
+        onUpdate: (update: { text: string; functionalParts?: Conversation['messages'][number]['functionalParts'] }) => void
+    ): Promise<{
+        text: string;
+        conversationId: string;
+        messageId: string;
+        functionalParts: Conversation['messages'][number]['functionalParts'];
+    }> {
+        this.promptsUsed.push(prompt);
+        this.optionsUsed.push(options as Record<string, unknown>);
+        const functionalParts = [
+            {
+                id: `part-${this.promptsUsed.length}`,
+                kind: 'tool_call' as const,
+                title: 'Tool call',
+                content: '{"name":"lookup"}'
+            }
+        ];
+        const text = `reply:${prompt}`;
+        onUpdate({ text, functionalParts });
+        return {
+            text,
+            conversationId: 'functional-conversation-id',
+            messageId: 'functional-message-id',
+            functionalParts
+        };
+    }
+}
+
+class FailingMockModelProvider extends MockModelProvider {
+    override async sendMessage(
+        prompt: string,
+        options = {},
+        _onUpdate: (update: { text: string }) => void
+    ): Promise<{ text: string; conversationId: string; messageId: string }> {
+        this.promptsUsed.push(prompt);
+        this.optionsUsed.push(options as Record<string, unknown>);
+        throw new Error('Provider unavailable');
     }
 }
 
@@ -182,6 +253,16 @@ class MockStorageProvider implements IConversationPersistProvider {
 
     async syncNow(): Promise<void> {
         this.syncNowCalls += 1;
+    }
+}
+
+class FailingStorageProvider extends MockStorageProvider {
+    constructor(conversations: Conversation[], private readonly error: Error) {
+        super(conversations);
+    }
+
+    override async deleteConversation(_id: string): Promise<void> {
+        throw this.error;
     }
 }
 
@@ -242,6 +323,22 @@ class DeferredHistoryProvider extends MockHistoryProvider {
     }
 }
 
+function createConversationContextProvider(context: WorkspaceContext): IContextProvider {
+    return {
+        id: 'conversation-context',
+        initializeAccess: vi.fn().mockResolvedValue(undefined),
+        getContext: vi.fn().mockResolvedValue(context),
+        getConversations: vi.fn().mockResolvedValue([]),
+        getProjectDocuments: vi.fn().mockResolvedValue([]),
+        readDocument: vi.fn(),
+        writeDocument: vi.fn(),
+        createNode: vi.fn(),
+        deleteNode: vi.fn(),
+        renameNode: vi.fn(),
+        searchInScope: vi.fn()
+    } as unknown as IContextProvider;
+}
+
 describe('useChatStore workspace history flow', () => {
     const providerCatalog: ProviderConfig[] = [
         {
@@ -249,6 +346,13 @@ describe('useChatStore workspace history flow', () => {
             name: 'Mock Provider',
             models: [{ id: 'static-model', name: 'Static Model' }],
             defaultModel: 'static-model',
+            supportedRuntimeModes: ['web']
+        },
+        {
+            id: 'gemini-api',
+            name: 'Gemini API',
+            models: [{ id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' }],
+            defaultModel: 'gemini-2.5-pro',
             supportedRuntimeModes: ['web']
         },
         {
@@ -275,6 +379,18 @@ describe('useChatStore workspace history flow', () => {
         sourcePaths: ['/docs/.agent.json'],
         tools: [{ id: 'read_document', description: 'Read docs' }],
         skills: [{ id: 'summarize', description: 'Summarize docs' }]
+    };
+    const archiveAgent: ResolvedAgentConfig = {
+        name: 'Archive Agent',
+        description: 'Archive specialist',
+        instructions: 'Use archive context only.',
+        effectiveInstructions: 'Use archive context only.',
+        modelProviderName: 'other-provider',
+        modelName: 'other-static',
+        scopePath: '/archive',
+        sourcePaths: ['/archive/.agent.json'],
+        tools: [{ id: 'search_in_scope', description: 'Search archive' }],
+        skills: [{ id: 'archive', description: 'Archive docs' }]
     };
 
     it('marks imported external history items from local metadata', async () => {
@@ -503,13 +619,15 @@ describe('useChatStore workspace history flow', () => {
         expect(store.currentProviderId).toBe('mock-provider');
         expect(store.currentModelId).toBe('dynamic-model');
         expect(store.currentModelOptions).toEqual({ web_search: true });
+        expect(store.currentReasoningEffort).toBe('high');
 
         store.setCurrentModelOption('deep_research', true);
         expect(store.currentModelOptions).toEqual({ deep_research: true });
         expect(store.currentConversation?.modelSelection).toEqual({
             providerId: 'mock-provider',
             modelId: 'dynamic-model',
-            modelOptions: { deep_research: true }
+            modelOptions: { deep_research: true },
+            reasoningEffort: 'high'
         });
 
         store.setCurrentModel('research-only');
@@ -517,7 +635,8 @@ describe('useChatStore workspace history flow', () => {
         expect(store.currentConversation?.modelSelection).toEqual({
             providerId: 'mock-provider',
             modelId: 'research-only',
-            modelOptions: { deep_research: true }
+            modelOptions: { deep_research: true },
+            reasoningEffort: 'high'
         });
     });
 
@@ -659,6 +778,41 @@ describe('useChatStore workspace history flow', () => {
         ]);
     });
 
+    it('persists functional parts without sending them back as provider history', async () => {
+        const provider = new FunctionalPartsProvider();
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+
+        await store.sendMessage('第一问');
+
+        expect(store.currentConversation?.messages[1]?.functionalParts).toEqual([
+            {
+                id: 'part-1',
+                kind: 'tool_call',
+                title: 'Tool call',
+                content: '{"name":"lookup"}'
+            }
+        ]);
+        expect(storage.conversations[0]?.messages[1]?.functionalParts).toHaveLength(1);
+
+        await store.sendMessage('第二问');
+
+        expect(provider.optionsUsed[1]?.history).toEqual([
+            {
+                role: 'user',
+                content: '第一问',
+                attachments: undefined
+            },
+            {
+                role: 'assistant',
+                content: 'reply:第一问',
+                attachments: undefined
+            }
+        ]);
+    });
+
     it('passes normalized model options through the send pipeline and persists them on new conversations', async () => {
         const provider = new MockModelProvider();
         const storage = new MockStorageProvider([]);
@@ -678,15 +832,45 @@ describe('useChatStore workspace history flow', () => {
         await store.sendMessage('测试 option 透传');
 
         expect(provider.optionsUsed[0]?.modelOptions).toEqual({ web_search: true });
+        expect(provider.optionsUsed[0]?.reasoningEffort).toBe('high');
         expect(store.currentConversation?.modelSelection).toEqual({
             providerId: 'mock-provider',
             modelId: 'dynamic-model',
-            modelOptions: { web_search: true }
+            modelOptions: { web_search: true },
+            reasoningEffort: 'high'
         });
         expect((await storage.getAllConversations())[0]?.modelSelection).toEqual({
             providerId: 'mock-provider',
             modelId: 'dynamic-model',
-            modelOptions: { web_search: true }
+            modelOptions: { web_search: true },
+            reasoningEffort: 'high'
+        });
+    });
+
+    it('allows overriding reasoning effort and persists it through the send pipeline', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+
+        await store.initializeProviderCatalog(providerCatalog);
+        await store.startNewConversation();
+
+        store.setCurrentReasoningEffort('low');
+        await store.sendMessage('测试推理强度');
+
+        expect(provider.optionsUsed[0]?.reasoningEffort).toBe('low');
+        expect(store.currentConversation?.modelSelection).toEqual({
+            providerId: 'mock-provider',
+            modelId: 'static-model',
+            modelOptions: {},
+            reasoningEffort: 'low'
+        });
+        expect((await storage.getAllConversations())[0]?.modelSelection).toEqual({
+            providerId: 'mock-provider',
+            modelId: 'static-model',
+            modelOptions: {},
+            reasoningEffort: 'low'
         });
     });
 
@@ -708,6 +892,88 @@ describe('useChatStore workspace history flow', () => {
 
         expect(store.currentConversation?.boundNodeName).toBe('archive');
         expect((await storage.getAllConversations())).toHaveLength(0);
+    });
+
+    it('binds a new workspace conversation to the active agent and document immediately', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+
+        await store.initializeProviderCatalog(providerCatalog);
+        store.setWorkspaceMode('agent');
+        store.setWorkspaceContext({
+            activeAgentKey: '/docs/.agent.json',
+            selectedNodePath: '/docs/guide.md',
+            activePath: '/docs/guide.md',
+            activeDocument: {
+                path: '/docs/guide.md',
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('# Guide'),
+                updatedAt: 1,
+                version: 'v1',
+                canWrite: true
+            },
+            contextProvider: null
+        });
+
+        await store.startNewConversation({
+            boundNodeName: 'guide.md',
+            agentKey: '/docs/.agent.json',
+            documentPath: '/docs/guide.md',
+            activeDocument: {
+                path: '/docs/guide.md',
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('# Guide'),
+                updatedAt: 1,
+                version: 'v1',
+                canWrite: true
+            }
+        });
+
+        expect(store.currentConversation).toMatchObject({
+            title: 'New Chat',
+            boundNodeName: 'guide.md',
+            agentKey: '/docs/',
+            documentPaths: ['/docs/guide.md']
+        });
+    });
+
+    it('rebinds the primary conversation document while preserving referenced document paths', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([
+            {
+                id: 'conversation-1',
+                title: 'Existing chat',
+                origin: 'local',
+                agentKey: '/docs/',
+                documentPaths: ['/docs/guide.md', '/docs/appendix.md'],
+                updatedAt: 1,
+                messages: []
+            }
+        ]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+        store.currentConversation = {
+            id: 'conversation-1',
+            title: 'Existing chat',
+            origin: 'local',
+            agentKey: '/docs/',
+            documentPaths: ['/docs/guide.md', '/docs/appendix.md'],
+            updatedAt: 1,
+            messages: []
+        };
+
+        await store.bindConversationToDocument('conversation-1', {
+            documentPath: '/docs/reference.md',
+            previousDocumentPath: '/docs/guide.md'
+        });
+
+        expect((await storage.getConversation('conversation-1'))?.documentPaths).toEqual([
+            '/docs/reference.md',
+            '/docs/appendix.md'
+        ]);
     });
 
     it('resets inherited workspace agent selection when starting a new chat in conversation mode', async () => {
@@ -733,7 +999,8 @@ describe('useChatStore workspace history flow', () => {
         expect(store.currentConversation?.modelSelection).toEqual({
             providerId: 'mock-provider',
             modelId: 'static-model',
-            modelOptions: {}
+            modelOptions: {},
+            reasoningEffort: 'high'
         });
     });
 
@@ -857,6 +1124,8 @@ describe('useChatStore workspace history flow', () => {
             modelName: undefined
         });
         store.setWorkspaceContext({
+            activeAgentKey: '/docs/.agent.json',
+            selectedNodePath: '/docs/guide.md',
             activePath: '/docs/guide.md',
             activeDocument: {
                 path: '/docs/guide.md',
@@ -902,6 +1171,316 @@ describe('useChatStore workspace history flow', () => {
         await store.sendMessage('第二条消息');
 
         expect(provider.promptsUsed[1]).toBe('第二条消息');
+    });
+
+    it('keeps first-turn active document behavior while appending mentioned file sections', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const contextProvider = createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' },
+                { path: '/docs/appendix.md', name: 'appendix.md', kind: 'file', parentPath: '/docs' }
+            ],
+            documents: {
+                '/docs/guide.md': '# Guide',
+                '/docs/appendix.md': '# Appendix'
+            }
+        });
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+
+        store.setActiveAgentContext({
+            ...scopedAgent,
+            modelProviderName: undefined,
+            modelName: undefined
+        });
+        store.setWorkspaceContext({
+            activeAgentKey: '/docs/.agent.json',
+            selectedNodePath: '/docs/guide.md',
+            activePath: '/docs/guide.md',
+            activeDocument: {
+                path: '/docs/guide.md',
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('# Guide')
+            },
+            contextProvider
+        });
+
+        await store.sendMessage('请比较 @appendix.md');
+
+        expect(provider.promptsUsed[0]).toBe(
+            '当前文档已作为附件提供：/docs/guide.md\n\n请比较 @appendix.md\n\n[引用文件: appendix.md]\n# Appendix'
+        );
+        expect(provider.optionsUsed[0]?.attachments).toEqual([
+            expect.objectContaining({
+                id: 'active-document:/docs/guide.md',
+                name: 'guide.md',
+                mimeType: 'text/markdown'
+            })
+        ]);
+        expect(store.currentConversation?.messages[0]?.requestSnapshot).toEqual({
+            prompt: '当前文档已作为附件提供：/docs/guide.md\n\n请比较 @appendix.md\n\n[引用文件: appendix.md]\n# Appendix',
+            attachments: [
+                expect.objectContaining({
+                    id: 'active-document:/docs/guide.md',
+                    name: 'guide.md',
+                    mimeType: 'text/markdown',
+                    base64Data: encodeTextDocument('# Guide')
+                })
+            ],
+            activeDocumentMode: 'attachment'
+        });
+        expect(store.currentConversation?.documentPaths).toEqual(['/docs/guide.md', '/docs/appendix.md']);
+    });
+
+    it('injects mentioned file sections on later turns without auto-attaching the current document again', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const contextProvider = createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' },
+                { path: '/docs/appendix.md', name: 'appendix.md', kind: 'file', parentPath: '/docs' }
+            ],
+            documents: {
+                '/docs/guide.md': '# Guide',
+                '/docs/appendix.md': '# Appendix'
+            }
+        });
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+
+        store.setActiveAgentContext({
+            ...scopedAgent,
+            modelProviderName: undefined,
+            modelName: undefined
+        });
+        store.setWorkspaceContext({
+            activeAgentKey: '/docs/.agent.json',
+            selectedNodePath: '/docs/guide.md',
+            activePath: '/docs/guide.md',
+            activeDocument: {
+                path: '/docs/guide.md',
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('# Guide')
+            },
+            contextProvider
+        });
+
+        await store.sendMessage('第一轮');
+        await store.sendMessage('第二轮请结合 @appendix.md');
+
+        expect(provider.promptsUsed[1]).toBe('第二轮请结合 @appendix.md\n\n[引用文件: appendix.md]\n# Appendix');
+        expect(provider.optionsUsed[1]?.attachments).toEqual([]);
+        expect(store.currentConversation?.messages[2]?.requestSnapshot).toEqual({
+            prompt: '第二轮请结合 @appendix.md\n\n[引用文件: appendix.md]\n# Appendix',
+            attachments: [],
+            activeDocumentMode: 'none'
+        });
+        expect(store.currentConversation?.documentPaths).toEqual(['/docs/guide.md', '/docs/appendix.md']);
+    });
+
+    it('resolves mentioned files by unique path suffix when basenames collide', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const contextProvider = createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/docs/reference', name: 'reference', kind: 'directory', parentPath: '/docs' },
+                { path: '/archive', name: 'archive', kind: 'directory' },
+                { path: '/docs/reference/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs/reference' },
+                { path: '/archive/guide.md', name: 'guide.md', kind: 'file', parentPath: '/archive' }
+            ],
+            documents: {
+                '/docs/reference/guide.md': '# Docs Guide',
+                '/archive/guide.md': '# Archive Guide'
+            }
+        });
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+        store.setWorkspaceContext({
+            activePath: '/docs/reference/guide.md',
+            activeDocument: null,
+            contextProvider
+        });
+
+        await store.sendMessage('请阅读 @docs/reference/guide.md');
+
+        expect(provider.promptsUsed[0]).toBe('请阅读 @docs/reference/guide.md\n\n[引用文件: guide.md]\n# Docs Guide');
+        expect(store.currentConversation?.documentPaths).toEqual(['/docs/reference/guide.md']);
+    });
+
+    it('uses the default active Agent context to resolve mentioned files before considering workspace-wide duplicates', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const contextProvider = createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/archive', name: 'archive', kind: 'directory' },
+                { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' },
+                { path: '/archive/guide.md', name: 'guide.md', kind: 'file', parentPath: '/archive' }
+            ],
+            agentConfigs: {
+                '/docs/': scopedAgent,
+                '/archive/': archiveAgent
+            },
+            documents: {
+                '/docs/guide.md': '# Docs Guide',
+                '/archive/guide.md': '# Archive Guide'
+            }
+        });
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+        store.setActiveAgentContext({
+            ...scopedAgent,
+            modelProviderName: undefined,
+            modelName: undefined
+        });
+        store.setWorkspaceContext({
+            activePath: '/docs/guide.md',
+            activeDocument: null,
+            contextProvider
+        });
+
+        await store.sendMessage('请阅读 @guide.md');
+
+        expect(provider.promptsUsed[0]).toBe('请阅读 @guide.md\n\n[引用文件: guide.md]\n# Docs Guide');
+        expect(store.currentError).toBeNull();
+        expect(store.currentConversation?.documentPaths).toEqual(['/docs/guide.md']);
+    });
+
+    it('uses the bound conversation Agent context instead of the default active Agent context when resolving mentioned files', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const archiveMentionAgent: ResolvedAgentConfig = {
+            ...archiveAgent,
+            modelProviderName: undefined,
+            modelName: undefined
+        };
+        const contextProvider = createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/archive', name: 'archive', kind: 'directory' },
+                { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' },
+                { path: '/archive/guide.md', name: 'guide.md', kind: 'file', parentPath: '/archive' }
+            ],
+            agentConfigs: {
+                '/docs/': scopedAgent,
+                '/archive/': archiveMentionAgent
+            },
+            documents: {
+                '/docs/guide.md': '# Docs Guide',
+                '/archive/guide.md': '# Archive Guide'
+            }
+        });
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+        store.setActiveAgentContext({
+            ...scopedAgent,
+            modelProviderName: undefined,
+            modelName: undefined
+        });
+        store.setWorkspaceContext({
+            activeAgentKey: '/docs/.agent.json',
+            activePath: '/docs/guide.md',
+            activeDocument: null,
+            contextProvider
+        });
+        store.setConversationExecutionContext({
+            contextProvider
+        });
+        store.currentConversation = {
+            id: 'conversation-archive-scope',
+            title: 'Archive scoped chat',
+            origin: 'local',
+            agentKey: '/archive/',
+            messages: [],
+            updatedAt: Date.now()
+        };
+
+        await store.sendMessage('请阅读 @guide.md');
+
+        expect(provider.promptsUsed[0]).toBe('请阅读 @guide.md\n\n[引用文件: guide.md]\n# Archive Guide');
+        expect(store.currentError).toBeNull();
+        expect(store.currentConversation?.documentPaths).toEqual(['/archive/guide.md']);
+    });
+
+    it('surfaces an error when a mentioned file is ambiguous inside the current Agent context', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const contextProvider = createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/docs/reference', name: 'reference', kind: 'directory', parentPath: '/docs' },
+                { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' },
+                { path: '/docs/reference/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs/reference' },
+                { path: '/archive', name: 'archive', kind: 'directory' },
+                { path: '/archive/guide.md', name: 'guide.md', kind: 'file', parentPath: '/archive' }
+            ],
+            documents: {
+                '/docs/guide.md': '# Docs Guide',
+                '/docs/reference/guide.md': '# Docs Reference Guide',
+                '/archive/guide.md': '# Archive Guide'
+            }
+        });
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+        store.setActiveAgentContext({
+            ...scopedAgent,
+            modelProviderName: undefined,
+            modelName: undefined
+        });
+        store.setWorkspaceContext({
+            activePath: '/docs/guide.md',
+            activeDocument: null,
+            contextProvider
+        });
+
+        await store.sendMessage('请阅读 @guide.md');
+
+        expect(provider.promptsUsed).toEqual([]);
+        expect(store.currentError).toBe(
+            "Referenced file '@guide.md' matches multiple files in the current Agent context. Please use a more specific path suffix."
+        );
+    });
+
+    it('surfaces an error when a mentioned file resolves to a non-text document', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const contextProvider = createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/docs/spec.pdf', name: 'spec.pdf', kind: 'file', parentPath: '/docs' }
+            ],
+            documents: {
+                '/docs/spec.pdf': {
+                    mimeType: 'application/pdf',
+                    dataBase64: 'JVBERi0xLjQ='
+                }
+            }
+        });
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+        store.setWorkspaceContext({
+            activePath: '/docs/spec.pdf',
+            activeDocument: null,
+            contextProvider
+        });
+
+        await store.sendMessage('请阅读 @spec.pdf');
+
+        expect(provider.promptsUsed).toEqual([]);
+        expect(store.currentError).toBe(
+            "Referenced file '@spec.pdf' is not a text document and cannot be injected into the prompt."
+        );
     });
 
     it('applies and groups local conversations by agentKey without overwriting an existing binding', async () => {
@@ -995,6 +1574,41 @@ describe('useChatStore workspace history flow', () => {
         expect(storage['conversations'][0].agentKey).toBeUndefined();
         expect(store.currentConversation?.agentKey).toBeUndefined();
         expect(store.getConversationsByAgent('/workspace/.agent.json').map((item) => item.id)).toEqual([]);
+    });
+
+    it('restores the bound agent context when selecting an existing local conversation', async () => {
+        const storage = new MockStorageProvider([
+            {
+                id: 'conversation-bound',
+                title: 'Bound conversation',
+                origin: 'local',
+                agentKey: '/docs/',
+                updatedAt: 100,
+                messages: []
+            }
+        ]);
+        const store = useChatStore();
+        store.setProviders(new MockModelProvider(), storage);
+        const conversationContextProvider = createConversationContextProvider({
+            nodes: [],
+            agentConfigs: {
+                '/docs/': scopedAgent,
+                '/archive/': archiveAgent
+            }
+        });
+        store.setConversationExecutionContext({
+            contextProvider: conversationContextProvider,
+            onFileChanged: null
+        });
+        store.setActiveAgentContext(archiveAgent);
+
+        await store.init();
+        await store.selectLocalConversation('conversation-bound');
+
+        expect(store.activeAgentContext).toEqual(expect.objectContaining({
+            name: 'Docs Agent',
+            tools: [{ id: 'read_document', description: 'Read docs' }]
+        }));
     });
 
     it('includes the active local conversation in agent grouping before persistence refresh completes', async () => {
@@ -1108,7 +1722,7 @@ describe('useChatStore workspace history flow', () => {
             attachments: [],
             activeDocumentMode: 'omitted'
         });
-        expect(store.currentConversation?.documentPaths).toBeUndefined();
+        expect(store.currentConversation?.documentPaths).toEqual(['/docs/spec.pdf']);
     });
 
     it('keeps the first-turn document binding when later turns switch to another document', async () => {
@@ -1321,12 +1935,24 @@ describe('useChatStore workspace history flow', () => {
         const provider = new MockModelProvider();
         const storage = new MockStorageProvider([]);
         const store = useChatStore();
-        const run = vi.fn(async (request: Record<string, unknown>, onUpdate: (update: { text: string }) => void) => {
-            onUpdate({ text: 'agent-runtime:done' });
+        const run = vi.fn(async (
+            request: Record<string, unknown>,
+            onUpdate: (update: { text: string; functionalParts?: Conversation['messages'][number]['functionalParts'] }) => void
+        ) => {
+            const functionalParts = [
+                {
+                    id: 'agent-part-1',
+                    kind: 'tool_result' as const,
+                    title: 'Workspace read',
+                    content: '# Guide'
+                }
+            ];
+            onUpdate({ text: 'agent-runtime:done', functionalParts });
             return {
                 text: 'agent-runtime:done',
                 conversationId: 'runtime-conversation',
                 messageId: 'runtime-message',
+                functionalParts,
                 requestSnapshot: {
                     prompt: String(request.prompt),
                     attachments: request.workspace
@@ -1377,6 +2003,7 @@ describe('useChatStore workspace history flow', () => {
         });
 
         await store.initializeProviderCatalog(providerCatalog);
+        store.setWorkspaceMode('agent');
         store.setActiveAgentContext({
             ...scopedAgent,
             modelProviderName: 'other-provider',
@@ -1392,14 +2019,29 @@ describe('useChatStore workspace history flow', () => {
             contextProvider: {
                 id: 'workspace-context',
                 initializeAccess: vi.fn(async () => undefined),
-                listTree: vi.fn(async () => []),
+                getContext: vi.fn(async () => ({ nodes: [], agentConfigs: {} })),
+                getConversations: vi.fn(async () => []),
+                getProjectDocuments: vi.fn(async () => []),
                 readDocument: vi.fn(async (path: string) => ({ path, mimeType: 'text/markdown', dataBase64: encodeTextDocument('# Guide') })),
                 writeDocument: vi.fn(async () => ({})),
-                createNode: vi.fn(async () => ({ path: '/docs/draft.md', name: 'draft.md', kind: 'file' as const })),
+                createNode: vi.fn(async () => ({ path: '/docs/draft.md', name: 'draft.md', kind: 'file' as const, agentKey: '/docs/' })),
+                deleteNode: vi.fn(async () => undefined),
+                renameNode: vi.fn(async () => ({ path: '/docs/renamed.md', name: 'renamed.md', kind: 'file' as const, agentKey: '/docs/' })),
                 searchInScope: vi.fn(async () => []),
                 resolveScopedAgentConfig: vi.fn(async () => scopedAgent)
             },
             onFileChanged: vi.fn(async () => undefined)
+        });
+
+        await store.startNewConversation({
+            boundNodeName: 'guide.md',
+            agentKey: '/docs/.agent.json',
+            documentPath: '/docs/guide.md',
+            activeDocument: {
+                path: '/docs/guide.md',
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('# Guide')
+            }
         });
 
         await store.sendMessage('让 runtime 发送');
@@ -1428,6 +2070,14 @@ describe('useChatStore workspace history flow', () => {
             modelOptions: {}
         });
         expect(store.currentConversation?.messages[1]?.content).toBe('agent-runtime:done');
+        expect(store.currentConversation?.messages[1]?.functionalParts).toEqual([
+            {
+                id: 'agent-part-1',
+                kind: 'tool_result',
+                title: 'Workspace read',
+                content: '# Guide'
+            }
+        ]);
         expect(store.currentConversation?.backendId).toBe('runtime-conversation');
         expect(store.currentConversation?.messages[0]?.requestSnapshot).toEqual({
             prompt: '让 runtime 发送',
@@ -1474,6 +2124,97 @@ describe('useChatStore workspace history flow', () => {
                     attachments: undefined
                 }
             ]
+        });
+    });
+
+    it('prefers the existing conversation agent binding over the currently selected workspace agent when sending', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        const run = vi.fn(async (
+            request: Record<string, unknown>,
+            onUpdate: (update: { text: string }) => void
+        ) => {
+            onUpdate({ text: 'agent-runtime:bound-agent' });
+            return {
+                text: 'agent-runtime:bound-agent',
+                conversationId: 'runtime-conversation',
+                messageId: 'runtime-message',
+                requestSnapshot: {
+                    prompt: String(request.prompt),
+                    attachments: [],
+                    activeDocumentMode: 'none'
+                }
+            };
+        });
+
+        store.setProviders(provider, storage);
+        store.setAgentRuntime({
+            run,
+            abort: vi.fn()
+        });
+        store.setProviderModelsResolver(async (providerId: string) => {
+            if (providerId === 'other-provider') {
+                return {
+                    models: [{ id: 'other-static', name: 'Other Static' }],
+                    defaultModel: 'other-static'
+                };
+            }
+
+            return {
+                models: [{ id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' }],
+                defaultModel: 'gemini-2.5-pro'
+            };
+        });
+
+        await store.initializeProviderCatalog(providerCatalog);
+        const conversationContextProvider = createConversationContextProvider({
+            nodes: [],
+            agentConfigs: {
+                '/docs/': scopedAgent,
+                '/archive/': archiveAgent
+            }
+        });
+        store.setConversationExecutionContext({
+            contextProvider: conversationContextProvider,
+            onFileChanged: null
+        });
+        store.setActiveAgentContext(archiveAgent);
+        store.currentConversation = {
+            id: 'conversation-bound-agent',
+            title: 'Bound agent conversation',
+            origin: 'local',
+            agentKey: '/docs/',
+            updatedAt: Date.now(),
+            messages: [
+                {
+                    id: 'user-1',
+                    role: 'user',
+                    content: '已有历史'
+                },
+                {
+                    id: 'assistant-1',
+                    role: 'assistant',
+                    content: '已有回复'
+                }
+            ]
+        };
+        store.setDraftPrompt('继续提问');
+
+        await store.sendDraft();
+
+        expect(run).toHaveBeenCalledTimes(1);
+        expect(run.mock.calls[0]?.[0]).toMatchObject({
+            agent: expect.objectContaining({
+                name: 'Docs Agent',
+                tools: [{ id: 'read_document', description: 'Read docs' }]
+            }),
+            workspace: expect.objectContaining({
+                contextProvider: conversationContextProvider,
+                onFileChanged: undefined
+            }),
+            providerId: 'gemini-api',
+            modelId: 'gemini-2.5-pro'
         });
     });
 
@@ -1524,7 +2265,8 @@ describe('useChatStore workspace history flow', () => {
         expect(store.currentConversation?.modelSelection).toEqual({
             providerId: 'other-provider',
             modelId: 'other-dynamic',
-            modelOptions: {}
+            modelOptions: {},
+            reasoningEffort: 'high'
         });
     });
 
@@ -1975,6 +2717,262 @@ describe('useChatStore workspace history flow', () => {
         expect(store.currentConversation?.messages[1]?.deleted).toBe(true);
     });
 
+    it('backfills the draft and enters edit mode for a prior question', async () => {
+        const storage = new MockStorageProvider([
+            {
+                id: 'conversation-edit-backfill',
+                title: 'Editable conversation',
+                origin: 'local',
+                updatedAt: 10,
+                messages: [
+                    {
+                        id: 'user-1',
+                        role: 'user',
+                        content: '原始问题',
+                        questionId: 'question-1',
+                        createdAt: 1
+                    },
+                    {
+                        id: 'assistant-1',
+                        role: 'assistant',
+                        content: '原始回答',
+                        questionId: 'question-1',
+                        createdAt: 2
+                    }
+                ]
+            }
+        ]);
+        const store = useChatStore();
+        store.setProviders(new MockModelProvider(), storage);
+
+        await store.init();
+        await store.selectLocalConversation('conversation-edit-backfill');
+
+        store.startQuestionEdit('question-1');
+
+        expect(store.editingQuestionId).toBe('question-1');
+        expect(store.draftPrompt).toBe('原始问题');
+        expect(store.draftFocusRequestKey).toBe(1);
+        expect(store.currentConversation?.messages.some((message) => message.deleted === true)).toBe(false);
+    });
+
+    it('cancels question editing without mutating conversation history', async () => {
+        const storage = new MockStorageProvider([
+            {
+                id: 'conversation-edit-cancel',
+                title: 'Editable conversation',
+                origin: 'local',
+                updatedAt: 10,
+                messages: [
+                    {
+                        id: 'user-1',
+                        role: 'user',
+                        content: '原始问题',
+                        questionId: 'question-1',
+                        createdAt: 1
+                    },
+                    {
+                        id: 'assistant-1',
+                        role: 'assistant',
+                        content: '原始回答',
+                        questionId: 'question-1',
+                        createdAt: 2
+                    }
+                ]
+            }
+        ]);
+        const store = useChatStore();
+        store.setProviders(new MockModelProvider(), storage);
+
+        await store.init();
+        await store.selectLocalConversation('conversation-edit-cancel');
+        store.startQuestionEdit('question-1');
+        store.setDraftPrompt('修改中的草稿');
+
+        store.cancelQuestionEdit();
+
+        expect(store.editingQuestionId).toBeNull();
+        expect(store.draftPrompt).toBe('修改中的草稿');
+        expect(store.currentConversation?.messages[0]?.deleted).toBeUndefined();
+        expect(store.currentConversation?.messages[1]?.deleted).toBeUndefined();
+    });
+
+    it('truncates later turns and resets provider history when resending an edited question', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([
+            {
+                id: 'conversation-edit-resend',
+                title: 'Editable conversation',
+                origin: 'local',
+                updatedAt: 10,
+                messages: [
+                    {
+                        id: 'user-1',
+                        role: 'user',
+                        content: '第一问',
+                        questionId: 'question-1',
+                        createdAt: 1
+                    },
+                    {
+                        id: 'assistant-1',
+                        role: 'assistant',
+                        content: '第一答',
+                        questionId: 'question-1',
+                        createdAt: 2
+                    },
+                    {
+                        id: 'user-2',
+                        role: 'user',
+                        content: '第二问',
+                        questionId: 'question-2',
+                        createdAt: 3
+                    },
+                    {
+                        id: 'assistant-2',
+                        role: 'assistant',
+                        content: '第二答',
+                        questionId: 'question-2',
+                        createdAt: 4
+                    }
+                ]
+            }
+        ]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+        await store.loadLocalConversations();
+        await store.selectLocalConversation('conversation-edit-resend');
+
+        store.startQuestionEdit('question-2');
+        store.setDraftPrompt('第二问（已修改）');
+
+        await store.sendDraft();
+
+        expect(provider.optionsUsed[0]?.history).toEqual([
+            {
+                role: 'user',
+                content: '第一问',
+                attachments: undefined
+            },
+            {
+                role: 'assistant',
+                content: '第一答',
+                attachments: undefined
+            }
+        ]);
+        expect(store.editingQuestionId).toBeNull();
+        expect(store.currentConversation?.messages[2]?.deleted).toBe(true);
+        expect(store.currentConversation?.messages[3]?.deleted).toBe(true);
+        expect(store.visibleMessages.map((message) => message.content)).toEqual([
+            '第一问',
+            '第一答',
+            '第二问（已修改）',
+            'reply:第二问（已修改）'
+        ]);
+    });
+
+    it('updates the persisted conversation title when resending an edited first question', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([
+            {
+                id: 'conversation-edit-first-title',
+                title: '旧标题',
+                origin: 'local',
+                updatedAt: 10,
+                messages: [
+                    {
+                        id: 'user-1',
+                        role: 'user',
+                        content: '旧问题',
+                        questionId: 'question-1',
+                        createdAt: 1
+                    },
+                    {
+                        id: 'assistant-1',
+                        role: 'assistant',
+                        content: '旧回答',
+                        questionId: 'question-1',
+                        createdAt: 2
+                    },
+                    {
+                        id: 'user-2',
+                        role: 'user',
+                        content: '后续问题',
+                        questionId: 'question-2',
+                        createdAt: 3
+                    },
+                    {
+                        id: 'assistant-2',
+                        role: 'assistant',
+                        content: '后续回答',
+                        questionId: 'question-2',
+                        createdAt: 4
+                    }
+                ]
+            }
+        ]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+        await store.loadLocalConversations();
+        await store.selectLocalConversation('conversation-edit-first-title');
+
+        store.startQuestionEdit('question-1');
+        store.setDraftPrompt('新的第一条问题标题应该更新');
+
+        await store.sendDraft();
+
+        expect(store.currentConversation?.title).toBe('新的第一条问题标题应该更新');
+        expect(storage.conversations[0]?.title).toBe('新的第一条问题标题应该更新');
+    });
+
+    it('exits edit mode as soon as an edited question is resent', async () => {
+        const provider = new PendingMockModelProvider();
+        const storage = new MockStorageProvider([
+            {
+                id: 'conversation-edit-pending',
+                title: 'Editable conversation',
+                origin: 'local',
+                updatedAt: 10,
+                messages: [
+                    {
+                        id: 'user-1',
+                        role: 'user',
+                        content: '第一问',
+                        questionId: 'question-1',
+                        createdAt: 1
+                    },
+                    {
+                        id: 'assistant-1',
+                        role: 'assistant',
+                        content: '第一答',
+                        questionId: 'question-1',
+                        createdAt: 2
+                    }
+                ]
+            }
+        ]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+        await store.loadLocalConversations();
+        await store.selectLocalConversation('conversation-edit-pending');
+
+        store.startQuestionEdit('question-1');
+        store.setDraftPrompt('第一问（已修改）');
+
+        const pending = store.sendDraft();
+        await vi.waitFor(() => {
+            expect(provider.resolvePending).toBeTypeOf('function');
+        });
+
+        expect(store.isGenerating).toBe(true);
+        expect(store.editingQuestionId).toBeNull();
+
+        provider.resolvePending?.();
+        await pending;
+    });
+
     it('restores the submitted draft when aborting generation', async () => {
         const provider = new AbortableMockModelProvider();
         const storage = new MockStorageProvider([]);
@@ -2003,6 +3001,69 @@ describe('useChatStore workspace history flow', () => {
             content: '需要修改的提问'
         });
         expect((await storage.getAllConversations())).toHaveLength(1);
+    });
+
+    it('persists a new conversation immediately when the first model request fails', async () => {
+        const provider = new FailingMockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+        store.setWorkspaceMode('agent');
+        store.setWorkspaceContext({
+            activeAgentKey: '/docs/.agent.json',
+            selectedNodePath: '/docs/guide.md',
+            activePath: '/docs/guide.md',
+            activeDocument: {
+                path: '/docs/guide.md',
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('# Guide'),
+                updatedAt: 1,
+                version: 'v1',
+                canWrite: true
+            },
+            contextProvider: null
+        });
+
+        await store.startNewConversation({
+            boundNodeName: 'guide.md',
+            agentKey: '/docs/.agent.json',
+            documentPath: '/docs/guide.md',
+            activeDocument: {
+                path: '/docs/guide.md',
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('# Guide'),
+                updatedAt: 1,
+                version: 'v1',
+                canWrite: true
+            }
+        });
+        store.setDraftPrompt('首次提问失败也要保留');
+
+        await store.sendDraft();
+
+        expect(store.currentError).toBe('Provider unavailable');
+        expect(store.currentConversation).toMatchObject({
+            boundNodeName: 'guide.md',
+            agentKey: '/docs/',
+            documentPaths: ['/docs/guide.md']
+        });
+        expect(store.currentConversation?.messages).toMatchObject([
+            {
+                role: 'user',
+                content: '首次提问失败也要保留'
+            },
+            {
+                role: 'assistant',
+                content: ''
+            }
+        ]);
+        expect(await storage.getAllConversations()).toHaveLength(1);
+        expect((await storage.getAllConversations())[0]).toMatchObject({
+            boundNodeName: 'guide.md',
+            agentKey: '/docs/',
+            documentPaths: ['/docs/guide.md']
+        });
     });
 
     it('saves and restores the agent view status snapshot', () => {
@@ -2177,6 +3238,72 @@ describe('useChatStore workspace history flow', () => {
         expect(store.conversations).toHaveLength(0);
     });
 
+    it('surfaces delete failures through currentError', async () => {
+        const storage = new FailingStorageProvider([
+            {
+                id: 'conversation-failing',
+                title: '失败会话',
+                origin: 'local',
+                updatedAt: 10,
+                messages: [{ id: 'only-user', role: 'user', content: '唯一问题' }]
+            }
+        ], new Error('Delete request failed.'));
+        const store = useChatStore();
+        store.setProviders(new MockModelProvider(), storage);
+
+        await store.init();
+        await store.selectLocalConversation('conversation-failing');
+
+        await expect(store.deleteLocalConversation('conversation-failing')).rejects.toMatchObject({
+            message: 'Delete request failed.'
+        } satisfies Partial<HttpApiError>);
+        expect(store.currentError).toBe('Delete request failed.');
+        expect(store.currentConversation?.id).toBe('conversation-failing');
+    });
+
+    it('renames local conversations and refreshes the active conversation', async () => {
+        const storage = new MockStorageProvider([
+            {
+                id: 'conversation-to-rename',
+                title: 'Old title',
+                origin: 'local',
+                updatedAt: 10,
+                messages: []
+            }
+        ]);
+        const store = useChatStore();
+        store.setProviders(new MockModelProvider(), storage);
+
+        await store.init();
+        await store.selectLocalConversation('conversation-to-rename');
+        await store.renameLocalConversation('conversation-to-rename', '  New title  ');
+
+        expect(store.currentConversation?.title).toBe('New title');
+        expect(storage.conversations[0]?.title).toBe('New title');
+
+        await store.renameLocalConversation('conversation-to-rename', '   ');
+        expect(store.currentConversation?.title).toBe('New Chat');
+    });
+
+    it('does not rename external history conversations', async () => {
+        const storage = new MockStorageProvider([
+            {
+                id: 'external-conversation',
+                title: 'External title',
+                origin: 'chatgpt-web',
+                updatedAt: 10,
+                messages: []
+            }
+        ]);
+        const store = useChatStore();
+        store.setProviders(new MockModelProvider(), storage);
+
+        await store.init();
+        await store.renameLocalConversation('external-conversation', 'New title');
+
+        expect(storage.conversations[0]?.title).toBe('External title');
+    });
+
     it('archives only in eligible agent-mode markdown document contexts', async () => {
         const provider = new ArchiveResultProvider('{"q":"# Q","a":"# A"}');
         const store = useChatStore();
@@ -2226,7 +3353,10 @@ describe('useChatStore workspace history flow', () => {
 
     it('archives the current conversation into the active markdown document', async () => {
         const provider = new ArchiveResultProvider('{"q":"# Q\\n\\nUpdated question","a":"# A\\n\\nUpdated answer"}');
-        const onFileChanged = vi.fn(async () => undefined);
+        let resolveFileChange: (() => void) | null = null;
+        const onFileChanged = vi.fn(() => new Promise<void>((resolve) => {
+            resolveFileChange = resolve;
+        }));
         const storage = new MockStorageProvider([]);
         const store = useChatStore();
         store.setProviders(provider, storage);
@@ -2249,22 +3379,41 @@ describe('useChatStore workspace history flow', () => {
             activeDocument: {
                 path: '/docs/guide.md',
                 mimeType: 'text/markdown',
-                dataBase64: encodeTextDocument('# Q\n\nOriginal question\n\n---\n\n# A\n\nOriginal answer')
+                dataBase64: encodeTextDocument('# Q\n\nOriginal question\n\n***\n\n# A\n\nOriginal answer')
             },
             contextProvider: null,
             onFileChanged
         });
 
-        await store.archiveCurrentConversationToDocument();
+        const archivePromise = store.archiveCurrentConversationToDocument();
+
+        expect(store.archiveConversationProgressPart).toMatchObject({
+            kind: 'tool_call',
+            title: 'Archive conversation',
+            content: 'Archiving the current conversation into the active document.'
+        });
+        expect(store.currentConversation?.messages).toHaveLength(2);
+        expect(store.isArchivingConversation).toBe(true);
+
+        await vi.waitFor(() => {
+            expect(onFileChanged).toHaveBeenCalledTimes(1);
+        });
+        resolveFileChange?.();
+        await archivePromise;
 
         expect(onFileChanged).toHaveBeenCalledWith({
             path: '/docs/guide.md',
-            beforeContent: '# Q\n\nOriginal question\n\n---\n\n# A\n\nOriginal answer',
-            afterContent: '# Q\n\nUpdated question\n\n---\n\n# A\n\nUpdated answer'
+            beforeContent: '# Q\n\nOriginal question\n\n***\n\n# A\n\nOriginal answer',
+            afterContent: '# Q\n\nUpdated question\n\n***\n\n# A\n\nUpdated answer'
         });
         expect(provider.optionsUsed[0]).toMatchObject({
             modelId: 'static-model',
             modelOptions: {}
+        });
+        expect(store.archiveConversationProgressPart).toMatchObject({
+            kind: 'tool_result',
+            title: 'Archive conversation',
+            content: 'Conversation archived into the current document.'
         });
         expect(store.archiveFeedback).toEqual({
             tone: 'success',
@@ -2313,7 +3462,7 @@ describe('useChatStore workspace history flow', () => {
             activeDocument: {
                 path: '/docs/guide.md',
                 mimeType: 'text/markdown',
-                dataBase64: encodeTextDocument('# Q\n\nOriginal question\n\n---\n\n# A\n\nOriginal answer')
+                dataBase64: encodeTextDocument('# Q\n\nOriginal question\n\n***\n\n# A\n\nOriginal answer')
             },
             contextProvider: null,
             onFileChanged
@@ -2322,6 +3471,10 @@ describe('useChatStore workspace history flow', () => {
         await store.archiveCurrentConversationToDocument();
 
         expect(onFileChanged).not.toHaveBeenCalled();
+        expect(store.archiveConversationProgressPart).toMatchObject({
+            kind: 'tool_result',
+            content: 'No new content was archived.'
+        });
         expect(store.archiveFeedback).toEqual({
             tone: 'info',
             message: 'No new content was archived.'
@@ -2368,7 +3521,7 @@ describe('useChatStore workspace history flow', () => {
             activeDocument: {
                 path: '/docs/guide.md',
                 mimeType: 'text/markdown',
-                dataBase64: encodeTextDocument('# Q\n\nArchived question\n\n---\n\n# A\n\nArchived answer')
+                dataBase64: encodeTextDocument('# Q\n\nArchived question\n\n***\n\n# A\n\nArchived answer')
             },
             contextProvider: null,
             onFileChanged: vi.fn()
@@ -2430,8 +3583,58 @@ describe('useChatStore workspace history flow', () => {
         await store.archiveCurrentConversationToDocument();
 
         expect(onFileChanged).not.toHaveBeenCalled();
+        expect(store.archiveConversationProgressPart).toMatchObject({
+            kind: 'tool_result'
+        });
         expect(store.archiveFeedback?.tone).toBe('error');
         expect(store.archiveFeedback?.message).toContain('Archive failed:');
         expect(store.isArchivingConversation).toBe(false);
+    });
+
+    it('reports inserted *** divider in archive feedback and progress result', async () => {
+        const provider = new ArchiveResultProvider('{"q":"# Q\\n\\nUpdated question","a":"# A\\n\\nUpdated answer"}');
+        const onFileChanged = vi.fn(async () => undefined);
+        const store = useChatStore();
+        store.setProviders(provider, new MockStorageProvider([]));
+        await store.initializeProviderCatalog(providerCatalog);
+
+        store.workspaceMode = 'agent';
+        store.currentConversation = {
+            id: 'archive-conversation',
+            title: 'Archive conversation',
+            origin: 'local',
+            updatedAt: 1,
+            messages: [
+                { id: 'user-1', role: 'user', content: 'Please update the question.' },
+                { id: 'assistant-1', role: 'assistant', content: 'Question updated.' }
+            ]
+        };
+        store.setWorkspaceContext({
+            selectedNodePath: '/docs/guide.md',
+            activePath: '/docs/guide.md',
+            activeDocument: {
+                path: '/docs/guide.md',
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('# Q\n\nOriginal question')
+            },
+            contextProvider: null,
+            onFileChanged
+        });
+
+        await store.archiveCurrentConversationToDocument();
+
+        expect(onFileChanged).toHaveBeenCalledWith({
+            path: '/docs/guide.md',
+            beforeContent: '# Q\n\nOriginal question',
+            afterContent: '# Q\n\nUpdated question\n\n***\n\n# A\n\nUpdated answer'
+        });
+        expect(store.archiveFeedback).toEqual({
+            tone: 'success',
+            message: 'Conversation archived into the current document. Added a missing *** divider automatically.'
+        });
+        expect(store.archiveConversationProgressPart).toMatchObject({
+            kind: 'tool_result',
+            content: 'Conversation archived into the current document. Added a missing *** divider automatically.'
+        });
     });
 });

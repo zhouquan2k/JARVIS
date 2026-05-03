@@ -8,6 +8,12 @@ type ActiveDocumentContext = {
     dataBase64: string;
 };
 
+type MentionedFilePromptPart = {
+    path: string;
+    name: string;
+    content: string;
+};
+
 export type PreparedActiveDocumentRequest = {
     prompt: string;
     attachments: MessageAttachment[];
@@ -27,6 +33,28 @@ export function augmentPromptWithAgentContext(
         `当前文档已作为附件提供：${activeDocument.path}`,
         '',
         prompt
+    ].join('\n');
+}
+
+function buildMentionedFilePromptSection(file: MentionedFilePromptPart): string {
+    return [
+        `[引用文件: ${file.name}]`,
+        file.content
+    ].join('\n');
+}
+
+export function augmentPromptWithMentionedFiles(
+    prompt: string,
+    files: MentionedFilePromptPart[]
+): string {
+    if (files.length === 0) {
+        return prompt;
+    }
+
+    return [
+        prompt,
+        '',
+        files.map(buildMentionedFilePromptSection).join('\n\n')
     ].join('\n');
 }
 

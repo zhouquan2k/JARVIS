@@ -18,3 +18,4 @@ export { useDocumentWorkspaceStore } from './src/store/documentWorkspace';
 export { useCompareStore } from './src/store/compare';
 export { CHAT_ROUTES, PRIMARY_WORKSPACE_ROUTES, type ChatRoute, type ChatRoutePath } from './src/routes';
 export { openConversationImportDialog, parseConversationImportPayload } from './src/utils/externalFileImport';
+export { installGlobalUnhandledErrorFallback } from './src/utils/installGlobalUnhandledErrorFallback';

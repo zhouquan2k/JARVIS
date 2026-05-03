@@ -43,6 +43,10 @@ function createContextProvider(conversations: Conversation[] = []): IContextProv
         getConversations: vi.fn(async (query: { documentPath?: string }) => conversations.filter((conversation) => (
             query.documentPath ? conversation.documentPaths?.includes(query.documentPath) : true
         ))),
+        getProjectDocuments: vi.fn(async () => [
+            { path: '/docs/guide.md', name: 'guide.md' },
+            { path: '/docs/reference.md', name: 'reference.md' }
+        ]),
         readDocument: vi.fn(),
         writeDocument: vi.fn(),
         createNode: vi.fn(),
@@ -320,5 +324,224 @@ describe('AgentConversationPanel', () => {
             ]
         });
         expect(wrapper.get('[data-testid="agent-conversation-title"]').text()).toContain('Remote document discussion');
+    });
+
+    it('creates a new document conversation with immediate agent and document bindings', async () => {
+        const chatStore = useChatStore();
+        chatStore.setProviders(new PanelTestModelProvider(), new MissingConversationStorageProvider());
+        chatStore.setWorkspaceMode('agent');
+
+        const wrapper = mount(AgentConversationPanel, {
+            props: {
+                activeAgentKey: '/docs/.agent.json',
+                activePath: '/docs/guide.md',
+                selectedNodePath: '/docs/guide.md',
+                activeDocument: {
+                    path: '/docs/guide.md',
+                    mimeType: 'text/markdown',
+                    dataBase64: ''
+                },
+                showAgentConversationList: false,
+                contextProvider: createContextProvider()
+            },
+            global: {
+                stubs: {
+                    NormalChatView: {
+                        template: '<div data-testid="normal-chat-stub" />'
+                    }
+                }
+            }
+        });
+
+        await flushPromises();
+        await wrapper.vm.$nextTick();
+        await wrapper.get('[data-testid="agent-conversation-list-plus"]').trigger('click');
+
+        expect(chatStore.currentConversation).toMatchObject({
+            title: 'New Chat',
+            boundNodeName: 'guide.md',
+            agentKey: '/docs/',
+            documentPaths: ['/docs/guide.md']
+        });
+    });
+
+    it('rebinds the current conversation document from the project document picker', async () => {
+        const chatStore = useChatStore();
+        chatStore.setProviders(new PanelTestModelProvider(), new MissingConversationStorageProvider());
+        chatStore.currentConversation = {
+            id: 'conversation-1',
+            title: 'Shared Conversation',
+            origin: 'local',
+            agentKey: '/docs/',
+            documentPaths: ['/docs/guide.md', '/docs/appendix.md'],
+            updatedAt: 1,
+            messages: []
+        };
+        const bindSpy = vi.spyOn(chatStore, 'bindConversationToDocument').mockResolvedValue(undefined);
+
+        const wrapper = mount(AgentConversationPanel, {
+            props: {
+                activeAgentKey: '/docs/',
+                activePath: '/docs/guide.md',
+                selectedNodePath: '/docs',
+                activeDocument: {
+                    path: '/docs/guide.md',
+                    mimeType: 'text/markdown',
+                    dataBase64: ''
+                },
+                showAgentConversationList: false,
+                contextProvider: createContextProvider()
+            },
+            global: {
+                stubs: {
+                    NormalChatView: {
+                        template: '<div data-testid="normal-chat-stub" />'
+                    }
+                }
+            }
+        });
+
+        await flushPromises();
+        await wrapper.get('[data-testid="agent-conversation-rebind-document"]').trigger('click');
+        await flushPromises();
+
+        expect(wrapper.get('[data-testid="agent-conversation-document-picker"]').exists()).toBe(true);
+        await wrapper.get('[data-testid="agent-conversation-document-option-reference.md"]').trigger('click');
+
+        expect(bindSpy).toHaveBeenCalledWith('conversation-1', {
+            documentPath: '/docs/reference.md',
+            previousDocumentPath: '/docs/guide.md'
+        });
+    });
+
+    it('hides the rebind and archive actions when there is no current conversation', async () => {
+        const chatStore = useChatStore();
+        chatStore.currentConversation = null;
+
+        const wrapper = mount(AgentConversationPanel, {
+            props: {
+                activeAgentKey: '/docs/',
+                activePath: '/docs/guide.md',
+                selectedNodePath: '/docs',
+                activeDocument: {
+                    path: '/docs/guide.md',
+                    mimeType: 'text/markdown',
+                    dataBase64: ''
+                },
+                showAgentConversationList: false,
+                contextProvider: createContextProvider()
+            },
+            global: {
+                stubs: {
+                    NormalChatView: {
+                        template: '<div data-testid="normal-chat-stub" />'
+                    }
+                }
+            }
+        });
+
+        await flushPromises();
+
+        expect(wrapper.find('[data-testid="agent-conversation-rebind-document"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid="agent-conversation-archive"]').exists()).toBe(false);
+    });
+
+    it('highlights the archive action when the current conversation is not archived yet', async () => {
+        const chatStore = useChatStore();
+        chatStore.currentConversation = {
+            id: 'conversation-1',
+            title: 'Shared Conversation',
+            origin: 'local',
+            updatedAt: 1,
+            messages: [{ id: 'user-1', role: 'user', content: 'Archive this' }]
+        };
+        chatStore.currentConversationArchiveStatus = {
+            state: 'idle',
+            archivedAt: null,
+            documentPath: null,
+            sourceMessageCount: null
+        };
+        chatStore.canArchiveCurrentConversation = vi.fn(() => true);
+        chatStore.archiveCurrentConversationToDocument = vi.fn().mockResolvedValue(undefined);
+
+        const wrapper = mount(AgentConversationPanel, {
+            props: {
+                activeAgentKey: '/docs/',
+                activePath: '/docs/guide.md',
+                selectedNodePath: '/docs/guide.md',
+                activeDocument: {
+                    path: '/docs/guide.md',
+                    mimeType: 'text/markdown',
+                    dataBase64: ''
+                },
+                showAgentConversationList: false,
+                contextProvider: createContextProvider()
+            },
+            global: {
+                stubs: {
+                    NormalChatView: {
+                        template: '<div data-testid="normal-chat-stub" />'
+                    }
+                }
+            }
+        });
+
+        await flushPromises();
+
+        const archiveButton = wrapper.get('[data-testid="agent-conversation-archive"]');
+        expect(archiveButton.classes()).toContain('agent-conversation-panel__icon-btn--highlighted');
+        expect(archiveButton.attributes('disabled')).toBeUndefined();
+
+        await archiveButton.trigger('click');
+        expect(chatStore.archiveCurrentConversationToDocument).toHaveBeenCalledTimes(1);
+    });
+
+    it('disables the archive action when the current conversation is already archived', async () => {
+        const chatStore = useChatStore();
+        chatStore.currentConversation = {
+            id: 'conversation-1',
+            title: 'Shared Conversation',
+            origin: 'local',
+            updatedAt: 1,
+            messages: [{ id: 'user-1', role: 'user', content: 'Archive this' }]
+        };
+        chatStore.currentConversationArchiveStatus = {
+            state: 'archived',
+            archivedAt: 123,
+            documentPath: '/docs/guide.md',
+            sourceMessageCount: 1
+        };
+        chatStore.canArchiveCurrentConversation = vi.fn(() => true);
+        chatStore.archiveCurrentConversationToDocument = vi.fn().mockResolvedValue(undefined);
+
+        const wrapper = mount(AgentConversationPanel, {
+            props: {
+                activeAgentKey: '/docs/',
+                activePath: '/docs/guide.md',
+                selectedNodePath: '/docs/guide.md',
+                activeDocument: {
+                    path: '/docs/guide.md',
+                    mimeType: 'text/markdown',
+                    dataBase64: ''
+                },
+                showAgentConversationList: false,
+                contextProvider: createContextProvider()
+            },
+            global: {
+                stubs: {
+                    NormalChatView: {
+                        template: '<div data-testid="normal-chat-stub" />'
+                    }
+                }
+            }
+        });
+
+        await flushPromises();
+
+        const archiveButton = wrapper.get('[data-testid="agent-conversation-archive"]');
+        expect(archiveButton.attributes('disabled')).toBeDefined();
+        expect(archiveButton.classes()).not.toContain('agent-conversation-panel__icon-btn--highlighted');
+        await archiveButton.trigger('click');
+        expect(chatStore.archiveCurrentConversationToDocument).toHaveBeenCalledTimes(0);
     });
 });

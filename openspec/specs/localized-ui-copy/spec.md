@@ -1,7 +1,7 @@
 # localized-ui-copy Specification
 
 ## Purpose
-TBD - created by archiving change i18n-2. Update Purpose after archive.
+Define localization requirements for shared UI copy, including static labels, navigation text, provider/model display copy, and newly added workspace controls.
 ## Requirements
 ### Requirement: Shared static UI copy MUST be localized through translation keys
 Static copy in the shared UI that is shown directly to users MUST be rendered through translation keys rather than continuing to rely on inline hard-coded strings as the sole copy source. This requirement SHALL cover buttons, labels, empty states, placeholders, menus, panel titles, and static prompts.
@@ -46,3 +46,18 @@ New `en` and `zh-CN` translation entries added in Phase 2 MUST follow the reposi
 #### Scenario: Core UI terms stay consistent across locales
 - **WHEN** the user views copy involving Workspace, Agent, Provider, or Context under different locales
 - **THEN** the translation results MUST remain consistent with the glossary's canonical Chinese-English definitions
+
+### Requirement: Localized copy MUST cover miscellaneous workspace controls
+Shared UI copy for Markdown search, conversation rename, dirty save state, and functional message details MUST be rendered through translation keys for every supported locale.
+
+#### Scenario: Render Markdown search copy through translations
+- **WHEN** the Markdown search control is visible
+- **THEN** placeholder text, match count text, previous/next labels, and close labels MUST come from translation entries
+
+#### Scenario: Render conversation rename and functional detail copy through translations
+- **WHEN** the conversation rename controls or functional message detail controls are visible
+- **THEN** their user-facing labels, tooltips, and empty/status text MUST come from translation entries
+
+#### Scenario: Render dirty save copy through translations
+- **WHEN** the save button communicates unsaved changes
+- **THEN** the accessible label or tooltip MUST come from translation entries

@@ -1,14 +1,27 @@
 <template>
   <section class="markdown-viewer" data-testid="markdown-viewer">
-    <div
-      ref="editorRoot"
-      class="editor-input"
-      :class="{
-        'editor-input--markdown-viewer': isMarkdownDocument && markdownViewerMode === 'viewer',
-        'editor-input--markdown-edit': isMarkdownDocument && markdownViewerMode === 'edit'
-      }"
-      data-testid="document-editor-surface"
-    />
+    <div class="editor-scroll-shell" data-testid="document-editor-scroll-shell">
+      <div
+        v-if="!isMarkdownEditMode"
+        ref="editorRoot"
+        class="editor-input"
+        :class="{
+          'editor-input--markdown-viewer': isMarkdownDocument && markdownViewerMode === 'viewer',
+          'editor-input--markdown-edit': isMarkdownDocument && markdownViewerMode === 'edit'
+        }"
+        data-testid="document-editor-surface"
+        :style="zoomStyle"
+      />
+      <textarea
+        v-else
+        class="editor-input editor-input--markdown-source"
+        data-testid="document-editor-input"
+        :value="modelValue"
+        :style="zoomStyle"
+        spellcheck="false"
+        @input="onMarkdownSourceInput"
+      />
+    </div>
 
     <section
       v-if="activePath && latestFileChange"
@@ -67,10 +80,14 @@ import type { ContextDocument } from '@packages/core/src';
 import { useWorkspaceI18n } from '../i18n';
 import {
   createMarkdownEditor,
+  getMarkdownEditorSearchMatchCount,
   destroyMarkdownEditor,
   normalizeMarkdownViewerContent,
   readMarkdownDocument,
   replaceMarkdownDocument,
+  scrollToMarkdownEditorSearchMatch,
+  setMarkdownEditorActiveSearchMatchIndex,
+  setMarkdownEditorSearchQuery,
   type MarkdownEditor,
   type MarkdownViewerMode
 } from '../utils/markdownDocument';
@@ -85,31 +102,35 @@ export interface MarkdownDocumentViewerProps {
   diffEntries: LineDiffEntry[];
   canUndo: boolean;
   canRedo: boolean;
+  middlePaneZoom?: number;
 }
 
-const props = defineProps<MarkdownDocumentViewerProps>();
+const props = withDefaults(defineProps<MarkdownDocumentViewerProps>(), {
+  middlePaneZoom: 1
+});
 const { t } = useWorkspaceI18n();
 
 const emit = defineEmits<{
   (event: 'update:modelValue', value: string): void;
   (event: 'undo-change'): void;
   (event: 'redo-change'): void;
+  (event: 'open-document-link', path: string): void;
 }>();
 
 const isMarkdownDocument = computed(() => props.activeDocument?.mimeType === 'text/markdown');
+const isMarkdownEditMode = computed(() => isMarkdownDocument.value && props.markdownViewerMode === 'edit');
+const zoomStyle = computed(() => ({
+  transform: `scale(${props.middlePaneZoom})`
+}));
 const editorRoot = ref<HTMLElement | null>(null);
+const searchQuery = ref('');
+const activeSearchMatchIndex = ref(0);
 
 let editor: MarkdownEditor | null = null;
 let creationToken = 0;
 let isApplyingExternalSync = false;
 let lastKnownMarkdown = '';
 let activeEditorMode: MarkdownViewerMode | null = null;
-
-function getMarkdownContentForCurrentMode(content: string): string {
-  return isMarkdownDocument.value && props.markdownViewerMode === 'viewer'
-    ? normalizeMarkdownViewerContent(content)
-    : content;
-}
 
 watch(() => [props.activePath, props.activeDocument?.mimeType, props.modelValue, props.markdownViewerMode] as const, async ([activePath, mimeType, modelValue], previousValue) => {
   const previousPath = previousValue?.[0] ?? null;
@@ -119,27 +140,40 @@ watch(() => [props.activePath, props.activeDocument?.mimeType, props.modelValue,
     return;
   }
 
-  await nextTick();
-  await ensureEditor(modelValue);
-
-  if (!editor) {
-    return;
-  }
-
   const desiredMode: MarkdownViewerMode = mimeType === 'text/markdown'
     ? props.markdownViewerMode
     : 'edit';
-  if (activeEditorMode !== desiredMode) {
+
+  await nextTick();
+  if (activeEditorMode && activeEditorMode !== desiredMode) {
     const currentMarkdown = activeEditorMode === 'viewer'
       ? props.modelValue
       : editor ? readMarkdownDocument(editor) : lastKnownMarkdown || modelValue;
     lastKnownMarkdown = currentMarkdown;
-    if (currentMarkdown !== props.modelValue) {
+    if (activeEditorMode === 'viewer' && currentMarkdown !== props.modelValue) {
       emit('update:modelValue', currentMarkdown);
     }
     await teardownEditor();
+    activeEditorMode = desiredMode;
+    if (desiredMode === 'edit') {
+      lastKnownMarkdown = currentMarkdown;
+      return;
+    }
     await nextTick();
     await ensureEditor(currentMarkdown);
+    return;
+  }
+
+  if (isMarkdownEditMode.value) {
+    await teardownEditor();
+    activeEditorMode = 'edit';
+    lastKnownMarkdown = modelValue;
+    return;
+  }
+
+  await ensureEditor(modelValue);
+
+  if (!editor) {
     return;
   }
 
@@ -158,12 +192,17 @@ async function ensureEditor(content: string) {
   }
 
   const token = ++creationToken;
-  const renderedContent = getMarkdownContentForCurrentMode(content);
+  const renderedContent = isMarkdownDocument.value && props.markdownViewerMode === 'viewer'
+    ? normalizeMarkdownViewerContent(content)
+    : content;
   const instance = await createMarkdownEditor({
     root: editorRoot.value,
     content: renderedContent,
     mode: isMarkdownDocument.value ? props.markdownViewerMode : 'edit',
     documentPath: props.activeDocument?.path ?? props.activePath,
+    onOpenDocumentLink(path) {
+      emit('open-document-link', path);
+    },
     onChange(markdown) {
       lastKnownMarkdown = markdown;
       if (isApplyingExternalSync || !props.activePath) {
@@ -188,6 +227,7 @@ async function ensureEditor(content: string) {
   activeEditorMode = isMarkdownDocument.value ? props.markdownViewerMode : 'edit';
   lastKnownMarkdown = content;
   applyReadonlyCodeBlockLabels(renderedContent);
+  applySearchHighlights();
 }
 
 function syncEditorContent(content: string) {
@@ -196,13 +236,26 @@ function syncEditorContent(content: string) {
   }
 
   isApplyingExternalSync = true;
-  const renderedContent = getMarkdownContentForCurrentMode(content);
+  const renderedContent = isMarkdownDocument.value && props.markdownViewerMode === 'viewer'
+    ? normalizeMarkdownViewerContent(content)
+    : content;
   replaceMarkdownDocument(editor, renderedContent);
   lastKnownMarkdown = content;
   applyReadonlyCodeBlockLabels(renderedContent);
+  applySearchHighlights();
   queueMicrotask(() => {
     isApplyingExternalSync = false;
   });
+}
+
+function onMarkdownSourceInput(event: Event) {
+  const target = event.target;
+  if (!(target instanceof HTMLTextAreaElement)) {
+    return;
+  }
+
+  lastKnownMarkdown = target.value;
+  emit('update:modelValue', target.value);
 }
 
 function applyReadonlyCodeBlockLabels(content: string) {
@@ -232,6 +285,53 @@ function applyReadonlyCodeBlockLabels(content: string) {
   queueMicrotask(sync);
   window.setTimeout(sync, 50);
 }
+
+function applySearchHighlights() {
+  if (!editor) {
+    return;
+  }
+
+  setMarkdownEditorSearchQuery(editor, searchQuery.value);
+  if (searchQuery.value) {
+    setMarkdownEditorActiveSearchMatchIndex(editor, activeSearchMatchIndex.value);
+  }
+}
+
+function setSearchQuery(query: string) {
+  searchQuery.value = query;
+  activeSearchMatchIndex.value = 0;
+  nextTick(applySearchHighlights);
+}
+
+function setActiveSearchMatchIndex(index: number) {
+  activeSearchMatchIndex.value = index;
+  if (editor) {
+    setMarkdownEditorActiveSearchMatchIndex(editor, index);
+  }
+}
+
+function getSearchMatchCount(): number {
+  if (!editor) {
+    return 0;
+  }
+
+  return getMarkdownEditorSearchMatchCount(editor);
+}
+
+function scrollToSearchMatch(index: number) {
+  if (!editor) {
+    return;
+  }
+
+  scrollToMarkdownEditorSearchMatch(editor, index);
+}
+
+defineExpose({
+  setSearchQuery,
+  setActiveSearchMatchIndex,
+  getSearchMatchCount,
+  scrollToSearchMatch
+});
 
 async function teardownEditor() {
   creationToken += 1;
@@ -270,13 +370,37 @@ function extractMarkdownCodeBlockLabels(content: string): string[] {
   overflow: hidden;
 }
 
-.editor-input {
+.editor-scroll-shell {
+  display: flex;
   flex: 1;
-  width: 100%;
+  min-width: 0;
   min-height: 0;
   overflow: auto;
+}
+
+.editor-input {
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 100%;
+  min-height: 0;
   box-sizing: border-box;
   padding: 22px 24px 30px;
+  transform-origin: top left;
+}
+
+.editor-input--markdown-source {
+  border: 0;
+  outline: none;
+  resize: none;
+  color: #e2e8f0;
+  background: transparent;
+  font: 15px/1.7 'SFMono-Regular', 'SF Mono', 'Menlo', monospace;
+  white-space: pre;
+  tab-size: 2;
+}
+
+.editor-input--markdown-source:focus {
+  outline: none;
 }
 
 .editor-input :deep(.milkdown .milkdown-code-block .tools) {
@@ -420,6 +544,21 @@ function extractMarkdownCodeBlockLabels(content: string): string[] {
 .editor-input :deep(.milkdown .ProseMirror code) {
   border-radius: 6px;
   background: rgba(15, 23, 42, 0.72);
+}
+
+.editor-input :deep(.milkdown .ProseMirror a) {
+  color: #7dd3fc;
+  text-decoration: underline;
+  text-decoration-color: rgba(125, 211, 252, 0.7);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 0.12em;
+}
+
+.editor-input :deep(.milkdown .ProseMirror a:hover),
+.editor-input :deep(.milkdown .ProseMirror a:focus-visible) {
+  color: #22d3ee;
+  text-decoration-color: currentColor;
+  cursor: pointer;
 }
 
 .editor-input :deep(.milkdown .milkdown-code-block .hidden) {
@@ -583,5 +722,16 @@ function extractMarkdownCodeBlockLabels(content: string): string[] {
   white-space: pre-wrap;
   word-break: break-word;
   background: transparent;
+}
+
+.editor-input :deep(.markdown-search-highlight) {
+  border-radius: 3px;
+  background: rgba(250, 204, 21, 0.42);
+  color: inherit;
+}
+
+.editor-input :deep(.markdown-search-highlight--active) {
+  background: rgba(251, 146, 60, 0.72);
+  outline: 1px solid rgba(251, 191, 36, 0.88);
 }
 </style>

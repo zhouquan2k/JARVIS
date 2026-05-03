@@ -27,6 +27,7 @@ classDiagram
       +getContext()
       +readDocument(path)
       +getConversations(query)
+      +getProjectDocuments(curNode)
     }
 
     class AgentPane {
@@ -41,6 +42,8 @@ classDiagram
       +openConversationList()
       +openConversationDetail(conversationId)
       +createDocumentConversation()
+      +toggleProjectDocumentPicker()
+      +archiveConversationFromToolbar()
       +syncPanelStateFromSelection()
     }
 
@@ -87,6 +90,7 @@ classDiagram
       <<interface>>
       +getContext() Promise~WorkspaceContext~
       +getConversations(query: ConversationQuery) Promise~Conversation[]~
+      +getProjectDocuments(curNode: string) Promise~ProjectDocumentEntry[]~
       +readDocument(path: string) Promise~ContextDocument~
     }
 
@@ -134,5 +138,14 @@ classDiagram
 
 * `IContextProvider.getConversations(query)` 是工作区面板使用的统一查询入口。
 
-* `AgentConversationPanel` 负责列表/详情状态，`IContextProvider` 负责数据查询。
+* `IContextProvider.getProjectDocuments(curNode)` 是当前 agent 或目录作用域内可绑定文档的统一来源。
 
+* `AgentConversationPanel` 负责列表/详情状态和顶部工具条动作，`IContextProvider` 负责数据查询。
+
+* 在 agentMode 下，右侧面板顶部工具条是会话级操作的唯一入口，承载展开、新建对话、绑定文档、归档等动作；输入区不再承载归档入口。
+
+* “绑定文档 / 归档”两个按钮仅在存在当前对话时显示。
+
+* 绑定文档候选来自 `getProjectDocuments(curNode)`，在当前 agent 作用域内选择，而不是默认复用中间 panel 当前打开文档。
+
+* 归档按钮需要反映持久化归档状态：未归档或已过期时高亮且可执行；已归档时显示为 disabled。

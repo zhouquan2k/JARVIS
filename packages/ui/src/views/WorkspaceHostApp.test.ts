@@ -285,4 +285,62 @@ describe('WorkspaceHostApp', () => {
         expect(wrapper.get('[data-testid="conversation-workspace-stub"]').attributes('data-auth-message')).toBe('auth-msg');
         expect(wrapper.get('[data-testid="conversation-workspace-stub"]').attributes('data-host-message')).toBe('host-msg');
     });
+
+    it('shows a global error banner when chatStore.currentError is set', async () => {
+        setActivePinia(createPinia());
+        const chatStore = useChatStore();
+        chatStore.currentError = 'Backend request failed.';
+
+        const wrapper = mount(WorkspaceHostApp, {
+            props: {
+                currentRoutePath: '/chat',
+                navigateTo: vi.fn(),
+                contextProvider: { id: 'ctx' }
+            },
+            global: {
+                stubs: {
+                    ConversationWorkspaceView: {
+                        template: '<div data-testid="conversation-workspace-stub" />'
+                    },
+                    DocumentWorkspaceView: {
+                        template: '<div data-testid="document-workspace-stub" />'
+                    }
+                }
+            }
+        });
+
+        await flushPromises();
+
+        expect(wrapper.get('[data-testid="workspace-global-error"]').text()).toContain('Backend request failed.');
+    });
+
+    it('clears the global error banner when the close button is clicked', async () => {
+        setActivePinia(createPinia());
+        const chatStore = useChatStore();
+        chatStore.currentError = 'Backend request failed.';
+
+        const wrapper = mount(WorkspaceHostApp, {
+            props: {
+                currentRoutePath: '/chat',
+                navigateTo: vi.fn(),
+                contextProvider: { id: 'ctx' }
+            },
+            global: {
+                stubs: {
+                    ConversationWorkspaceView: {
+                        template: '<div data-testid="conversation-workspace-stub" />'
+                    },
+                    DocumentWorkspaceView: {
+                        template: '<div data-testid="document-workspace-stub" />'
+                    }
+                }
+            }
+        });
+
+        await flushPromises();
+        await wrapper.get('[data-testid="workspace-global-error-close"]').trigger('click');
+
+        expect(chatStore.currentError).toBeNull();
+        expect(wrapper.find('[data-testid="workspace-global-error"]').exists()).toBe(false);
+    });
 });

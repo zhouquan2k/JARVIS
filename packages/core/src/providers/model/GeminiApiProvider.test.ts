@@ -272,6 +272,112 @@ describe('GeminiApiProvider', () => {
         );
 
         expect(String(fetchMock.mock.calls[1]?.[0])).toContain('/models/gemini-3.1-pro:streamGenerateContent');
+        const requestBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+        expect(requestBody.generationConfig).toEqual({
+            thinkingConfig: {
+                thinkingLevel: 'high'
+            }
+        });
+
+        vi.unstubAllGlobals();
+    });
+
+    it('maps low reasoning effort to low thinking level for Gemini Pro Latest', async () => {
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    models: [
+                        {
+                            name: 'models/gemini-pro-latest',
+                            baseModelId: 'gemini-pro-latest',
+                            displayName: 'Gemini Pro Latest',
+                            supportedGenerationMethods: ['generateContent', 'streamGenerateContent']
+                        }
+                    ]
+                })
+            })
+            .mockResolvedValueOnce(
+                createGeminiSseResponse([
+                    {
+                        candidates: [
+                            {
+                                content: {
+                                    parts: [{ text: '已发送' }]
+                                }
+                            }
+                        ]
+                    }
+                ])
+            );
+        vi.stubGlobal('fetch', fetchMock);
+
+        const provider = new GeminiApiProvider({ apiKey: 'test-key' });
+        await provider.sendMessage(
+            '分析附件',
+            {
+                modelId: 'gemini-pro-latest',
+                reasoningEffort: 'low'
+            },
+            () => undefined
+        );
+
+        const requestBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+        expect(requestBody.generationConfig).toEqual({
+            thinkingConfig: {
+                thinkingLevel: 'low'
+            }
+        });
+
+        vi.unstubAllGlobals();
+    });
+
+    it('maps medium reasoning effort to Gemini 2.5 thinking budget', async () => {
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    models: [
+                        {
+                            name: 'models/gemini-2.5-pro',
+                            baseModelId: 'gemini-2.5-pro',
+                            displayName: 'Gemini 2.5 Pro',
+                            supportedGenerationMethods: ['generateContent', 'streamGenerateContent']
+                        }
+                    ]
+                })
+            })
+            .mockResolvedValueOnce(
+                createGeminiSseResponse([
+                    {
+                        candidates: [
+                            {
+                                content: {
+                                    parts: [{ text: '已发送' }]
+                                }
+                            }
+                        ]
+                    }
+                ])
+            );
+        vi.stubGlobal('fetch', fetchMock);
+
+        const provider = new GeminiApiProvider({ apiKey: 'test-key' });
+        await provider.sendMessage(
+            '分析附件',
+            {
+                modelId: 'gemini-2.5-pro',
+                reasoningEffort: 'medium'
+            },
+            () => undefined
+        );
+
+        const requestBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+        expect(requestBody.generationConfig).toEqual({
+            thinkingConfig: {
+                thinkingBudget: 8192
+            }
+        });
 
         vi.unstubAllGlobals();
     });
@@ -667,7 +773,7 @@ describe('GeminiApiProvider', () => {
         vi.stubGlobal('fetch', fetchMock);
 
         const provider = new GeminiApiProvider({ apiKey: 'test-key' });
-        const updates: Array<{ text: string; toolCalls?: unknown[] }> = [];
+        const updates: Array<{ text: string; toolCalls?: unknown[]; functionalParts?: unknown[] }> = [];
         const result = await provider.runAgent(
             {
                 prompt: '请分析当前文档',
@@ -697,9 +803,36 @@ describe('GeminiApiProvider', () => {
                     name: 'read_file',
                     arguments: { path: '/docs/guide.md' }
                 }
+            ],
+            functionalParts: [
+                {
+                    id: 'function-call-call-1',
+                    kind: 'function_call',
+                    title: 'read_file',
+                    content: JSON.stringify({
+                        id: 'call-1',
+                        name: 'read_file',
+                        arguments: { path: '/docs/guide.md' }
+                    }, null, 2)
+                }
             ]
         });
-        expect(updates[1]).toEqual({ text: '前置思考最终答案', toolCalls: undefined });
+        expect(updates[1]).toEqual({
+            text: '前置思考最终答案',
+            toolCalls: undefined,
+            functionalParts: [
+                {
+                    id: 'function-call-call-1',
+                    kind: 'function_call',
+                    title: 'read_file',
+                    content: JSON.stringify({
+                        id: 'call-1',
+                        name: 'read_file',
+                        arguments: { path: '/docs/guide.md' }
+                    }, null, 2)
+                }
+            ]
+        });
         expect(result.toolCalls).toEqual([
             {
                 id: 'call-1',
@@ -707,6 +840,7 @@ describe('GeminiApiProvider', () => {
                 arguments: { path: '/docs/guide.md' }
             }
         ]);
+        expect(result.functionalParts).toHaveLength(1);
         expect(result.modelTurn).toEqual({
             role: 'model',
             parts: [

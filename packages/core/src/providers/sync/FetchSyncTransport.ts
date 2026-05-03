@@ -5,6 +5,7 @@ import type {
     SyncPushResult
 } from '../../interfaces/ISyncTransport';
 import type { Conversation } from '../../interfaces/Conversation';
+import { HttpApiClient } from '../http/HttpApiClient';
 
 export interface FetchSyncTransportOptions {
     syncKey: string;
@@ -14,16 +15,18 @@ export interface FetchSyncTransportOptions {
 }
 
 export class FetchSyncTransport implements ISyncTransport {
-    private readonly syncKey: string;
-    private readonly baseUrl: string;
-    private readonly fetchImpl: typeof fetch;
-    private readonly headers: Record<string, string>;
+    private readonly client: HttpApiClient;
 
     constructor(options: FetchSyncTransportOptions) {
-        this.syncKey = options.syncKey;
-        this.baseUrl = (options.baseUrl || '/api/sync').replace(/\/$/, '');
-        this.fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
-        this.headers = options.headers ?? {};
+        this.client = new HttpApiClient({
+            baseUrl: (options.baseUrl || '/api/sync').replace(/\/$/, ''),
+            fetchImpl: options.fetchImpl,
+            source: 'sync',
+            headers: {
+                'x-sync-key': options.syncKey,
+                ...(options.headers ?? {})
+            }
+        });
     }
 
     async pull(cursor: number | null): Promise<SyncPullResult> {
@@ -38,20 +41,6 @@ export class FetchSyncTransport implements ISyncTransport {
     }
 
     private async post<T>(path: string, body: unknown): Promise<T> {
-        const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
-            method: 'POST',
-            headers: {
-                'content-type': 'application/json',
-                'x-sync-key': this.syncKey,
-                ...this.headers
-            },
-            body: JSON.stringify(body)
-        });
-
-        if (!response.ok) {
-            throw new Error(`Sync request failed with status ${response.status}`);
-        }
-
-        return response.json() as Promise<T>;
+        return this.client.postJson<T>(path, body);
     }
 }

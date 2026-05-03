@@ -235,6 +235,23 @@ describe('FileSystemContextProvider', () => {
         expect(targetStats.isDirectory()).toBe(true);
     });
 
+    it('lists markdown documents in the current project scope', async () => {
+        const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-node-project-docs-'));
+        tempRoots.push(rootPath);
+
+        await mkdir(path.join(rootPath, 'workspace', 'archive'), { recursive: true });
+        await writeFile(path.join(rootPath, 'workspace', 'guide.md'), '# Guide\n');
+        await writeFile(path.join(rootPath, 'workspace', 'notes.txt'), 'ignore\n');
+        await writeFile(path.join(rootPath, 'workspace', 'archive', 'history.markdown'), '# History\n');
+
+        const provider = new FileSystemContextProvider({ rootPath });
+
+        await expect(provider.getProjectDocuments('/workspace')).resolves.toEqual([
+            { path: '/workspace/archive/history.markdown', name: 'history.markdown' },
+            { path: '/workspace/guide.md', name: 'guide.md' }
+        ]);
+    });
+
     it('rejects mixed-content mount roots', async () => {
         const basePath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-node-mount-invalid-'));
         tempRoots.push(basePath);

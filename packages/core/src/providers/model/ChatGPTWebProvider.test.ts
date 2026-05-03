@@ -566,7 +566,7 @@ describe('normalizeChatGPTConversationDetail', () => {
             );
         vi.stubGlobal('fetch', fetchMock);
 
-        const updates: Array<{ text: string; annotations?: unknown[] }> = [];
+        const updates: Array<{ text: string; annotations?: unknown[]; functionalParts?: unknown[] }> = [];
         const result = await provider.sendMessage(
             '看看来源',
             {
@@ -587,7 +587,19 @@ describe('normalizeChatGPTConversationDetail', () => {
         });
 
         expect(updates[0]?.text).toBe('答案如下 [1]');
+        expect(updates[0]?.functionalParts).toEqual([
+            expect.objectContaining({
+                kind: 'search',
+                title: 'Source A'
+            })
+        ]);
         expect(result.text).toBe('答案如下 [1]');
+        expect(result.functionalParts).toEqual([
+            expect.objectContaining({
+                kind: 'search',
+                title: 'Source A'
+            })
+        ]);
         expect(result.annotations).toEqual([
             expect.objectContaining({
                 kind: 'cite',
@@ -630,7 +642,7 @@ describe('normalizeChatGPTConversationDetail', () => {
             );
         vi.stubGlobal('fetch', fetchMock);
 
-        await provider.sendMessage(
+        const result = await provider.sendMessage(
             '做研究',
             {
                 modelId: 'gpt-4o',
@@ -642,6 +654,7 @@ describe('normalizeChatGPTConversationDetail', () => {
         const requestBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
         expect(requestBody.conversation_mode).toEqual({ kind: 'research' });
         expect(requestBody.client_contextual_info).toEqual({ is_deep_research: true });
+        expect(result.functionalParts).toBeUndefined();
 
         vi.unstubAllGlobals();
     });
@@ -702,6 +715,13 @@ describe('normalizeChatGPTConversationDetail', () => {
                     url: 'https://example.com/stream-source',
                     snippet: 'Stream snippet'
                 })
+            })
+        ]);
+        expect(result.functionalParts).toEqual([
+            expect.objectContaining({
+                id: 'chatgpt-search-turn1search6',
+                kind: 'search',
+                title: 'Nested Stream Source'
             })
         ]);
 

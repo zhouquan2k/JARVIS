@@ -44,7 +44,7 @@ export function renderMermaidPreview(
     language: string,
     content: string,
     applyPreview: MermaidPreviewRenderer
-): void | null {
+): string | HTMLElement | null {
     if (language.trim().toLowerCase() !== 'mermaid') {
         return null;
     }
@@ -52,7 +52,7 @@ export function renderMermaidPreview(
     const source = content.trim();
     if (!source) {
         applyPreview(null);
-        return;
+        return null;
     }
 
     const renderId = `markdown-mermaid-${++renderSequence}`;
@@ -70,4 +70,6 @@ export function renderMermaidPreview(
         .catch((error) => {
             applyPreview(createErrorPreview(error));
         });
+
+    return '';
 }

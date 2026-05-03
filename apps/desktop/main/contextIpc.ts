@@ -15,6 +15,7 @@ import {
     DESKTOP_CONTEXT_DELETE_NODE_CHANNEL,
     DESKTOP_CONTEXT_GET_CONVERSATIONS_CHANNEL,
     DESKTOP_CONTEXT_GET_CONTEXT_CHANNEL,
+    DESKTOP_CONTEXT_GET_PROJECT_DOCUMENTS_CHANNEL,
     DESKTOP_CONTEXT_INITIALIZE_CHANNEL,
     DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL,
     DESKTOP_CONTEXT_RENAME_NODE_CHANNEL,
@@ -96,6 +97,9 @@ export function registerContextIpc(options: RegisterContextIpcOptions = {}) {
     ipc.handle(DESKTOP_CONTEXT_GET_CONVERSATIONS_CHANNEL, async (_event, query: ConversationQuery) => {
         return provider.getConversations(query);
     });
+    ipc.handle(DESKTOP_CONTEXT_GET_PROJECT_DOCUMENTS_CHANNEL, async (_event, curNode: string) => {
+        return provider.getProjectDocuments(curNode);
+    });
     ipc.handle(DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL, async (_event, targetPath: string) => {
         return provider.readDocument(targetPath);
     });
@@ -119,6 +123,7 @@ export function registerContextIpc(options: RegisterContextIpcOptions = {}) {
         ipc.removeHandler(DESKTOP_CONTEXT_INITIALIZE_CHANNEL);
         ipc.removeHandler(DESKTOP_CONTEXT_GET_CONTEXT_CHANNEL);
         ipc.removeHandler(DESKTOP_CONTEXT_GET_CONVERSATIONS_CHANNEL);
+        ipc.removeHandler(DESKTOP_CONTEXT_GET_PROJECT_DOCUMENTS_CHANNEL);
         ipc.removeHandler(DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL);
         ipc.removeHandler(DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL);
         ipc.removeHandler(DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL);

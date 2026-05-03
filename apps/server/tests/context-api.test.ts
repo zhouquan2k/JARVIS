@@ -184,6 +184,56 @@ describe('context api', () => {
         });
     });
 
+    it('logs write-document failures with request metadata and exposes the error in access logs', async () => {
+        const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const consoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+        const app = createApp({
+            config: createConfig({
+                isDevelopment: true
+            }),
+            contextProvider: {
+                initializeAccess: vi.fn(async () => {}),
+                getContext: vi.fn(async () => ({ nodes: [], agentConfigs: {} })),
+                getConversations: vi.fn(async () => []),
+                getProjectDocuments: vi.fn(async () => []),
+                readDocument: vi.fn(),
+                writeDocument: vi.fn(async () => {
+                    throw new Error('The document version has changed. Please reload and try again.');
+                }),
+                createNode: vi.fn(),
+                deleteNode: vi.fn(async () => {}),
+                renameNode: vi.fn(),
+                searchInScope: vi.fn(async () => [])
+            } as unknown as ContextProvider
+        });
+
+        const response = await app.request('/api/context/write-document', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                path: '/welcome.md',
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('# Updated\n'),
+                expectedVersion: 'v1'
+            })
+        });
+
+        expect(response.status).toBe(400);
+        await expect(response.json()).resolves.toEqual({
+            error: 'The document version has changed. Please reload and try again.',
+            code: 'CONTEXT_WRITE_DOCUMENT_FAILED'
+        });
+        expect(consoleError).toHaveBeenCalledWith('[sync-server] write-document failed', {
+            path: '/welcome.md',
+            mimeType: 'text/markdown',
+            expectedVersion: 'v1',
+            dataBase64Length: encodeTextDocument('# Updated\n').length,
+            error: 'The document version has changed. Please reload and try again.'
+        });
+        expect(consoleLog).toHaveBeenCalledWith(expect.stringContaining('error=\"The document version has changed. Please reload and try again.\"'));
+    });
+
     it('serves image documents through /api/context/document-asset', async () => {
         const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-context-'));
         tempRoots.push(rootPath);
@@ -254,7 +304,8 @@ describe('context api', () => {
         });
         expect(rejected.status).toBe(400);
         await expect(rejected.json()).resolves.toEqual({
-            error: 'Path escapes the knowledge workspace root: /../secret.md'
+            error: 'Path escapes the knowledge workspace root: /../secret.md',
+            code: 'CONTEXT_READ_DOCUMENT_FAILED'
         });
     });
 
@@ -274,6 +325,7 @@ describe('context api', () => {
                 messages: [],
                 updatedAt: 100
             }]),
+            getProjectDocuments: vi.fn(async () => [{ path: '/virtual.md', name: 'virtual.md' }]),
             readDocument: vi.fn(async (filePath: string) => ({
                 path: filePath,
                 mimeType: 'text/markdown',

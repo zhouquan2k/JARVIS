@@ -6,6 +6,7 @@ import { reactive, ref } from 'vue';
 
 const mockOpenConversationImportDialog = vi.fn();
 const mockSetRuntime = vi.fn().mockResolvedValue(undefined);
+const mockInstallGlobalUnhandledErrorFallback = vi.fn();
 const mockAgentRuntime = {
     run: vi.fn(),
     abort: vi.fn()
@@ -30,6 +31,9 @@ const chatStore = reactive({
     currentProviderId: 'chatgpt-web',
     currentModelId: 'gpt-4o',
     currentError: null as string | null,
+    reportUnhandledBackendError: vi.fn(function (this: typeof chatStore, error: unknown) {
+        this.currentError = error instanceof Error ? error.message : String(error);
+    }),
     currentHistoryErrorCode: null as string | null,
     historySource: 'local' as 'local' | 'external',
     activeExternalProviderId: 'chatgpt-web' as 'chatgpt-web' | 'gemini-web' | 'external-file',
@@ -94,6 +98,7 @@ vi.mock('@packages/ui', () => ({
         `
     },
     openConversationImportDialog: mockOpenConversationImportDialog,
+    installGlobalUnhandledErrorFallback: mockInstallGlobalUnhandledErrorFallback,
     useChatStore: () => chatStore,
     useCompareStore: () => compareStore
 }));
@@ -129,6 +134,10 @@ describe('Desktop App auth recovery', () => {
         chatStore.historySource = 'local';
         chatStore.activeExternalProviderId = 'chatgpt-web';
         compareStore.analysisError = null;
+        mockInstallGlobalUnhandledErrorFallback.mockImplementation(({ reportError }: { reportError: (message: string) => void }) => {
+            mockInstallGlobalUnhandledErrorFallback.reportError = reportError;
+            return vi.fn();
+        });
         window.chatprismDesktop = undefined;
     });
 
@@ -307,5 +316,17 @@ describe('Desktop App auth recovery', () => {
 
         await wrapper.get('[data-testid="topbar-knowledge"]').trigger('click');
         expect(workspaceHostCalls).toHaveBeenCalledWith('/');
+    });
+
+    it('reports unhandled global errors through chatStore', async () => {
+        const { default: App } = await import('./App.vue');
+        mount(App);
+        await flushPromises();
+
+        expect(mockInstallGlobalUnhandledErrorFallback).toHaveBeenCalledTimes(1);
+        mockInstallGlobalUnhandledErrorFallback.reportError('Desktop backend request failed.');
+
+        expect(chatStore.reportUnhandledBackendError).toHaveBeenCalledWith('Desktop backend request failed.');
+        expect(chatStore.currentError).toBe('Desktop backend request failed.');
     });
 });

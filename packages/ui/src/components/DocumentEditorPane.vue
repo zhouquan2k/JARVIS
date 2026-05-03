@@ -5,36 +5,28 @@
         <span class="editor-path">{{ activePathLabel }}</span>
       </div>
       <div class="editor-actions">
-        <div
+        <button
           v-if="isMarkdownDocument"
-          class="mode-switch"
-          data-testid="markdown-mode-switch"
-          :aria-label="t('shared.markdownModeSwitch')"
+          type="button"
+          class="save-button save-button--mode-toggle"
+          data-testid="markdown-mode-toggle"
+          :class="{ 'save-button--active': markdownViewerMode === 'viewer' }"
+          :title="markdownModeToggleLabel"
+          :aria-label="markdownModeToggleLabel"
+          :aria-pressed="markdownViewerMode === 'viewer'"
+          @click="toggleMarkdownViewerMode"
         >
-          <button
-            type="button"
-            class="mode-switch-button"
-            data-testid="markdown-mode-viewer"
-            :class="{ active: markdownViewerMode === 'viewer' }"
-            :aria-pressed="markdownViewerMode === 'viewer'"
-            @click="switchMarkdownViewerMode('viewer')"
-          >
-            {{ t('shared.markdownViewerMode') }}
-          </button>
-          <button
-            type="button"
-            class="mode-switch-button"
-            data-testid="markdown-mode-edit"
-            :class="{ active: markdownViewerMode === 'edit' }"
-            :aria-pressed="markdownViewerMode === 'edit'"
-            @click="switchMarkdownViewerMode('edit')"
-          >
-            {{ t('shared.markdownEditMode') }}
-          </button>
-        </div>
+          <component
+            :is="markdownViewerMode === 'viewer' ? Eye : PencilLine"
+            class="save-icon"
+            :size="18"
+            aria-hidden="true"
+          />
+        </button>
         <button
           type="button"
           class="save-button"
+          :class="{ 'save-button--dirty': isDirty, 'save-button--saving': isSaving }"
           data-testid="document-save"
           :title="saveButtonLabel"
           :aria-label="saveButtonLabel"
@@ -46,6 +38,21 @@
           @click="emit('save')"
         >
           <Save class="save-icon" :size="18" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          class="save-button save-button--pane-toggle"
+          data-testid="document-middle-pane-toggle"
+          :title="middlePaneToggleLabel"
+          :aria-label="middlePaneToggleLabel"
+          @click="emit('toggle-middle-pane-mode')"
+        >
+          <component
+            :is="props.middlePaneMode === 'maximized' ? Minimize2 : Maximize2"
+            class="save-icon"
+            :size="18"
+            aria-hidden="true"
+          />
         </button>
       </div>
     </header>
@@ -61,63 +68,104 @@
       </div>
     </Teleport>
 
-    <div v-if="activePaneMode === 'empty'" class="empty-state" data-testid="document-editor-empty">
-      {{ t('shared.selectFile') }}
+    <div v-if="isSearchOpen" class="viewer-search" data-testid="document-viewer-search">
+      <input
+        ref="searchInputRef"
+        v-model="searchQuery"
+        class="viewer-search-input"
+        data-testid="document-viewer-search-input"
+        :placeholder="t('shared.documentSearchPlaceholder')"
+        @input="updateViewerSearch"
+        @keydown.enter.prevent="goToNextSearchMatch"
+        @keydown.esc.prevent="closeViewerSearch"
+      />
+      <span class="viewer-search-count" data-testid="document-viewer-search-count">
+        {{ t('shared.documentSearchMatchCount', { current: searchMatchCurrent, total: searchMatchCount }) }}
+      </span>
+      <button type="button" class="viewer-search-button" :aria-label="t('shared.previousMatch')" @click="goToPreviousSearchMatch">
+        {{ t('shared.previousMatchShort') }}
+      </button>
+      <button type="button" class="viewer-search-button" :aria-label="t('shared.nextMatch')" @click="goToNextSearchMatch">
+        {{ t('shared.nextMatchShort') }}
+      </button>
+      <button type="button" class="viewer-search-button" :aria-label="t('shared.closeSearch')" @click="closeViewerSearch">
+        {{ t('shared.close') }}
+      </button>
     </div>
-    <component
-      :is="activeViewerComponent"
-      v-else-if="activeViewerComponent"
-      class="editor-viewer"
-      :active-path="activePath"
-      :active-document="activeDocument"
-      :model-value="modelValue"
-      :markdown-viewer-mode="markdownViewerMode"
-      :latest-file-change="latestFileChange"
-      :diff-entries="diffEntries"
-      :can-undo="canUndo"
-      :can-redo="canRedo"
-      @update:model-value="emit('update:modelValue', $event)"
-      @undo-change="emit('undo-change')"
-      @redo-change="emit('redo-change')"
-    />
-    <div
-      v-else
-      class="unsupported-state"
-      data-testid="document-unsupported-viewer"
-    >
-      {{ t('shared.unsupportedViewer', { mimeType: activeDocument?.mimeType ?? 'unknown' }) }}
+
+    <div class="editor-content">
+      <div v-if="activePaneMode === 'empty'" class="empty-state" data-testid="document-editor-empty">
+        {{ t('shared.selectFile') }}
+      </div>
+      <div v-else class="editor-surface">
+        <component
+          :is="activeViewerComponent"
+          v-if="activeViewerComponent"
+          class="editor-viewer"
+          :active-path="activePath"
+          :active-document="activeDocument"
+          :model-value="modelValue"
+          :markdown-viewer-mode="markdownViewerMode"
+          :latest-file-change="latestFileChange"
+          :diff-entries="diffEntries"
+          :can-undo="canUndo"
+          :can-redo="canRedo"
+          :middle-pane-zoom="props.middlePaneZoom ?? 1"
+          ref="viewerRef"
+          @update:model-value="emit('update:modelValue', $event)"
+          @undo-change="emit('undo-change')"
+          @redo-change="emit('redo-change')"
+          @open-document-link="emit('open-document-link', $event)"
+        />
+        <div
+          v-else
+          class="unsupported-state"
+          data-testid="document-unsupported-viewer"
+        >
+          {{ t('shared.unsupportedViewer', { mimeType: activeDocument?.mimeType ?? 'unknown' }) }}
+        </div>
+      </div>
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue';
-import { Save } from 'lucide-vue-next';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { Eye, Maximize2, Minimize2, PencilLine, Save } from 'lucide-vue-next';
 import type { ContextDocument } from '@packages/core/src';
 import { useWorkspaceI18n } from '../i18n';
 import { resolveDocumentViewer } from '../document-viewers';
 import type { MarkdownViewerMode } from '../utils/markdownDocument';
 import type { FileChangeRecord, LineDiffEntry } from '../services/FileChangeService';
+import type { DocumentViewerSearchHandle } from '../document-viewers/types';
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   activePath: string | null;
   activeDocument: ContextDocument | null;
   activeViewerId: string | null;
   activePaneMode: 'empty' | 'viewer' | 'unsupported';
   modelValue: string;
   isSaving: boolean;
+  isDirty: boolean;
+  middlePaneMode?: 'default' | 'maximized';
+  middlePaneZoom?: number;
   latestFileChange: FileChangeRecord | null;
   diffEntries: LineDiffEntry[];
   canUndo: boolean;
   canRedo: boolean;
-}>();
+}>(), {
+  isDirty: false,
+  middlePaneZoom: 1
+});
 const { t } = useWorkspaceI18n();
 
 const emit = defineEmits<{
   (event: 'update:modelValue', value: string): void;
   (event: 'save'): void;
+  (event: 'toggle-middle-pane-mode'): void;
   (event: 'undo-change'): void;
   (event: 'redo-change'): void;
+  (event: 'open-document-link', path: string): void;
 }>();
 
 const activePathLabel = computed(() => {
@@ -138,12 +186,32 @@ const saveButtonLabel = computed(() => {
     return t('shared.unsavedDocument');
   }
 
-  return props.isSaving ? t('shared.saving') : t('shared.save');
+  if (props.isSaving) {
+    return t('shared.saving');
+  }
+
+  return props.isDirty ? t('shared.unsavedChanges') : t('shared.save');
+});
+const middlePaneToggleLabel = computed(() => {
+  return props.middlePaneMode === 'maximized'
+    ? t('shared.defaultMiddlePane')
+    : t('shared.maximizeMiddlePane');
+});
+const markdownModeToggleLabel = computed(() => {
+  return markdownViewerMode.value === 'viewer'
+    ? t('shared.markdownEditMode')
+    : t('shared.markdownViewerMode');
 });
 const isMarkdownDocument = computed(() => {
   return props.activeDocument?.mimeType === 'text/markdown';
 });
 const markdownViewerMode = ref<MarkdownViewerMode>('viewer');
+const viewerRef = ref<Partial<DocumentViewerSearchHandle> | null>(null);
+const searchInputRef = ref<HTMLInputElement | null>(null);
+const isSearchOpen = ref(false);
+const searchQuery = ref('');
+const activeSearchMatchIndex = ref(0);
+const searchMatchCount = ref(0);
 const activeViewerComponent = computed(() => {
   if (!props.activeDocument) {
     return null;
@@ -151,6 +219,8 @@ const activeViewerComponent = computed(() => {
 
   return resolveDocumentViewer(props.activeDocument)?.component ?? null;
 });
+const supportsViewerSearch = computed(() => props.activeDocument?.mimeType === 'text/markdown');
+const searchMatchCurrent = computed(() => searchMatchCount.value === 0 ? 0 : activeSearchMatchIndex.value + 1);
 const tooltipState = reactive({
   text: '',
   top: 0,
@@ -164,16 +234,108 @@ watch(
     if (mimeType === 'text/markdown') {
       markdownViewerMode.value = 'viewer';
     }
+    closeViewerSearch();
   },
   { immediate: true }
 );
 
-function switchMarkdownViewerMode(nextMode: MarkdownViewerMode) {
+onMounted(() => {
+  window.addEventListener('keydown', onGlobalKeydown);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onGlobalKeydown);
+});
+
+function toggleMarkdownViewerMode() {
+  const nextMode: MarkdownViewerMode = markdownViewerMode.value === 'viewer' ? 'edit' : 'viewer';
   if (markdownViewerMode.value === nextMode) {
     return;
   }
 
   markdownViewerMode.value = nextMode;
+}
+
+function getViewerSearchHandle(): DocumentViewerSearchHandle | null {
+  const candidate = viewerRef.value;
+  if (
+    candidate
+    && typeof candidate.setSearchQuery === 'function'
+    && typeof candidate.setActiveSearchMatchIndex === 'function'
+    && typeof candidate.getSearchMatchCount === 'function'
+    && typeof candidate.scrollToSearchMatch === 'function'
+  ) {
+    return candidate as DocumentViewerSearchHandle;
+  }
+
+  return null;
+}
+
+function refreshSearchMatchCount() {
+  searchMatchCount.value = getViewerSearchHandle()?.getSearchMatchCount() ?? 0;
+}
+
+function openViewerSearch() {
+  if (!supportsViewerSearch.value) {
+    return;
+  }
+
+  isSearchOpen.value = true;
+  nextTick(() => {
+    searchInputRef.value?.focus();
+    updateViewerSearch();
+  });
+}
+
+function closeViewerSearch() {
+  isSearchOpen.value = false;
+  searchQuery.value = '';
+  activeSearchMatchIndex.value = 0;
+  searchMatchCount.value = 0;
+  getViewerSearchHandle()?.setSearchQuery('');
+}
+
+function updateViewerSearch() {
+  const handle = getViewerSearchHandle();
+  if (!handle) {
+    return;
+  }
+
+  handle.setSearchQuery(searchQuery.value);
+  activeSearchMatchIndex.value = 0;
+  nextTick(() => {
+    refreshSearchMatchCount();
+    handle.scrollToSearchMatch(activeSearchMatchIndex.value);
+  });
+}
+
+function goToNextSearchMatch() {
+  refreshSearchMatchCount();
+  if (searchMatchCount.value === 0) {
+    return;
+  }
+
+  activeSearchMatchIndex.value = (activeSearchMatchIndex.value + 1) % searchMatchCount.value;
+  getViewerSearchHandle()?.setActiveSearchMatchIndex(activeSearchMatchIndex.value);
+  getViewerSearchHandle()?.scrollToSearchMatch(activeSearchMatchIndex.value);
+}
+
+function goToPreviousSearchMatch() {
+  refreshSearchMatchCount();
+  if (searchMatchCount.value === 0) {
+    return;
+  }
+
+  activeSearchMatchIndex.value = (activeSearchMatchIndex.value - 1 + searchMatchCount.value) % searchMatchCount.value;
+  getViewerSearchHandle()?.setActiveSearchMatchIndex(activeSearchMatchIndex.value);
+  getViewerSearchHandle()?.scrollToSearchMatch(activeSearchMatchIndex.value);
+}
+
+function onGlobalKeydown(event: KeyboardEvent) {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f' && supportsViewerSearch.value) {
+    event.preventDefault();
+    openViewerSearch();
+  }
 }
 
 function showTooltip(event: MouseEvent | FocusEvent, text: string) {
@@ -237,37 +399,6 @@ function hideTooltip() {
   flex-shrink: 0;
 }
 
-.mode-switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.62);
-  flex-shrink: 0;
-}
-
-.mode-switch-button {
-  border: 0;
-  border-radius: 999px;
-  min-width: 72px;
-  height: 28px;
-  padding: 0 14px;
-  color: rgba(226, 232, 240, 0.84);
-  background: transparent;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.mode-switch-button:hover,
-.mode-switch-button:focus-visible,
-.mode-switch-button.active {
-  background: rgba(14, 165, 233, 0.26);
-  color: #f8fafc;
-}
-
 .save-button {
   border: 0;
   border-radius: 8px;
@@ -296,6 +427,84 @@ function hideTooltip() {
 .save-button:disabled {
   cursor: not-allowed;
   opacity: 0.6;
+}
+
+.save-button--dirty:not(:disabled) {
+  color: #facc15;
+  background: rgba(250, 204, 21, 0.1);
+}
+
+.save-button--saving {
+  color: #7dd3fc;
+  background: rgba(14, 165, 233, 0.12);
+}
+
+.save-button--pane-toggle:not(:disabled) {
+  color: rgba(226, 232, 240, 0.86);
+}
+
+.save-button--mode-toggle:not(:disabled) {
+  color: rgba(226, 232, 240, 0.76);
+}
+
+.save-button--active:not(:disabled) {
+  background: rgba(14, 165, 233, 0.16);
+  color: #f8fafc;
+}
+
+.editor-content {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.editor-surface {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  transform-origin: top left;
+}
+
+.viewer-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(15, 23, 42, 0.76);
+}
+
+.viewer-search-input {
+  min-width: 160px;
+  width: 220px;
+  height: 30px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 8px;
+  padding: 0 10px;
+  color: #e2e8f0;
+  background: rgba(2, 6, 23, 0.48);
+  font-size: 13px;
+}
+
+.viewer-search-count {
+  color: rgba(226, 232, 240, 0.72);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.viewer-search-button {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 8px;
+  height: 30px;
+  padding: 0 9px;
+  color: #e2e8f0;
+  background: rgba(15, 23, 42, 0.7);
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .floating-tooltip {

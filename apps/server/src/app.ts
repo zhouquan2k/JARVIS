@@ -46,6 +46,10 @@ export function createApp(options: CreateAppOptions = {}) {
         await next();
 
         const elapsedMs = Date.now() - startedAt;
+        const requestError = (c as { get(key: string): unknown }).get('requestError');
+        const errorSummary = requestError && typeof requestError === 'object' && 'message' in requestError
+            ? ` error=${JSON.stringify(String((requestError as { message: unknown }).message))}`
+            : '';
         console.log(
             [
                 '[sync-server]',
@@ -55,7 +59,7 @@ export function createApp(options: CreateAppOptions = {}) {
                 `elapsed=${elapsedMs}ms`,
                 `syncKey=${syncKey}`,
                 `origin=${origin}`
-            ].join(' ')
+            ].join(' ') + errorSummary
         );
     });
 

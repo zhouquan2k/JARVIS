@@ -9,6 +9,7 @@ import type {
     IAgentCapableProvider
 } from '../../interfaces/IAgentCapableProvider';
 import type { IModelProvider, ProviderSendResult, ProviderStreamUpdate } from '../../interfaces/IModelProvider';
+import type { MessageFunctionalPart } from '../../interfaces/Conversation';
 import type { ModelProviderRuntime } from '../../runtime/modelProviderRuntime.types';
 import type { AgentRuntime, AgentRuntimeRequest } from './types';
 
@@ -60,43 +61,40 @@ function formatAgentTraceValue(value: unknown): string {
     return JSON.stringify(value, null, 2);
 }
 
-function renderAgentToolExchange(call: AgentToolCall, result: AgentToolResult): string {
-    return [
-        'Function Call Request',
-        '```json',
-        formatAgentTraceValue({
+function buildAgentFunctionalParts(
+    toolExchanges: Array<{ call: AgentToolCall; result: AgentToolResult }>,
+    afterCharIndex: number
+): MessageFunctionalPart[] {
+    return toolExchanges.map(({ call, result }) => ({
+        id: `tool-exchange-${call.id}`,
+        kind: 'tool_exchange' as const,
+        title: call.name,
+        content: formatAgentTraceValue({
+            request: {
+                id: call.id,
+                name: call.name,
+                arguments: call.arguments || {}
+            },
+            response: {
+                toolCallId: result.toolCallId,
+                name: result.name,
+                result: result.result,
+                isError: result.isError === true
+            }
+        }),
+        requestContent: formatAgentTraceValue({
             id: call.id,
             name: call.name,
             arguments: call.arguments || {}
         }),
-        '```',
-        '',
-        'Function Call Response',
-        '```json',
-        formatAgentTraceValue({
+        responseContent: formatAgentTraceValue({
             toolCallId: result.toolCallId,
             name: result.name,
             result: result.result,
             isError: result.isError === true
         }),
-        '```'
-    ].join('\n');
-}
-
-function renderAgentToolRound(toolExchanges: Array<{ call: AgentToolCall; result: AgentToolResult }>): string {
-    const total = toolExchanges.length;
-    const heading = `### 本轮工具调用（${total} 个函数调用）`;
-
-    return [
-        heading,
-        ...toolExchanges.flatMap((exchange, index) => {
-            return [
-                '',
-                `#### 调用 ${index + 1}: \`${exchange.call.name}\``,
-                renderAgentToolExchange(exchange.call, exchange.result)
-            ];
-        })
-    ].join('\n');
+        afterCharIndex
+    }));
 }
 
 async function runNativeAgentLoop(
@@ -114,6 +112,7 @@ async function runNativeAgentLoop(
     const serializableAgent = cloneAgentConfig(agent);
 
     const toolExchanges: AgentToolExchange[] = [];
+    const functionalParts: MessageFunctionalPart[] = [];
     const completedTexts: string[] = [];
     let conversationId = request.context?.conversationId;
     const resolvedTools = agent.tools?.length
@@ -138,6 +137,7 @@ async function runNativeAgentLoop(
                 attachments: request.attachments,
                 history: request.history,
                 modelOptions: request.modelOptions,
+                reasoningEffort: request.reasoningEffort,
                 tools: resolvedTools,
                 toolExchanges
             } satisfies AgentRunRequest,
@@ -156,7 +156,8 @@ async function runNativeAgentLoop(
             const finalText = joinAgentTexts([...completedTexts, result.text || iterationText]);
             return {
                 ...result,
-                text: finalText
+                text: finalText,
+                functionalParts: functionalParts.length > 0 ? functionalParts : result.functionalParts
             };
         }
 
@@ -177,13 +178,18 @@ async function runNativeAgentLoop(
             call,
             result: nextToolResults[index]
         }));
-        const stepText = joinAgentTexts([
-            result.text || iterationText,
-            renderAgentToolRound(nextToolExchanges)
-        ]);
+        const stepText = joinAgentTexts([result.text || iterationText]);
+        const nextFunctionalParts = buildAgentFunctionalParts(
+            nextToolExchanges,
+            joinAgentTexts([...completedTexts, stepText]).length
+        );
+        functionalParts.push(...nextFunctionalParts);
         if (stepText.trim().length > 0) {
             completedTexts.push(stepText);
-            onUpdate({ text: joinAgentTexts(completedTexts) });
+            onUpdate({
+                text: joinAgentTexts(completedTexts),
+                functionalParts: [...functionalParts]
+            });
         }
         toolExchanges.push(...nextToolExchanges);
     }
@@ -269,7 +275,8 @@ export function createAgentRuntime(options: CreateAgentRuntimeOptions): AgentRun
                         modelId: request.modelId,
                         attachments: preparedRequest.attachments,
                         history: request.history,
-                        modelOptions: request.modelOptions
+                        modelOptions: request.modelOptions,
+                        reasoningEffort: request.reasoningEffort
                     },
                     onUpdate
                 );

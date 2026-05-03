@@ -134,10 +134,10 @@ test('web knowledge workspace archives an agent conversation into a markdown doc
     await page.getByTestId('normal-send').click();
     await expect(page.getByTestId('normal-messages')).toContainText('Playwright archive prompt');
 
-    await expect(page.getByTestId('archive-conversation')).toBeVisible();
-    await page.getByTestId('archive-conversation').click();
-    await expect(page.getByTestId('archive-feedback')).toContainText('Added a missing --- divider automatically.');
-    await expect(page.getByTestId('archive-status')).toContainText('Archived');
+    await expect(page.getByTestId('agent-conversation-archive')).toBeVisible();
+    await page.getByTestId('agent-conversation-archive').click();
+    await expect(page.getByTestId('archive-feedback')).toContainText('Conversation archived into the current document.');
+    await expect(page.getByTestId('archive-feedback')).toContainText('Added a missing *** divider automatically.');
     await expect(page.getByTestId('document-file-change')).toBeVisible();
     await expect(page.getByTestId('document-file-diff')).toContainText('Playwright archive prompt');
 
@@ -146,7 +146,7 @@ test('web knowledge workspace archives an agent conversation into a markdown doc
       archivedContent = await readContextText(request, virtualPath);
       return archivedContent;
     }).toContain('Playwright archive prompt');
-    expect(archivedContent).toContain('---');
+    expect(archivedContent).toContain('***');
 
     await page.getByTestId('document-file-change-undo').click();
     await expect.poll(async () => readContextText(request, virtualPath)).toBe(`${initialContent}\n`);
@@ -154,12 +154,10 @@ test('web knowledge workspace archives an agent conversation into a markdown doc
     await page.getByTestId('document-file-change-redo').click();
     await expect.poll(async () => readContextText(request, virtualPath)).toBe(archivedContent);
     await expect(page.getByTestId('document-file-diff')).toContainText('Playwright archive prompt');
-    await expect(page.getByTestId('archive-status')).toContainText('Archived');
 
     await page.getByTestId('normal-input').fill('Playwright archive follow-up');
     await page.getByTestId('normal-send').click();
     await expect(page.getByTestId('normal-messages')).toContainText('Playwright archive follow-up');
-    await expect(page.getByTestId('archive-status')).toContainText('Archive stale');
 
     await page.reload();
     await expect(page.getByTestId('document-workspace')).toBeVisible();
@@ -189,7 +187,7 @@ test('web knowledge workspace negotiates text pdf and unsupported document reque
     /^data:image\/svg\+xml;base64,/
   );
   await expect(page.getByTestId('document-save')).toBeDisabled();
-  await expect(page.getByTestId('markdown-mode-switch')).toHaveCount(0);
+  await expect(page.getByTestId('markdown-mode-toggle')).toHaveCount(0);
 
   await page.getByTestId('document-node-file').filter({ hasText: 'report.pdf' }).click();
   await expect(page.getByTestId('document-pdf-viewer')).toBeVisible();
@@ -224,10 +222,10 @@ test('web knowledge workspace renders markdown mermaid and images while preservi
   await expect(page.getByTestId('document-workspace')).toBeVisible();
   await page.getByTestId('document-node-file').filter({ hasText: 'md-mermaid.md' }).click();
 
-  await expect(page.getByTestId('markdown-mode-switch')).toBeVisible();
-  await expect(page.getByTestId('markdown-mode-viewer')).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByTestId('markdown-mode-viewer')).toHaveText('View');
-  await expect(page.getByTestId('markdown-mode-edit')).toHaveText('Edit');
+  const markdownModeToggle = page.getByTestId('markdown-mode-toggle');
+  await expect(markdownModeToggle).toBeVisible();
+  await expect(markdownModeToggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(markdownModeToggle).toHaveAttribute('title', 'Edit');
   await expect(page.getByTestId('document-editor')).toContainText('Normal Markdown paragraph for viewer mode.');
   await expect(page.getByTestId('markdown-mermaid-preview')).toBeVisible();
   const mermaidBlock = page.locator('.milkdown-code-block').filter({
@@ -244,18 +242,16 @@ test('web knowledge workspace renders markdown mermaid and images while preservi
   await expect(page.locator('[data-testid="document-editor-surface"] img')).toHaveCount(1);
   await expect(page.locator('[data-testid="document-editor-surface"] img[src*=\"document-asset?path=%2Freferences%2Fflow.svg\"]')).toHaveCount(1);
 
-  await page.getByTestId('markdown-mode-edit').click();
-  await expect(page.getByTestId('markdown-mode-edit')).toHaveAttribute('aria-pressed', 'true');
-  const editMermaidBlock = page.locator('.milkdown-code-block').filter({
-    hasText: 'classDiagram'
-  });
-  await expect(editMermaidBlock).toHaveAttribute('data-readonly-language', 'mermaid');
-  await expect(page.getByTestId('document-editor-input')).toContainText('classDiagram');
-  await expect(page.getByTestId('document-editor-input')).toContainText('Draft --> Preview');
+  await markdownModeToggle.click();
+  await expect(markdownModeToggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(markdownModeToggle).toHaveAttribute('title', 'View');
+  await expect(page.getByTestId('document-editor-input')).toHaveValue(/classDiagram/);
+  await expect(page.getByTestId('document-editor-input')).toHaveValue(/Draft --> Preview/);
   await expect(page.locator('.markdown-mermaid-preview')).toHaveCount(0);
 
-  await page.getByTestId('markdown-mode-viewer').click();
-  await expect(page.getByTestId('markdown-mode-viewer')).toHaveAttribute('aria-pressed', 'true');
+  await markdownModeToggle.click();
+  await expect(markdownModeToggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(markdownModeToggle).toHaveAttribute('title', 'Edit');
   await expect(page.getByTestId('document-editor')).toContainText('Normal Markdown paragraph for viewer mode.');
   await expect(page.getByTestId('markdown-mermaid-preview')).toBeVisible();
   await expect(page.locator('.milkdown-code-block').filter({
@@ -271,14 +267,43 @@ test('web knowledge workspace renders markdown mermaid and images while preservi
   await expect(page.locator('[data-testid="document-editor-surface"] img[src*=\"document-asset?path=%2Freferences%2Fflow.svg\"]')).toHaveCount(1);
 });
 
+test('web knowledge workspace shows markdown table source in edit mode', async ({ page }) => {
+  await page.goto('/#/');
+
+  await expect(page.getByTestId('document-workspace')).toBeVisible();
+  await page.getByTestId('document-node-file').filter({ hasText: 'table-source.md' }).click();
+
+  const markdownModeToggle = page.getByTestId('markdown-mode-toggle');
+  await expect(markdownModeToggle).toBeVisible();
+  await expect(markdownModeToggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(markdownModeToggle).toHaveAttribute('title', 'Edit');
+  await expect(page.getByTestId('document-editor')).toContainText('Normal Markdown paragraph for table mode.');
+
+  await markdownModeToggle.click();
+  await expect(markdownModeToggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(markdownModeToggle).toHaveAttribute('title', 'View');
+  await expect(page.getByTestId('document-editor-input')).toHaveValue(/\| Name\s+\| Type\s+\|/);
+  await expect(page.getByTestId('document-editor-input')).toHaveValue(/\| id\s+\| string \|/);
+
+  await markdownModeToggle.click();
+  await expect(markdownModeToggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(markdownModeToggle).toHaveAttribute('title', 'Edit');
+
+  await markdownModeToggle.click();
+  await expect(markdownModeToggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(markdownModeToggle).toHaveAttribute('title', 'View');
+  await expect(page.getByTestId('document-editor-input')).toHaveValue(/\| Name\s+\| Type\s+\|/);
+  await expect(page.getByTestId('document-editor-input')).not.toHaveValue(/```cp-md-table/);
+});
+
 test('web knowledge workspace renders pdf wiki embeds as inline iframes', async ({ page }) => {
   await page.goto('/#/');
 
   await page.getByTestId('document-node-file').filter({ hasText: 'pdf-embed.md' }).click();
 
-  await expect(page.getByTestId('markdown-mode-switch')).toBeVisible();
-  await expect(page.getByTestId('markdown-mode-viewer')).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByTestId('markdown-mode-viewer')).toHaveText('View');
+  await expect(page.getByTestId('markdown-mode-toggle')).toBeVisible();
+  await expect(page.getByTestId('markdown-mode-toggle')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('markdown-mode-toggle')).toHaveAttribute('title', 'Edit');
   await expect(page.getByTestId('document-editor')).toContainText('Normal Markdown paragraph for PDF viewer fallback.');
   await expect(page.locator('[data-testid="document-editor-surface"] img')).toHaveCount(0);
   const pdfEmbed = page.locator('[data-testid="document-editor-surface"] .pdf-inline-embed iframe');
@@ -377,7 +402,6 @@ test('web knowledge workspace edits AgentView prompt model and inheritance throu
     await page.getByTestId('agent-view-tool-search_in_scope').uncheck();
     await page.getByTestId('agent-view-tool-write_file').check();
     await page.getByTestId('agent-view-save').click();
-    await expect(page.getByTestId('agent-view-save')).toBeDisabled();
     await expect.poll(async () => (await readContextJson(request, `${ownerPath}/.agent.json`)).description)
       .toBe('Updated parent description from AgentView');
     await expect.poll(async () => (await readContextJson(request, `${ownerPath}/.agent.json`)).instructions)

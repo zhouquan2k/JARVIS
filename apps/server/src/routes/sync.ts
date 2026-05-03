@@ -79,7 +79,8 @@ export function createSyncRouter(options: { service: SyncService; config: Server
             return c.json(service.push(syncKey, body.conversations, body.deletedConversations ?? []));
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Invalid push request.';
-            return c.json({ error: message }, 400);
+            const code = /syncKey/i.test(message) ? 'SYNC_KEY_INVALID' : 'SYNC_PUSH_INVALID';
+            return c.json({ error: message, code }, 400);
         }
     });
 
@@ -90,7 +91,8 @@ export function createSyncRouter(options: { service: SyncService; config: Server
             return c.json(service.pull(syncKey, body.cursor));
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Invalid pull request.';
-            return c.json({ error: message }, 400);
+            const code = /syncKey/i.test(message) ? 'SYNC_KEY_INVALID' : 'SYNC_PULL_INVALID';
+            return c.json({ error: message, code }, 400);
         }
     });
 

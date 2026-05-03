@@ -5,6 +5,7 @@ import { DEFAULT_WORKSPACE_AGENT_KEY } from '../interfaces/IContextProvider';
 import type {
     ContextDocument,
     ContextNode,
+    ProjectDocumentEntry,
     ContextSearchMatch,
     ContextSearchRequest,
     CreateContextNodeInput,
@@ -95,6 +96,10 @@ function nodeHasChildren(nodes: StoredContextNode[], path: string): boolean {
 function getAgentScopePath(agentKey: string): string {
     if (agentKey === '/') return '/';
     return agentKey.endsWith('/') ? agentKey.slice(0, -1) : agentKey;
+}
+
+function isMarkdownPath(targetPath: string): boolean {
+    return targetPath.endsWith('.md') || targetPath.endsWith('.markdown');
 }
 
 function ensureNode(snapshot: StoredWorkspaceSnapshot, path: string): StoredContextNode {
@@ -248,6 +253,36 @@ export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): I
                     }))
                 }))
                 .sort((left, right) => right.updatedAt - left.updatedAt);
+        },
+        async getProjectDocuments(curNode: string): Promise<ProjectDocumentEntry[]> {
+            const normalizedCurNode = normalizePath(curNode) ?? '/';
+            const currentNode = normalizedCurNode === '/'
+                ? null
+                : currentSnapshot.nodes.find((node) => node.path === normalizedCurNode) ?? null;
+            if (normalizedCurNode !== '/' && !currentNode) {
+                throw new Error(`Node does not exist: ${curNode}`);
+            }
+
+            const scopePath = currentNode?.kind === 'file'
+                ? normalizePath(currentNode.parentPath) ?? '/'
+                : normalizedCurNode;
+            const prefix = scopePath === '/' ? '/' : `${scopePath}/`;
+
+            return currentSnapshot.nodes
+                .filter((node) => {
+                    if (node.kind !== 'file' || !isMarkdownPath(node.path)) {
+                        return false;
+                    }
+
+                    return scopePath === '/'
+                        ? true
+                        : node.path === scopePath || node.path.startsWith(prefix);
+                })
+                .map((node) => ({
+                    path: node.path,
+                    name: node.name
+                }))
+                .sort((left, right) => left.path.localeCompare(right.path, 'zh-Hans-CN'));
         },
         async readDocument(path: string): Promise<ContextDocument> {
             const normalizedPath = normalizePath(path);

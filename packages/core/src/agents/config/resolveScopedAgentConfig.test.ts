@@ -336,6 +336,12 @@ describe('resolveScopedAgentConfig', () => {
                     agentConfigs: {}
                 };
             },
+            async getConversations() {
+                return [];
+            },
+            async getProjectDocuments() {
+                return [];
+            },
             async readDocument(path) {
                 if (path === '/workspace/archive') {
                     throw new Error('EISDIR: illegal operation on a directory, read');

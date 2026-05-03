@@ -6,6 +6,12 @@ JARVIS is a human-AI collaboration space for evolving Markdown documents around 
 
 Rather than treating chat as disposable conversation, JARVIS treats documents as the durable center of collaboration. The goal is to help a person and an AI jointly maintain context, refine solutions, and turn ongoing discussion into structured knowledge.
 
+## UI Screenshots
+
+![JARVIS UI screenshot 1](docs/screenshots/1777231314622.jpg)
+
+![JARVIS UI screenshot 2](docs/screenshots/1777234089398.jpg)
+
 ## What JARVIS Is
 
 - A workspace organized by problem domains, represented as a tree of folders and Markdown files.
@@ -75,7 +81,7 @@ Key risks currently called out in the product notes:
 
 ## Documentation
 
-- Product direction: [docs/new_overall.md](docs/new_overall.md)
+- Product direction: [docs/index.md](docs/index.md)
 - Architecture overview: [ARCHITECTURE.md](ARCHITECTURE.md)
 - Contribution guide: [CONTRIBUTING.md](CONTRIBUTING.md)
 - Security policy: [SECURITY.md](SECURITY.md)

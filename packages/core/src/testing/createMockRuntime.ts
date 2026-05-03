@@ -251,6 +251,21 @@ class MockStreamingProvider implements IAgentCapableProvider {
         const attachmentEchoText = prompt.includes('TRIGGER_ATTACHMENT_ECHO')
             ? buildAttachmentEchoText(this.id, options.modelId, options.attachments || [])
             : null;
+        const functionalParts = prompt.includes('TRIGGER_FUNCTIONAL_PARTS')
+            ? [
+                {
+                    id: 'mock-functional-tool-exchange',
+                    kind: 'tool_exchange' as const,
+                    title: 'mock_tool',
+                    content: JSON.stringify({
+                        request: { name: 'mock_tool', arguments: { prompt } },
+                        response: { ok: true, echoedPrompt: prompt }
+                    }, null, 2),
+                    requestContent: JSON.stringify({ name: 'mock_tool', arguments: { prompt } }, null, 2),
+                    responseContent: JSON.stringify({ ok: true, echoedPrompt: prompt }, null, 2)
+                }
+            ]
+            : undefined;
         const archiveResponseText = buildArchiveMockResponse(prompt);
         const finalText = isAnalysisPrompt
             ? this.buildAnalysisText(userPrompt, outputA, outputB)
@@ -269,7 +284,8 @@ class MockStreamingProvider implements IAgentCapableProvider {
                 text: partial,
                 annotations: structuredResponse && partial.length === finalText.length
                     ? structuredResponse.annotations
-                    : undefined
+                    : undefined,
+                functionalParts: partial.length === finalText.length ? functionalParts : undefined
             });
             await sleep(charDelay);
         }
@@ -278,7 +294,8 @@ class MockStreamingProvider implements IAgentCapableProvider {
             text: finalText,
             conversationId: options.context?.conversationId || crypto.randomUUID(),
             messageId: crypto.randomUUID(),
-            annotations: structuredResponse?.annotations
+            annotations: structuredResponse?.annotations,
+            functionalParts
         };
     }
 

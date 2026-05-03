@@ -20,6 +20,7 @@ function createProvider(): ContextProvider {
             messages: [],
             updatedAt: 100
         }]),
+        getProjectDocuments: vi.fn(async () => [{ path: '/welcome.md', name: 'welcome.md' }]),
         readDocument: vi.fn(async (path: string) => ({ path, mimeType: 'text/markdown', dataBase64: encodeTextDocument('# hello') })),
         writeDocument: vi.fn(async () => ({ version: 'v2', updatedAt: 2 })),
         createNode: vi.fn(async (input) => ({
@@ -55,6 +56,9 @@ describe('http context service', () => {
                 id: 'conversation-1',
                 documentPaths: ['/welcome.md']
             })
+        ]);
+        await expect(service.getProjectDocuments('/')).resolves.toEqual([
+            { path: '/welcome.md', name: 'welcome.md' }
         ]);
         await expect(service.readDocument('/welcome.md')).resolves.toEqual({
             path: '/welcome.md',
@@ -92,6 +96,7 @@ describe('http context service', () => {
         expect(provider.initializeAccess).toHaveBeenCalledTimes(1);
         expect(provider.getContext).toHaveBeenCalledTimes(1);
         expect(provider.getConversations).toHaveBeenCalledWith({ documentPath: '/welcome.md' });
+        expect(provider.getProjectDocuments).toHaveBeenCalledWith('/');
         expect(provider.readDocument).toHaveBeenCalledWith('/welcome.md');
         expect(provider.writeDocument).toHaveBeenCalledWith({
             path: '/welcome.md',

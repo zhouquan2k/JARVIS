@@ -28,7 +28,10 @@ export function createProviderConfigRouter() {
         applyCorsHeaders(c);
 
         if (!config) {
-            return c.json({ error: `Provider config '${providerId}' not found.` }, 404);
+            return c.json({
+                error: `Provider config '${providerId}' not found.`,
+                code: 'PROVIDER_CONFIG_NOT_FOUND'
+            }, 404);
         }
 
         c.header('Cache-Control', PROVIDER_CONFIG_CACHE_CONTROL);

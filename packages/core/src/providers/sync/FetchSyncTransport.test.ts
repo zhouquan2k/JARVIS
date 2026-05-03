@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { HttpApiError } from '../../interfaces/HttpApiError';
 import { FetchSyncTransport } from './FetchSyncTransport';
 
 const originalFetch = globalThis.fetch;
@@ -36,5 +37,26 @@ describe('FetchSyncTransport', () => {
             conversations: [],
             nextCursor: 10
         });
+    });
+
+    it('preserves server error message and code', async () => {
+        const transport = new FetchSyncTransport({
+            syncKey: 'workspace-a',
+            baseUrl: 'http://sync.test',
+            fetchImpl: async () => new Response(JSON.stringify({
+                error: 'syncKey must not be empty.',
+                code: 'SYNC_KEY_INVALID'
+            }), {
+                status: 400
+            })
+        });
+
+        await expect(transport.pull(null)).rejects.toMatchObject({
+            name: 'HttpApiError',
+            message: 'syncKey must not be empty.',
+            status: 400,
+            code: 'SYNC_KEY_INVALID',
+            source: 'sync'
+        } satisfies Partial<HttpApiError>);
     });
 });

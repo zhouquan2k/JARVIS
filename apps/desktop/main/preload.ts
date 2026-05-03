@@ -4,6 +4,7 @@ import {
     DESKTOP_CONTEXT_DELETE_NODE_CHANNEL,
     DESKTOP_CONTEXT_GET_CONVERSATIONS_CHANNEL,
     DESKTOP_CONTEXT_GET_CONTEXT_CHANNEL,
+    DESKTOP_CONTEXT_GET_PROJECT_DOCUMENTS_CHANNEL,
     DESKTOP_CONTEXT_INITIALIZE_CHANNEL,
     DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL,
     DESKTOP_CONTEXT_RENAME_NODE_CHANNEL,
@@ -33,6 +34,9 @@ contextBridge.exposeInMainWorld('chatprismDesktop', {
     },
     getConversations(query: { documentPath?: string }) {
         return ipcRenderer.invoke(DESKTOP_CONTEXT_GET_CONVERSATIONS_CHANNEL, query);
+    },
+    getProjectDocuments(curNode: string) {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_GET_PROJECT_DOCUMENTS_CHANNEL, curNode);
     },
     readContextDocument(path: string) {
         return ipcRenderer.invoke(DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL, path);

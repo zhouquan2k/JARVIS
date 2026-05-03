@@ -1,6 +1,12 @@
 import type { ProviderModelCatalog } from '../../config';
 import type { AgentModelTurn, AgentToolCall } from './IAgentCapableProvider';
-import type { ConversationRole, MessageAnnotation, MessageAttachment, MessageRequestSnapshot } from './Conversation';
+import type {
+  ConversationRole,
+  MessageAnnotation,
+  MessageAttachment,
+  MessageFunctionalPart,
+  MessageRequestSnapshot
+} from './Conversation';
 
 export interface ProviderContextMessage {
   role: ConversationRole;
@@ -8,18 +14,22 @@ export interface ProviderContextMessage {
   attachments?: MessageAttachment[];
 }
 
+export type ReasoningEffort = 'low' | 'medium' | 'high';
+
 export interface SendMessageOptions {
   context?: { parentMessageId?: string, conversationId?: string };
   modelId?: string;
   attachments?: MessageAttachment[];
   history?: ProviderContextMessage[];
   modelOptions?: Record<string, boolean>;
+  reasoningEffort?: ReasoningEffort;
 }
 
 export interface ProviderStreamUpdate {
   text: string;
   annotations?: MessageAnnotation[];
   toolCalls?: AgentToolCall[];
+  functionalParts?: MessageFunctionalPart[];
 }
 
 export interface ProviderSendResult {
@@ -30,6 +40,7 @@ export interface ProviderSendResult {
   toolCalls?: AgentToolCall[];
   modelTurn?: AgentModelTurn;
   requestSnapshot?: MessageRequestSnapshot;
+  functionalParts?: MessageFunctionalPart[];
 }
 
 export interface ProviderDocumentCapability {

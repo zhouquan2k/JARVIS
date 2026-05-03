@@ -114,6 +114,55 @@ describe('DocumentWorkspaceView', () => {
         expect(wrapper.findAll('.grid-pane')).toHaveLength(3);
     });
 
+    it('keeps AgentView visible and passes owner index document when an agent owner index exists', async () => {
+        const wrapper = mount(DocumentWorkspaceView, {
+            props: {
+                contextProvider: createMockContextProvider({
+                    nodes: [
+                        { path: '/docs', name: 'docs', kind: 'directory' },
+                        { path: '/docs/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/docs' },
+                        { path: '/docs/index.md', name: 'index.md', kind: 'file', parentPath: '/docs' }
+                    ],
+                    documents: {
+                        '/docs/.agent.json': JSON.stringify({
+                            name: 'Docs Agent',
+                            instructions: 'Handle docs.'
+                        }),
+                        '/docs/index.md': '# Docs index'
+                    }
+                })
+            },
+            global: {
+                stubs: {
+                    AgentPane: {
+                        template: '<div data-testid="agent-pane" />'
+                    },
+                    AgentView: {
+                        props: ['indexDocument'],
+                        template: '<div data-testid="agent-view-stub" :data-index-path="indexDocument?.path ?? \'\'" />'
+                    },
+                    DocumentEditorPane: {
+                        props: ['activePath', 'activeDocument'],
+                        template: '<div data-testid="document-editor" :data-active-path="activePath" />'
+                    }
+                }
+            }
+        });
+
+        await flushPromises();
+        await wrapper.vm.$nextTick();
+        await wrapper.get('[data-path="/docs"]').trigger('click');
+        await flushPromises();
+
+        expect(wrapper.get('[data-testid="agent-view-stub"]').attributes('data-index-path')).toBe('/docs/index.md');
+        expect(wrapper.find('[data-testid="document-editor"]').exists()).toBe(false);
+
+        const documentStore = useDocumentWorkspaceStore();
+        expect(documentStore.selectedNodePath).toBe('/docs');
+        expect(documentStore.activePath).toBeNull();
+        expect(documentStore.agentIndexPath).toBe('/docs/index.md');
+    });
+
     it('allows the host to override the default assistant pane through the slot', async () => {
         const wrapper = mount(DocumentWorkspaceView, {
             props: {
@@ -165,7 +214,10 @@ describe('DocumentWorkspaceView', () => {
             global: {
                 stubs: {
                     AgentPane: { template: '<div data-testid="agent-pane" />' },
-                    AgentView: { template: '<div data-testid="agent-view-stub" />' },
+                    AgentView: {
+                        props: ['indexDocument'],
+                        template: '<div data-testid="agent-view-stub" :data-index-path="indexDocument?.path ?? \'\'" />'
+                    },
                     DocumentEditorPane: { template: '<div data-testid="document-editor" />' }
                 }
             }
@@ -173,6 +225,7 @@ describe('DocumentWorkspaceView', () => {
 
         await flushPromises();
         expect(wrapper.find('[data-testid="agent-view-stub"]').exists()).toBe(true);
+        expect(wrapper.get('[data-testid="agent-view-stub"]').attributes('data-index-path')).toBe('');
 
         await wrapper.get('[data-path="/docs"]').trigger('click');
         await flushPromises();
@@ -364,6 +417,101 @@ describe('DocumentWorkspaceView', () => {
         expect(wrapper.emitted('request-workspace-switch')).toEqual([['/chat']]);
     });
 
+    it('opens a linked markdown document through the workspace store', async () => {
+        const wrapper = mount(DocumentWorkspaceView, {
+            props: {
+                contextProvider: createMockContextProvider({
+                    nodes: [
+                        { path: '/docs', name: 'docs', kind: 'directory' },
+                        { path: '/docs/start.md', name: 'start.md', kind: 'file', parentPath: '/docs' },
+                        { path: '/docs/next.md', name: 'next.md', kind: 'file', parentPath: '/docs' }
+                    ],
+                    documents: {
+                        '/docs/start.md': '# Start',
+                        '/docs/next.md': '# Next'
+                    }
+                })
+            },
+            global: {
+                stubs: {
+                    AgentPane: {
+                        template: '<div data-testid="agent-pane" />'
+                    },
+                    DocumentEditorPane: {
+                        template: '<button data-testid="document-editor-link" @click="$emit(\'open-document-link\', \'/docs/next.md\')" />'
+                    }
+                }
+            }
+        });
+
+        await flushPromises();
+        const documentStore = useDocumentWorkspaceStore();
+        await documentStore.openNode('/docs/start.md');
+        await flushPromises();
+
+        expect(documentStore.activePath).toBe('/docs/start.md');
+
+        await wrapper.get('[data-testid="document-editor-link"]').trigger('click');
+        await flushPromises();
+
+        expect(documentStore.selectedNodePath).toBe('/docs/next.md');
+        expect(documentStore.activePath).toBe('/docs/next.md');
+        expect(documentStore.nodeHistory).toEqual(['/docs/start.md', '/docs/next.md']);
+        expect(documentStore.nodeHistoryIndex).toBe(1);
+    });
+
+    it('reuses the same workspace navigation when AgentView emits a markdown document link', async () => {
+        const wrapper = mount(DocumentWorkspaceView, {
+            props: {
+                contextProvider: createMockContextProvider({
+                    nodes: [
+                        { path: '/docs', name: 'docs', kind: 'directory' },
+                        { path: '/docs/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/docs' },
+                        { path: '/docs/index.md', name: 'index.md', kind: 'file', parentPath: '/docs' },
+                        { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' }
+                    ],
+                    documents: {
+                        '/docs/.agent.json': JSON.stringify({
+                            name: 'Docs Agent',
+                            instructions: 'Handle docs.'
+                        }),
+                        '/docs/index.md': '# Docs index',
+                        '/docs/guide.md': '# Guide'
+                    }
+                })
+            },
+            global: {
+                stubs: {
+                    AgentPane: {
+                        template: '<div data-testid="agent-pane" />'
+                    },
+                    AgentView: {
+                        template: '<button data-testid="agent-view-link" @click="$emit(\'open-document-link\', \'/docs/guide.md\')" />'
+                    },
+                    DocumentEditorPane: {
+                        template: '<div data-testid="document-editor" />'
+                    }
+                }
+            }
+        });
+
+        await flushPromises();
+        await wrapper.get('[data-path="/docs"]').trigger('click');
+        await flushPromises();
+
+        const documentStore = useDocumentWorkspaceStore();
+        expect(documentStore.selectedNodePath).toBe('/docs');
+        expect(documentStore.activePath).toBeNull();
+
+        await wrapper.get('[data-testid="agent-view-link"]').trigger('click');
+        await flushPromises();
+
+        expect(documentStore.selectedNodePath).toBe('/docs/guide.md');
+        expect(documentStore.activePath).toBe('/docs/guide.md');
+        expect(documentStore.nodeHistory).toEqual(['/docs', '/docs/guide.md']);
+        expect(documentStore.nodeHistoryIndex).toBe(1);
+    });
+
     it('restores the saved agent conversation and document selection when remounting', async () => {
         const chatStore = useChatStore();
         const storage = new MockConversationStorage([
@@ -524,6 +672,71 @@ describe('DocumentWorkspaceView', () => {
         expect(documentStore.selectedNodePath).toBe('/docs/archive');
         expect(documentStore.activePath).toBeNull();
         expect(documentStore.activeDocument).toBeNull();
+    });
+
+    it('forwards the middle pane toggle from the document header and resets state after switching documents', async () => {
+        const wrapper = mount(DocumentWorkspaceView, {
+            props: {
+                contextProvider: createMockContextProvider({
+                    nodes: [
+                        { path: '/docs', name: 'docs', kind: 'directory' },
+                        { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' },
+                        { path: '/docs/reference.md', name: 'reference.md', kind: 'file', parentPath: '/docs' }
+                    ],
+                    documents: {
+                        '/docs/guide.md': '# Guide',
+                        '/docs/reference.md': '# Reference'
+                    }
+                })
+            },
+            global: {
+                stubs: {
+                    AgentPane: {
+                        template: '<div data-testid="agent-pane" />'
+                    },
+                    DocumentEditorPane: {
+                        props: ['middlePaneMode'],
+                        template: `
+                          <div data-testid="document-editor" :data-middle-pane-mode="middlePaneMode">
+                            <button data-testid="document-middle-pane-toggle" @click="$emit('toggle-middle-pane-mode')" />
+                            <button data-testid="document-editor-link" @click="$emit('open-document-link', '/docs/reference.md')" />
+                            <div data-testid="document-editor-scroll-shell" style="overflow:auto">
+                              <div data-testid="document-editor-surface" />
+                            </div>
+                          </div>
+                        `
+                    }
+                }
+            }
+        });
+
+        await flushPromises();
+        const documentStore = useDocumentWorkspaceStore();
+        expect(documentStore.middlePaneMode).toBe('default');
+        expect(documentStore.middlePaneZoom).toBe(1);
+
+        await documentStore.openNode('/docs/guide.md');
+        await flushPromises();
+        await wrapper.get('[data-testid="document-middle-pane-toggle"]').trigger('click');
+        expect(documentStore.middlePaneMode).toBe('maximized');
+        expect(documentStore.panelSizes).toEqual([20, 80, 0]);
+
+        const editorScrollShell = wrapper.get('[data-testid="document-editor-scroll-shell"]').element as HTMLElement;
+        Object.defineProperty(editorScrollShell, 'clientWidth', { value: 200, configurable: true });
+        Object.defineProperty(editorScrollShell, 'clientHeight', { value: 120, configurable: true });
+        editorScrollShell.scrollLeft = 40;
+        editorScrollShell.scrollTop = 30;
+        documentStore.setMiddlePaneZoom(1.5);
+        await wrapper.vm.$nextTick();
+        await wrapper.vm.$nextTick();
+        expect(editorScrollShell.scrollLeft).toBe(110);
+        expect(editorScrollShell.scrollTop).toBe(75);
+        expect(documentStore.middlePaneZoom).toBe(1.5);
+
+        await wrapper.get('[data-testid="document-editor-link"]').trigger('click');
+        await flushPromises();
+        expect(documentStore.middlePaneMode).toBe('default');
+        expect(documentStore.middlePaneZoom).toBe(1);
     });
 
 });

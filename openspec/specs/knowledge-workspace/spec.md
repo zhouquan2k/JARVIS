@@ -1,4 +1,13 @@
-English | [Chinese](spec.zh-CN.md) ## MODIFIED Requirements ### Requirement: Knowledge workspace MUST provide a default assistant pane that is bound to the active scope agent
+English | [Chinese](spec.zh-CN.md)
+
+## Purpose
+Define knowledge workspace behavior for document viewing and editing, agent-scoped assistant flows, viewer search, save-state feedback, default index documents, and workspace-backed file reference resolution.
+
+## Requirements
+
+## MODIFIED Requirements
+
+### Requirement: Knowledge workspace MUST provide a default assistant pane that is bound to the active scope agent
 knowledge workspace的右栏 MUST defaultrender真实的 AI 对话 pane，并将其绑定到current激活文件或directoryresolve得到的生效 Agent 上下文，而不是始终以global固定的通用聊天身份运行。该 pane MUST continue复用现有聊天detailsview，但在currentselected节点为document时，右栏 MUST 先enter该document的关联conversationlist，在currentselected节点为绑定 Agent 的directory时，右栏 MUST 先enter该 Agent 的localconversationlist，再由the userswitch到具体conversationdetails。document关联conversationlist MUST 通过 `IContextProvider` provide的通用conversationquerycapability获取，而directory级 Agent conversationlist MUST 复用current `agentKey` scope下的localconversation聚合result，而不是另起一套list实现。该工作区在从对话模式return时 MUST recovery之前save的selected节点、活动路径与currentconversationdetails，使 Agent 主viewcontinue停留在离开前的上下文上。 #### Scenario: Render the default assistant pane with the active scope agent
 - **WHEN** hostenterknowledge workspace且current激活节点已经resolve出一个生效 Agent
 - **THEN** The system MUST 在右栏renderdefault的 `AgentPane`
@@ -48,7 +57,10 @@ knowledge workspace的右栏 MUST defaultrender真实的 AI 对话 pane，并将
 - **AND** The system MUST NOT 要求the user必须先打开该directory下的文件才update右栏身份 #### Scenario: Show manually bound conversations in the agent-scoped list
 - **WHEN** the user在普通对话工作台中将一条localconversation手动绑定到currentdirectory对应的 Agent key
 - **THEN** 该conversation MUST 出现在knowledge workspaceright-side `AgentPane` 的current Agent conversationlist中
-- **AND** The system MUST NOT 要求该conversation必须由knowledge workspaceautomaticallycreate或automatically绑定后才visible ## ADDED Requirements ### Requirement: Knowledge workspace MUST surface file changes with line-level undo and redo
+- **AND** The system MUST NOT 要求该conversation必须由knowledge workspaceautomaticallycreate或automatically绑定后才visible #### Scenario: Keep an existing conversation bound to its own agent in detail mode
+- **WHEN** the user opens an existing conversation detail in the knowledge workspace and that conversation already persists `conversation.agentKey`
+- **THEN** follow-up sends MUST use the Agent context resolved from that persisted conversation binding
+- **AND** The system MUST NOT override that conversation's Agent tools, instructions, or model selection only because the currently selected tree node resolves to a different Agent ## ADDED Requirements ### Requirement: Knowledge workspace MUST surface file changes with line-level undo and redo
 knowledge workspace MUST 为文件修订resultprovide diff 展示与行级 undo/redo 入口，以supportthe user理解和fallback Agent 写盘后的变更。 #### Scenario: Show the latest file change as a line diff
 - **WHEN** 某个文件修订tool成功修改current工作区文件
 - **THEN** UI MUST 能根据修改前后text展示 line diff
@@ -177,7 +189,22 @@ The knowledge workspace main Markdown viewer SHALL display wiki-style PDF embeds
 - **THEN** the system MUST NOT inject inline PDF iframes; the source text remains editable as-is #### Scenario: PDF embed survives external content sync
 - **WHEN** an inline PDF embed has been injected into the document body
 - **AND** external content sync causes ProseMirror to reconcile the DOM
-- **THEN** the system MUST re-inject the PDF embed so it remains visible to the user ### Requirement: Knowledge workspace Markdown viewer SHALL preserve existing viewer boundaries
+- **THEN** the system MUST re-inject the PDF embed so it remains visible to the user
+
+### Requirement: Knowledge workspace Markdown viewer SHALL route Markdown document links to workspace navigation
+The knowledge workspace main Markdown viewer SHALL treat links to other Markdown documents as in-workspace navigation targets. When a user clicks a relative or resolved link to a `.md` or `.markdown` document, the system MUST open that target as the active node in the workspace and preserve node history so back/forward navigation returns to the previous selection. Non-Markdown links MUST keep their existing behavior.
+
+#### Scenario: Open a linked Markdown document from the main viewer
+- **WHEN** a `text/markdown` document in viewer mode contains a link to another `.md` or `.markdown` file
+- **AND** the user clicks that link
+- **THEN** the system MUST open the linked document as the active workspace node
+- **AND** the system MUST record the previous selection in node history
+
+#### Scenario: Keep non-Markdown links on their existing path
+- **WHEN** a `text/markdown` document in viewer mode contains a link that does not resolve to a Markdown document
+- **THEN** the system MUST keep the existing non-navigation behavior for that link type
+
+### Requirement: Knowledge workspace Markdown viewer SHALL preserve existing viewer boundaries
 The Mermaid and image preview behavior SHALL apply only to the main knowledge workspace Markdown document viewer. Chat-message Markdown rendering, PDF viewing, unsupported viewer handling, diff display, undo/redo, and document registry resolution MUST keep their existing responsibilities. #### Scenario: Leave chat message Markdown rendering unchanged
 - **WHEN** a chat message is rendered through the chat Markdown renderer
 - **THEN** this change MUST NOT require the chat message renderer to use the main document viewer Mermaid or image preview implementation #### Scenario: Preserve PDF and unsupported document behavior
@@ -201,22 +228,35 @@ The knowledge workspace MUST support archiving the full visible message history 
 - **WHEN** the current conversation contains soft-deleted messages
 - **THEN** the system MUST exclude those deleted messages from the archive input
 
-### Requirement: Knowledge workspace MUST split Q and A by the first standard markdown divider
-The knowledge workspace archive flow MUST identify the top-level `Q` / `A` boundary using only the first Markdown standard horizontal divider in the active document. If the document does not contain such a divider, the system MUST append `---` at the end of the document before producing the merged result. `***` MUST NOT be treated as the archive divider.
+### Requirement: Knowledge workspace MUST show lightweight archive progress inside the chat thread
+When the user triggers archive from an eligible agent conversation, the knowledge workspace MUST immediately show lightweight archive progress inside the current chat thread using the existing functional-parts/tool-call presentation, so the user can see that the archive is running before the final result arrives.
+
+#### Scenario: Show an in-thread archive tool call while archiving
+- **WHEN** the user clicks archive in an eligible agent conversation
+- **THEN** the system MUST immediately show a lightweight archive progress event in the current chat thread
+- **AND** that progress event MUST use the chat functional-parts/tool-call presentation rather than only a toolbar-level status
+
+#### Scenario: Replace archive progress with the final archive result
+- **WHEN** the archive operation succeeds, produces no change, or fails
+- **THEN** the system MUST replace or update the in-thread archive progress event with a final tool-result style event
+- **AND** the system MUST NOT persist that temporary archive progress event as a normal conversation message
+
+### Requirement: Knowledge workspace MUST split Q and A by the first triple-asterisk markdown divider
+The knowledge workspace archive flow MUST identify the top-level `Q` / `A` boundary using only the first `***` Markdown horizontal divider in the active document. If the document does not contain such a divider, the system MUST append `***` at the end of the document before producing the merged result. `---` MUST NOT be treated as the archive divider.
 
 #### Scenario: Split Q and A by the first valid divider
-- **WHEN** the active Markdown document contains one or more valid Markdown standard dividers
+- **WHEN** the active Markdown document contains one or more valid `***` dividers
 - **THEN** the system MUST use only the first such divider as the top-level `Q` / `A` boundary
 - **AND** later dividers MUST remain part of normal document content
 
 #### Scenario: Insert divider when the document has no archive boundary
 - **WHEN** the active Markdown document does not contain a valid archive divider
-- **THEN** the system MUST append `---` to establish the `Q` / `A` boundary before merging archived content
+- **THEN** the system MUST append `***` to establish the `Q` / `A` boundary before merging archived content
 
-#### Scenario: Ignore triple-asterisk divider for archive boundary detection
-- **WHEN** the active Markdown document contains `***` but no other valid archive divider
-- **THEN** the system MUST NOT treat `***` as the archive boundary
-- **AND** the system MUST still append `---` before merging archived content
+#### Scenario: Ignore triple-dash divider for archive boundary detection
+- **WHEN** the active Markdown document contains `---` but no valid `***` archive divider
+- **THEN** the system MUST NOT treat `---` as the archive boundary
+- **AND** the system MUST still append `***` before merging archived content
 
 ### Requirement: Knowledge workspace MUST preserve diff and undo semantics for archive writes
 Archive writes in the knowledge workspace MUST flow through the existing file change history pipeline rather than bypassing it with a direct document overwrite. The merged result MUST become a normal workspace file change so the user can inspect the diff and use undo/redo to revert or restore the archive result.
@@ -247,3 +287,67 @@ When an eligible archive succeeds, the knowledge workspace MUST persist archive 
 - **WHEN** a conversation has persisted archive metadata and later receives additional visible messages
 - **THEN** the system MUST mark the conversation archive state as stale
 - **AND** the previously persisted archive metadata MUST remain available for UI display
+
+### Requirement: Knowledge workspace MUST expose viewer-level search interface and implement Markdown search
+The knowledge workspace MUST expose search through a viewer-level interface so future document viewers can implement scoped search. In this change, only the Markdown viewer MUST implement in-document keyword search. When the active viewer supports search, search MUST open with `Ctrl+F` or `Cmd+F`, MUST highlight matches inside the active viewer, and MUST support previous/next match navigation.
+
+#### Scenario: Open Markdown document search with shortcut
+- **WHEN** a Markdown document is active and the user presses `Ctrl+F` or `Cmd+F`
+- **THEN** the system MUST open the Markdown search control in the document pane
+- **AND** the system MUST scope that search behavior to the currently active Markdown document
+
+#### Scenario: Highlight and navigate matches
+- **WHEN** the user enters a non-empty search term and the current Markdown document has matches
+- **THEN** the system MUST highlight matches in the viewer
+- **AND** the user MUST be able to move to the previous and next match
+
+#### Scenario: Preserve browser search behavior for non-Markdown documents
+- **WHEN** the current active viewer does not implement the viewer search interface
+- **THEN** the system MUST NOT intercept the browser find shortcut for document viewer search
+
+#### Scenario: Future viewers can implement search through the same interface
+- **WHEN** a future non-Markdown viewer implements the viewer search interface
+- **THEN** the document pane MUST drive search-term updates, match-count reads, and previous/next navigation through that interface
+- **AND** the future viewer MUST own its highlighting and scrolling behavior
+
+### Requirement: Knowledge workspace save button MUST reflect active-document dirty state
+The knowledge workspace document save button MUST use the active document's canonical dirty state and distinguish clean, dirty, and saving visual states for writable text files.
+
+#### Scenario: Show dirty save state
+- **WHEN** the current writable text document has unsaved local changes
+- **THEN** the save button MUST render a dirty visual state
+- **AND** its accessible label or tooltip MUST indicate that unsaved changes exist
+
+#### Scenario: Show saving state
+- **WHEN** the active document save operation is running
+- **THEN** the save button MUST render with a saving visual state
+- **AND** the button MUST remain disabled until the save operation completes
+
+### Requirement: Knowledge workspace MUST show Agent folder index document when present
+When an Agent owner directory is selected, the knowledge workspace MUST open an existing `index.md` in that directory as the main document while preserving the selected directory as the active Agent scope. The system MUST NOT create `index.md` automatically.
+
+#### Scenario: Show index document for Agent owner directory
+- **WHEN** the user selects an Agent owner directory that contains `index.md`
+- **THEN** the system MUST open that `index.md` in the main document pane
+- **AND** the active Agent context MUST continue to resolve from the selected directory
+
+#### Scenario: Keep Agent view when index document is absent
+- **WHEN** the user selects an Agent owner directory that does not contain `index.md`
+- **THEN** the system MUST keep showing `AgentView` in the main pane
+- **AND** the system MUST NOT create a new `index.md`
+
+### Requirement: Knowledge workspace MUST serve as the file-resolution source for `@filename`
+The knowledge workspace MUST allow the chat send pipeline to resolve `@filename` references against the effective Agent context for the conversation. If the conversation is bound to an Agent, resolution MUST use that Agent scope; otherwise it MUST use the default active Agent scope. Resolution MUST prefer exact basename matches; when basename alone is ambiguous within that Agent scope, the system MAY accept a unique path-suffix match. Only documents that can be safely read as text MAY be injected as prompt sections.
+
+#### Scenario: Resolve a unique basename from the effective Agent context
+- **WHEN** chat input contains `@guide.md` and the current Agent context contains exactly one file with that basename
+- **THEN** the system MUST resolve the reference to that unique file
+
+#### Scenario: Allow unique path-suffix resolution when basenames collide
+- **WHEN** multiple files inside the current Agent context share the same basename and the user's reference uniquely matches one path suffix
+- **THEN** the system MUST resolve the reference to that unique path
+
+#### Scenario: Do not inject non-text files as prompt sections
+- **WHEN** an `@filename` reference resolves to a non-text document
+- **THEN** the system MUST block that prompt-section injection
+- **AND** the system MUST return a clear error instead of appending binary content to the prompt

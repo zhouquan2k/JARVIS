@@ -7,6 +7,7 @@ import {
     DESKTOP_CONTEXT_CREATE_NODE_CHANNEL,
     DESKTOP_CONTEXT_DELETE_NODE_CHANNEL,
     DESKTOP_CONTEXT_GET_CONTEXT_CHANNEL,
+    DESKTOP_CONTEXT_GET_PROJECT_DOCUMENTS_CHANNEL,
     DESKTOP_CONTEXT_INITIALIZE_CHANNEL,
     DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL,
     DESKTOP_CONTEXT_RENAME_NODE_CHANNEL,
@@ -68,6 +69,7 @@ describe('contextIpc', () => {
         const dispose = registerContextIpc({ ipc, workspaceRoot });
         const initializeHandler = getHandler(ipc, DESKTOP_CONTEXT_INITIALIZE_CHANNEL);
         const getContextHandler = getHandler(ipc, DESKTOP_CONTEXT_GET_CONTEXT_CHANNEL);
+        const getProjectDocumentsHandler = getHandler(ipc, DESKTOP_CONTEXT_GET_PROJECT_DOCUMENTS_CHANNEL);
         const readDocumentHandler = getHandler(ipc, DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL);
         const searchInScopeHandler = getHandler(ipc, DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL);
         const writeDocumentHandler = getHandler(ipc, DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL);
@@ -84,6 +86,9 @@ describe('contextIpc', () => {
 
         const document = await readDocumentHandler?.({}, '/notes/today.md') as { dataBase64: string };
         expect(decodeTextDocument(document.dataBase64)).toContain('# Today');
+        await expect(getProjectDocumentsHandler?.({}, '/notes')).resolves.toEqual([
+            { path: '/notes/today.md', name: 'today.md' }
+        ]);
 
         const matches = await searchInScopeHandler?.({}, {
             query: 'Today',
@@ -109,6 +114,7 @@ describe('contextIpc', () => {
         dispose();
         expect(ipc.removeHandler).toHaveBeenCalledWith(DESKTOP_CONTEXT_INITIALIZE_CHANNEL);
         expect(ipc.removeHandler).toHaveBeenCalledWith(DESKTOP_CONTEXT_GET_CONTEXT_CHANNEL);
+        expect(ipc.removeHandler).toHaveBeenCalledWith(DESKTOP_CONTEXT_GET_PROJECT_DOCUMENTS_CHANNEL);
         expect(ipc.removeHandler).toHaveBeenCalledWith(DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL);
         expect(ipc.removeHandler).toHaveBeenCalledWith(DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL);
         expect(ipc.removeHandler).toHaveBeenCalledWith(DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL);

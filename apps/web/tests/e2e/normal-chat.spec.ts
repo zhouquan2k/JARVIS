@@ -171,7 +171,8 @@ test('normal chat can bind a local conversation to an agent and surface it in th
 
   const localHistoryRow = page.locator('.local-history-row').first();
   await localHistoryRow.hover();
-  await localHistoryRow.getByTestId('local-history-agent-binding').click();
+  await localHistoryRow.getByTestId('local-history-actions-menu').click({ force: true });
+  await localHistoryRow.getByTestId('local-history-agent-binding').click({ force: true });
   const docsAgentOption = localHistoryRow.locator('[data-testid="local-history-agent-option"][data-agent-key="/docs/"]');
   await expect(docsAgentOption).toBeVisible();
   await docsAgentOption.click();
@@ -210,12 +211,15 @@ test('local history deletes the active conversation with hover-only controls and
   const historyRows = page.locator('.local-history-row');
   const activeRow = historyRows.first();
   const inactiveRow = historyRows.nth(1);
-  await expect(inactiveRow.getByTestId('local-history-delete')).toBeHidden();
   await inactiveRow.hover();
+  await inactiveRow.getByTestId('local-history-actions-menu').click({ force: true });
+  await expect(inactiveRow.getByTestId('local-history-actions-popup')).toBeVisible();
   await expect(inactiveRow.getByTestId('local-history-delete')).toBeVisible();
 
   await activeRow.hover();
-  await activeRow.getByTestId('local-history-delete').click();
+  await activeRow.getByTestId('local-history-actions-menu').click({ force: true });
+  await expect(activeRow.getByTestId('local-history-actions-popup')).toBeVisible();
+  await activeRow.getByTestId('local-history-delete').click({ force: true });
   await activeRow.getByTestId('local-history-delete-confirm').click();
 
   await expect(localHistoryItems).toHaveCount(1);

@@ -8,6 +8,7 @@ interface CursorRow {
 
 interface ConversationRow {
     agent_key: string | null;
+    document_paths: string | null;
     payload_json: string;
     server_cursor: number;
     created_at: number;
@@ -89,6 +90,7 @@ export class SyncRepository implements IConversationQueryProvider {
         const row = this.database
             .prepare(`
                 SELECT agent_key, payload_json, server_cursor, created_at, last_seen_at
+                , document_paths
                 FROM synced_conversations
                 WHERE sync_key = ? AND conversation_id = ?
             `)
@@ -111,6 +113,7 @@ export class SyncRepository implements IConversationQueryProvider {
         const rows = this.database
             .prepare(`
                 SELECT agent_key, payload_json, server_cursor, created_at, last_seen_at
+                , document_paths
                 FROM synced_conversations
                 WHERE sync_key = ? AND server_cursor > ?
                 ORDER BY server_cursor ASC
@@ -129,6 +132,7 @@ export class SyncRepository implements IConversationQueryProvider {
         const rows = this.database
             .prepare(`
                 SELECT agent_key, payload_json, server_cursor, created_at, last_seen_at
+                , document_paths
                 FROM synced_conversations
                 WHERE deleted = 0
                 ORDER BY updated_at DESC
@@ -208,6 +212,7 @@ export class SyncRepository implements IConversationQueryProvider {
                     conversation_id,
                     title,
                     agent_key,
+                    document_paths,
                     backend_id,
                     source_type,
                     external_id,
@@ -225,6 +230,7 @@ export class SyncRepository implements IConversationQueryProvider {
                     @conversationId,
                     @title,
                     @agentKey,
+                    @documentPaths,
                     @backendId,
                     @origin,
                     @externalId,
@@ -240,6 +246,7 @@ export class SyncRepository implements IConversationQueryProvider {
                 ON CONFLICT(sync_key, conversation_id) DO UPDATE SET
                     title = excluded.title,
                     agent_key = excluded.agent_key,
+                    document_paths = excluded.document_paths,
                     backend_id = excluded.backend_id,
                     source_type = excluded.source_type,
                     external_id = excluded.external_id,
@@ -256,6 +263,9 @@ export class SyncRepository implements IConversationQueryProvider {
                 conversationId: conversation.id,
                 title: conversation.title,
                 agentKey: conversation.agentKey ?? null,
+                documentPaths: Array.isArray(conversation.documentPaths) && conversation.documentPaths.length > 0
+                    ? JSON.stringify(conversation.documentPaths)
+                    : null,
                 backendId: conversation.backendId ?? null,
                 origin: conversation.origin ?? null,
                 externalId: conversation.externalId ?? null,
@@ -272,21 +282,49 @@ export class SyncRepository implements IConversationQueryProvider {
 
     private hydrateConversation(row: ConversationRow): SyncConversation {
         const conversation = JSON.parse(row.payload_json) as SyncConversation;
+        const resolvedDocumentPaths = this.parseDocumentPathsColumn(row.document_paths);
+        const nextConversation: SyncConversation = resolvedDocumentPaths
+            ? {
+                ...conversation,
+                documentPaths: resolvedDocumentPaths
+            }
+            : conversation;
 
         // Prefer the actual column value. This allows manual DB patches to the agent_key column 
         // to take effect without having to parse and re-stringify the entire payload_json.
         if (typeof row.agent_key === 'string' && row.agent_key.trim()) {
             return {
-                ...conversation,
+                ...nextConversation,
                 agentKey: row.agent_key
             };
         }
 
-        if (typeof conversation.agentKey === 'string' && conversation.agentKey.trim()) {
-            return conversation;
+        if (typeof nextConversation.agentKey === 'string' && nextConversation.agentKey.trim()) {
+            return nextConversation;
         }
 
-        return conversation;
+        return nextConversation;
+    }
+
+    private parseDocumentPathsColumn(value: string | null): string[] | undefined {
+        if (typeof value !== 'string' || value.trim().length === 0) {
+            return undefined;
+        }
+
+        try {
+            const parsed = JSON.parse(value) as unknown;
+            if (!Array.isArray(parsed)) {
+                return undefined;
+            }
+
+            const normalizedPaths = parsed.filter((path): path is string => {
+                return typeof path === 'string' && path.trim().length > 0;
+            }).map((path) => path.trim());
+
+            return normalizedPaths.length > 0 ? Array.from(new Set(normalizedPaths)) : undefined;
+        } catch {
+            return undefined;
+        }
     }
 
     saveDeletedConversation(input: SaveDeletedConversationInput): void {

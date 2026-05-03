@@ -40,7 +40,8 @@ describe('provider config api', () => {
 
         expect(response.status).toBe(404);
         await expect(response.json()).resolves.toEqual({
-            error: "Provider config 'not-exists' not found."
+            error: "Provider config 'not-exists' not found.",
+            code: 'PROVIDER_CONFIG_NOT_FOUND'
         });
     });
 

@@ -62,6 +62,28 @@ function mountAgentView(extraProps = {}) {
                 openai: { loaded: true }
             },
             ...extraProps
+        },
+        global: {
+            stubs: {
+                DocumentEditorPane: {
+                    props: ['activePath', 'activeDocument', 'activeViewerId', 'activePaneMode', 'modelValue', 'isSaving', 'isDirty'],
+                    template: `
+                      <div
+                        data-testid="agent-view-index-editor"
+                        :data-active-path="activePath ?? ''"
+                        :data-viewer-id="activeViewerId ?? ''"
+                        :data-pane-mode="activePaneMode"
+                        :data-model-value="modelValue"
+                        :data-is-saving="isSaving === true"
+                        :data-is-dirty="isDirty === true"
+                      >
+                        <button data-testid="agent-view-index-update" @click="$emit('update:modelValue', '# Updated Index\\n')" />
+                        <button data-testid="agent-view-index-save" @click="$emit('save')" />
+                        <button data-testid="agent-view-index-open-link" @click="$emit('open-document-link', '/workspace/archive/guide.md')" />
+                      </div>
+                    `
+                }
+            }
         }
     });
 }
@@ -71,6 +93,7 @@ describe('AgentView', () => {
         const wrapper = mountAgentView();
         expect(wrapper.get('[data-testid="agent-view"]').text()).toContain('Archive Agent');
         expect(wrapper.get('[data-testid="agent-view-model"]').text()).toContain('gemini-api / gemini-2.5-flash');
+        expect(wrapper.find('[data-testid="agent-view-index"]').exists()).toBe(false);
         expect(wrapper.find('[data-testid="agent-view-document"]').exists()).toBe(false);
         expect(wrapper.find('[data-testid="agent-view-conversation"]').exists()).toBe(false);
         expect(wrapper.text()).not.toContain('Local conversations');
@@ -91,6 +114,70 @@ describe('AgentView', () => {
         expect(wrapper.get('[data-testid="agent-view-prompt"]').exists()).toBe(true);
         expect(wrapper.get('[data-testid="agent-view-instructions"]').text()).toContain('Use archive context');
         expect(wrapper.get('[data-testid="agent-view-instructions-toggle"]').attributes('aria-expanded')).toBe('true');
+    });
+
+    it('renders owner index with the shared document editor when present', () => {
+        const wrapper = mountAgentView({
+            indexPath: '/workspace/archive/index.md',
+            indexDocument: {
+                path: '/workspace/archive/index.md',
+                mimeType: 'text/markdown',
+                dataBase64: Buffer.from('# Archive Index\n\nOwner notes here.\n', 'utf8').toString('base64')
+            },
+            indexViewerId: 'text',
+            indexPaneMode: 'viewer',
+            indexDraftContent: '# Archive Index\n\nOwner notes here.\n',
+            indexIsDirty: true
+        });
+
+        expect(wrapper.get('[data-testid="agent-view-index-editor"]').attributes('data-active-path')).toBe('/workspace/archive/index.md');
+        expect(wrapper.get('[data-testid="agent-view-index-editor"]').attributes('data-viewer-id')).toBe('text');
+        expect(wrapper.get('[data-testid="agent-view-index-editor"]').attributes('data-model-value')).toContain('Archive Index');
+        expect(wrapper.get('[data-testid="agent-view-index-editor"]').attributes('data-is-dirty')).toBe('true');
+    });
+
+    it('forwards index document edit and save events', async () => {
+        const wrapper = mountAgentView({
+            indexPath: '/workspace/archive/index.md',
+            indexDocument: {
+                path: '/workspace/archive/index.md',
+                mimeType: 'text/markdown',
+                dataBase64: Buffer.from('# Archive Index\n', 'utf8').toString('base64')
+            },
+            indexViewerId: 'text',
+            indexPaneMode: 'viewer',
+            indexDraftContent: '# Archive Index\n'
+        });
+
+        await wrapper.get('[data-testid="agent-view-index-update"]').trigger('click');
+        await wrapper.get('[data-testid="agent-view-index-save"]').trigger('click');
+
+        expect(wrapper.emitted('update-index-content')).toEqual([
+            ['# Updated Index\n']
+        ]);
+        expect(wrapper.emitted('save-index-document')).toEqual([
+            []
+        ]);
+    });
+
+    it('forwards index document markdown link navigation events', async () => {
+        const wrapper = mountAgentView({
+            indexPath: '/workspace/archive/index.md',
+            indexDocument: {
+                path: '/workspace/archive/index.md',
+                mimeType: 'text/markdown',
+                dataBase64: Buffer.from('# Archive Index\n', 'utf8').toString('base64')
+            },
+            indexViewerId: 'text',
+            indexPaneMode: 'viewer',
+            indexDraftContent: '# Archive Index\n'
+        });
+
+        await wrapper.get('[data-testid="agent-view-index-open-link"]').trigger('click');
+
+        expect(wrapper.emitted('open-document-link')).toEqual([
+            ['/workspace/archive/guide.md']
+        ]);
     });
 
     it('edits description, prompt, provider, model and tools before emitting a save payload', async () => {

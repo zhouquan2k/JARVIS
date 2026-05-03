@@ -36,6 +36,31 @@
         <PanelRightOpen :size="16" />
       </button>
       <button
+        v-if="showRebindConversationAction"
+        type="button"
+        class="agent-conversation-panel__icon-btn"
+        data-testid="agent-conversation-rebind-document"
+        :title="t('shared.rebindConversationDocument')"
+        :aria-label="t('shared.rebindConversationDocument')"
+        :disabled="!canRebindConversationDocument"
+        @click="toggleProjectDocumentPicker"
+      >
+        <Files :size="16" />
+      </button>
+      <button
+        v-if="showArchiveConversationAction"
+        type="button"
+        class="agent-conversation-panel__icon-btn"
+        :class="{ 'agent-conversation-panel__icon-btn--highlighted': isArchiveConversationHighlighted }"
+        data-testid="agent-conversation-archive"
+        :title="t('shared.archiveConversation')"
+        :aria-label="t('shared.archiveConversation')"
+        :disabled="isArchiveConversationDisabled"
+        @click="archiveConversationFromToolbar"
+      >
+        <Archive :size="16" />
+      </button>
+      <button
         type="button"
         class="agent-conversation-panel__icon-btn"
         data-testid="agent-conversation-list-plus"
@@ -44,6 +69,59 @@
         <Plus :size="16" />
       </button>
     </header>
+
+    <section
+      v-if="isProjectDocumentPickerOpen"
+      class="agent-conversation-panel__document-picker"
+      data-testid="agent-conversation-document-picker"
+    >
+      <div class="agent-conversation-panel__document-picker-header">
+        <strong>{{ t('shared.projectDocuments') }}</strong>
+        <button
+          type="button"
+          class="agent-conversation-panel__document-picker-close"
+          data-testid="agent-conversation-document-picker-close"
+          @click="isProjectDocumentPickerOpen = false"
+        >
+          {{ t('shared.close') }}
+        </button>
+      </div>
+      <p
+        v-if="projectDocumentLoading"
+        class="agent-conversation-panel__document-picker-message"
+        data-testid="agent-conversation-document-picker-loading"
+      >
+        {{ t('shared.loadingProjectDocuments') }}
+      </p>
+      <p
+        v-else-if="projectDocumentError"
+        class="agent-conversation-panel__document-picker-message agent-conversation-panel__document-picker-message--error"
+        data-testid="agent-conversation-document-picker-error"
+      >
+        {{ projectDocumentError }}
+      </p>
+      <p
+        v-else-if="projectDocuments.length === 0"
+        class="agent-conversation-panel__document-picker-message"
+        data-testid="agent-conversation-document-picker-empty"
+      >
+        {{ t('shared.noProjectDocuments') }}
+      </p>
+      <div v-else class="agent-conversation-panel__document-picker-list">
+        <button
+          v-for="document in projectDocuments"
+          :key="document.path"
+          type="button"
+          class="agent-conversation-panel__document-picker-item"
+          :class="{ 'agent-conversation-panel__document-picker-item--active': document.path === currentPrimaryDocumentPath }"
+          :data-testid="`agent-conversation-document-option-${document.name}`"
+          @click="rebindConversationDocument(document.path)"
+        >
+          <span class="agent-conversation-panel__document-picker-name">{{ document.name }}</span>
+          <span class="agent-conversation-panel__document-picker-path">{{ document.path }}</span>
+        </button>
+      </div>
+    </section>
 
     <AgentDocumentConversationList
       v-if="panelMode === 'list' && hasConversationListContext"
@@ -60,8 +138,8 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { ArrowLeft, PanelRightOpen, Plus } from 'lucide-vue-next';
-import type { ContextDocument, Conversation, IContextProvider } from '@packages/core/src';
+import { Archive, ArrowLeft, Files, PanelRightOpen, Plus } from 'lucide-vue-next';
+import type { ContextDocument, Conversation, IContextProvider, ProjectDocumentEntry } from '@packages/core/src';
 import AgentDocumentConversationList from './AgentDocumentConversationList.vue';
 import NormalChatView from '../views/NormalChatView.vue';
 import { useChatStore } from '../store/chat';
@@ -90,8 +168,13 @@ const panelMode = ref<PanelMode>('detail');
 const documentConversations = ref<Conversation[]>([]);
 const isLoading = ref(false);
 const currentError = ref<string | null>(null);
+const projectDocuments = ref<ProjectDocumentEntry[]>([]);
+const projectDocumentLoading = ref(false);
+const projectDocumentError = ref<string | null>(null);
+const isProjectDocumentPickerOpen = ref(false);
 const pendingRestoreConversationId = ref<string | null>(props.restoreConversationId ?? null);
 let documentConversationLoadToken = 0;
+let projectDocumentLoadToken = 0;
 
 const activeDocumentPath = computed(() => props.activeDocument?.path?.trim() || '');
 const isDocumentSelection = computed(() => !!activeDocumentPath.value);
@@ -108,6 +191,7 @@ const currentConversationTitle = computed(() => {
 const showToolbar = computed(() => hasConversationListContext.value);
 const showBackButton = computed(() => panelMode.value === 'detail' && hasConversationListContext.value);
 const toolbarTitle = computed(() => panelMode.value === 'detail' && hasConversationListContext.value ? currentConversationTitle.value : '');
+const hasCurrentConversation = computed(() => !!chatStore.currentConversation);
 const documentScopedConversations = computed(() => {
   const scopedAgentKey = activeAgentKey.value;
   const merged = [...documentConversations.value];
@@ -149,6 +233,38 @@ const listConversations = computed(() => {
 const listEmptyMessage = computed(() => {
   return isDocumentSelection.value ? t('shared.currentDocumentUnavailable') : t('shared.currentAgentUnavailable');
 });
+const currentProjectNodePath = computed(() => {
+  return props.selectedNodePath?.trim()
+    || props.activePath?.trim()
+    || props.activeDocument?.path?.trim()
+    || '/';
+});
+const currentPrimaryDocumentPath = computed(() => {
+  return chatStore.currentConversation?.documentPaths?.[0] ?? null;
+});
+const canRebindConversationDocument = computed(() => {
+  return !!props.contextProvider
+    && !!chatStore.currentConversation
+    && chatStore.currentConversation.origin === 'local'
+    && !!currentProjectNodePath.value;
+});
+const currentConversationArchiveState = computed(() => chatStore.currentConversationArchiveStatus.state);
+const showRebindConversationAction = computed(() => hasCurrentConversation.value);
+const showArchiveConversationAction = computed(() => {
+  return hasCurrentConversation.value
+    && (
+      chatStore.canArchiveCurrentConversation()
+      || currentConversationArchiveState.value === 'archived'
+      || currentConversationArchiveState.value === 'stale'
+    );
+});
+const isArchiveConversationDisabled = computed(() => {
+  return currentConversationArchiveState.value === 'archived'
+    || chatStore.isArchivingConversation;
+});
+const isArchiveConversationHighlighted = computed(() => {
+  return currentConversationArchiveState.value !== 'archived';
+});
 
 async function loadDocumentConversations(path: string): Promise<void> {
     const provider = props.contextProvider;
@@ -181,6 +297,39 @@ async function loadDocumentConversations(path: string): Promise<void> {
   }
 }
 
+async function loadProjectDocuments(): Promise<void> {
+  const provider = props.contextProvider;
+  const curNode = currentProjectNodePath.value;
+  const loadToken = ++projectDocumentLoadToken;
+  if (!provider || !curNode) {
+    projectDocuments.value = [];
+    projectDocumentError.value = t('shared.noAgentBindingProvider');
+    return;
+  }
+
+  projectDocumentLoading.value = true;
+  projectDocumentError.value = null;
+  try {
+    const documents = await provider.getProjectDocuments(curNode);
+    if (loadToken !== projectDocumentLoadToken) {
+      return;
+    }
+
+    projectDocuments.value = documents;
+  } catch (error) {
+    if (loadToken !== projectDocumentLoadToken) {
+      return;
+    }
+
+    projectDocuments.value = [];
+    projectDocumentError.value = error instanceof Error ? error.message : t('shared.loadingProjectDocumentsFailed');
+  } finally {
+    if (loadToken === projectDocumentLoadToken) {
+      projectDocumentLoading.value = false;
+    }
+  }
+}
+
 function openConversationList(): void {
   if (!hasConversationListContext.value) {
     panelMode.value = 'detail';
@@ -206,9 +355,48 @@ async function openConversationDetail(conversationId: string): Promise<void> {
 
 async function createDocumentConversation(): Promise<void> {
   await chatStore.startNewConversation({
-    boundNodeName: extractNodeNameFromPath(props.selectedNodePath ?? props.activeDocument?.path ?? props.activePath ?? null)
+    boundNodeName: extractNodeNameFromPath(props.selectedNodePath ?? props.activeDocument?.path ?? props.activePath ?? null),
+    agentKey: props.activeAgentKey ?? null,
+    documentPath: props.activeDocument?.path ?? props.activePath ?? null,
+    activeDocument: props.activeDocument ?? null
   });
   panelMode.value = 'detail';
+}
+
+async function toggleProjectDocumentPicker(): Promise<void> {
+  if (!canRebindConversationDocument.value) {
+    return;
+  }
+
+  isProjectDocumentPickerOpen.value = !isProjectDocumentPickerOpen.value;
+  if (isProjectDocumentPickerOpen.value) {
+    await loadProjectDocuments();
+  }
+}
+
+async function rebindConversationDocument(documentPath: string): Promise<void> {
+  const conversationId = chatStore.currentConversation?.id;
+  if (!conversationId) {
+    return;
+  }
+
+  await chatStore.bindConversationToDocument(conversationId, {
+    documentPath,
+    previousDocumentPath: currentPrimaryDocumentPath.value
+  });
+  isProjectDocumentPickerOpen.value = false;
+
+  if (activeDocumentPath.value) {
+    void loadDocumentConversations(activeDocumentPath.value);
+  }
+}
+
+async function archiveConversationFromToolbar(): Promise<void> {
+  if (isArchiveConversationDisabled.value) {
+    return;
+  }
+
+  await chatStore.archiveCurrentConversationToDocument();
 }
 
 function switchWorkspace(path: ChatRoutePath): void {
@@ -244,6 +432,7 @@ function syncPanelStateFromSelection(): void {
   documentConversations.value = [];
   currentError.value = null;
   documentConversationLoadToken += 1;
+  isProjectDocumentPickerOpen.value = false;
 }
 
 watch(
@@ -266,6 +455,10 @@ watch(
   ] as const,
   () => {
     syncPanelStateFromSelection();
+    projectDocuments.value = [];
+    projectDocumentError.value = null;
+    projectDocumentLoadToken += 1;
+    isProjectDocumentPickerOpen.value = false;
   },
   { immediate: true, flush: 'sync' }
 );
@@ -302,7 +495,7 @@ watch(
 
 .agent-conversation-panel__toolbar {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) 36px 36px;
+  grid-template-columns: 36px minmax(0, 1fr) repeat(4, 36px);
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
@@ -331,6 +524,12 @@ watch(
 
 .agent-conversation-panel__icon-btn:disabled {
   cursor: default;
+  opacity: 0.42;
+}
+
+.agent-conversation-panel__icon-btn--highlighted {
+  background: rgba(59, 130, 246, 0.24);
+  color: #dbeafe;
 }
 
 .agent-conversation-panel__icon-btn--hidden {
@@ -358,5 +557,78 @@ watch(
   flex: 1;
   min-width: 0;
   min-height: 0;
+}
+
+.agent-conversation-panel__document-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(8, 15, 26, 0.96);
+}
+
+.agent-conversation-panel__document-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #e2e8f0;
+  font-size: 13px;
+}
+
+.agent-conversation-panel__document-picker-close {
+  border: 0;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+}
+
+.agent-conversation-panel__document-picker-message {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.agent-conversation-panel__document-picker-message--error {
+  color: #fecaca;
+}
+
+.agent-conversation-panel__document-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.agent-conversation-panel__document-picker-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.56);
+  color: #e2e8f0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.agent-conversation-panel__document-picker-item:hover,
+.agent-conversation-panel__document-picker-item:focus-visible,
+.agent-conversation-panel__document-picker-item--active {
+  border-color: rgba(56, 189, 248, 0.5);
+  background: rgba(14, 165, 233, 0.12);
+}
+
+.agent-conversation-panel__document-picker-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.agent-conversation-panel__document-picker-path {
+  color: #94a3b8;
+  font-size: 12px;
 }
 </style>

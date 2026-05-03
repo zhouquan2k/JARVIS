@@ -254,7 +254,7 @@ describe('createAgentRuntime', () => {
         const runtime = createAgentRuntime({
             modelProviderRuntime: createRuntime(provider)
         });
-        const updates: string[] = [];
+        const updates: ProviderStreamUpdate[] = [];
         const contextProvider = createMockContextProvider({
             nodes: [
                 { path: '/docs', name: 'docs', kind: 'directory' },
@@ -278,22 +278,31 @@ describe('createAgentRuntime', () => {
                 providerId: 'gemini-api',
                 modelId: 'gemini-2.5-pro'
             },
-            (update) => updates.push(update.text)
+            (update) => updates.push(update)
         );
 
         expect(provider.runAgent).toHaveBeenCalledTimes(2);
         expect(provider.sendMessage).not.toHaveBeenCalled();
         expect(result.text).toContain('native:intro');
-        expect(result.text).toContain('Function Call Request');
-        expect(result.text).toContain('"name": "read_file"');
-        expect(result.text).toContain('Function Call Response');
-        expect(result.text).toContain('\\"content\\":\\"# Guide\\"');
         expect(result.text).toContain('native:done');
+        expect(result.text).not.toContain('Function Call Request');
+        expect(result.text).not.toContain('Function Call Response');
+        expect(result.text).not.toContain('### 本轮工具调用');
         expect(updates).toHaveLength(3);
-        expect(updates[0]).toBe('native:intro');
-        expect(updates[1]).toContain('Function Call Request');
-        expect(updates[1]).toContain('Function Call Response');
-        expect(updates[2]).toBe(result.text);
+        expect(result.functionalParts).toEqual([
+            expect.objectContaining({
+                id: 'tool-exchange-call-1',
+                kind: 'tool_exchange',
+                title: 'read_file',
+                requestContent: expect.stringContaining('"name": "read_file"'),
+                responseContent: expect.stringContaining('"toolCallId": "call-1"'),
+                afterCharIndex: 'native:intro'.length
+            })
+        ]);
+        expect(updates[0].text).toBe('native:intro');
+        expect(updates[1].text).toBe('native:intro');
+        expect(updates[1].functionalParts).toHaveLength(1);
+        expect(updates[2].text).toBe(result.text);
     });
 
     it('falls back to prompt envelope when the provider does not support native agents', async () => {
@@ -380,7 +389,7 @@ describe('createAgentRuntime', () => {
         });
     });
 
-    it('renders a grouped tool round summary when a single turn emits multiple function calls', async () => {
+    it('keeps tool exchanges grouped at the same insertion point when a turn emits multiple function calls', async () => {
         const provider = new MultiToolAgentProvider();
         const runtime = createAgentRuntime({
             modelProviderRuntime: createRuntime(provider)
@@ -422,9 +431,18 @@ describe('createAgentRuntime', () => {
             () => undefined
         );
 
-        expect(result.text).toContain('### 本轮工具调用（2 个函数调用）');
-        expect(result.text).toContain('#### 调用 1: `read_file`');
-        expect(result.text).toContain('#### 调用 2: `read_current_file`');
+        expect(result.text).toContain('native:planning');
+        expect(result.text).toContain('native:done');
+        expect(result.text).not.toContain('### 本轮工具调用');
+        expect(result.text).not.toContain('#### 调用 1');
+        expect(result.text).not.toContain('#### 调用 2');
+        expect(result.functionalParts?.map((part) => part.title)).toEqual([
+            'read_file',
+            'read_current_file'
+        ]);
+        expect(new Set(result.functionalParts?.map((part) => part.afterCharIndex))).toEqual(
+            new Set(['native:planning'.length])
+        );
     });
 
     it('passes the active file context into native agent requests', async () => {

@@ -12,6 +12,23 @@
       @go-back-node-history="onGoBackNodeHistory"
       @go-forward-node-history="onGoForwardNodeHistory"
     />
+    <div
+      v-if="chatStore.currentError"
+      class="global-error-banner"
+      data-testid="workspace-global-error"
+      role="alert"
+    >
+      <span class="global-error-banner__message">{{ chatStore.currentError }}</span>
+      <button
+        type="button"
+        class="global-error-banner__close"
+        data-testid="workspace-global-error-close"
+        aria-label="Close error"
+        @click="chatStore.clearCurrentError()"
+      >
+        ×
+      </button>
+    </div>
     <main class="view-host">
       <DocumentWorkspaceView
         v-if="isKnowledgeMode"
@@ -162,5 +179,32 @@ watch(
   min-height: 0;
   min-width: 0;
   overflow: hidden;
+}
+
+.global-error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(248, 113, 113, 0.35);
+  background: rgba(127, 29, 29, 0.92);
+  color: #fee2e2;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.global-error-banner__message {
+  min-width: 0;
+}
+
+.global-error-banner__close {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 0;
 }
 </style>

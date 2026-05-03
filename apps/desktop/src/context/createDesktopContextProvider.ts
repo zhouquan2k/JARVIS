@@ -26,6 +26,13 @@ export function createDesktopContextProvider(): IContextProvider {
 
             return window.chatprismDesktop.getConversations(query);
         },
+        async getProjectDocuments(curNode: string) {
+            if (!window.chatprismDesktop) {
+                throw new Error('Desktop context bridge is unavailable');
+            }
+
+            return window.chatprismDesktop.getProjectDocuments(curNode);
+        },
         async readDocument(path: string) {
             if (!window.chatprismDesktop) {
                 throw new Error('Desktop context bridge is unavailable');

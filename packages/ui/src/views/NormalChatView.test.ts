@@ -57,6 +57,7 @@ function mountView(props: Record<string, unknown> = {}) {
                     props: ['source'],
                     template: '<div data-testid="markdown-stub">{{ source }}</div>'
                 },
+                MessageFunctionalParts: false,
                 QuestionIndexPanel: {
                     template: '<aside data-testid="question-index-panel">panel</aside>'
                 }
@@ -138,6 +139,58 @@ describe('NormalChatView', () => {
         expect(wrapper.text()).not.toContain('支持拖拽、文件选择和剪贴板图片粘贴');
     });
 
+    it('renders assistant functional parts collapsed by default and keeps them in message order', async () => {
+        const store = useChatStore();
+        store.currentConversation = createConversation([
+            {
+                id: 'assistant-1',
+                role: 'assistant',
+                content: '第一条回答\n\n第二条回答',
+                createdAt: 1,
+                functionalParts: [
+                    {
+                        id: 'part-1',
+                        kind: 'tool_exchange',
+                        title: 'Lookup docs',
+                        content: '{"request":{"query":"docs"}}',
+                        requestContent: '{"query":"docs"}',
+                        responseContent: '{"ok":true}',
+                        afterCharIndex: 6
+                    }
+                ]
+            },
+            {
+                id: 'assistant-2',
+                role: 'assistant',
+                content: '第二条回答',
+                createdAt: 2
+            }
+        ]);
+        store.workspaceMode = 'conversation';
+        store.init = vi.fn().mockResolvedValue(undefined);
+        store.checkAuth = vi.fn().mockResolvedValue(true);
+
+        const wrapper = mountView();
+        await wrapper.vm.$nextTick();
+
+        const markdownBlocks = wrapper.findAll('[data-testid="markdown-stub"]');
+        expect(markdownBlocks).toHaveLength(3);
+        expect(markdownBlocks[0]?.text()).toBe('第一条回答');
+        expect(markdownBlocks[1]?.text()).toBe('第二条回答');
+
+        const details = wrapper.findAll('[data-testid="message-functional-part"]');
+        expect(details).toHaveLength(1);
+        expect(details[0].attributes('open')).toBeUndefined();
+        expect(wrapper.find('.message.assistant')?.text()).toMatch(/第一条回答[\s\S]*Lookup docs[\s\S]*第二条回答/);
+
+        await details[0].find('summary').trigger('click');
+        expect(details[0].text()).toContain('Request');
+        expect(details[0].text()).toContain('Response');
+        expect(details[0].text()).toContain('Lookup docs');
+        expect(details[0].text()).toContain('{"query":"docs"}');
+        expect(details[0].text()).toContain('{"ok":true}');
+    });
+
     it('hides question index affordances while previewing', async () => {
         const store = useChatStore();
         store.previewConversation = createConversation([
@@ -180,6 +233,117 @@ describe('NormalChatView', () => {
 
         expect(wrapper.find('[data-testid="question-index-panel"]').exists()).toBe(false);
         expect(wrapper.find('[data-testid="question-panel-open"]').exists()).toBe(false);
+    });
+
+    it('shows message-level edit controls for user messages and enters edit mode', async () => {
+        const store = useChatStore();
+        store.currentConversation = createConversation([
+            {
+                id: 'user-1',
+                role: 'user',
+                content: '可编辑的问题',
+                questionId: 'question-1',
+                createdAt: 1
+            },
+            {
+                id: 'assistant-1',
+                role: 'assistant',
+                content: '已有回答',
+                questionId: 'question-1',
+                createdAt: 2
+            }
+        ]);
+        store.workspaceMode = 'conversation';
+        store.init = vi.fn().mockResolvedValue(undefined);
+        store.checkAuth = vi.fn().mockResolvedValue(true);
+
+        const wrapper = mountView();
+        await flushPromises();
+
+        expect(wrapper.findAll('[data-testid="message-edit"]')).toHaveLength(1);
+        expect(wrapper.get('[data-testid="message-edit"] .message-edit-icon').exists()).toBe(true);
+
+        await wrapper.get('[data-testid="message-edit"]').trigger('click');
+
+        expect(store.editingQuestionId).toBe('question-1');
+        expect(store.draftPrompt).toBe('可编辑的问题');
+        expect(wrapper.get('[data-testid="edit-resend-banner"]').text()).toContain('Sending now will delete later conversation turns.');
+    });
+
+    it('cancels edit mode from the composer banner without mutating the conversation', async () => {
+        const store = useChatStore();
+        store.currentConversation = createConversation([
+            {
+                id: 'user-1',
+                role: 'user',
+                content: '可编辑的问题',
+                questionId: 'question-1',
+                createdAt: 1
+            },
+            {
+                id: 'assistant-1',
+                role: 'assistant',
+                content: '已有回答',
+                questionId: 'question-1',
+                createdAt: 2
+            }
+        ]);
+        store.workspaceMode = 'conversation';
+        store.init = vi.fn().mockResolvedValue(undefined);
+        store.checkAuth = vi.fn().mockResolvedValue(true);
+        store.startQuestionEdit('question-1');
+
+        const wrapper = mountView();
+        await flushPromises();
+
+        await wrapper.get('[data-testid="edit-resend-cancel"]').trigger('click');
+
+        expect(store.editingQuestionId).toBeNull();
+        expect(store.currentConversation?.messages[0]?.deleted).toBeUndefined();
+        expect(store.currentConversation?.messages[1]?.deleted).toBeUndefined();
+        expect(wrapper.find('[data-testid="edit-resend-banner"]').exists()).toBe(false);
+    });
+
+    it('hides the edit banner immediately after resending an edited question', async () => {
+        const store = useChatStore();
+        store.currentConversation = createConversation([
+            {
+                id: 'user-1',
+                role: 'user',
+                content: '可编辑的问题',
+                questionId: 'question-1',
+                createdAt: 1
+            },
+            {
+                id: 'assistant-1',
+                role: 'assistant',
+                content: '已有回答',
+                questionId: 'question-1',
+                createdAt: 2
+            }
+        ]);
+        store.workspaceMode = 'conversation';
+        store.currentModelId = 'mock-model';
+        store.init = vi.fn().mockResolvedValue(undefined);
+        store.checkAuth = vi.fn().mockResolvedValue(true);
+        store.startQuestionEdit('question-1');
+        store.setDraftPrompt('可编辑的问题（已修改）');
+        store.sendDraft = vi.fn().mockImplementation(async () => {
+            store.isGenerating = true;
+            store.editingQuestionId = null;
+        });
+
+        const wrapper = mountView();
+        await flushPromises();
+
+        expect(wrapper.find('[data-testid="edit-resend-banner"]').exists()).toBe(true);
+
+        await wrapper.get('[data-testid="normal-send"]').trigger('click');
+        await flushPromises();
+
+        expect(store.sendDraft).toHaveBeenCalledTimes(1);
+        expect(store.editingQuestionId).toBeNull();
+        expect(wrapper.find('[data-testid="edit-resend-banner"]').exists()).toBe(false);
     });
 
     it('renders model option controls when the current model exposes options', async () => {
@@ -352,7 +516,7 @@ describe('NormalChatView', () => {
         expect(wrapper.find('[data-testid="provider-selector-stub"]').exists()).toBe(true);
     });
 
-    it('shows the archive action only for eligible agent markdown document contexts', async () => {
+    it('does not render the archive action in the input area anymore', async () => {
         const store = useChatStore();
         store.workspaceMode = 'agent';
         store.currentConversation = createConversation([
@@ -377,30 +541,12 @@ describe('NormalChatView', () => {
         const wrapper = mountView();
         await flushPromises();
 
-        expect(wrapper.find('[data-testid="archive-conversation"]').exists()).toBe(true);
-        expect(wrapper.get('[data-testid="archive-status"]').text()).toContain('Not archived');
-
-        store.activeWorkspaceSelectedNodePath = '/docs';
-        await wrapper.vm.$nextTick();
-
         expect(wrapper.find('[data-testid="archive-conversation"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid="archive-status"]').exists()).toBe(false);
     });
 
-    it('renders archive feedback and disables the action while archiving', async () => {
+    it('renders archive feedback and progress while archiving', async () => {
         const store = useChatStore();
-        store.canArchiveCurrentConversation = vi.fn(() => true);
-        store.currentConversationArchiveStatus = {
-            state: 'archived',
-            archivedAt: 123,
-            documentPath: '/docs/guide.md',
-            sourceMessageCount: 1
-        };
-        store.archiveCurrentConversationToDocument = vi.fn(async () => {
-            store.archiveFeedback = {
-                tone: 'success',
-                message: 'Archived'
-            };
-        });
         store.workspaceMode = 'agent';
         store.currentConversation = createConversation([
             {
@@ -411,50 +557,39 @@ describe('NormalChatView', () => {
             }
         ]);
         store.currentModelId = 'gpt-4o';
-        store.init = vi.fn().mockResolvedValue(undefined);
-        store.checkAuth = vi.fn().mockResolvedValue(true);
-
-        const wrapper = mountView();
-        await flushPromises();
-
-        await wrapper.get('[data-testid="archive-conversation"]').trigger('click');
-        await flushPromises();
-
-        expect(store.archiveCurrentConversationToDocument).toHaveBeenCalledTimes(1);
-        expect(wrapper.get('[data-testid="archive-feedback"]').text()).toContain('Archived');
-        expect(wrapper.get('[data-testid="archive-status"]').text()).toContain('Archived');
-
+        store.archiveConversationProgressPart = {
+            id: 'archive-progress',
+            kind: 'tool_call',
+            title: 'Archive conversation',
+            content: 'Archiving the current conversation into the active document.',
+            collapsed: false
+        };
         store.isArchivingConversation = true;
-        await wrapper.vm.$nextTick();
-        expect(wrapper.get('[data-testid="archive-conversation"]').attributes('disabled')).toBeDefined();
-    });
-
-    it('renders stale archive status when the persisted snapshot is outdated', async () => {
-        const store = useChatStore();
-        store.canArchiveCurrentConversation = vi.fn(() => true);
-        store.currentConversationArchiveStatus = {
-            state: 'stale',
-            archivedAt: 123,
-            documentPath: '/docs/guide.md',
-            sourceMessageCount: 2
-        };
-        store.workspaceMode = 'agent';
-        store.currentConversation = createConversation([
-            {
-                id: 'user-1',
-                role: 'user',
-                content: 'Archive this',
-                createdAt: 1
-            }
-        ]);
-        store.currentModelId = 'gpt-4o';
         store.init = vi.fn().mockResolvedValue(undefined);
         store.checkAuth = vi.fn().mockResolvedValue(true);
 
         const wrapper = mountView();
         await flushPromises();
 
-        expect(wrapper.get('[data-testid="archive-status"]').text()).toContain('Archive stale');
+        expect(wrapper.get('[data-testid="archive-progress-message"]').text()).toContain('Archive conversation');
+        expect(wrapper.get('[data-testid="archive-progress-message"]').text()).toContain('Archiving the current conversation into the active document.');
+
+        store.archiveConversationProgressPart = {
+            id: 'archive-progress',
+            kind: 'tool_result',
+            title: 'Archive conversation',
+            content: 'Archived',
+            collapsed: false
+        };
+        store.archiveFeedback = {
+            tone: 'success',
+            message: 'Archived'
+        };
+        store.isArchivingConversation = false;
+        await wrapper.vm.$nextTick();
+
+        expect(wrapper.get('[data-testid="archive-feedback"]').text()).toContain('Archived');
+        expect(wrapper.get('[data-testid="archive-progress-message"]').text()).toContain('Archived');
     });
 
     it('disables attachment entry when the current provider does not support uploads', async () => {

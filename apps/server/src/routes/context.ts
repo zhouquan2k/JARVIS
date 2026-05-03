@@ -70,6 +70,14 @@ function normalizeConversationQuery(body: Record<string, unknown>): Conversation
     };
 }
 
+function normalizeCurNode(body: Record<string, unknown>): string {
+    const value = body.curNode;
+    if (typeof value !== 'string' || !value.trim()) {
+        throw new Error('curNode must not be empty.');
+    }
+    return value;
+}
+
 function normalizeWriteDocumentInput(body: Record<string, unknown>): WriteContextDocumentInput {
     if (typeof body.mimeType !== 'string' || !body.mimeType.trim()) {
         throw new Error('mimeType must not be empty.');
@@ -139,6 +147,10 @@ function normalizeSearchRequest(body: Record<string, unknown>): ContextSearchReq
     };
 }
 
+function setRequestError(c: Context, message: string): void {
+    c.set('requestError', { message });
+}
+
 export function createContextRouter(options: { service: HttpContextService; config: ServerConfig }) {
     const app = new Hono();
     const { service, config } = options;
@@ -171,7 +183,7 @@ export function createContextRouter(options: { service: HttpContextService; conf
             return c.json({ ok: true });
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to initialize context access.';
-            return c.json({ error: message }, 400);
+            return c.json({ error: message, code: 'CONTEXT_INITIALIZE_FAILED' }, 400);
         }
     });
 
@@ -181,7 +193,7 @@ export function createContextRouter(options: { service: HttpContextService; conf
             return c.json(await service.getContext());
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to read workspace context.';
-            return c.json({ error: message }, 400);
+            return c.json({ error: message, code: 'CONTEXT_GET_FAILED' }, 400);
         }
     });
 
@@ -191,7 +203,17 @@ export function createContextRouter(options: { service: HttpContextService; conf
             return c.json({ conversations: await service.getConversations(normalizeConversationQuery(body)) });
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to read document conversations.';
-            return c.json({ error: message }, 400);
+            return c.json({ error: message, code: 'CONTEXT_GET_CONVERSATIONS_FAILED' }, 400);
+        }
+    });
+
+    app.post('/get-project-documents', async (c) => {
+        try {
+            const body = normalizeObjectBody(await readJsonBody(c));
+            return c.json({ documents: await service.getProjectDocuments(normalizeCurNode(body)) });
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to read project documents.';
+            return c.json({ error: message, code: 'CONTEXT_GET_PROJECT_DOCUMENTS_FAILED' }, 400);
         }
     });
 
@@ -201,7 +223,7 @@ export function createContextRouter(options: { service: HttpContextService; conf
             return c.json({ document: await service.readDocument(normalizeRequiredPath(body)) });
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to read document.';
-            return c.json({ error: message }, 400);
+            return c.json({ error: message, code: 'CONTEXT_READ_DOCUMENT_FAILED' }, 400);
         }
     });
 
@@ -219,18 +241,27 @@ export function createContextRouter(options: { service: HttpContextService; conf
             return c.body(Buffer.from(document.dataBase64, 'base64'));
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to read document asset.';
-            return c.json({ error: message }, 400);
+            return c.json({ error: message, code: 'CONTEXT_READ_DOCUMENT_ASSET_FAILED' }, 400);
         }
     });
 
     app.post('/write-document', async (c) => {
+        let body: Record<string, unknown> | null = null;
         try {
-            const body = normalizeObjectBody(await readJsonBody(c));
+            body = normalizeObjectBody(await readJsonBody(c));
             const result = await service.writeDocument(normalizeWriteDocumentInput(body));
             return c.json({ ok: true, result });
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to write document.';
-            return c.json({ error: message }, 400);
+            setRequestError(c, message);
+            console.error('[sync-server] write-document failed', {
+                path: typeof body?.path === 'string' ? body.path : undefined,
+                mimeType: typeof body?.mimeType === 'string' ? body.mimeType : undefined,
+                expectedVersion: typeof body?.expectedVersion === 'string' ? body.expectedVersion : undefined,
+                dataBase64Length: typeof body?.dataBase64 === 'string' ? body.dataBase64.length : undefined,
+                error: message
+            });
+            return c.json({ error: message, code: 'CONTEXT_WRITE_DOCUMENT_FAILED' }, 400);
         }
     });
 
@@ -240,7 +271,7 @@ export function createContextRouter(options: { service: HttpContextService; conf
             return c.json({ node: await service.createNode(normalizeCreateNodeInput(body)) });
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to create node.';
-            return c.json({ error: message }, 400);
+            return c.json({ error: message, code: 'CONTEXT_CREATE_NODE_FAILED' }, 400);
         }
     });
 
@@ -251,7 +282,7 @@ export function createContextRouter(options: { service: HttpContextService; conf
             return c.json({ ok: true });
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to delete node.';
-            return c.json({ error: message }, 400);
+            return c.json({ error: message, code: 'CONTEXT_DELETE_NODE_FAILED' }, 400);
         }
     });
 
@@ -261,7 +292,7 @@ export function createContextRouter(options: { service: HttpContextService; conf
             return c.json({ node: await service.renameNode(normalizeRenameNodeInput(body)) });
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to rename node.';
-            return c.json({ error: message }, 400);
+            return c.json({ error: message, code: 'CONTEXT_RENAME_NODE_FAILED' }, 400);
         }
     });
 
@@ -271,7 +302,7 @@ export function createContextRouter(options: { service: HttpContextService; conf
             return c.json({ matches: await service.searchInScope(normalizeSearchRequest(body)) });
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to search scope.';
-            return c.json({ error: message }, 400);
+            return c.json({ error: message, code: 'CONTEXT_SEARCH_SCOPE_FAILED' }, 400);
         }
     });
 

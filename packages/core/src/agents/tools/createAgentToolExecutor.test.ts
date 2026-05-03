@@ -121,7 +121,8 @@ describe('createAgentToolExecutor', () => {
         expect(onFileChanged).toHaveBeenCalledWith({
             path: '/docs/guide.md',
             beforeContent: '# Guide',
-            afterContent: '# Updated Guide'
+            afterContent: '# Updated Guide',
+            alreadyPersisted: true
         });
         const updatedDocument = await provider.readDocument('/docs/guide.md');
         expect(updatedDocument.mimeType).toBe('text/markdown');

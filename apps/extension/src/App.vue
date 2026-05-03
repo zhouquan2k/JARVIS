@@ -10,6 +10,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, toRaw, watchEffect } from 'vue';
 import {
+  installGlobalUnhandledErrorFallback,
   openConversationImportDialog,
   useChatStore,
   useCompareStore,
@@ -34,6 +35,7 @@ let storageProvider: SyncStorageProvider | null = null;
 let syncIntervalId: number | null = null;
 let onlineHandler: (() => void) | null = null;
 let visibilityHandler: (() => void) | null = null;
+let removeUnhandledErrorFallback: (() => void) | null = null;
 
 function triggerSync() {
   if (!storageProvider) {
@@ -46,6 +48,12 @@ function triggerSync() {
 }
 
 onMounted(() => {
+  removeUnhandledErrorFallback = installGlobalUnhandledErrorFallback({
+    reportError: (message) => {
+      chatStore.reportUnhandledBackendError(message);
+    }
+  });
+
   void (async () => {
     try {
       const providerCatalog = modelProviderRuntime.getProviderCatalog();
@@ -122,6 +130,8 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  removeUnhandledErrorFallback?.();
+  removeUnhandledErrorFallback = null;
   if (onlineHandler) {
     window.removeEventListener('online', onlineHandler);
   }

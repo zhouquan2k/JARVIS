@@ -8,12 +8,41 @@ const mocks = vi.hoisted(() => {
 
     class MockCrepe {
         readonly options: Record<string, any>;
-        readonly editor = { action: vi.fn() };
+        readonly mockView: {
+            dom: HTMLElement;
+            state: {
+                doc: {
+                    descendants: (callback: (node: { isText: boolean; text: string }, pos: number) => boolean) => void;
+                };
+            };
+            setProps: ReturnType<typeof vi.fn>;
+            updateState: ReturnType<typeof vi.fn>;
+        };
+        readonly editor: { action: ReturnType<typeof vi.fn> };
         private markdown = '';
 
         constructor(options: Record<string, any>) {
             this.options = options;
             this.markdown = options.defaultValue;
+            this.mockView = {
+                dom: document.createElement('div'),
+                state: {
+                    doc: {
+                        descendants: (callback: (node: { isText: boolean; text: string }, pos: number) => boolean) => {
+                            callback({ isText: true, text: this.markdown }, 1);
+                        }
+                    }
+                },
+                setProps: vi.fn(),
+                updateState: vi.fn()
+            };
+            this.editor = {
+                action: vi.fn((callback: (ctx: { get: (slice: symbol) => typeof this.mockView }) => void) => {
+                    callback({
+                        get: () => this.mockView
+                    });
+                })
+            };
             crepeInstances.push(this);
         }
 
@@ -49,6 +78,10 @@ vi.mock('@milkdown/kit/utils', () => ({
     replaceAll: vi.fn((content: string) => ({ content }))
 }));
 
+vi.mock('@milkdown/kit/core', () => ({
+    editorViewCtx: Symbol('editorViewCtx')
+}));
+
 vi.mock('@milkdown/crepe', () => ({
     Crepe: mocks.MockCrepe,
     CrepeFeature: {
@@ -67,7 +100,7 @@ vi.mock('@milkdown/crepe', () => ({
 
 describe('markdownDocument', () => {
     it('enables table support in viewer mode without rewriting markdown table source', async () => {
-        const { createMarkdownEditor, readMarkdownDocument } = await import('./markdownDocument');
+        const { createMarkdownEditor, createMarkdownBlockRenderConfig, readMarkdownDocument } = await import('./markdownDocument');
         const root = document.createElement('div');
         const content = [
             '| Name | Type |',
@@ -85,11 +118,12 @@ describe('markdownDocument', () => {
 
         const crepeOptions = mocks.crepeInstances.at(-1)?.options;
         expect(crepeOptions?.features?.table).toBe(true);
+        expect(createMarkdownBlockRenderConfig('viewer').enabledFeatures.table).toBe(true);
         expect(readMarkdownDocument(editor)).toBe(content);
     });
 
-    it('keeps table support enabled in edit mode', async () => {
-        const { createMarkdownEditor, readMarkdownDocument } = await import('./markdownDocument');
+    it('falls back to table source editing in edit mode', async () => {
+        const { createMarkdownEditor, createMarkdownBlockRenderConfig, readMarkdownDocument, resolveMarkdownBlockRenderer } = await import('./markdownDocument');
         const root = document.createElement('div');
         const content = [
             '| Name | Type |',
@@ -106,12 +140,14 @@ describe('markdownDocument', () => {
         });
 
         const crepeOptions = mocks.crepeInstances.at(-1)?.options;
-        expect(crepeOptions?.features?.table).toBe(true);
+        expect(crepeOptions?.features?.table).toBe(false);
+        expect(createMarkdownBlockRenderConfig('edit').enabledFeatures.table).toBe(false);
+        expect(resolveMarkdownBlockRenderer('edit', 'table').name).toBe('source');
         expect(readMarkdownDocument(editor)).toBe(content);
     });
 
     it('wires Mermaid preview only in viewer mode', async () => {
-        const { createMarkdownEditor } = await import('./markdownDocument');
+        const { createMarkdownEditor, resolveMarkdownBlockRenderer } = await import('./markdownDocument');
         const root = document.createElement('div');
         root.innerHTML = '<div contenteditable="true"></div>';
         const applyPreview = vi.fn();
@@ -128,13 +164,14 @@ describe('markdownDocument', () => {
         codeMirrorConfig.renderPreview('mermaid', 'graph TD;', applyPreview);
 
         expect(codeMirrorConfig.previewOnlyByDefault).toBe(true);
+        expect(resolveMarkdownBlockRenderer('viewer', 'mermaid').name).toBe('mermaid-preview');
         expect(mocks.renderMermaidPreview).toHaveBeenCalledTimes(1);
         expect(mocks.renderMermaidPreview).toHaveBeenCalledWith('mermaid', 'graph TD;', applyPreview);
         expect(codeMirrorConfig.renderPreview('ts', 'const value = 1;', applyPreview)).toBeNull();
     });
 
     it('keeps Mermaid source editable in edit mode', async () => {
-        const { createMarkdownEditor } = await import('./markdownDocument');
+        const { createMarkdownEditor, resolveMarkdownBlockRenderer } = await import('./markdownDocument');
         const root = document.createElement('div');
         const applyPreview = vi.fn();
 
@@ -148,7 +185,22 @@ describe('markdownDocument', () => {
 
         const codeMirrorConfig = mocks.crepeInstances.at(-1)?.options.featureConfigs['code-mirror'];
         expect(codeMirrorConfig.previewOnlyByDefault).toBe(false);
+        expect(resolveMarkdownBlockRenderer('edit', 'mermaid').name).toBe('source');
         expect(codeMirrorConfig.renderPreview('mermaid', 'graph TD;', applyPreview)).toBeNull();
+    });
+
+    it('uses source rendering as the default fallback for unconfigured code blocks', async () => {
+        const {
+            createMarkdownBlockRenderConfig,
+            detectMarkdownBlockType,
+            resolveMarkdownBlockRenderer,
+        } = await import('./markdownDocument');
+
+        expect(detectMarkdownBlockType('ts', 'const value = 1;')).toBe('default-code');
+        expect(resolveMarkdownBlockRenderer('viewer', 'default-code').name).toBe('source');
+        expect(resolveMarkdownBlockRenderer('edit', 'default-code').name).toBe('source');
+        expect(createMarkdownBlockRenderConfig('viewer').codeBlocks['default-code'].viewRenderer.name).toBe('source');
+        expect(createMarkdownBlockRenderConfig('viewer').codeBlocks.table.viewRenderer.name).toBe('markdown-table-preview');
     });
 
     it('resolves markdown image URLs with document-relative paths only when needed', async () => {
@@ -213,6 +265,37 @@ describe('markdownDocument', () => {
         open.mockRestore();
     });
 
+    it('routes markdown document links to the workspace callback instead of opening a new tab', async () => {
+        const { createMarkdownEditor, destroyMarkdownEditor, resolveMarkdownDocumentLinkPath } = await import('./markdownDocument');
+        const root = document.createElement('div');
+        root.innerHTML = '<div contenteditable="true"><p><a href="./guide.md">guide.md</a></p></div>';
+        const open = vi.spyOn(window, 'open').mockReturnValue(null);
+        const onOpenDocumentLink = vi.fn();
+
+        expect(resolveMarkdownDocumentLinkPath('./guide.md', '/notes/current.md')).toBe('/notes/guide.md');
+
+        const editor = await createMarkdownEditor({
+            root,
+            content: '[guide.md](./guide.md)',
+            mode: 'viewer',
+            documentPath: '/notes/current.md',
+            onOpenDocumentLink,
+            onChange: vi.fn()
+        });
+
+        const anchor = root.querySelector<HTMLAnchorElement>('a[href="./guide.md"]');
+        anchor?.dispatchEvent(new MouseEvent('click', {
+            bubbles: true,
+            cancelable: true
+        }));
+
+        expect(onOpenDocumentLink).toHaveBeenCalledWith('/notes/guide.md');
+        expect(open).not.toHaveBeenCalled();
+
+        await destroyMarkdownEditor(editor);
+        open.mockRestore();
+    });
+
     it('does not inject PDF embeds in edit mode', async () => {
         const { createMarkdownEditor, destroyMarkdownEditor } = await import('./markdownDocument');
         const root = document.createElement('div');
@@ -266,5 +349,43 @@ describe('markdownDocument', () => {
         expect(root.querySelectorAll('.pdf-inline-embed')).toHaveLength(1);
 
         await destroyMarkdownEditor(editor);
+    });
+
+    it('updates markdown editor search state through editor view decorations', async () => {
+        const {
+            createMarkdownEditor,
+            getMarkdownEditorSearchMatchCount,
+            scrollToMarkdownEditorSearchMatch,
+            setMarkdownEditorActiveSearchMatchIndex,
+            setMarkdownEditorSearchQuery
+        } = await import('./markdownDocument');
+        const root = document.createElement('div');
+
+        const editor = await createMarkdownEditor({
+            root,
+            content: 'Alpha beta Alpha',
+            mode: 'viewer',
+            documentPath: '/notes/search.md',
+            onChange: vi.fn()
+        });
+        const crepeInstance = mocks.crepeInstances.at(-1);
+        expect(crepeInstance?.mockView.setProps).toHaveBeenCalled();
+
+        const scrollIntoView = vi.fn();
+        const mark = document.createElement('mark');
+        mark.className = 'markdown-search-highlight';
+        mark.dataset.matchIndex = '1';
+        mark.scrollIntoView = scrollIntoView;
+        crepeInstance?.mockView.dom.append(mark);
+
+        setMarkdownEditorSearchQuery(editor, 'alpha');
+        expect(getMarkdownEditorSearchMatchCount(editor)).toBe(2);
+        expect(crepeInstance?.mockView.updateState).toHaveBeenCalled();
+
+        setMarkdownEditorActiveSearchMatchIndex(editor, 1);
+        expect(getMarkdownEditorSearchMatchCount(editor)).toBe(2);
+
+        scrollToMarkdownEditorSearchMatch(editor, 1);
+        expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' });
     });
 });

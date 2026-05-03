@@ -83,6 +83,7 @@ function createPaneContextProvider(conversations: Conversation[] = []): IContext
         getConversations: vi.fn(async (query: { documentPath?: string }) => conversations.filter((conversation) => (
             query.documentPath ? conversation.documentPaths?.includes(query.documentPath) : true
         ))),
+        getProjectDocuments: vi.fn(async () => []),
         readDocument: async (path: string) => ({ path, mimeType: 'text/markdown', dataBase64: encodeTextDocument('') }),
         writeDocument: async () => ({}),
         createNode: async () => ({ path: '/draft.md', name: 'draft.md', kind: 'file', agentKey: '/' }),

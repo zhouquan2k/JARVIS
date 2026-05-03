@@ -1,7 +1,12 @@
 import type { ResolvedAgentConfig } from '../../interfaces/IAgentConfig';
 import type { ContextDocument, IContextProvider } from '../../interfaces/IContextProvider';
 import type { MessageAttachment } from '../../interfaces/Conversation';
-import type { ProviderContextMessage, ProviderSendResult, ProviderStreamUpdate } from '../../interfaces/IModelProvider';
+import type {
+    ProviderContextMessage,
+    ProviderSendResult,
+    ProviderStreamUpdate,
+    ReasoningEffort
+} from '../../interfaces/IModelProvider';
 
 export interface AgentRuntimeRequest {
     prompt: string;
@@ -22,6 +27,7 @@ export interface AgentRuntimeRequest {
     attachments?: MessageAttachment[];
     history?: ProviderContextMessage[];
     modelOptions?: Record<string, boolean>;
+    reasoningEffort?: ReasoningEffort;
     context?: { parentMessageId?: string, conversationId?: string };
 }
 

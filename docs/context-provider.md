@@ -27,6 +27,7 @@ classDiagram
       +getContext()
       +readDocument(path)
       +getConversations(query)
+      +getProjectDocuments(curNode)
     }
 
     class AgentPane {
@@ -41,6 +42,8 @@ classDiagram
       +openConversationList()
       +openConversationDetail(conversationId)
       +createDocumentConversation()
+      +toggleProjectDocumentPicker()
+      +archiveConversationFromToolbar()
       +syncPanelStateFromSelection()
     }
 
@@ -87,6 +90,7 @@ classDiagram
       <<interface>>
       +getContext() Promise~WorkspaceContext~
       +getConversations(query: ConversationQuery) Promise~Conversation[]~
+      +getProjectDocuments(curNode: string) Promise~ProjectDocumentEntry[]~
       +readDocument(path: string) Promise~ContextDocument~
     }
 
@@ -134,5 +138,14 @@ classDiagram
 
 * `IContextProvider.getConversations(query)` is the single query entry used by the workspace panel.
 
-* `AgentConversationPanel` remains responsible for list/detail state, while `IContextProvider` owns the data query.
+* `IContextProvider.getProjectDocuments(curNode)` is the scoped source of bindable project documents for the active agent or folder.
 
+* `AgentConversationPanel` remains responsible for list/detail state and top-toolbar actions, while `IContextProvider` owns the data query.
+
+* The right-hand panel toolbar is the single place for conversation-level actions in agent mode. It carries expand, create, rebind-document, and archive actions instead of placing archive controls in the input area.
+
+* Rebind-document and archive actions are only shown when there is a current conversation.
+
+* Rebind-document candidates come from `getProjectDocuments(curNode)` and are chosen within the current agent scope instead of reusing the middle pane's current document implicitly.
+
+* The archive action reflects persisted archive state: unarchived or stale conversations appear highlighted and actionable, while already-archived conversations appear disabled.

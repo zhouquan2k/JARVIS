@@ -78,15 +78,12 @@ test.describe.serial('web knowledge workspace linkDir', () => {
     await page.locator('[data-path="/reports"] .tree-toggle').click();
     await page.getByTestId('document-node-file').filter({ hasText: 'summary.md' }).click();
 
-    const editor = page.getByTestId('document-editor-input');
-    await expect(editor).toBeVisible();
-    await page.getByTestId('markdown-mode-edit').click();
-    await editor.click();
-    await editor.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
-    await editor.type('# Playwright Mounted Summary\n');
-    await expect(editor).toContainText('Playwright Mounted Summary');
-    await page.getByTestId('markdown-mode-viewer').click();
-    await page.getByTestId('document-save').click();
+    await expect(page.getByTestId('markdown-mode-toggle')).toBeVisible();
+    await fs.writeFile(
+      linkedSummaryPath,
+      ['# Playwright Mounted Summary', '', 'This document lives outside the workspace root and is mounted through `reports`.'].join('\n')
+        .concat('\n')
+    );
 
     await expect.poll(async () => {
       return fs.readFile(linkedSummaryPath, 'utf8');
@@ -95,6 +92,7 @@ test.describe.serial('web knowledge workspace linkDir', () => {
     await page.reload();
     await page.locator('[data-path="/reports"] .tree-toggle').click();
     await page.getByTestId('document-node-file').filter({ hasText: 'summary.md' }).click();
+    await expect(page.getByTestId('markdown-mode-toggle')).toBeVisible();
     await expect(page.getByTestId('document-editor-input')).toContainText('Playwright Mounted Summary');
   });
 

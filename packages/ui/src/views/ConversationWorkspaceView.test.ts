@@ -38,6 +38,7 @@ function createWorkspaceContextProvider(context: WorkspaceContext): IContextProv
         initializeAccess: vi.fn().mockResolvedValue(undefined),
         getContext: vi.fn().mockResolvedValue(context),
         getConversations: vi.fn(),
+        getProjectDocuments: vi.fn().mockResolvedValue([]),
         readDocument: vi.fn(),
         writeDocument: vi.fn(),
         createNode: vi.fn(),
@@ -57,6 +58,7 @@ function createDeferredContextProvider() {
         initializeAccess: vi.fn().mockResolvedValue(undefined),
         getContext: vi.fn().mockReturnValue(contextPromise),
         getConversations: vi.fn(),
+        getProjectDocuments: vi.fn().mockResolvedValue([]),
         readDocument: vi.fn(),
         writeDocument: vi.fn(),
         createNode: vi.fn(),
@@ -111,6 +113,42 @@ describe('ConversationWorkspaceView', () => {
         expect(wrapper.get('[data-testid="thread-stub"]').attributes('data-show-question-index')).toBe('true');
         expect(wrapper.find('[data-testid="question-index-panel"]').exists()).toBe(false);
         expect(wrapper.find('[data-testid="question-panel-open"]').exists()).toBe(false);
+    });
+
+    it('registers the conversation execution context on the chat store while mounted', async () => {
+        const store = useChatStore();
+        const provider = createWorkspaceContextProvider({
+            nodes: [],
+            agentConfigs: {}
+        });
+
+        const wrapper = mount(ConversationWorkspaceView, {
+            props: {
+                isCompareMode: false,
+                contextProvider: provider
+            },
+            global: {
+                stubs: {
+                    ConversationSidebar: {
+                        template: '<div data-testid="sidebar-stub" />'
+                    },
+                    NormalChatView: {
+                        template: '<div data-testid="thread-stub" />'
+                    },
+                    CompareChatView: {
+                        template: '<div data-testid="compare-stub" />'
+                    }
+                }
+            }
+        });
+
+        expect(store.conversationContextProvider).toBe(provider);
+        expect(store.conversationOnFileChanged).toBeNull();
+
+        wrapper.unmount();
+
+        expect(store.conversationContextProvider).toBeNull();
+        expect(store.conversationOnFileChanged).toBeNull();
     });
 
     it('forwards workspace switch requests from the normal chat view', async () => {

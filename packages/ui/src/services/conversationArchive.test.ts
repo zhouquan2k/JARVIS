@@ -55,26 +55,26 @@ describe('conversationArchive', () => {
             '',
             'Question block',
             '',
-            '---',
+            '***',
             '',
             '# A',
             '',
             'Answer block',
             '',
-            '---',
+            '***',
             '',
             'Nested divider stays in A'
         ].join('\n'));
 
         expect(result).toEqual({
             q: '# Q\n\nQuestion block',
-            a: '# A\n\nAnswer block\n\n---\n\nNested divider stays in A',
-            divider: '---',
+            a: '# A\n\nAnswer block\n\n***\n\nNested divider stays in A',
+            divider: '***',
             inserted: false
         });
     });
 
-    it('ignores *** and inserts --- when the document has no archive divider', () => {
+    it('recognizes *** as the archive divider', () => {
         const result = splitQaDocument([
             '# Q',
             '',
@@ -82,13 +82,34 @@ describe('conversationArchive', () => {
             '',
             '***',
             '',
+            '# A',
+            '',
+            'Answer block'
+        ].join('\n'));
+
+        expect(result).toEqual({
+            q: '# Q\n\nQuestion block',
+            a: '# A\n\nAnswer block',
+            divider: '***',
+            inserted: false
+        });
+    });
+
+    it('ignores --- and inserts *** when the document has no archive divider', () => {
+        const result = splitQaDocument([
+            '# Q',
+            '',
+            'Question block',
+            '',
+            '---',
+            '',
             'Still question content'
         ].join('\n'));
 
         expect(result).toEqual({
-            q: '# Q\n\nQuestion block\n\n***\n\nStill question content',
+            q: '# Q\n\nQuestion block\n\n---\n\nStill question content',
             a: '',
-            divider: '---',
+            divider: '***',
             inserted: true
         });
     });
@@ -99,7 +120,7 @@ describe('conversationArchive', () => {
         const result = await executeConversationArchive({
             provider,
             modelId: 'archive-model',
-            documentMarkdown: '# Q\n\nOld question\n\n---\n\n# A\n\nOld answer',
+            documentMarkdown: '# Q\n\nOld question\n\n***\n\n# A\n\nOld answer',
             messages: buildMessages()
         });
 
@@ -110,7 +131,7 @@ describe('conversationArchive', () => {
             originalA: '# A\n\nOld answer',
             nextQ: '# Q\n\nUpdated question',
             nextA: '# A\n\nUpdated answer',
-            nextDocument: '# Q\n\nUpdated question\n\n---\n\n# A\n\nUpdated answer',
+            nextDocument: '# Q\n\nUpdated question\n\n***\n\n# A\n\nUpdated answer',
             changed: true,
             insertedDivider: false
         });
@@ -145,7 +166,7 @@ describe('conversationArchive', () => {
         const result = await executeConversationArchive({
             provider,
             modelId: 'archive-model',
-            documentMarkdown: '# Q\n\nOld question\n\n---\n\n# A\n\nOld answer',
+            documentMarkdown: '# Q\n\nOld question\n\n***\n\n# A\n\nOld answer',
             messages: buildMessages()
         });
 

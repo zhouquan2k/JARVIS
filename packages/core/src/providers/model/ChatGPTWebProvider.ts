@@ -11,7 +11,8 @@ import type {
     Conversation,
     ConversationMessage,
     MessageAnnotation,
-    MessageAttachment
+    MessageAttachment,
+    MessageFunctionalPart
 } from '../../interfaces/Conversation';
 import { IModelProvider, type ProviderSendResult, type ProviderStreamUpdate, type SendMessageOptions } from '../../interfaces/IModelProvider';
 import { sha3_512 } from 'js-sha3';
@@ -617,14 +618,39 @@ function buildImageGroupPayload(candidate: Record<string, unknown> | undefined, 
     };
 }
 
+function buildChatGPTFunctionalParts(candidates: Record<string, unknown>[]): MessageFunctionalPart[] {
+    return candidates.flatMap((candidate, index) => {
+        const title = getCandidateTitle(candidate) || getCandidateUrl(candidate) || getCandidateRefId(candidate);
+        const url = getCandidateUrl(candidate);
+        const snippet = getCandidateSnippet(candidate);
+        if (!title || (!url && !snippet)) {
+            return [];
+        }
+
+        const part: MessageFunctionalPart = {
+            id: `chatgpt-search-${getCandidateRefId(candidate) || index + 1}`,
+            kind: 'search',
+            title,
+            content: JSON.stringify({
+                refId: getCandidateRefId(candidate),
+                title: getCandidateTitle(candidate),
+                url,
+                snippet
+            }, null, 2)
+        };
+        return [part];
+    });
+}
+
 function normalizeChatGPTResponseSnapshot(
     rawText: string,
     metadata?: Record<string, unknown> | null
-): Pick<ProviderStreamUpdate, 'text' | 'annotations'> {
+): Pick<ProviderStreamUpdate, 'text' | 'annotations' | 'functionalParts'> {
     const candidates = collectChatGPTAnnotationCandidates(metadata);
     const citeCandidates = candidates.filter((candidate) => isLikelyCiteCandidate(candidate));
     const imageGroupCandidates = candidates.filter((candidate) => isLikelyImageGroupCandidate(candidate));
     const citeCandidatesByRefId = buildBestCiteCandidateMap(citeCandidates);
+    const functionalParts = buildChatGPTFunctionalParts(citeCandidates);
 
     const annotations: MessageAnnotation[] = [];
     let normalizedText = '';
@@ -663,19 +689,21 @@ function normalizeChatGPTResponseSnapshot(
 
     return {
         text: normalizedText,
-        annotations: annotations.length > 0 ? annotations : undefined
+        annotations: annotations.length > 0 ? annotations : undefined,
+        functionalParts: functionalParts.length > 0 ? functionalParts : undefined
     };
 }
 
 function normalizeChatGPTMessage(
     content: ChatGPTMessageContent | null | undefined,
     metadata?: Record<string, unknown> | null
-): Pick<ConversationMessage, 'content' | 'attachments' | 'annotations'> {
+): Pick<ConversationMessage, 'content' | 'attachments' | 'annotations' | 'functionalParts'> {
     const textSnapshot = normalizeChatGPTResponseSnapshot(extractMessageText(content), metadata);
     return {
         content: textSnapshot.text,
         attachments: extractMessageAttachments(content),
-        annotations: textSnapshot.annotations
+        annotations: textSnapshot.annotations,
+        functionalParts: textSnapshot.functionalParts
     };
 }
 
@@ -1171,6 +1199,7 @@ export class ChatGPTWebProvider implements IModelProvider, IExternalConversation
         let replyConversationId = context.conversationId || '';
         let replyMessageId = '';
         let latestAnnotations: MessageAnnotation[] | undefined;
+        let latestFunctionalParts: MessageFunctionalPart[] | undefined;
 
         while (true) {
             const { done, value } = await reader.read();
@@ -1199,11 +1228,13 @@ export class ChatGPTWebProvider implements IModelProvider, IExternalConversation
                         // ChatGPT provides full text replacement
                         fullText = normalizedMessage.content;
                         latestAnnotations = normalizedMessage.annotations;
+                        latestFunctionalParts = normalizedMessage.functionalParts;
                         replyConversationId = data.conversation_id || replyConversationId;
                         replyMessageId = data.message.id || replyMessageId;
                         onUpdate({
                             text: fullText,
-                            annotations: normalizedMessage.annotations
+                            annotations: normalizedMessage.annotations,
+                            functionalParts: normalizedMessage.functionalParts
                         });
                     }
                 } catch (e) {
@@ -1217,7 +1248,8 @@ export class ChatGPTWebProvider implements IModelProvider, IExternalConversation
             text: fullText,
             conversationId: replyConversationId,
             messageId: replyMessageId,
-            annotations: latestAnnotations
+            annotations: latestAnnotations,
+            functionalParts: latestFunctionalParts
         };
     }
 

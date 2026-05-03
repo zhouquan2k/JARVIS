@@ -12,6 +12,7 @@ export const SCHEMA_STATEMENTS = [
         conversation_id TEXT NOT NULL,
         title TEXT NOT NULL,
         agent_key TEXT,
+        document_paths TEXT,
         backend_id TEXT,
         source_type TEXT,
         external_id TEXT,
@@ -60,6 +61,10 @@ export const MIGRATION_STATEMENTS = [
     `
     ALTER TABLE synced_conversations
     ADD COLUMN agent_key TEXT
+    `,
+    `
+    ALTER TABLE synced_conversations
+    ADD COLUMN document_paths TEXT
     `
 ] as const;
 

@@ -45,14 +45,42 @@ describe('ConversationSidebar', () => {
 
         expect(wrapper.emitted('delete-local')).toBeUndefined();
 
+        await wrapper.get('[data-testid="local-history-actions-menu"]').trigger('click');
         const deleteButton = wrapper.get('[data-testid="local-history-delete"]');
-        expect(deleteButton.text()).toBe('x');
+        expect(deleteButton.text()).toContain('Delete');
 
         await deleteButton.trigger('click');
         expect(wrapper.find('[data-testid="local-history-delete-confirm"]').exists()).toBe(true);
 
         await wrapper.get('[data-testid="local-history-delete-confirm"]').trigger('click');
         expect(wrapper.emitted('delete-local')).toEqual([['local-1']]);
+    });
+
+    it('keeps delete confirmation actions interactive above the local history row button', async () => {
+        const wrapper = mount(ConversationSidebar, {
+            attachTo: document.body,
+            props: {
+                collapsed: false,
+                historySource: 'local',
+                localItems: [createLocalConversation('local-1', '第一条会话')],
+                externalProviders,
+                externalItems: [],
+                externalHistoryLoading: false,
+                externalHistoryQuery: '',
+                activeExternalProviderId: 'chatgpt-web',
+                isCompareMode: false
+            }
+        });
+
+        await wrapper.get('[data-testid="local-history-actions-menu"]').trigger('click');
+        await wrapper.get('[data-testid="local-history-delete"]').trigger('click');
+        const confirmButton = wrapper.get('[data-testid="local-history-delete-confirm"]');
+        expect(confirmButton.exists()).toBe(true);
+
+        await confirmButton.trigger('click');
+
+        expect(wrapper.emitted('delete-local')).toEqual([['local-1']]);
+        wrapper.unmount();
     });
 
     it('prefixes local history titles with the bound node name', () => {
@@ -102,6 +130,7 @@ describe('ConversationSidebar', () => {
 
         expect(wrapper.find('[data-testid="local-history-delete"]').exists()).toBe(false);
         expect(wrapper.find('[data-testid="local-history-star"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid="local-history-rename"]').exists()).toBe(false);
         expect(wrapper.findAll('[data-testid="external-history-item"]')).toHaveLength(1);
     });
 
@@ -129,8 +158,59 @@ describe('ConversationSidebar', () => {
         expect(wrapper.find('[data-testid="local-history-filter-toggle"]').exists()).toBe(true);
         expect(wrapper.text()).toContain('★');
 
+        await wrapper.get('[data-testid="local-history-actions-menu"]').trigger('click');
         await wrapper.get('[data-testid="local-history-star"]').trigger('click');
         expect(wrapper.emitted('toggle-local-star')).toEqual([['local-1']]);
+    });
+
+    it('emits rename-local from the inline local rename form', async () => {
+        const wrapper = mount(ConversationSidebar, {
+            props: {
+                collapsed: false,
+                historySource: 'local',
+                localItems: [createLocalConversation('local-1', '第一条会话')],
+                localConversationFilter: 'all',
+                externalProviders,
+                externalItems: [],
+                externalHistoryLoading: false,
+                externalHistoryQuery: '',
+                activeExternalProviderId: 'chatgpt-web',
+                isCompareMode: false
+            }
+        });
+
+        await wrapper.get('[data-testid="local-history-actions-menu"]').trigger('click');
+        await wrapper.get('[data-testid="local-history-rename"]').trigger('click');
+        await wrapper.get('[data-testid="local-history-rename-input"]').setValue('新标题');
+        await wrapper.get('[data-testid="local-history-rename-form"]').trigger('submit');
+
+        expect(wrapper.emitted('rename-local')).toEqual([[{ id: 'local-1', title: '新标题' }]]);
+    });
+
+    it('exits rename mode on Escape without emitting rename-local', async () => {
+        const wrapper = mount(ConversationSidebar, {
+            props: {
+                collapsed: false,
+                historySource: 'local',
+                localItems: [createLocalConversation('local-1', '第一条会话')],
+                localConversationFilter: 'all',
+                externalProviders,
+                externalItems: [],
+                externalHistoryLoading: false,
+                externalHistoryQuery: '',
+                activeExternalProviderId: 'chatgpt-web',
+                isCompareMode: false
+            }
+        });
+
+        await wrapper.get('[data-testid="local-history-actions-menu"]').trigger('click');
+        await wrapper.get('[data-testid="local-history-rename"]').trigger('click');
+        expect(wrapper.find('[data-testid="local-history-rename-form"]').exists()).toBe(true);
+
+        await wrapper.get('[data-testid="local-history-rename-input"]').trigger('keydown.esc');
+
+        expect(wrapper.find('[data-testid="local-history-rename-form"]').exists()).toBe(false);
+        expect(wrapper.emitted('rename-local')).toBeUndefined();
     });
 
     it('emits set-local-filter when toggling starred-only filter', async () => {
@@ -193,6 +273,7 @@ describe('ConversationSidebar', () => {
             }
         });
 
+        await wrapper.get('[data-testid="local-history-actions-menu"]').trigger('click');
         await wrapper.get('[data-testid="local-history-agent-binding"]').trigger('click');
 
         expect(wrapper.emitted('open-local-agent-binding')).toEqual([['local-1']]);
@@ -296,5 +377,52 @@ describe('ConversationSidebar', () => {
         });
 
         expect(wrapper.find('[data-testid="external-history-search"]').exists()).toBe(false);
+    });
+
+    it('opens the local history action popup from a single trigger button', async () => {
+        const wrapper = mount(ConversationSidebar, {
+            props: {
+                collapsed: false,
+                historySource: 'local',
+                localItems: [createLocalConversation('local-1', '第一条会话')],
+                externalProviders,
+                externalItems: [],
+                externalHistoryLoading: false,
+                externalHistoryQuery: '',
+                activeExternalProviderId: 'chatgpt-web',
+                isCompareMode: false
+            }
+        });
+
+        expect(wrapper.find('[data-testid="local-history-actions-popup"]').exists()).toBe(false);
+        const trigger = wrapper.get('[data-testid="local-history-actions-menu"]');
+        await trigger.trigger('click');
+        expect(wrapper.find('[data-testid="local-history-actions-popup"]').exists()).toBe(true);
+        expect(wrapper.findAll('.history-action-trigger')).toHaveLength(1);
+        expect(trigger.classes()).toContain('history-action-trigger--visible');
+    });
+
+    it('does not depend on activeLocalId to expose the more-actions trigger state', () => {
+        const wrapper = mount(ConversationSidebar, {
+            props: {
+                collapsed: false,
+                historySource: 'local',
+                localItems: [
+                    createLocalConversation('local-1', '第一条会话'),
+                    createLocalConversation('local-2', '第二条会话')
+                ],
+                externalProviders,
+                externalItems: [],
+                externalHistoryLoading: false,
+                externalHistoryQuery: '',
+                activeExternalProviderId: 'chatgpt-web',
+                isCompareMode: false
+            }
+        });
+
+        const triggers = wrapper.findAll('[data-testid="local-history-actions-menu"]');
+        expect(triggers).toHaveLength(2);
+        expect(triggers[0]?.classes()).not.toContain('history-action-trigger--visible');
+        expect(triggers[1]?.classes()).not.toContain('history-action-trigger--visible');
     });
 });

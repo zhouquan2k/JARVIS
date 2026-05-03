@@ -3,6 +3,7 @@ import type { AgentToolDeclaration } from '../agents/tools/types';
 import type {
     IModelProvider,
     ProviderContextMessage,
+    ReasoningEffort,
     ProviderSendResult,
     ProviderStreamUpdate
 } from './IModelProvider';
@@ -56,6 +57,7 @@ export interface AgentRunRequest {
     attachments?: MessageAttachment[];
     history?: ProviderContextMessage[];
     modelOptions?: Record<string, boolean>;
+    reasoningEffort?: ReasoningEffort;
     toolExchanges?: AgentToolExchange[];
 }
 

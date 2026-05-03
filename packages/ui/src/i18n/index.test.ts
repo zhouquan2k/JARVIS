@@ -82,4 +82,32 @@ describe('workspace i18n runtime', () => {
         expect(resolveWorkspaceText('missing.translation.key', 'English fallback')).toBe('English fallback');
         expect(resolveWorkspaceText('shared.cancel', 'English fallback')).toBe('Cancel');
     });
+
+    it('resolves static labels added for workspace search, rename, save, and functional details', () => {
+        const i18n = createWorkspaceI18n({
+            storage: createMemoryStorage(),
+            defaultLocale: 'en'
+        });
+        const TestComponent = defineComponent({
+            setup() {
+                const { t, setLocale } = useWorkspaceI18n();
+                setLocale('zh-CN');
+                return () => h('div', [
+                    t('shared.documentSearchPlaceholder'),
+                    t('shared.renameConversation'),
+                    t('shared.unsavedChanges'),
+                    t('shared.functionalPartToolExchange'),
+                    t('shared.functionalPartRequest')
+                ].join('|'));
+            }
+        });
+
+        const wrapper = mount(TestComponent, {
+            global: {
+                plugins: [i18n]
+            }
+        });
+
+        expect(wrapper.text()).toBe('在文档中搜索|重命名会话|未保存|工具|请求');
+    });
 });

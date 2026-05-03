@@ -3,7 +3,7 @@
     <div
       ref="shellRef"
       class="knowledge-grid"
-      :style="{ gridTemplateColumns: `minmax(0, calc((100% - 8px) * ${panelSizes[0]} / 100)) 4px minmax(0, calc((100% - 8px) * ${panelSizes[1]} / 100)) 4px minmax(0, calc((100% - 8px) * ${panelSizes[2]} / 100))` }"
+      :style="{ gridTemplateColumns }"
     >
       <div class="grid-pane">
         <DocumentFileTree
@@ -25,41 +25,69 @@
         @pointerdown="startResize(0, $event)"
       />
       <div class="grid-pane">
-        <AgentView
-          v-if="selectedOwnerNode && documentStore.activeAgent && documentStore.activeAgentKey"
-          :agent-key="documentStore.activeAgentKey"
-          :agent="documentStore.activeAgent"
-          :owner-node="selectedOwnerNode"
-          :providers="chatStore.availableProviders"
-          :builtin-tools="builtinTools"
-          :model-load-states="chatStore.providerModelStates"
-          @load-provider-models="chatStore.ensureProviderModelsLoaded"
-          @save-agent-config="saveSelectedAgentConfig"
-        />
-        <DocumentEditorPane
-          v-else
-          :active-path="documentStore.activePath"
-          :active-document="documentStore.activeDocument"
-          :active-viewer-id="documentStore.activeViewerId"
-          :active-pane-mode="documentStore.activePaneMode"
-          :model-value="draftContent"
-          :is-saving="documentStore.isSaving"
-          :latest-file-change="documentStore.latestFileChange"
-          :diff-entries="documentStore.activeDiffEntries"
-          :can-undo="documentStore.canUndoActiveFile"
-          :can-redo="documentStore.canRedoActiveFile"
-          @update:model-value="onDraftChange"
-          @save="documentStore.flushActiveDocument"
-          @undo-change="documentStore.undoActiveFileChange"
-          @redo-change="documentStore.redoActiveFileChange"
-        />
+        <section class="middle-pane" data-testid="middle-pane">
+          <div
+            ref="viewportRef"
+            class="middle-pane__viewport"
+            data-testid="middle-pane-viewport"
+            @wheel="handleMiddlePaneWheel"
+          >
+            <AgentView
+              v-if="selectedOwnerNode && documentStore.activeAgent && documentStore.activeAgentKey && !documentStore.activePath"
+              :agent-key="documentStore.activeAgentKey"
+              :agent="documentStore.activeAgent"
+              :owner-node="selectedOwnerNode"
+              :index-path="documentStore.agentIndexPath"
+              :index-document="documentStore.agentIndexDocument"
+              :index-draft-content="documentStore.agentIndexDraftContent"
+              :index-viewer-id="documentStore.agentIndexViewerId"
+              :index-pane-mode="documentStore.agentIndexPaneMode"
+              :index-is-saving="documentStore.agentIndexIsSaving"
+              :index-is-dirty="!!(documentStore.agentIndexPath && documentStore.dirtyPaths[documentStore.agentIndexPath])"
+              :providers="chatStore.availableProviders"
+              :builtin-tools="builtinTools"
+              :model-load-states="chatStore.providerModelStates"
+              @load-provider-models="chatStore.ensureProviderModelsLoaded"
+              @save-agent-config="saveSelectedAgentConfig"
+              @update-index-content="documentStore.updateAgentIndexDocument"
+              @save-index-document="documentStore.flushAgentIndexDocument"
+              @open-document-link="onOpenDocumentLink"
+            />
+            <DocumentEditorPane
+              v-else
+              :active-path="documentStore.activePath"
+              :active-document="documentStore.activeDocument"
+              :active-viewer-id="documentStore.activeViewerId"
+              :active-pane-mode="documentStore.activePaneMode"
+              :model-value="draftContent"
+              :is-saving="documentStore.isSaving"
+              :is-dirty="activeDocumentIsDirty"
+              :middle-pane-mode="documentStore.middlePaneMode"
+              :middle-pane-zoom="documentStore.middlePaneZoom"
+              :latest-file-change="documentStore.latestFileChange"
+              :diff-entries="documentStore.activeDiffEntries"
+              :can-undo="documentStore.canUndoActiveFile"
+              :can-redo="documentStore.canRedoActiveFile"
+              @update:model-value="onDraftChange"
+              @save="documentStore.flushActiveDocument"
+              @toggle-middle-pane-mode="documentStore.toggleMiddlePaneExpanded()"
+              @undo-change="documentStore.undoActiveFileChange"
+              @redo-change="documentStore.redoActiveFileChange"
+              @open-document-link="onOpenDocumentLink"
+            />
+          </div>
+        </section>
       </div>
       <div
         class="resize-handle"
+        :class="{ 'resize-handle--hidden': documentStore.middlePaneMode === 'maximized' }"
         data-testid="document-resize-right"
         @pointerdown="startResize(1, $event)"
       />
-      <div class="grid-pane">
+      <div
+        class="grid-pane"
+        :class="{ 'grid-pane--collapsed': documentStore.middlePaneMode === 'maximized' }"
+      >
         <slot name="assistant-pane">
         <AgentPane
           @request-workspace-switch="requestWorkspaceSwitch"
@@ -81,7 +109,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import {
   DEFAULT_WORKSPACE_AGENT_KEY,
   createBuiltinWorkspaceToolDefinitions,
@@ -112,8 +140,19 @@ const emit = defineEmits<{
   (event: 'request-workspace-switch', path: ChatRoutePath): void;
 }>();
 const shellRef = ref<HTMLElement | null>(null);
+const viewportRef = ref<HTMLElement | null>(null);
 const panelSizes = computed(() => documentStore.panelSizes);
 const draftContent = computed(() => documentStore.draftContent);
+const gridTemplateColumns = computed(() => {
+  if (documentStore.middlePaneMode === 'maximized') {
+    return `minmax(0, calc((100% - 4px) * ${panelSizes.value[0]} / 100)) 4px minmax(0, calc((100% - 4px) * ${100 - panelSizes.value[0]} / 100)) 0px minmax(0, 0px)`;
+  }
+
+  return `minmax(0, calc((100% - 8px) * ${panelSizes.value[0]} / 100)) 4px minmax(0, calc((100% - 8px) * ${panelSizes.value[1]} / 100)) 4px minmax(0, calc((100% - 8px) * ${panelSizes.value[2]} / 100))`;
+});
+const activeDocumentIsDirty = computed(() => {
+  return !!documentStore.activePath && documentStore.dirtyPaths[documentStore.activePath] === true;
+});
 const isWorkspaceSelectionReady = ref(false);
 const selectedOwnerNode = computed<ContextNode | null>(() => {
   if (documentStore.selectedNodePath === '/' && documentStore.activeAgent) {
@@ -205,6 +244,15 @@ async function syncWorkspaceConversationSelection(): Promise<void> {
 
 async function onOpenNode(path: string) {
   await documentStore.openNode(path);
+  documentStore.setMiddlePaneMode('default');
+  documentStore.resetMiddlePaneZoom();
+  await syncWorkspaceConversationSelection();
+}
+
+async function onOpenDocumentLink(path: string): Promise<void> {
+  await documentStore.openNode(path);
+  documentStore.setMiddlePaneMode('default');
+  documentStore.resetMiddlePaneZoom();
   await syncWorkspaceConversationSelection();
 }
 
@@ -303,6 +351,69 @@ function handleAssistantFileChanged(change: { path: string; beforeContent: strin
   return documentStore.applyGeneratedDocumentChange(change);
 }
 
+function handleMiddlePaneWheel(event: WheelEvent) {
+  if (!event.ctrlKey) {
+    return;
+  }
+
+  event.preventDefault();
+  documentStore.stepMiddlePaneZoom(event.deltaY < 0 ? 1 : -1);
+}
+
+function getMiddlePaneZoomScrollTarget(): HTMLElement | null {
+  const viewport = viewportRef.value;
+  if (!viewport) {
+    return null;
+  }
+
+  return (
+    viewport.querySelector<HTMLElement>('[data-testid="document-editor-scroll-shell"]') ??
+    viewport.querySelector<HTMLElement>('[data-testid="document-editor-surface"]') ??
+    viewport.querySelector<HTMLElement>('[data-testid="document-editor-input"]')
+  );
+}
+
+function applyCenteredZoom(previousZoom: number, nextZoom: number) {
+  const scrollTarget = getMiddlePaneZoomScrollTarget();
+  if (!scrollTarget || previousZoom <= 0 || nextZoom <= 0) {
+    return;
+  }
+
+  const ratio = nextZoom / previousZoom;
+  if (!Number.isFinite(ratio) || ratio <= 0 || ratio === 1) {
+    return;
+  }
+
+  const nextScrollLeft = (scrollTarget.scrollLeft + scrollTarget.clientWidth / 2) * ratio - scrollTarget.clientWidth / 2;
+  const nextScrollTop = (scrollTarget.scrollTop + scrollTarget.clientHeight / 2) * ratio - scrollTarget.clientHeight / 2;
+  scrollTarget.scrollLeft = Math.max(0, nextScrollLeft);
+  scrollTarget.scrollTop = Math.max(0, nextScrollTop);
+}
+
+watch(
+  () => documentStore.activePath,
+  (value, previous) => {
+    if (value && previous && value !== previous) {
+      documentStore.setMiddlePaneMode('default');
+      documentStore.resetMiddlePaneZoom();
+    }
+  }
+);
+
+watch(
+  () => documentStore.middlePaneZoom,
+  async (nextZoom, previousZoom) => {
+    const priorZoom = typeof previousZoom === 'number' ? previousZoom : 1;
+    if (nextZoom === priorZoom) {
+      return;
+    }
+
+    await nextTick();
+    applyCenteredZoom(priorZoom, nextZoom);
+  },
+  { immediate: true }
+);
+
 function startResize(handleIndex: 0 | 1, event: PointerEvent) {
   const shell = shellRef.value;
   if (!shell) {
@@ -382,6 +493,24 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
+.middle-pane {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.middle-pane__viewport {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
 .resize-handle {
   cursor: col-resize;
   background: linear-gradient(180deg, rgba(37, 99, 235, 0.28), rgba(14, 165, 233, 0.18));
@@ -389,5 +518,15 @@ onBeforeUnmount(() => {
 
 .resize-handle:hover {
   background: linear-gradient(180deg, rgba(37, 99, 235, 0.5), rgba(14, 165, 233, 0.4));
+}
+
+.resize-handle--hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.grid-pane--collapsed {
+  visibility: hidden;
+  pointer-events: none;
 }
 </style>

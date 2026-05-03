@@ -90,4 +90,25 @@ describe('GeminiHistoryConfigLoader', () => {
         expect(result.metadata.fetchedAt).toBe(456);
         expect(result.config.version).toBe('remote-1');
     });
+
+    it('falls back to builtin config when provider-config endpoint returns an error response', async () => {
+        const storage = new MemoryConfigStorage();
+        const loader = new GeminiHistoryConfigLoader({
+            env: {
+                WXT_PROVIDER_CONFIG_BASE_URL: 'https://config.test/api/provider-configs'
+            },
+            storage,
+            fetchImpl: async () => new Response(JSON.stringify({
+                error: "Provider config 'gemini-history' not found.",
+                code: 'PROVIDER_CONFIG_NOT_FOUND'
+            }), {
+                status: 404
+            }),
+            now: () => 789
+        });
+
+        const result = await loader.load();
+        expect(result.metadata.source).toBe('builtin');
+        expect(result.metadata.fetchedAt).toBe(789);
+    });
 });

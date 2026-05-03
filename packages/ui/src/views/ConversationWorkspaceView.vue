@@ -28,6 +28,7 @@
       @select-external-provider="onSelectExternalProvider"
       @select-local="onSelectLocal"
       @delete-local="onDeleteLocal"
+      @rename-local="onRenameLocal"
       @toggle-local-star="chatStore.toggleConversationStar"
       @set-local-filter="chatStore.setLocalConversationFilter"
       @select-external="onSelectExternal"
@@ -62,7 +63,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, type PropType } from 'vue';
+import { computed, onBeforeUnmount, ref, watch, type PropType } from 'vue';
 import '../theme/chatgpt-dark.css';
 import CompareChatView from './CompareChatView.vue';
 import ConversationSidebar from '../components/ConversationSidebar.vue';
@@ -285,6 +286,13 @@ async function onDeleteLocal(id: string) {
   await chatStore.deleteLocalConversation(id);
 }
 
+async function onRenameLocal(payload: { id: string; title: string }) {
+  if (props.isCompareMode) {
+    requestWorkspaceSwitch('/chat');
+  }
+  await chatStore.renameLocalConversation(payload.id, payload.title);
+}
+
 async function onSelectExternal(id: string) {
   if (props.isCompareMode) {
     requestWorkspaceSwitch('/chat');
@@ -332,7 +340,22 @@ async function onBindLocalAgent(payload: { conversationId: string; agentKey: str
   }
 }
 
+watch(
+  () => props.contextProvider ?? null,
+  (provider) => {
+    chatStore.setConversationExecutionContext({
+      contextProvider: provider,
+      onFileChanged: null
+    });
+  },
+  { immediate: true, flush: 'sync' }
+);
+
 onBeforeUnmount(() => {
+  chatStore.setConversationExecutionContext({
+    contextProvider: null,
+    onFileChanged: null
+  });
   if (agentBindingNoticeTimer) {
     clearTimeout(agentBindingNoticeTimer);
     agentBindingNoticeTimer = null;

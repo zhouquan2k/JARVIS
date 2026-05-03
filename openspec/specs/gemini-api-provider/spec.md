@@ -1,5 +1,10 @@
 English | [Chinese](spec.zh-CN.md)
 
+## Purpose
+Define Gemini API provider behavior for streaming model execution, native agent capability, tool/function metadata handling, and shared result normalization.
+
+## Requirements
+
 ## MODIFIED Requirements
 
 ### Requirement: Implementation of Gemini API via SSE
@@ -52,3 +57,16 @@ The system MUST allow phase-one Gemini native agent requests to work through Gem
 - **WHEN** `AgentRuntime` has prepared the augmented Agent/Workspace context for this request
 - **THEN** the Gemini provider MUST consume that runtime input directly to issue the native agent request
 - **AND** the provider MUST NOT independently decide whether to read or inject the current active file content
+
+### Requirement: Gemini provider MUST normalize function and tool metadata into functional message parts
+The Gemini provider MUST convert structured function-call or tool-call metadata from normal and native Agent Gemini responses into shared functional message parts when such metadata is available.
+
+#### Scenario: Normalize Gemini function call metadata
+- **WHEN** a Gemini response includes structured function-call metadata
+- **THEN** the provider MUST expose that metadata as `functionalParts`
+- **AND** the normal assistant text stream MUST remain available through the shared `text` update
+
+#### Scenario: Preserve normal responses without functional metadata
+- **WHEN** a Gemini response contains only assistant answer text
+- **THEN** the provider MUST return no functional parts
+- **AND** the response MUST render as a normal assistant message

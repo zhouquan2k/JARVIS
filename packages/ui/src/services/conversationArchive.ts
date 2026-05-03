@@ -1,4 +1,4 @@
-import type { ConversationMessage, IModelProvider } from '@packages/core/src';
+import type { ConversationMessage, IModelProvider, ReasoningEffort } from '@packages/core/src';
 
 export type ArchiveExecutionResult = {
     originalQ: string;
@@ -14,6 +14,7 @@ export type ArchiveConversationInput = {
     provider: IModelProvider;
     modelId: string;
     modelOptions?: Record<string, boolean>;
+    reasoningEffort?: ReasoningEffort;
     documentMarkdown: string;
     messages: ConversationMessage[];
 };
@@ -30,7 +31,7 @@ type ArchivePayload = {
     a: string;
 };
 
-const MARKDOWN_DIVIDER_PATTERN = /^\s{0,3}([-_])(?:\s*\1){2,}\s*$/u;
+const MARKDOWN_DIVIDER_PATTERN = /^\s{0,3}\*(?:\s*\*){2,}\s*$/u;
 
 function normalizeSection(value: string): string {
     return value.replace(/\r\n/g, '\n').trim();
@@ -145,7 +146,7 @@ export function splitQaDocument(markdown: string): ArchiveSections {
         return {
             q: normalizeSection(normalizedMarkdown),
             a: '',
-            divider: '---',
+            divider: '***',
             inserted: true
         };
     }
@@ -172,7 +173,8 @@ export async function executeConversationArchive(
         prompt,
         {
             modelId: input.modelId,
-            modelOptions: input.modelOptions
+            modelOptions: input.modelOptions,
+            reasoningEffort: input.reasoningEffort
         },
         () => undefined
     );

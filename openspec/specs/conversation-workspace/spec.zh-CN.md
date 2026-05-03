@@ -41,10 +41,14 @@ The system MUST 在普通对话工作台left-sidelocalhistorylist中，为每条
 - **AND** 该conversation后续 MUST 不再出现在任何按 `agentKey` 聚合的 Agent conversationlist中 #### Scenario: Load binding candidates from the workspace context
 - **WHEN** the user首次打开left-sidelocalhistory项的“绑定 Agent”入口
 - **THEN** The system MUST 基于current工作区 `contextProvider.getContext()` return的 `agentConfigs` 构造可选 Agent list
-- **AND** 该list MUST 同时包含default根scope Agent 以及current工作区中可resolve到的 scoped agents #### Scenario: Keep normal chat execution semantics unchanged after manual binding
-- **WHEN** the user已经为一条local普通conversation手动设置了 `conversation.agentKey`
-- **THEN** the user在普通对话工作台continue发送后续message时，The system MUST NOT only因该手动绑定而automaticallyswitch实际执行 Agent
-- **AND** 手动绑定 MUST 只影响该conversation在 Agent 相关list中的归属与展示 ### Requirement: Normal chat view MUST support multimodal attachment composition
+- **AND** 该list MUST 同时包含default根scope Agent 以及current工作区中可resolve到的 scoped agents #### Scenario: Bind a new knowledge-workspace conversation to the currently selected agent
+- **WHEN** the user在 knowledge workspace 中基于当前选中节点新建一条localconversation
+- **THEN** The system MUST 将该节点当前解析出的生效 Agent 持久化为这条conversation的初始 `conversation.agentKey`
+- **AND** 该初始绑定 MUST 来自新建时的当前选中节点，而不是之后任意时刻的 UI 选中态 #### Scenario: Prefer the persisted conversation binding for follow-up execution
+- **WHEN** 一条已存在的localconversation已经持久化了 `conversation.agentKey`
+- **AND** the user在任意工作台中重新打开这条conversation并继续发送后续message
+- **THEN** The system MUST 优先使用该conversation自身绑定的 Agent 上下文执行请求
+- **AND** The system MUST NOT 仅因当前选中节点解析出另一个 Agent，就覆盖该conversation既有的 Agent tools、instructions 或 model 选择 ### Requirement: Normal chat view MUST support multimodal attachment composition
 The system MUST 在普通聊天input区support文件选择、拖拽和剪贴板image粘贴三类attachmentinput方式，并在发送前展示可移除的attachment预览。 #### Scenario: Queue attachments before sending
 - **WHEN** the user通过文件选择、拖拽或粘贴向普通聊天input区添加image或文件
 - **THEN** The system MUST 在input区上方展示对应的attachment预览卡片

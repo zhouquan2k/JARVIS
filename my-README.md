@@ -17,7 +17,7 @@ CHATPRISM_SYNC_KEY=dev-local \
 pnpm dev:desktop:renderer
 
 CHATPRISM_CONTEXT_BASE_URL=http://127.0.0.1:8787/api/context \
-CHATPRISM_LLM_API_KEY=AIzaSyDLs2UnDyhMfvOqsk5EwwGZXL4fo4EIBYU \
+CHATPRISM_LLM_API_KEY=AIzaSyAE1vWZ1uvb0G0oGtLfhWrPmEl05N_kLNA \
 CHATPRISM_SYNC_KEY=dev-local \
 CHATPRISM_SYNC_BASE_URL=http://127.0.0.1:8787/api/sync \
 pnpm --filter desktop dev:host

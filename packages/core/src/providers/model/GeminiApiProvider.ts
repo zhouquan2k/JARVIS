@@ -8,10 +8,11 @@ import type {
     AgentToolCall,
     IAgentCapableProvider
 } from '../../interfaces/IAgentCapableProvider';
-import type { MessageAttachment } from '../../interfaces/Conversation';
+import type { MessageAttachment, MessageFunctionalPart } from '../../interfaces/Conversation';
 import {
     IModelProvider,
     type ProviderContextMessage,
+    type ReasoningEffort,
     type ProviderSendResult,
     type ProviderStreamUpdate,
     type SendMessageOptions
@@ -144,6 +145,29 @@ function isGeminiProLatestAlias(value: string | undefined): boolean {
         APP_CONFIG.providers.find((provider) => provider.id === 'gemini-api')?.preferredDefaultModel || 'Gemini Pro Latest'
     );
     return normalizedValue === normalizedModelToken('gemini-pro-latest') || normalizedValue === normalizedPreferred;
+}
+
+function buildGeminiThinkingConfig(modelId: string, reasoningEffort: ReasoningEffort | undefined): Record<string, unknown> | undefined {
+    const effort = reasoningEffort || 'high';
+    const normalizedModelId = normalizedModelToken(modelId);
+
+    if (normalizedModelId.includes('geminiprolatest') || normalizedModelId.startsWith('gemini3')) {
+        return {
+            thinkingLevel: effort === 'low' ? 'low' : 'high'
+        };
+    }
+
+    if (normalizedModelId.startsWith('gemini25')) {
+        return {
+            thinkingBudget: effort === 'low'
+                ? 1024
+                : effort === 'medium'
+                    ? 8192
+                    : 24576
+        };
+    }
+
+    return undefined;
 }
 
 function isGeminiChatModel(model: GeminiModelListItem): boolean {
@@ -341,10 +365,14 @@ function buildGeminiRequestTools(input: { modelOptions?: Record<string, boolean>
     return declaredTools;
 }
 
+function formatGeminiFunctionalPartContent(value: unknown): string {
+    return JSON.stringify(value, null, 2);
+}
+
 async function parseGeminiSse(
     response: Response,
     onUpdate: (update: ProviderStreamUpdate) => void
-): Promise<Pick<ProviderSendResult, 'text' | 'toolCalls'> & { modelTurn?: AgentModelTurn }> {
+): Promise<Pick<ProviderSendResult, 'text' | 'toolCalls' | 'functionalParts'> & { modelTurn?: AgentModelTurn }> {
     const reader = response.body?.getReader();
     if (!reader) {
         throw new Error('No response body stream available');
@@ -355,6 +383,7 @@ async function parseGeminiSse(
     let buffer = '';
     const aggregatedToolCalls: AgentToolCall[] = [];
     const aggregatedModelParts: AgentResponsePart[] = [];
+    const aggregatedFunctionalParts: MessageFunctionalPart[] = [];
 
     while (true) {
         const { done, value } = await reader.read();
@@ -409,6 +438,16 @@ async function parseGeminiSse(
                         toolCalls.push(toolCall);
                         if (!aggregatedToolCalls.some((existing) => existing.id === toolCall.id)) {
                             aggregatedToolCalls.push(toolCall);
+                            aggregatedFunctionalParts.push({
+                                id: `function-call-${toolCall.id}`,
+                                kind: 'function_call',
+                                title: toolCall.name,
+                                content: formatGeminiFunctionalPartContent({
+                                    id: toolCall.id,
+                                    name: toolCall.name,
+                                    arguments: toolCall.arguments || {}
+                                })
+                            });
                         }
                     }
                 });
@@ -416,7 +455,10 @@ async function parseGeminiSse(
                 if (hasTextDelta || toolCalls.length > 0) {
                     onUpdate({
                         text: fullText,
-                        toolCalls: toolCalls.length > 0 ? toolCalls : undefined
+                        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+                        functionalParts: aggregatedFunctionalParts.length > 0
+                            ? [...aggregatedFunctionalParts]
+                            : undefined
                     });
                 }
             } catch (error) {
@@ -428,6 +470,7 @@ async function parseGeminiSse(
     return {
         text: fullText,
         toolCalls: aggregatedToolCalls.length > 0 ? aggregatedToolCalls : undefined,
+        functionalParts: aggregatedFunctionalParts.length > 0 ? aggregatedFunctionalParts : undefined,
         modelTurn: aggregatedModelParts.length > 0
             ? {
                 role: 'model',
@@ -599,6 +642,12 @@ export class GeminiApiProvider implements IAgentCapableProvider {
         const payload: Record<string, unknown> = {
             contents: buildGeminiContents(prompt, options)
         };
+        const thinkingConfig = buildGeminiThinkingConfig(modelId, options.reasoningEffort);
+        if (thinkingConfig) {
+            payload.generationConfig = {
+                thinkingConfig
+            };
+        }
 
         const requestTools = buildGeminiRequestTools({
             modelOptions: options.modelOptions
@@ -632,7 +681,8 @@ export class GeminiApiProvider implements IAgentCapableProvider {
             text: streamResult.text,
             conversationId,
             messageId,
-            toolCalls: streamResult.toolCalls
+            toolCalls: streamResult.toolCalls,
+            functionalParts: streamResult.functionalParts
         };
     }
 
@@ -663,6 +713,12 @@ export class GeminiApiProvider implements IAgentCapableProvider {
             },
             contents: buildGeminiAgentContents(request)
         };
+        const thinkingConfig = buildGeminiThinkingConfig(modelId, request.reasoningEffort);
+        if (thinkingConfig) {
+            payload.generationConfig = {
+                thinkingConfig
+            };
+        }
 
         const requestTools = buildGeminiRequestTools({
             modelOptions: request.modelOptions,
@@ -704,7 +760,8 @@ export class GeminiApiProvider implements IAgentCapableProvider {
             conversationId: request.context?.conversationId || crypto.randomUUID(),
             messageId: crypto.randomUUID(),
             toolCalls: streamResult.toolCalls,
-            modelTurn: streamResult.modelTurn
+            modelTurn: streamResult.modelTurn,
+            functionalParts: streamResult.functionalParts
         };
     }
 

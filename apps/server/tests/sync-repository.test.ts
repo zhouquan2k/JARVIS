@@ -24,6 +24,7 @@ function createConversation(
         title: overrides.title ?? `Conversation ${id}`,
         agentKey: overrides.agentKey,
         boundNodeName: overrides.boundNodeName,
+        documentPaths: overrides.documentPaths,
         updatedAt,
         messages: overrides.messages ?? [
             {
@@ -214,13 +215,42 @@ describe('SyncRepository', () => {
         });
 
         const rawRow = database
-            .prepare('SELECT agent_key, payload_json FROM synced_conversations WHERE sync_key = ? AND conversation_id = ?')
-            .get('alpha', 'conv-agent') as { agent_key: string | null; payload_json: string } | undefined;
+            .prepare('SELECT agent_key, document_paths, payload_json FROM synced_conversations WHERE sync_key = ? AND conversation_id = ?')
+            .get('alpha', 'conv-agent') as { agent_key: string | null; document_paths: string | null; payload_json: string } | undefined;
 
         expect(rawRow).toBeDefined();
         expect(rawRow?.agent_key).toBe('/workspace/archive/.agent.json');
+        expect(rawRow?.document_paths).toBeNull();
         expect(JSON.parse(rawRow!.payload_json)).toEqual(expect.objectContaining({
             agentKey: '/workspace/archive/.agent.json'
+        }));
+    });
+
+    it('stores documentPaths in both the dedicated column and payload json', () => {
+        const database = createDatabase(createConfig());
+        const repository = new SyncRepository(database);
+
+        repository.runInTransaction(() => {
+            const cursor = repository.allocateNextCursor('alpha', 100);
+            repository.saveConversation({
+                syncKey: 'alpha',
+                conversation: createConversation('conv-document-paths', 100, false, {
+                    documentPaths: ['/docs/guide.md', '/docs/spec.pdf']
+                }),
+                serverCursor: cursor,
+                receivedAt: 100,
+                createdAt: 100
+            });
+        });
+
+        const rawRow = database
+            .prepare('SELECT document_paths, payload_json FROM synced_conversations WHERE sync_key = ? AND conversation_id = ?')
+            .get('alpha', 'conv-document-paths') as { document_paths: string | null; payload_json: string } | undefined;
+
+        expect(rawRow).toBeDefined();
+        expect(rawRow?.document_paths).toBe(JSON.stringify(['/docs/guide.md', '/docs/spec.pdf']));
+        expect(JSON.parse(rawRow!.payload_json)).toEqual(expect.objectContaining({
+            documentPaths: ['/docs/guide.md', '/docs/spec.pdf']
         }));
     });
 
@@ -301,6 +331,61 @@ describe('SyncRepository', () => {
         expect(repository.getConversation('alpha', 'conv-legacy')?.conversation).toEqual(expect.objectContaining({
             id: 'conv-legacy',
             agentKey: '/workspace/docs/.agent.json'
+        }));
+    });
+
+    it('falls back to the dedicated document_paths column when payload_json omits documentPaths', () => {
+        const database = createDatabase(createConfig());
+        const repository = new SyncRepository(database);
+
+        database
+            .prepare(`
+                INSERT INTO synced_conversations (
+                    sync_key,
+                    conversation_id,
+                    title,
+                    agent_key,
+                    document_paths,
+                    backend_id,
+                    source_type,
+                    external_id,
+                    messages_json,
+                    updated_at,
+                    deleted,
+                    synced_at,
+                    server_cursor,
+                    payload_json,
+                    created_at,
+                    last_seen_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `)
+            .run(
+                'alpha',
+                'conv-legacy-document-paths',
+                'Legacy Docs',
+                null,
+                JSON.stringify(['/docs/guide.md']),
+                null,
+                null,
+                null,
+                JSON.stringify([{ id: 'm1', role: 'user', content: 'hello' }]),
+                100,
+                0,
+                100,
+                1,
+                JSON.stringify({
+                    id: 'conv-legacy-document-paths',
+                    title: 'Legacy Docs',
+                    updatedAt: 100,
+                    messages: [{ id: 'm1', role: 'user', content: 'hello' }]
+                }),
+                100,
+                100
+            );
+
+        expect(repository.getConversation('alpha', 'conv-legacy-document-paths')?.conversation).toEqual(expect.objectContaining({
+            id: 'conv-legacy-document-paths',
+            documentPaths: ['/docs/guide.md']
         }));
     });
 });

@@ -19,6 +19,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import {
+  installGlobalUnhandledErrorFallback,
   openConversationImportDialog,
   useChatStore,
   useCompareStore,
@@ -44,6 +45,7 @@ let authRefreshSequence = 0;
 let loginLaunchTimer: ReturnType<typeof setTimeout> | null = null;
 let geminiCompletedRefreshSucceeded = false;
 let geminiCompletedRefreshInFlight = false;
+let removeUnhandledErrorFallback: (() => void) | null = null;
 const GEMINI_LOGIN_REFRESH_MAX_ATTEMPTS = 4;
 const GEMINI_LOGIN_REFRESH_RETRY_DELAY_MS = 1200;
 
@@ -229,6 +231,12 @@ async function refreshGeminiHistoryAfterLogin(trigger: 'completed' | 'closed'): 
 }
 
 onMounted(() => {
+  removeUnhandledErrorFallback = installGlobalUnhandledErrorFallback({
+    reportError: (message) => {
+      chatStore.reportUnhandledBackendError(message);
+    }
+  });
+
   void (async () => {
     const providerCatalog = modelProviderRuntime.getProviderCatalog();
 
@@ -330,6 +338,8 @@ watch(() => chatStore.currentProviderId, () => {
 });
 
 onBeforeUnmount(() => {
+  removeUnhandledErrorFallback?.();
+  removeUnhandledErrorFallback = null;
   if (loginLaunchTimer) {
     clearTimeout(loginLaunchTimer);
     loginLaunchTimer = null;

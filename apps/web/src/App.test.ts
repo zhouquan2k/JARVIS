@@ -6,9 +6,13 @@ import { reactive, ref } from 'vue';
 
 const mockOpenConversationImportDialog = vi.fn();
 const mockCurrentRoute = ref({ path: '/chat' });
+const mockInstallGlobalUnhandledErrorFallback = vi.fn();
 
 const chatStore = reactive({
     currentError: null as string | null,
+    reportUnhandledBackendError: vi.fn(function (this: typeof chatStore, error: unknown) {
+        this.currentError = error instanceof Error ? error.message : String(error);
+    }),
     setProviderCatalog: vi.fn(),
     setAgentRuntime: vi.fn(),
     setModelProviderResolver: vi.fn(),
@@ -40,6 +44,7 @@ vi.mock('@packages/ui', () => ({
         `
     },
     openConversationImportDialog: mockOpenConversationImportDialog,
+    installGlobalUnhandledErrorFallback: mockInstallGlobalUnhandledErrorFallback,
     useChatStore: () => chatStore,
     useCompareStore: () => compareStore
 }));
@@ -77,6 +82,10 @@ describe('Web App workspace navigation', () => {
         vi.clearAllMocks();
         mockCurrentRoute.value = { path: '/chat' };
         chatStore.currentError = null;
+        mockInstallGlobalUnhandledErrorFallback.mockImplementation(({ reportError }: { reportError: (message: string) => void }) => {
+            mockInstallGlobalUnhandledErrorFallback.reportError = reportError;
+            return vi.fn();
+        });
     });
 
     it('renders the shared workspace host with web route and context props', async () => {
@@ -86,5 +95,17 @@ describe('Web App workspace navigation', () => {
 
         expect(wrapper.get('[data-testid="workspace-host-stub"]').attributes('data-route-path')).toBe('/chat');
         expect(wrapper.get('[data-testid="workspace-host-stub"]').attributes('data-context-id')).toBe('web-context');
+    });
+
+    it('reports unhandled global errors through chatStore', async () => {
+        const { default: App } = await import('./App.vue');
+        mount(App);
+        await flushPromises();
+
+        expect(mockInstallGlobalUnhandledErrorFallback).toHaveBeenCalledTimes(1);
+        mockInstallGlobalUnhandledErrorFallback.reportError('Backend request failed.');
+
+        expect(chatStore.reportUnhandledBackendError).toHaveBeenCalledWith('Backend request failed.');
+        expect(chatStore.currentError).toBe('Backend request failed.');
     });
 });

@@ -11,6 +11,13 @@ export interface DocumentViewerDefinition {
   component: Component;
 }
 
+export interface DocumentViewerSearchHandle {
+  setSearchQuery(query: string): void;
+  setActiveSearchMatchIndex(index: number): void;
+  getSearchMatchCount(): number;
+  scrollToSearchMatch(index: number): void;
+}
+
 export function supportsDocumentMimeType(
   viewer: DocumentViewerDefinition,
   document: Pick<ContextDocument, 'mimeType'>

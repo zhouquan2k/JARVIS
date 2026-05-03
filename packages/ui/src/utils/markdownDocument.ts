@@ -1,7 +1,11 @@
 import { Crepe, CrepeFeature, type CrepeConfig } from '@milkdown/crepe';
+import { editorViewCtx } from '@milkdown/kit/core';
+import type { Node as ProseMirrorNode } from '@milkdown/kit/prose/model';
+import { Decoration, DecorationSet, type EditorView as ProseMirrorEditorView } from '@milkdown/kit/prose/view';
 import { replaceAll } from '@milkdown/kit/utils';
 import { resolveContextBaseUrl } from '@packages/core/src';
 import { translateWorkspaceMessage } from '../i18n';
+import { findMarkdownSearchMatches } from './markdownSearch';
 import { renderMermaidPreview } from './mermaidPreview';
 
 export type MarkdownEditor = Crepe;
@@ -13,39 +17,91 @@ export interface CreateMarkdownEditorOptions {
     mode: MarkdownViewerMode;
     documentPath: string | null;
     onChange: (markdown: string) => void;
+    onOpenDocumentLink?: (path: string) => void;
 }
 
 const viewerControllers = new WeakMap<MarkdownEditor, AbortController>();
+const searchStates = new WeakMap<MarkdownEditor, MarkdownEditorSearchState>();
+
+interface MarkdownEditorSearchRange {
+    index: number;
+    from: number;
+    to: number;
+}
+
+interface MarkdownEditorSearchState {
+    query: string;
+    activeMatchIndex: number;
+    matchCount: number;
+    ranges: MarkdownEditorSearchRange[];
+    decoratedDoc: ProseMirrorNode | null;
+    decorations: DecorationSet | null;
+}
+
+type MarkdownBlockType = 'default-code' | 'mermaid' | 'table';
+
+export interface MarkdownBlockRenderer {
+    readonly name: string;
+    renderPreview?: (language: string, content: string, applyPreview: (preview: string | HTMLElement | null) => void) => HTMLElement | string | null;
+}
+
+interface MarkdownBlockConfig {
+    viewRenderer: MarkdownBlockRenderer;
+    editRenderer: MarkdownBlockRenderer;
+}
+
+interface MarkdownBlockRenderConfig {
+    codeBlocks: Record<MarkdownBlockType, MarkdownBlockConfig>;
+    enabledFeatures: NonNullable<CrepeConfig['features']>;
+}
+
+const sourceRenderer: MarkdownBlockRenderer = {
+    name: 'source'
+};
+
+const mermaidPreviewRenderer: MarkdownBlockRenderer = {
+    name: 'mermaid-preview',
+    renderPreview(language, content, applyPreview) {
+        return renderMermaidPreview(language, content, applyPreview);
+    }
+};
+
+const markdownTablePreviewRenderer: MarkdownBlockRenderer = {
+    name: 'markdown-table-preview'
+};
+
+const MARKDOWN_BLOCK_CONFIGS: Record<MarkdownBlockType, MarkdownBlockConfig> = {
+    mermaid: {
+        viewRenderer: mermaidPreviewRenderer,
+        editRenderer: sourceRenderer
+    },
+    table: {
+        viewRenderer: markdownTablePreviewRenderer,
+        editRenderer: sourceRenderer
+    },
+    'default-code': {
+        viewRenderer: sourceRenderer,
+        editRenderer: sourceRenderer
+    }
+};
 
 export async function createMarkdownEditor(options: CreateMarkdownEditorOptions): Promise<MarkdownEditor> {
-    const enabledFeatures: NonNullable<CrepeConfig['features']> = {
-        [CrepeFeature.BlockEdit]: false,
-        [CrepeFeature.CodeMirror]: true,
-        [CrepeFeature.Cursor]: true,
-        [CrepeFeature.ImageBlock]: true,
-        [CrepeFeature.Latex]: false,
-        [CrepeFeature.LinkTooltip]: false,
-        [CrepeFeature.ListItem]: false,
-        [CrepeFeature.Placeholder]: true,
-        [CrepeFeature.Table]: true,
-        [CrepeFeature.Toolbar]: false
-    };
+    const blockRenderConfig = createMarkdownBlockRenderConfig(options.mode);
 
     const editor = new Crepe({
         root: options.root,
         defaultValue: options.content,
-        features: enabledFeatures,
+        features: blockRenderConfig.enabledFeatures,
         featureConfigs: {
             [CrepeFeature.CodeMirror]: {
                 previewOnlyByDefault: options.mode === 'viewer',
                 renderPreview(language, content, applyPreview) {
-                    if (options.mode !== 'viewer') {
+                    const blockType = detectMarkdownBlockType(language, content);
+                    const renderer = resolveMarkdownBlockRenderer(options.mode, blockType);
+                    if (!renderer.renderPreview) {
                         return null;
                     }
-                    if (language.trim().toLowerCase() !== 'mermaid') {
-                        return null;
-                    }
-                    return renderMermaidPreview(language, content, applyPreview);
+                    return renderer.renderPreview(language, content, applyPreview);
                 }
             },
             [CrepeFeature.ImageBlock]: {
@@ -76,8 +132,42 @@ export async function createMarkdownEditor(options: CreateMarkdownEditorOptions)
     window.setTimeout(() => {
         attachEditorTestIds(options.root);
     }, 100);
-    attachMarkdownImageResolution(editor, options.root, options.documentPath, options.mode);
+    attachMarkdownImageResolution(editor, options.root, options.documentPath, options.mode, options.onOpenDocumentLink);
+    installMarkdownSearchDecorations(editor);
     return editor;
+}
+
+export function createMarkdownBlockRenderConfig(mode: MarkdownViewerMode): MarkdownBlockRenderConfig {
+    return {
+        codeBlocks: MARKDOWN_BLOCK_CONFIGS,
+        enabledFeatures: {
+            [CrepeFeature.BlockEdit]: false,
+            [CrepeFeature.CodeMirror]: true,
+            [CrepeFeature.Cursor]: true,
+            [CrepeFeature.ImageBlock]: true,
+            [CrepeFeature.Latex]: false,
+            [CrepeFeature.LinkTooltip]: false,
+            [CrepeFeature.ListItem]: false,
+            [CrepeFeature.Placeholder]: true,
+            [CrepeFeature.Table]: resolveMarkdownBlockRenderer(mode, 'table') === markdownTablePreviewRenderer,
+            [CrepeFeature.Toolbar]: false
+        }
+    };
+}
+
+export function resolveMarkdownBlockRenderer(mode: MarkdownViewerMode, blockType: MarkdownBlockType): MarkdownBlockRenderer {
+    const blockConfig = MARKDOWN_BLOCK_CONFIGS[blockType] ?? MARKDOWN_BLOCK_CONFIGS['default-code'];
+    return mode === 'viewer'
+        ? blockConfig.viewRenderer
+        : blockConfig.editRenderer;
+}
+
+export function detectMarkdownBlockType(language: string, _content: string): MarkdownBlockType {
+    const normalizedLanguage = language.trim().toLowerCase();
+    if (normalizedLanguage === 'mermaid') {
+        return 'mermaid';
+    }
+    return 'default-code';
 }
 
 export function replaceMarkdownDocument(editor: MarkdownEditor, content: string) {
@@ -96,8 +186,33 @@ export async function destroyMarkdownEditor(editor: MarkdownEditor | null | unde
     const viewerController = viewerControllers.get(editor);
     viewerController?.abort();
     viewerControllers.delete(editor);
+    searchStates.delete(editor);
 
     await editor.destroy();
+}
+
+export function setMarkdownEditorSearchQuery(editor: MarkdownEditor, query: string) {
+    const state = getOrCreateSearchState(editor);
+    state.query = query;
+    state.activeMatchIndex = 0;
+    refreshMarkdownEditorSearch(editor);
+}
+
+export function setMarkdownEditorActiveSearchMatchIndex(editor: MarkdownEditor, index: number) {
+    const state = getOrCreateSearchState(editor);
+    state.activeMatchIndex = index;
+    refreshMarkdownEditorSearch(editor);
+}
+
+export function getMarkdownEditorSearchMatchCount(editor: MarkdownEditor): number {
+    return getOrCreateSearchState(editor).matchCount;
+}
+
+export function scrollToMarkdownEditorSearchMatch(editor: MarkdownEditor, index: number) {
+    withMarkdownEditorView(editor, (view) => {
+        const target = view.dom.querySelector<HTMLElement>(`.markdown-search-highlight[data-match-index="${index}"]`);
+        target?.scrollIntoView({ block: 'center' });
+    });
 }
 
 export function attachEditorTestIds(root: HTMLElement) {
@@ -131,6 +246,22 @@ function resolveMarkdownAssetUrl(src: string, documentPath: string | null): stri
         env: readRuntimeEnv()
     });
     return `${contextBaseUrl}/document-asset?path=${encodeURIComponent(safeDecodePath(resolvedPath))}`;
+}
+
+export function resolveMarkdownDocumentLinkPath(href: string, documentPath: string | null): string | null {
+    const normalizedHref = href.trim();
+    if (!normalizedHref || normalizedHref.startsWith('#') || !documentPath) {
+        return null;
+    }
+
+    if (/^[a-z][a-z0-9+.-]*:/i.test(normalizedHref) && !normalizedHref.startsWith('file:')) {
+        return null;
+    }
+
+    const documentDirectory = documentPath.slice(0, documentPath.lastIndexOf('/') + 1) || '/';
+    const resolvedPath = new URL(normalizedHref, `http://workspace.local${documentDirectory}`).pathname;
+    const normalizedPath = safeDecodePath(resolvedPath);
+    return isMarkdownDocumentHref(normalizedPath) ? normalizedPath : null;
 }
 
 const WIKI_IMAGE_EMBED_PATTERN = /!\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
@@ -279,6 +410,11 @@ function safeDecodePath(path: string): string {
     }
 }
 
+function isMarkdownDocumentHref(href: string): boolean {
+    const pathname = href.split(/[?#]/, 1)[0].trim().toLowerCase();
+    return pathname.endsWith('.md') || pathname.endsWith('.markdown');
+}
+
 function encodeMarkdownTargetPath(target: string): string {
     const hashIndex = target.indexOf('#');
     const targetBeforeHash = hashIndex >= 0 ? target.slice(0, hashIndex) : target;
@@ -306,11 +442,144 @@ function readRuntimeEnv(): Record<string, string | undefined> {
         : {};
 }
 
+function installMarkdownSearchDecorations(editor: MarkdownEditor) {
+    withMarkdownEditorView(editor, (view) => {
+        view.setProps({
+            decorations: (state) => {
+                return getMarkdownEditorDecorations(editor, state.doc);
+            }
+        });
+    });
+}
+
+function getOrCreateSearchState(editor: MarkdownEditor): MarkdownEditorSearchState {
+    const existing = searchStates.get(editor);
+    if (existing) {
+        return existing;
+    }
+
+    const created: MarkdownEditorSearchState = {
+        query: '',
+        activeMatchIndex: 0,
+        matchCount: 0,
+        ranges: [],
+        decoratedDoc: null,
+        decorations: null
+    };
+    searchStates.set(editor, created);
+    return created;
+}
+
+function refreshMarkdownEditorSearch(editor: MarkdownEditor) {
+    withMarkdownEditorView(editor, (view) => {
+        const state = getOrCreateSearchState(editor);
+        const nextSearch = buildMarkdownEditorSearchState(view.state.doc, state.query, state.activeMatchIndex);
+        searchStates.set(editor, nextSearch);
+        view.updateState(view.state);
+    });
+}
+
+function getMarkdownEditorDecorations(editor: MarkdownEditor, doc: ProseMirrorNode): DecorationSet | null {
+    const state = getOrCreateSearchState(editor);
+    if (!state.query || state.matchCount === 0) {
+        return null;
+    }
+
+    if (state.decoratedDoc === doc && state.decorations) {
+        return state.decorations;
+    }
+
+    const decorations = DecorationSet.create(
+        doc,
+        state.ranges.map((range) => Decoration.inline(range.from, range.to, {
+            class: range.index === state.activeMatchIndex
+                ? 'markdown-search-highlight markdown-search-highlight--active'
+                : 'markdown-search-highlight',
+            'data-match-index': String(range.index)
+        }))
+    );
+    state.decoratedDoc = doc;
+    state.decorations = decorations;
+    return decorations;
+}
+
+function buildMarkdownEditorSearchState(
+    doc: ProseMirrorNode,
+    query: string,
+    activeMatchIndex: number
+): MarkdownEditorSearchState {
+    if (!query.trim()) {
+        return {
+            query,
+            activeMatchIndex: 0,
+            matchCount: 0,
+            ranges: [],
+            decoratedDoc: null,
+            decorations: null
+        };
+    }
+
+    const textNodes: Array<{ from: number; start: number; end: number }> = [];
+    let content = '';
+
+    doc.descendants((node, pos) => {
+        if (!node.isText || !node.text) {
+            return true;
+        }
+
+        const start = content.length;
+        content += node.text;
+        textNodes.push({
+            from: pos,
+            start,
+            end: content.length
+        });
+        return true;
+    });
+
+    const matches = findMarkdownSearchMatches(content, query);
+    const ranges: MarkdownEditorSearchRange[] = [];
+
+    for (const match of matches) {
+        for (const textNode of textNodes) {
+            if (match.end <= textNode.start || match.start >= textNode.end) {
+                continue;
+            }
+
+            const from = textNode.from + Math.max(match.start, textNode.start) - textNode.start;
+            const to = textNode.from + Math.min(match.end, textNode.end) - textNode.start;
+            if (from < to) {
+                ranges.push({
+                    index: match.index,
+                    from,
+                    to
+                });
+            }
+        }
+    }
+
+    return {
+        query,
+        activeMatchIndex: matches.length === 0 ? 0 : Math.min(activeMatchIndex, matches.length - 1),
+        matchCount: matches.length,
+        ranges,
+        decoratedDoc: null,
+        decorations: null
+    };
+}
+
+function withMarkdownEditorView(editor: MarkdownEditor, callback: (view: ProseMirrorEditorView) => void) {
+    editor.editor.action((ctx) => {
+        callback(ctx.get(editorViewCtx));
+    });
+}
+
 function attachMarkdownImageResolution(
     editor: MarkdownEditor,
     root: HTMLElement,
     documentPath: string | null,
-    mode: MarkdownViewerMode
+    mode: MarkdownViewerMode,
+    onOpenDocumentLink?: (path: string) => void
 ) {
     if (mode !== 'viewer') {
         return;
@@ -369,6 +638,14 @@ function attachMarkdownImageResolution(
 
         const href = anchor.getAttribute('href');
         if (!href || href.startsWith('#')) {
+            return;
+        }
+
+        const markdownDocumentPath = resolveMarkdownDocumentLinkPath(href, documentPath);
+        if (markdownDocumentPath) {
+            event.preventDefault();
+            event.stopPropagation();
+            onOpenDocumentLink?.(markdownDocumentPath);
             return;
         }
 

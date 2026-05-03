@@ -4,6 +4,7 @@ import type { ConversationQuery } from '../../interfaces/IConversationPersistPro
 import type {
     ContextDocument,
     ContextNode,
+    ProjectDocumentEntry,
     ContextSearchMatch,
     ContextSearchRequest,
     CreateContextNodeInput,
@@ -13,6 +14,7 @@ import type {
     WorkspaceContext,
     WriteContextDocumentInput
 } from '../../interfaces/IContextProvider';
+import { HttpApiClient } from '../http/HttpApiClient';
 
 export const DEFAULT_CONTEXT_BASE_URL = 'http://127.0.0.1:8787/api/context';
 
@@ -36,14 +38,6 @@ function normalizeBaseUrl(value?: string): string {
     return (normalized ? normalized : DEFAULT_CONTEXT_BASE_URL).replace(/\/+$/, '');
 }
 
-async function readJson(response: Response): Promise<unknown> {
-    try {
-        return await response.json();
-    } catch {
-        return null;
-    }
-}
-
 export function resolveContextBaseUrl(
     options: ResolveContextBaseUrlOptions | Record<string, string | undefined> = {}
 ): string {
@@ -65,16 +59,18 @@ export function resolveContextBaseUrl(
 
 export class HttpContextProvider implements IContextProvider {
     readonly id = 'http-context';
-    private readonly baseUrl: string;
-    private readonly fetchImpl: typeof fetch;
+    private readonly client: HttpApiClient;
 
     constructor(options: HttpContextProviderOptions = {}) {
         if (!options.fetchImpl && typeof fetch === 'undefined') {
             throw new Error('The current environment does not support fetch.');
         }
 
-        this.baseUrl = normalizeBaseUrl(options.baseUrl);
-        this.fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
+        this.client = new HttpApiClient({
+            baseUrl: normalizeBaseUrl(options.baseUrl),
+            fetchImpl: options.fetchImpl,
+            source: 'context'
+        });
     }
 
     async initializeAccess(): Promise<void> {
@@ -89,6 +85,11 @@ export class HttpContextProvider implements IContextProvider {
     async getConversations(query: ConversationQuery): Promise<Conversation[]> {
         const response = await this.post('/get-conversations', { ...query });
         return (response as { conversations: Conversation[] }).conversations;
+    }
+
+    async getProjectDocuments(curNode: string): Promise<ProjectDocumentEntry[]> {
+        const response = await this.post('/get-project-documents', { curNode });
+        return (response as { documents: ProjectDocumentEntry[] }).documents;
     }
 
     async readDocument(path: string): Promise<ContextDocument> {
@@ -125,22 +126,6 @@ export class HttpContextProvider implements IContextProvider {
     }
 
     private async post(path: string, body: Record<string, unknown>): Promise<unknown> {
-        const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
-            method: 'POST',
-            headers: {
-                'content-type': 'application/json'
-            },
-            body: JSON.stringify(body)
-        });
-
-        const payload = await readJson(response);
-        if (!response.ok) {
-            const message = payload && typeof payload === 'object' && 'error' in payload
-                ? String((payload as { error: unknown }).error)
-                : `HTTP ${response.status}`;
-            throw new Error(message);
-        }
-
-        return payload;
+        return this.client.postJson(path, body);
     }
 }

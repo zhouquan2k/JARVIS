@@ -66,11 +66,17 @@ export interface ContextSearchMatch {
     preview: string;
 }
 
+export interface ProjectDocumentEntry {
+    path: string;
+    name: string;
+}
+
 export interface IContextProvider {
     id: string;
     initializeAccess(): Promise<void>;
     getContext(): Promise<WorkspaceContext>;
     getConversations(query: ConversationQuery): Promise<Conversation[]>;
+    getProjectDocuments(curNode: string): Promise<ProjectDocumentEntry[]>;
     readDocument(path: string): Promise<ContextDocument>;
     writeDocument(input: WriteContextDocumentInput): Promise<WriteContextDocumentResult>;
     createNode(input: CreateContextNodeInput): Promise<ContextNode>;

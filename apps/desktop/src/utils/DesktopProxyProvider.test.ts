@@ -96,6 +96,14 @@ describe('DesktopProxyProvider', () => {
                                         label: '[1]'
                                     }
                                 }
+                            ],
+                            functionalParts: [
+                                {
+                                    id: 'part-1',
+                                    kind: 'search',
+                                    title: 'Search',
+                                    content: 'Structured search metadata'
+                                }
                             ]
                         }
                     });
@@ -116,6 +124,14 @@ describe('DesktopProxyProvider', () => {
                                         label: '[1]'
                                     }
                                 }
+                            ],
+                            functionalParts: [
+                                {
+                                    id: 'part-1',
+                                    kind: 'search',
+                                    title: 'Search',
+                                    content: 'Structured search metadata'
+                                }
                             ]
                         }
                     });
@@ -132,7 +148,7 @@ describe('DesktopProxyProvider', () => {
         };
 
         const provider = new DesktopProxyProvider('chatgpt-web', { channelId: 'desktop-send-channel' });
-        const updates: Array<{ text: string; annotations?: unknown[] }> = [];
+        const updates: Array<{ text: string; annotations?: unknown[]; functionalParts?: unknown[] }> = [];
         const result = await provider.sendMessage(
             '桌面消息',
             {
@@ -147,7 +163,9 @@ describe('DesktopProxyProvider', () => {
         );
 
         expect(updates[0]?.text).toBe('桌面结果 [1]');
+        expect(updates[0]?.functionalParts).toHaveLength(1);
         expect(result.annotations).toHaveLength(1);
+        expect(result.functionalParts).toHaveLength(1);
 
         const pendingProvider = new DesktopProxyProvider('chatgpt-web', { channelId: 'desktop-abort-channel' });
         const pendingPromise = pendingProvider.sendMessage('待中止请求', {}, () => undefined);

@@ -3,6 +3,7 @@ import {
     type GeminiHistoryRuntimeConfig
 } from '../../../../config';
 import { ExternalHistoryError } from '../../../interfaces/IExternalConversationProvider';
+import { HttpApiClient } from '../../http/HttpApiClient';
 import type {
     GeminiHistoryRemoteConfig,
     ProviderRemoteConfigLoadResult
@@ -57,24 +58,10 @@ function isValidGeminiHistoryConfig(value: unknown): value is GeminiHistoryRemot
         && isRecord(value.healthCheck);
 }
 
-async function fetchJsonWithTimeout<T>(url: string, timeoutMs: number, fetchImpl: typeof fetch): Promise<Response> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-    try {
-        return await fetchImpl(url, {
-            method: 'GET',
-            signal: controller.signal
-        });
-    } finally {
-        clearTimeout(timer);
-    }
-}
-
 export class GeminiHistoryConfigLoader {
     private readonly runtimeConfig: GeminiHistoryRuntimeConfig;
     private readonly storage: ConfigStorage;
-    private readonly fetchImpl: typeof fetch;
+    private readonly client: HttpApiClient;
     private readonly now: () => number;
 
     constructor(options: {
@@ -86,7 +73,11 @@ export class GeminiHistoryConfigLoader {
     }) {
         this.runtimeConfig = resolveGeminiHistoryRuntimeConfig({ env: options.env });
         this.storage = options.storage;
-        this.fetchImpl = options.fetchImpl ?? fetch;
+        this.client = new HttpApiClient({
+            baseUrl: this.runtimeConfig.providerConfigPath.replace(/\/gemini-history$/, ''),
+            fetchImpl: options.fetchImpl ?? fetch,
+            source: 'provider-config'
+        });
         this.now = options.now ?? (() => Date.now());
         this.builtinConfig = options.builtinConfig ?? BUILTIN_GEMINI_HISTORY_CONFIG;
     }
@@ -95,16 +86,13 @@ export class GeminiHistoryConfigLoader {
 
     async load(): Promise<ProviderRemoteConfigLoadResult<GeminiHistoryRemoteConfig>> {
         try {
-            const response = await fetchJsonWithTimeout(
-                this.runtimeConfig.providerConfigPath,
-                this.runtimeConfig.requestTimeoutMs,
-                this.fetchImpl
-            );
-            if (!response.ok) {
-                throw new Error(`Provider config request failed with status ${response.status}`);
-            }
-
-            const payload = await response.json() as unknown;
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), this.runtimeConfig.requestTimeoutMs);
+            const { data: payload, response } = await this.client.request<unknown>('gemini-history', {
+                signal: controller.signal
+            }).finally(() => {
+                clearTimeout(timer);
+            });
             if (!isValidGeminiHistoryConfig(payload)) {
                 throw new Error('Remote Gemini config payload is invalid');
             }

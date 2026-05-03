@@ -10,6 +10,7 @@ import {
     type AgentToolBinding,
     type ContextDocument,
     type ContextNode,
+    type ProjectDocumentEntry,
     type ContextSearchMatch,
     type ContextSearchRequest,
     type CreateContextNodeInput,
@@ -97,6 +98,11 @@ function inferDocumentMimeType(targetPath: string): string {
     const fileName = targetPath.split('/').pop() ?? targetPath;
     const extension = fileName.includes('.') ? fileName.split('.').pop()?.toLowerCase() ?? '' : '';
     return MIME_TYPES_BY_EXTENSION[extension] ?? 'application/octet-stream';
+}
+
+function isMarkdownPath(targetPath: string): boolean {
+    const extension = targetPath.split('.').pop()?.toLowerCase() ?? '';
+    return extension === 'md' || extension === 'markdown';
 }
 
 function serializeDefaultAgentConfig(): string {
@@ -499,6 +505,53 @@ export class FileSystemContextProvider implements IContextProvider {
             ...query,
             documentPath: normalizedDocumentPath
         });
+    }
+
+    async getProjectDocuments(curNode: string): Promise<ProjectDocumentEntry[]> {
+        const normalizedCurNode = normalizeVirtualPath(curNode, { allowRoot: false }) ?? '/';
+        const context = await this.getContext();
+        const scopeNode = normalizedCurNode === '/'
+            ? null
+            : findContextNodeByPath(context.nodes, normalizedCurNode);
+        if (normalizedCurNode !== '/' && !scopeNode) {
+            throw new Error(`Node does not exist: ${curNode}`);
+        }
+
+        const scopePath = scopeNode?.kind === 'file'
+            ? scopeNode.parentPath ?? '/'
+            : normalizedCurNode;
+        const documents: ProjectDocumentEntry[] = [];
+        const prefix = scopePath === '/' ? '/' : `${scopePath}/`;
+        const stack = [...context.nodes];
+
+        while (stack.length > 0) {
+            const node = stack.shift();
+            if (!node) {
+                continue;
+            }
+
+            if (node.kind === 'directory') {
+                if (node.children?.length) {
+                    stack.unshift(...node.children);
+                }
+                continue;
+            }
+
+            if (!isMarkdownPath(node.path)) {
+                continue;
+            }
+
+            if (scopePath !== '/' && !(node.path === scopePath || node.path.startsWith(prefix))) {
+                continue;
+            }
+
+            documents.push({
+                path: node.path,
+                name: node.name
+            });
+        }
+
+        return documents.sort((left, right) => left.path.localeCompare(right.path, 'zh-Hans-CN'));
     }
 
     async readDocument(filePath: string): Promise<ContextDocument> {

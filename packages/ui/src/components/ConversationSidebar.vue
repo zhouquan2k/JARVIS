@@ -123,12 +123,17 @@
           :class="{
             active: activeLocalId === item.id,
             confirming: pendingDeleteId === item.id,
-            'binding-open': localAgentBindingId === item.id
+            'binding-open': localAgentBindingId === item.id,
+            'menu-open': openActionMenuId === item.id
           }"
         >
           <button
+            v-if="renameEditingId !== item.id"
             class="history-item local-history-button"
-            :class="{ active: activeLocalId === item.id }"
+            :class="{
+              active: activeLocalId === item.id,
+              'history-item--menu-open': openActionMenuId === item.id
+            }"
             data-testid="local-history-item"
             @click="handleSelectLocal(item.id)"
           >
@@ -138,6 +143,20 @@
               {{ resolveConversationAgentLabel(item.agentKey) }}
             </span>
           </button>
+          <form
+            v-else
+            class="history-rename-form"
+            data-testid="local-history-rename-form"
+            @submit.prevent="submitRename(item.id)"
+          >
+            <input
+              v-model="renameDraft"
+              class="history-rename-input"
+              data-testid="local-history-rename-input"
+              :aria-label="t('shared.renameConversation')"
+              @keydown.esc.prevent="cancelRename"
+            />
+          </form>
           <div class="history-actions">
             <template v-if="pendingDeleteId === item.id">
               <button
@@ -171,36 +190,56 @@
             <template v-else>
               <button
                 type="button"
-                class="history-action"
-                data-testid="local-history-agent-binding"
-                :aria-label="t('shared.bindToAgent')"
-                :title="t('shared.bindToAgent')"
-                :disabled="agentBindingSubmitting === true"
-                @click.stop="openLocalAgentBinding(item.id)"
+                class="history-action-trigger"
+                :class="{ 'history-action-trigger--visible': openActionMenuId === item.id }"
+                data-testid="local-history-actions-menu"
+                :aria-label="`${formatConversationTitle(item.title, item.boundNodeName, t('shared.untitled'))} ${t('shared.chooseChatMode')}`"
+                :aria-expanded="openActionMenuId === item.id"
+                @click.stop="toggleLocalActionMenu(item.id)"
               >
-                {{ t('shared.bindToAgentShort') }}
-              </button>
-              <button
-                type="button"
-                class="history-action"
-                :class="{ active: item.starred === true }"
-                data-testid="local-history-star"
-                :aria-label="item.starred ? t('shared.unstarConversation') : t('shared.starConversation')"
-                :title="item.starred ? t('shared.unstarConversation') : t('shared.starConversation')"
-                @click.stop="$emit('toggle-local-star', item.id)"
-              >
-                ★
-              </button>
-              <button
-                type="button"
-                class="history-action danger"
-                data-testid="local-history-delete"
-                :aria-label="t('shared.deleteConversation')"
-                @click.stop="pendingDeleteId = item.id"
-              >
-                x
+                ⋯
               </button>
             </template>
+          </div>
+          <div
+            v-if="openActionMenuId === item.id"
+            class="history-action-menu"
+            data-testid="local-history-actions-popup"
+          >
+            <button
+              type="button"
+              class="history-action-menu-item"
+              data-testid="local-history-rename"
+              @click.stop="startRename(item)"
+            >
+              {{ t('shared.renameConversation') }}
+            </button>
+            <button
+              type="button"
+              class="history-action-menu-item"
+              data-testid="local-history-agent-binding"
+              :disabled="agentBindingSubmitting === true"
+              @click.stop="openLocalAgentBinding(item.id)"
+            >
+              {{ t('shared.bindToAgent') }}
+            </button>
+            <button
+              type="button"
+              class="history-action-menu-item"
+              :class="{ active: item.starred === true }"
+              data-testid="local-history-star"
+              @click.stop="toggleLocalStar(item.id)"
+            >
+              {{ item.starred ? t('shared.unstarConversation') : t('shared.starConversation') }}
+            </button>
+            <button
+              type="button"
+              class="history-action-menu-item history-action-menu-item--danger"
+              data-testid="local-history-delete"
+              @click.stop="startDeleteLocal(item.id)"
+            >
+              {{ t('shared.deleteConversation') }}
+            </button>
           </div>
           <div v-if="localAgentBindingId === item.id" class="local-agent-binding-panel">
             <p class="local-agent-binding-panel__title">{{ t('shared.selectedAgent') }}</p>
@@ -340,6 +379,7 @@ const emit = defineEmits<{
   (event: 'select-external-provider', id: ExternalHistoryProviderId): void;
   (event: 'select-local', id: string): void;
   (event: 'delete-local', id: string): void;
+  (event: 'rename-local', payload: { id: string; title: string }): void;
   (event: 'toggle-local-star', id: string): void;
   (event: 'set-local-filter', value: LocalConversationFilter): void;
   (event: 'select-external', id: string): void;
@@ -356,6 +396,9 @@ const menuOpen = ref(false);
 const menuHostRef = ref<HTMLElement | null>(null);
 const pendingDeleteId = ref<string | null>(null);
 const localAgentBindingId = ref<string | null>(null);
+const renameEditingId = ref<string | null>(null);
+const renameDraft = ref('');
+const openActionMenuId = ref<string | null>(null);
 const localAgentBindingOptions = computed(() => props.agentBindingOptions ?? []);
 const { t } = useWorkspaceI18n();
 
@@ -372,12 +415,17 @@ function emitNewCompare() {
 function handleSelectLocal(id: string) {
   pendingDeleteId.value = null;
   localAgentBindingId.value = null;
+  openActionMenuId.value = null;
+  if (renameEditingId.value === id) {
+    return;
+  }
   emit('select-local', id);
 }
 
 function confirmDeleteLocal(id: string) {
   pendingDeleteId.value = null;
   localAgentBindingId.value = null;
+  openActionMenuId.value = null;
   emit('delete-local', id);
 }
 
@@ -395,6 +443,8 @@ function resolveConversationAgentLabel(agentKey: string | null | undefined): str
 
 function openLocalAgentBinding(id: string) {
   pendingDeleteId.value = null;
+  renameEditingId.value = null;
+  openActionMenuId.value = null;
   if (localAgentBindingId.value === id) {
     localAgentBindingId.value = null;
     return;
@@ -402,6 +452,25 @@ function openLocalAgentBinding(id: string) {
 
   localAgentBindingId.value = id;
   emit('open-local-agent-binding', id);
+}
+
+function startRename(item: Conversation) {
+  pendingDeleteId.value = null;
+  localAgentBindingId.value = null;
+  openActionMenuId.value = null;
+  renameEditingId.value = item.id;
+  renameDraft.value = item.title || '';
+}
+
+function submitRename(id: string) {
+  emit('rename-local', { id, title: renameDraft.value });
+  renameEditingId.value = null;
+  renameDraft.value = '';
+}
+
+function cancelRename() {
+  renameEditingId.value = null;
+  renameDraft.value = '';
 }
 
 function closeLocalAgentBinding() {
@@ -413,17 +482,42 @@ function bindLocalAgent(conversationId: string, agentKey: string | null) {
   localAgentBindingId.value = null;
 }
 
+function toggleLocalActionMenu(id: string) {
+  pendingDeleteId.value = null;
+  localAgentBindingId.value = null;
+  if (renameEditingId.value === id) {
+    return;
+  }
+
+  openActionMenuId.value = openActionMenuId.value === id ? null : id;
+}
+
+function toggleLocalStar(id: string) {
+  openActionMenuId.value = null;
+  emit('toggle-local-star', id);
+}
+
+function startDeleteLocal(id: string) {
+  openActionMenuId.value = null;
+  pendingDeleteId.value = id;
+}
+
 function handleWindowClick(event: MouseEvent) {
-  if (!menuOpen.value || !menuHostRef.value) {
-    return;
-  }
-
   const target = event.target;
-  if (target instanceof Node && menuHostRef.value.contains(target)) {
+  if (!(target instanceof Node)) {
+    menuOpen.value = false;
+    openActionMenuId.value = null;
     return;
   }
 
-  menuOpen.value = false;
+  if (menuOpen.value && menuHostRef.value && !menuHostRef.value.contains(target)) {
+    menuOpen.value = false;
+  }
+
+  const sidebarRoot = target instanceof Element ? target.closest('.workspace-sidebar') : null;
+  if (!sidebarRoot) {
+    openActionMenuId.value = null;
+  }
 }
 
 onMounted(() => {
@@ -825,6 +919,21 @@ onUnmounted(() => {
   gap: 6px;
 }
 
+.history-rename-form {
+  padding: 4px 8px;
+}
+
+.history-rename-input {
+  width: 100%;
+  height: 28px;
+  border: 1px solid rgba(96, 165, 250, 0.36);
+  border-radius: 8px;
+  padding: 0 8px;
+  color: var(--cp-text-primary);
+  background: rgba(15, 23, 42, 0.82);
+  font-size: 13px;
+}
+
 .history-agent-tag {
   margin-left: auto;
   padding: 2px 8px;
@@ -843,41 +952,63 @@ onUnmounted(() => {
   right: 6px;
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, rgba(7, 10, 18, 0) 0%, rgba(7, 10, 18, 0.92) 24%, rgba(7, 10, 18, 0.98) 100%);
   transform: translateY(-50%);
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-  transition: opacity 0.16s ease, visibility 0.16s ease, transform 0.16s ease;
-}
-
-.local-history-row:hover .history-actions,
-.local-history-row:focus-within .history-actions,
-.local-history-row.confirming .history-actions {
   opacity: 1;
   visibility: visible;
-  pointer-events: auto;
-  transform: translateY(-50%) translateX(0);
+  pointer-events: none;
+  z-index: 2;
 }
 
-.history-action {
-  min-height: 24px;
-  min-width: 24px;
-  padding: 0 6px;
+.history-row.menu-open {
+  z-index: 20;
+}
+
+.history-action,
+.history-action-trigger {
+  min-height: 28px;
+  min-width: 28px;
+  padding: 0 8px;
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.92);
   color: var(--cp-text-muted);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.14);
   transition: color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+  border: none;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.history-action-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.history-action-trigger--visible {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.local-history-row:hover .history-action-trigger,
+.local-history-row:focus-within .history-action-trigger {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
 }
 
 .history-action:hover,
-.history-action:focus-visible {
+.history-action:focus-visible,
+.history-action-trigger:hover,
+.history-action-trigger:focus-visible {
   color: var(--cp-text-primary);
   background: rgba(30, 41, 59, 0.96);
   box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.28);
@@ -910,6 +1041,56 @@ onUnmounted(() => {
 .history-action:disabled {
   cursor: wait;
   opacity: 0.7;
+}
+
+.history-action-menu {
+  position: absolute;
+  top: 100%;
+  right: 6px;
+  z-index: 20;
+  min-width: 168px;
+  padding: 6px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background-color: #111827;
+  background-image: none;
+  opacity: 1;
+  isolation: isolate;
+  overflow: hidden;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.42);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.history-action-menu-item {
+  min-height: 34px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--cp-text-primary);
+  text-align: left;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.history-action-menu-item:hover,
+.history-action-menu-item:focus-visible {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.history-action-menu-item.active {
+  color: #fde68a;
+}
+
+.history-action-menu-item:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.history-action-menu-item--danger {
+  color: #fecaca;
 }
 
 .local-agent-binding-panel {

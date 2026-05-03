@@ -31,6 +31,10 @@ export class DatabaseContextProvider implements ContextProvider {
         return [];
     }
 
+    async getProjectDocuments(_curNode: string): Promise<Array<{ path: string; name: string }>> {
+        return [];
+    }
+
     async readDocument(_path: string): Promise<ContextDocument> {
         notImplemented();
     }

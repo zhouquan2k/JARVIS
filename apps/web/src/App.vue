@@ -7,8 +7,9 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue';
+import { onBeforeUnmount, onMounted } from 'vue';
 import {
+  installGlobalUnhandledErrorFallback,
   openConversationImportDialog,
   useChatStore,
   useCompareStore,
@@ -25,8 +26,15 @@ const historyProviders = createWebHistoryProviders();
 const contextProvider = createWebContextProvider({
   env: import.meta.env as Record<string, string | undefined>
 });
+let removeUnhandledErrorFallback: (() => void) | null = null;
 
 onMounted(() => {
+  removeUnhandledErrorFallback = installGlobalUnhandledErrorFallback({
+    reportError: (message) => {
+      chatStore.reportUnhandledBackendError(message);
+    }
+  });
+
   void (async () => {
     try {
       if (import.meta.env.DEV) {
@@ -76,5 +84,10 @@ onMounted(() => {
       console.error('Failed to initialize provider catalogs', error);
     }
   })();
+});
+
+onBeforeUnmount(() => {
+  removeUnhandledErrorFallback?.();
+  removeUnhandledErrorFallback = null;
 });
 </script>

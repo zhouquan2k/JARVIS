@@ -109,6 +109,14 @@ describe('BackgroundProxyProvider', () => {
                                 label: '[1]'
                             }
                         }
+                    ],
+                    functionalParts: [
+                        {
+                            id: 'part-1',
+                            kind: 'tool_call',
+                            title: 'Tool call',
+                            content: '{"name":"lookup"}'
+                        }
                     ]
                 }
             });
@@ -128,6 +136,14 @@ describe('BackgroundProxyProvider', () => {
                                 refId: 'ref-1',
                                 label: '[1]'
                             }
+                        }
+                    ],
+                    functionalParts: [
+                        {
+                            id: 'part-1',
+                            kind: 'tool_call',
+                            title: 'Tool call',
+                            content: '{"name":"lookup"}'
                         }
                     ]
                 }
@@ -150,7 +166,7 @@ describe('BackgroundProxyProvider', () => {
         };
 
         const provider = new BackgroundProxyProvider('chatgpt-web', { channelId: 'test-channel' });
-        const updates: Array<{ text: string; annotations?: unknown[] }> = [];
+        const updates: Array<{ text: string; annotations?: unknown[]; functionalParts?: unknown[] }> = [];
         const result = await provider.sendMessage(
             '分析附件',
             {
@@ -194,6 +210,8 @@ describe('BackgroundProxyProvider', () => {
             })
         }));
         expect(updates[0]?.text).toBe('阶段性结果 [1]');
+        expect(updates[0]?.functionalParts).toHaveLength(1);
         expect(result.annotations).toHaveLength(1);
+        expect(result.functionalParts).toHaveLength(1);
     });
 });

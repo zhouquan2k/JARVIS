@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import {
+    augmentPromptWithMentionedFiles,
     prepareRequestWithActiveDocument,
     type AgentRuntime,
     cloneConversation,
@@ -15,20 +16,25 @@ import {
     type ExternalHistoryProviderId,
     type HistoryListQueryOptions,
     type ContextDocument,
+    type ContextNode,
     type IConversationPersistProvider,
     type IContextProvider,
     type IExternalConversationProvider,
     type IModelProvider,
     type MessageAttachment,
+    type MessageFunctionalPart,
     type ProviderDocumentCapability,
+    type ReasoningEffort,
     type ResolvedAgentConfig,
-    decodeTextDocument
+    decodeTextDocument,
+    isTextDocumentMimeType
 } from '@packages/core/src';
 import type { ModelConfig, ModelOptionDefinition, ProviderConfig, ProviderModelCatalog } from '@packages/core/config';
 import { markRaw, toRaw } from 'vue';
 import { translateWorkspaceMessage } from '../i18n';
 import { executeConversationArchive, type ArchiveExecutionResult } from '../services/conversationArchive';
 import { extractNodeNameFromPath } from '../utils/conversationTitle';
+import { formatHttpApiError } from '../utils/formatHttpApiError';
 
 export type WorkspaceHistorySource = 'local' | 'external';
 export type WorkspaceMode = 'agent' | 'conversation';
@@ -39,6 +45,12 @@ export type LocalConversationFilter = 'all' | 'starred';
 type ProviderModelLoadState = {
     loading: boolean;
     loaded: boolean;
+};
+
+type ResolvedMentionedContextDocument = {
+    path: string;
+    name: string;
+    document: ContextDocument;
 };
 
 type ArchiveFeedbackTone = 'success' | 'info' | 'error';
@@ -95,10 +107,12 @@ export interface ChatState {
     currentProviderId: string;
     currentModelId: string;
     currentModelOptions: Record<string, boolean>;
+    currentReasoningEffort: ReasoningEffort;
     questionIndexFilter: QuestionIndexFilter;
     isQuestionIndexPanelOpen: boolean;
     activeQuestionId: string | null;
     pendingScrollQuestionId: string | null;
+    editingQuestionId: string | null;
     draftPrompt: string;
     lastSubmittedPrompt: string | null;
     draftFocusRequestKey: number;
@@ -106,6 +120,9 @@ export interface ChatState {
     attachmentError: string | null;
     activeAgentContext: ResolvedAgentConfig | null;
     workspaceAgentContext: ResolvedAgentConfig | null;
+    conversationContextProvider: IContextProvider | null;
+    conversationAgentConfigs: Record<string, ResolvedAgentConfig>;
+    conversationOnFileChanged: ((change: { path: string; beforeContent: string; afterContent: string; alreadyPersisted?: boolean }) => Promise<void> | void) | null;
     activeWorkspaceAgentKey: string | null;
     activeWorkspacePath: string | null;
     activeWorkspaceSelectedNodePath: string | null;
@@ -114,10 +131,14 @@ export interface ChatState {
     onWorkspaceFileChanged: ((change: { path: string; beforeContent: string; afterContent: string; alreadyPersisted?: boolean }) => Promise<void> | void) | null;
     isArchivingConversation: boolean;
     archiveFeedback: ArchiveFeedbackState | null;
+    archiveConversationProgressPart: MessageFunctionalPart | null;
     currentConversationArchiveStatus: ConversationArchiveStatus;
 }
 
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
+const DEFAULT_REASONING_EFFORT: ReasoningEffort = 'high';
+const FILE_REFERENCE_PATTERN = /(^|[\s([{\u3000\uFF08\u3010])@([^\s@]+)/gu;
+const TRAILING_MENTION_PUNCTUATION = /[.,;:!?)\]}>\u3001\u3002\uFF0C\uFF1B\uFF1A\uFF01\uFF1F\uFF09\u3011\u300B]+$/u;
 const FILE_EXTENSION_MIME_TYPES: Record<string, string> = {
     txt: 'text/plain',
     md: 'text/markdown',
@@ -227,6 +248,131 @@ function cloneActiveWorkspaceDocument(
         version: document.version,
         canWrite: document.canWrite
     };
+}
+
+function normalizeContextPath(path?: string | null): string | null {
+    const trimmed = path?.trim();
+    if (!trimmed) {
+        return null;
+    }
+
+    const withLeadingSlash = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+    const normalized = withLeadingSlash.replace(/\/+/g, '/').replace(/\/$/, '');
+    return normalized || '/';
+}
+
+function extractMentionedFileRefToken(token: string): string | null {
+    const trimmed = token.trim().replace(TRAILING_MENTION_PUNCTUATION, '');
+    if (!trimmed) {
+        return null;
+    }
+
+    return trimmed.replace(/^\.?\//u, '');
+}
+
+function extractMentionedFileRefs(prompt: string): string[] {
+    const matches = prompt.matchAll(FILE_REFERENCE_PATTERN);
+    const refs: string[] = [];
+
+    for (const match of matches) {
+        const token = typeof match[2] === 'string' ? extractMentionedFileRefToken(match[2]) : null;
+        if (token) {
+            refs.push(token);
+        }
+    }
+
+    return refs;
+}
+
+function flattenContextFileNodes(nodes: ContextNode[]): ContextNode[] {
+    const files: ContextNode[] = [];
+
+    for (const node of nodes) {
+        if (node.kind === 'file') {
+            files.push(node);
+        }
+
+        if (Array.isArray(node.children) && node.children.length > 0) {
+            files.push(...flattenContextFileNodes(node.children));
+        }
+    }
+
+    return files;
+}
+
+function buildMentionedFileError(ref: string, reason: 'missing' | 'ambiguous' | 'non-text'): Error {
+    switch (reason) {
+        case 'missing':
+            return new Error(`Referenced file '@${ref}' was not found in the current Agent context.`);
+        case 'ambiguous':
+            return new Error(`Referenced file '@${ref}' matches multiple files in the current Agent context. Please use a more specific path suffix.`);
+        case 'non-text':
+            return new Error(`Referenced file '@${ref}' is not a text document and cannot be injected into the prompt.`);
+        default:
+            return new Error(`Referenced file '@${ref}' could not be loaded.`);
+    }
+}
+
+function resolveMentionCandidateByReference(ref: string, nodes: ContextNode[]): ContextNode | null {
+    const normalizedRef = extractMentionedFileRefToken(ref);
+    if (!normalizedRef) {
+        return null;
+    }
+
+    const normalizedRefPath = normalizeContextPath(normalizedRef);
+    const basename = normalizedRef.split('/').pop() || normalizedRef;
+    const basenameMatches = nodes.filter((node) => node.name === basename);
+    if (basenameMatches.length === 1) {
+        return basenameMatches[0];
+    }
+
+    if (normalizedRefPath) {
+        const suffixMatches = nodes.filter((node) => {
+            const normalizedNodePath = normalizeContextPath(node.path);
+            return normalizedNodePath === normalizedRefPath
+                || normalizedNodePath?.endsWith(normalizedRefPath) === true;
+        });
+        if (suffixMatches.length === 1) {
+            return suffixMatches[0];
+        }
+    }
+
+    if (basenameMatches.length > 1) {
+        throw buildMentionedFileError(normalizedRef, 'ambiguous');
+    }
+
+    return null;
+}
+
+function resolveAgentContextScopeKey(agent: ResolvedAgentConfig | null | undefined): string | null {
+    const scopePath = agent?.scopePath?.trim();
+    if (!scopePath) {
+        return null;
+    }
+
+    return scopePath === '/' ? '/' : (scopePath.endsWith('/') ? scopePath : `${scopePath}/`);
+}
+
+function isPathWithinAgentScope(path: string, scopePath: string | null): boolean {
+    const normalizedPath = normalizeContextPath(path);
+    const normalizedScopePath = normalizeContextPath(scopePath);
+    if (!normalizedPath) {
+        return false;
+    }
+
+    if (!normalizedScopePath || normalizedScopePath === '/') {
+        return true;
+    }
+
+    return normalizedPath === normalizedScopePath || normalizedPath.startsWith(`${normalizedScopePath}/`);
+}
+
+function filterContextNodesByScope(nodes: ContextNode[], scopePath: string | null): ContextNode[] {
+    if (!scopePath || scopePath === '/') {
+        return nodes;
+    }
+
+    return nodes.filter((node) => isPathWithinAgentScope(node.path, scopePath));
 }
 
 function resolveProviderLabel(providerId: ExternalHistoryProviderId): string {
@@ -351,7 +497,8 @@ function normalizeModelOptions(
 function buildConversationModelSelection(
     providerId: string,
     modelId: string,
-    modelOptions: Record<string, boolean>
+    modelOptions: Record<string, boolean>,
+    reasoningEffort: ReasoningEffort
 ): ConversationModelSelection | undefined {
     if (!providerId || !modelId) {
         return undefined;
@@ -360,7 +507,8 @@ function buildConversationModelSelection(
     return {
         providerId,
         modelId,
-        modelOptions: cloneModelOptions(modelOptions)
+        modelOptions: cloneModelOptions(modelOptions),
+        reasoningEffort
     };
 }
 
@@ -418,6 +566,16 @@ function resolveQuestionPairIndices(messages: ConversationMessage[], questionId:
 function resolveLastVisibleQuestionMessage(messages: ConversationMessage[]): ConversationMessage | null {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
         const message = messages[index];
+        if (message.role === 'user' && message.deleted !== true) {
+            return message;
+        }
+    }
+
+    return null;
+}
+
+function resolveFirstVisibleQuestionMessage(messages: ConversationMessage[]): ConversationMessage | null {
+    for (const message of messages) {
         if (message.role === 'user' && message.deleted !== true) {
             return message;
         }
@@ -563,6 +721,40 @@ function buildArchiveFeedbackMessage(result: ArchiveExecutionResult): string {
     return translateWorkspaceMessage('shared.archiveConversationSuccess');
 }
 
+function buildArchiveConversationProgressPart(input: {
+    kind: MessageFunctionalPart['kind'];
+    content: string;
+}): MessageFunctionalPart {
+    return {
+        id: 'archive-conversation-progress',
+        kind: input.kind,
+        title: translateWorkspaceMessage('shared.archiveConversationToolTitle'),
+        content: input.content,
+        collapsed: false
+    };
+}
+
+function buildArchiveConversationProgressStartPart(): MessageFunctionalPart {
+    return buildArchiveConversationProgressPart({
+        kind: 'tool_call',
+        content: translateWorkspaceMessage('shared.archiveConversationInProgress')
+    });
+}
+
+function buildArchiveConversationProgressResultPart(result: ArchiveExecutionResult): MessageFunctionalPart {
+    return buildArchiveConversationProgressPart({
+        kind: 'tool_result',
+        content: buildArchiveFeedbackMessage(result)
+    });
+}
+
+function buildArchiveConversationProgressFailurePart(reason: string): MessageFunctionalPart {
+    return buildArchiveConversationProgressPart({
+        kind: 'tool_result',
+        content: translateWorkspaceMessage('shared.archiveConversationFailed', { reason })
+    });
+}
+
 function extractHistoryErrorCode(error: unknown): ExternalHistoryErrorCode | null {
     return error instanceof ExternalHistoryError ? error.code : null;
 }
@@ -636,10 +828,12 @@ export const useChatStore = defineStore('chat', {
         currentProviderId: '',
         currentModelId: '',
         currentModelOptions: {},
+        currentReasoningEffort: DEFAULT_REASONING_EFFORT,
         questionIndexFilter: 'all',
         isQuestionIndexPanelOpen: true,
         activeQuestionId: null,
         pendingScrollQuestionId: null,
+        editingQuestionId: null,
         draftPrompt: '',
         lastSubmittedPrompt: null,
         draftFocusRequestKey: 0,
@@ -647,6 +841,9 @@ export const useChatStore = defineStore('chat', {
         attachmentError: null,
         activeAgentContext: null,
         workspaceAgentContext: null,
+        conversationContextProvider: null,
+        conversationAgentConfigs: {},
+        conversationOnFileChanged: null,
         activeWorkspaceAgentKey: null,
         activeWorkspacePath: null,
         activeWorkspaceSelectedNodePath: null,
@@ -655,6 +852,7 @@ export const useChatStore = defineStore('chat', {
         onWorkspaceFileChanged: null,
         isArchivingConversation: false,
         archiveFeedback: null,
+        archiveConversationProgressPart: null,
         currentConversationArchiveStatus: buildIdleConversationArchiveStatus()
     }),
 
@@ -740,6 +938,24 @@ export const useChatStore = defineStore('chat', {
     },
 
     actions: {
+        reportUnhandledBackendError(error: unknown) {
+            const message = error instanceof Error
+                ? error.message
+                : typeof error === 'string'
+                    ? error
+                    : String(error);
+            const normalized = message.trim();
+            if (!normalized) {
+                return;
+            }
+
+            this.currentError = normalized;
+        },
+
+        clearCurrentError() {
+            this.currentError = null;
+        },
+
         resolveModelProvider(providerId?: string): IModelProvider | null {
             const targetProviderId = providerId || this.currentProviderId;
             if (this.modelProviderResolver && targetProviderId) {
@@ -757,7 +973,12 @@ export const useChatStore = defineStore('chat', {
         },
 
         buildCurrentConversationModelSelection(): ConversationModelSelection | undefined {
-            return buildConversationModelSelection(this.currentProviderId, this.currentModelId, this.currentModelOptions);
+            return buildConversationModelSelection(
+                this.currentProviderId,
+                this.currentModelId,
+                this.currentModelOptions,
+                this.currentReasoningEffort
+            );
         },
 
         syncCurrentConversationModelSelection() {
@@ -789,6 +1010,7 @@ export const useChatStore = defineStore('chat', {
                     this.currentModelConfig || undefined,
                     modelSelection.modelOptions
                 );
+                this.currentReasoningEffort = modelSelection.reasoningEffort || DEFAULT_REASONING_EFFORT;
                 this.syncCurrentConversationModelSelection();
                 return;
             }
@@ -804,6 +1026,7 @@ export const useChatStore = defineStore('chat', {
             }
 
             this.currentModelOptions = normalizeModelOptions(this.currentModelConfig || undefined, this.currentModelOptions);
+            this.currentReasoningEffort = conversation?.modelSelection?.reasoningEffort || DEFAULT_REASONING_EFFORT;
             this.syncCurrentConversationModelSelection();
         },
 
@@ -904,6 +1127,7 @@ export const useChatStore = defineStore('chat', {
                 this.currentProviderId = '';
                 this.currentModelId = '';
                 this.currentModelOptions = {};
+                this.currentReasoningEffort = DEFAULT_REASONING_EFFORT;
                 return;
             }
 
@@ -913,6 +1137,7 @@ export const useChatStore = defineStore('chat', {
 
             this.currentModelId = '';
             this.currentModelOptions = {};
+            this.currentReasoningEffort = DEFAULT_REASONING_EFFORT;
         },
 
         setAvailableProviders(providers: ProviderConfig[]) {
@@ -1058,6 +1283,7 @@ export const useChatStore = defineStore('chat', {
             this.currentProviderId = providerId;
             this.currentModelId = '';
             this.currentModelOptions = {};
+            this.currentReasoningEffort = this.currentConversation?.modelSelection?.reasoningEffort || this.currentReasoningEffort || DEFAULT_REASONING_EFFORT;
             this.currentError = null;
 
             const provider = await this.ensureProviderModelsLoaded(providerId);
@@ -1096,6 +1322,15 @@ export const useChatStore = defineStore('chat', {
             }
 
             this.currentModelOptions = normalizeModelOptions(model, this.currentModelOptions, { key, enabled });
+            this.syncCurrentConversationModelSelection();
+        },
+
+        setCurrentReasoningEffort(reasoningEffort: ReasoningEffort) {
+            if (reasoningEffort !== 'low' && reasoningEffort !== 'medium' && reasoningEffort !== 'high') {
+                return;
+            }
+
+            this.currentReasoningEffort = reasoningEffort;
             this.syncCurrentConversationModelSelection();
         },
 
@@ -1173,6 +1408,29 @@ export const useChatStore = defineStore('chat', {
             this.workspaceAgentContext = null;
         },
 
+        setConversationExecutionContext(input: {
+            contextProvider: IContextProvider | null;
+            onFileChanged?: ((change: {
+                path: string;
+                beforeContent: string;
+                afterContent: string;
+                alreadyPersisted?: boolean;
+            }) => Promise<void> | void) | null;
+        }) {
+            const nextProvider = input.contextProvider ? markRaw(input.contextProvider) : null;
+            const nextOnFileChanged = input.onFileChanged ? markRaw(input.onFileChanged) : null;
+            if (
+                this.conversationContextProvider?.id === nextProvider?.id
+                && this.conversationOnFileChanged === nextOnFileChanged
+            ) {
+                return;
+            }
+
+            this.conversationContextProvider = nextProvider;
+            this.conversationOnFileChanged = nextOnFileChanged;
+            this.conversationAgentConfigs = {};
+        },
+
         setWorkspaceMode(mode: WorkspaceMode) {
             this.workspaceMode = mode;
         },
@@ -1193,6 +1451,177 @@ export const useChatStore = defineStore('chat', {
             }
 
             await this.setCurrentModelProvider(providerId, agent.modelName?.trim() || undefined);
+        },
+
+        async loadConversationAgentConfigs(): Promise<Record<string, ResolvedAgentConfig>> {
+            if (Object.keys(this.conversationAgentConfigs).length > 0) {
+                return this.conversationAgentConfigs;
+            }
+
+            const provider = this.conversationContextProvider ?? this.activeWorkspaceContextProvider;
+            if (!provider) {
+                return {};
+            }
+
+            await provider.initializeAccess();
+            const context = await provider.getContext();
+            this.conversationAgentConfigs = Object.fromEntries(
+                Object.entries(context.agentConfigs).map(([key, agent]) => [key, cloneResolvedAgentConfig(agent)])
+            );
+            return this.conversationAgentConfigs;
+        },
+
+        async resolveAgentContextByKey(agentKey: string | null | undefined): Promise<ResolvedAgentConfig | null> {
+            const normalizedAgentKey = normalizeAgentScopeKey(agentKey);
+            if (!normalizedAgentKey) {
+                return null;
+            }
+
+            const activeAgentScopeKey = resolveAgentContextScopeKey(this.activeAgentContext);
+            if (activeAgentScopeKey === normalizedAgentKey && this.activeAgentContext) {
+                return cloneResolvedAgentConfig(this.activeAgentContext);
+            }
+
+            const workspaceAgentScopeKey = resolveAgentContextScopeKey(this.workspaceAgentContext);
+            if (workspaceAgentScopeKey === normalizedAgentKey && this.workspaceAgentContext) {
+                return cloneResolvedAgentConfig(this.workspaceAgentContext);
+            }
+
+            const agentConfigs = await this.loadConversationAgentConfigs();
+            const agent = agentConfigs[normalizedAgentKey];
+            return agent ? cloneResolvedAgentConfig(agent) : null;
+        },
+
+        async resolveCurrentConversationAgentContext(): Promise<ResolvedAgentConfig | null> {
+            const boundAgentContext = await this.resolveAgentContextByKey(this.currentConversation?.agentKey);
+            if (boundAgentContext) {
+                return boundAgentContext;
+            }
+
+            return this.activeAgentContext ? cloneResolvedAgentConfig(this.activeAgentContext) : null;
+        },
+
+        getActiveAgentContextSnapshot(): ResolvedAgentConfig | null {
+            return this.activeAgentContext ? cloneResolvedAgentConfig(this.activeAgentContext) : null;
+        },
+
+        resolveCurrentConversationContextProvider(): IContextProvider | null {
+            if (!normalizeAgentScopeKey(this.currentConversation?.agentKey)) {
+                return null;
+            }
+
+            return this.conversationContextProvider;
+        },
+
+        resolveMentionContextProvider(): IContextProvider | null {
+            return this.resolveCurrentConversationContextProvider() ?? this.activeWorkspaceContextProvider;
+        },
+
+        resolveMentionContextScopePath(agentContext?: ResolvedAgentConfig | null): string | null {
+            return resolveAgentContextScopeKey(agentContext ?? this.resolveEffectiveAgentContext());
+        },
+
+        async resolveMentionedContextDocuments(
+            prompt: string,
+            options?: { scopePath?: string | null }
+        ): Promise<ResolvedMentionedContextDocument[]> {
+            const refs = extractMentionedFileRefs(prompt);
+            if (refs.length === 0) {
+                return [];
+            }
+
+            const provider = this.resolveMentionContextProvider();
+            if (!provider) {
+                throw new Error('Workspace file references require an active workspace context provider.');
+            }
+
+            await provider.initializeAccess();
+            const context = await provider.getContext();
+            const scopedNodes = filterContextNodesByScope(context.nodes, options?.scopePath ?? null);
+            const fileNodes = flattenContextFileNodes(scopedNodes);
+            const resolved = new Map<string, ResolvedMentionedContextDocument>();
+
+            for (const ref of refs) {
+                const candidate = resolveMentionCandidateByReference(ref, fileNodes);
+                if (!candidate) {
+                    throw buildMentionedFileError(ref, 'missing');
+                }
+
+                const normalizedPath = normalizeContextPath(candidate.path);
+                if (!normalizedPath || resolved.has(normalizedPath)) {
+                    continue;
+                }
+
+                const document = await provider.readDocument(normalizedPath);
+                if (!isTextDocumentMimeType(document.mimeType)) {
+                    throw buildMentionedFileError(ref, 'non-text');
+                }
+
+                resolved.set(normalizedPath, {
+                    path: normalizedPath,
+                    name: candidate.name,
+                    document
+                });
+            }
+
+            return Array.from(resolved.values());
+        },
+
+        buildMentionedFilesPromptSections(files: ResolvedMentionedContextDocument[]): string {
+            return augmentPromptWithMentionedFiles(
+                '',
+                files.map((file) => ({
+                    path: file.path,
+                    name: file.name,
+                    content: decodeTextDocument(file.document.dataBase64)
+                }))
+            ).trim();
+        },
+
+        applyConversationReferencedDocumentPaths(conversation: Conversation, paths: string[]): void {
+            if (conversation.origin !== 'local' || paths.length === 0) {
+                return;
+            }
+
+            const nextDocumentPaths = new Set(conversation.documentPaths ?? []);
+            for (const path of paths) {
+                const normalizedPath = normalizeContextPath(path);
+                if (normalizedPath) {
+                    nextDocumentPaths.add(normalizedPath);
+                }
+            }
+            conversation.documentPaths = Array.from(nextDocumentPaths);
+        },
+
+        resolveCurrentConversationFileChangeHandler():
+        ((change: {
+            path: string;
+            beforeContent: string;
+            afterContent: string;
+            alreadyPersisted?: boolean;
+        }) => Promise<void> | void) | null {
+            if (!normalizeAgentScopeKey(this.currentConversation?.agentKey)) {
+                return null;
+            }
+
+            return this.conversationOnFileChanged;
+        },
+
+        async syncConversationExecutionContext(conversation: Conversation | null): Promise<void> {
+            if (!conversation?.agentKey) {
+                this.setActiveAgentContext(null);
+                return;
+            }
+
+            if (!this.conversationContextProvider && this.activeWorkspaceContextProvider) {
+                this.setConversationExecutionContext({
+                    contextProvider: this.activeWorkspaceContextProvider,
+                    onFileChanged: this.onWorkspaceFileChanged
+                });
+            }
+
+            const resolvedAgentContext = await this.resolveAgentContextByKey(conversation.agentKey);
+            this.setActiveAgentContext(resolvedAgentContext);
         },
 
         setWorkspaceContext(input: {
@@ -1295,12 +1724,82 @@ export const useChatStore = defineStore('chat', {
             }
         },
 
+        async bindConversationToDocument(id: string, input: {
+            documentPath: string | null;
+            previousDocumentPath?: string | null;
+        }): Promise<void> {
+            if (!this.storageProvider) {
+                throw new Error('Storage provider is not initialized');
+            }
+
+            const targetConversation = this.conversations.find((conversation) => conversation.id === id)
+                ?? (this.currentConversation?.id === id ? this.currentConversation : null);
+            if (!targetConversation) {
+                throw new Error(`Conversation ${id} not found`);
+            }
+
+            const normalizedDocumentPath = normalizeContextPath(input.documentPath);
+            if (!normalizedDocumentPath) {
+                throw new Error('Document path must not be empty.');
+            }
+
+            const normalizedPreviousDocumentPath = normalizeContextPath(input.previousDocumentPath)
+                ?? normalizeContextPath(targetConversation.documentPaths?.[0]);
+            const existingPaths = Array.isArray(targetConversation.documentPaths)
+                ? targetConversation.documentPaths
+                : [];
+            const retainedPaths = existingPaths.filter((path) => {
+                const normalizedPath = normalizeContextPath(path);
+                return normalizedPath !== normalizedPreviousDocumentPath && normalizedPath !== normalizedDocumentPath;
+            });
+            const nextConversation = normalizeStoredConversation({
+                ...cloneConversation(targetConversation),
+                updatedAt: Date.now(),
+                documentPaths: [normalizedDocumentPath, ...retainedPaths]
+            });
+
+            await this.storageProvider.saveConversation(toRaw(nextConversation));
+            const syncProvider = this.storageProvider as IConversationPersistProvider & { syncNow?: () => Promise<void> };
+            if (typeof syncProvider.syncNow === 'function') {
+                await syncProvider.syncNow();
+            }
+            await this.loadLocalConversations();
+
+            if (this.currentConversation?.id === id) {
+                this.currentConversation = nextConversation;
+            }
+        },
+
         resolveConversationDocumentPath(path: string | null, document: ContextDocument | null): string | undefined {
             if (document?.path?.trim()) {
                 return document.path.trim();
             }
 
             return typeof path === 'string' && path.trim() ? path.trim() : undefined;
+        },
+
+        applyInitialConversationDocumentRelation(
+            conversation: Conversation,
+            input: {
+                documentPath?: string | null;
+                activeDocument?: ContextDocument | null;
+            }
+        ): void {
+            if (conversation.origin !== 'local') {
+                return;
+            }
+
+            const normalizedDocumentPath = this.resolveConversationDocumentPath(
+                input.documentPath ?? null,
+                input.activeDocument ?? null
+            );
+            if (!normalizedDocumentPath) {
+                return;
+            }
+
+            const nextDocumentPaths = new Set(conversation.documentPaths ?? []);
+            nextDocumentPaths.add(normalizedDocumentPath);
+            conversation.documentPaths = Array.from(nextDocumentPaths);
         },
 
         applyConversationDocumentRelation(
@@ -1365,8 +1864,9 @@ export const useChatStore = defineStore('chat', {
             return [activeConversation, ...persistedConversations];
         },
 
-        async resolveSendTarget() {
-            const requestedProviderId = this.activeAgentContext?.modelProviderName?.trim() || this.currentProviderId;
+        async resolveSendTarget(agentContext?: ResolvedAgentConfig | null) {
+            const effectiveAgentContext = agentContext ?? this.activeAgentContext;
+            const requestedProviderId = effectiveAgentContext?.modelProviderName?.trim() || this.currentProviderId;
             if (!requestedProviderId) {
                 throw new Error('No active model provider selected.');
             }
@@ -1376,7 +1876,7 @@ export const useChatStore = defineStore('chat', {
                 throw new Error(`Provider '${requestedProviderId}' is unavailable.`);
             }
 
-            const requestedModelId = this.activeAgentContext?.modelName?.trim();
+            const requestedModelId = effectiveAgentContext?.modelName?.trim();
             let resolvedModelId = providerConfig.defaultModel;
             if (requestedModelId) {
                 const matchedModelId = resolveProviderModelId(providerConfig, requestedModelId);
@@ -1411,12 +1911,20 @@ export const useChatStore = defineStore('chat', {
                 modelOptions: normalizeModelOptions(
                     resolveModelConfig(providerConfig, resolvedModelId),
                     sourceOptions
-                )
+                ),
+                reasoningEffort: this.currentConversation?.modelSelection?.providerId === requestedProviderId
+                    && this.currentConversation.modelSelection.modelId === resolvedModelId
+                    ? this.currentConversation.modelSelection.reasoningEffort || DEFAULT_REASONING_EFFORT
+                    : this.currentReasoningEffort || DEFAULT_REASONING_EFFORT
             };
         },
 
         clearArchiveFeedback() {
             this.archiveFeedback = null;
+        },
+
+        clearArchiveConversationProgressPart() {
+            this.archiveConversationProgressPart = null;
         },
 
         refreshCurrentConversationArchiveStatus(): void {
@@ -1472,6 +1980,9 @@ export const useChatStore = defineStore('chat', {
             const activeDocument = this.activeWorkspaceDocument;
             const onWorkspaceFileChanged = this.onWorkspaceFileChanged;
             if (!activeDocument || !onWorkspaceFileChanged) {
+                this.archiveConversationProgressPart = buildArchiveConversationProgressFailurePart(
+                    'Workspace file change pipeline is unavailable.'
+                );
                 this.archiveFeedback = {
                     tone: 'error',
                     message: translateWorkspaceMessage('shared.archiveConversationFailed', {
@@ -1484,13 +1995,15 @@ export const useChatStore = defineStore('chat', {
             const beforeContent = decodeTextDocument(activeDocument.dataBase64);
             this.isArchivingConversation = true;
             this.archiveFeedback = null;
+            this.archiveConversationProgressPart = buildArchiveConversationProgressStartPart();
 
             try {
-                const sendTarget = await this.resolveSendTarget();
+                const sendTarget = await this.resolveSendTarget(await this.resolveCurrentConversationAgentContext());
                 const result = await executeConversationArchive({
                     provider: sendTarget.provider,
                     modelId: sendTarget.modelId,
                     modelOptions: sendTarget.modelOptions,
+                    reasoningEffort: sendTarget.reasoningEffort,
                     documentMarkdown: beforeContent,
                     messages: this.visibleMessages
                 });
@@ -1509,12 +2022,14 @@ export const useChatStore = defineStore('chat', {
                     archivedAt: Date.now()
                 });
 
+                this.archiveConversationProgressPart = buildArchiveConversationProgressResultPart(result);
                 this.archiveFeedback = {
                     tone: result.changed ? 'success' : 'info',
                     message: buildArchiveFeedbackMessage(result)
                 };
             } catch (error) {
                 const reason = error instanceof Error ? error.message : String(error);
+                this.archiveConversationProgressPart = buildArchiveConversationProgressFailurePart(reason);
                 this.archiveFeedback = {
                     tone: 'error',
                     message: translateWorkspaceMessage('shared.archiveConversationFailed', { reason })
@@ -1542,6 +2057,58 @@ export const useChatStore = defineStore('chat', {
 
         setActiveQuestion(questionId: string | null) {
             this.activeQuestionId = questionId;
+        },
+
+        startQuestionEdit(questionId: string) {
+            if (!this.currentConversation || this.isPreviewing) {
+                return;
+            }
+
+            const indices = resolveQuestionPairIndices(this.currentConversation.messages, questionId);
+            const userIndex = indices.find((index) => this.currentConversation!.messages[index]?.role === 'user');
+            if (userIndex === undefined) {
+                return;
+            }
+
+            const userMessage = this.currentConversation.messages[userIndex];
+            this.editingQuestionId = questionId;
+            this.draftPrompt = userMessage.content || userMessage.requestSnapshot?.prompt || '';
+            this.draftFocusRequestKey += 1;
+        },
+
+        cancelQuestionEdit() {
+            this.editingQuestionId = null;
+        },
+
+        truncateConversationFromQuestion(questionId: string) {
+            if (!this.currentConversation) {
+                return;
+            }
+
+            const messages = this.currentConversation.messages;
+            const indices = resolveQuestionPairIndices(messages, questionId);
+            const firstIndex = indices.length > 0 ? Math.min(...indices) : -1;
+            if (firstIndex < 0) {
+                return;
+            }
+
+            for (let index = firstIndex; index < messages.length; index += 1) {
+                messages[index].deleted = true;
+            }
+            this.refreshCurrentConversationArchiveStatus();
+
+            if (this.activeQuestionId) {
+                const activeIndices = resolveQuestionPairIndices(messages, this.activeQuestionId);
+                if (activeIndices.some((index) => index >= firstIndex)) {
+                    this.activeQuestionId = null;
+                }
+            }
+            if (this.pendingScrollQuestionId) {
+                const pendingIndices = resolveQuestionPairIndices(messages, this.pendingScrollQuestionId);
+                if (pendingIndices.some((index) => index >= firstIndex)) {
+                    this.pendingScrollQuestionId = null;
+                }
+            }
         },
 
         async checkAuth() {
@@ -1584,6 +2151,7 @@ export const useChatStore = defineStore('chat', {
             if (chat && !chat.compare && !chat.sync?.deleted) {
                 this.currentConversation = normalizeStoredConversation(chat);
             }
+            this.clearArchiveConversationProgressPart();
             this.refreshCurrentConversationArchiveStatus();
         },
 
@@ -1595,8 +2163,10 @@ export const useChatStore = defineStore('chat', {
             this.isQuestionIndexPanelOpen = true;
             this.activeQuestionId = null;
             this.pendingScrollQuestionId = null;
+            this.editingQuestionId = null;
             this.refreshCurrentConversationArchiveStatus();
             await this.applyConversationModelSelection(this.currentConversation);
+            await this.syncConversationExecutionContext(this.currentConversation);
         },
 
         async activateConversationSnapshot(conversation: Conversation) {
@@ -1605,6 +2175,7 @@ export const useChatStore = defineStore('chat', {
             }
 
             this.currentConversation = normalizeStoredConversation(conversation);
+            this.clearArchiveConversationProgressPart();
             this.historySource = 'local';
             this.previewConversation = null;
             this.currentError = null;
@@ -1614,19 +2185,27 @@ export const useChatStore = defineStore('chat', {
             this.isQuestionIndexPanelOpen = true;
             this.activeQuestionId = null;
             this.pendingScrollQuestionId = null;
+            this.editingQuestionId = null;
             this.refreshCurrentConversationArchiveStatus();
             await this.applyConversationModelSelection(this.currentConversation);
+            await this.syncConversationExecutionContext(this.currentConversation);
         },
 
         async deleteLocalConversation(id: string) {
             if (!this.storageProvider) {
+                this.currentError = 'Conversation storage is unavailable.';
                 return;
             }
 
             const isDeletingCurrentConversation = !this.isPreviewing && this.currentConversation?.id === id;
-
-            await this.storageProvider.deleteConversation(id);
-            await this.loadLocalConversations();
+            this.currentError = null;
+            try {
+                await this.storageProvider.deleteConversation(id);
+                await this.loadLocalConversations();
+            } catch (error) {
+                this.currentError = formatHttpApiError(error);
+                throw error;
+            }
 
             if (!isDeletingCurrentConversation) {
                 return;
@@ -1639,6 +2218,34 @@ export const useChatStore = defineStore('chat', {
             }
 
             await this.startNewConversation();
+        },
+
+        async renameLocalConversation(id: string, title: string) {
+            if (!this.storageProvider) {
+                return;
+            }
+
+            const normalizedTitle = title.trim() || 'New Chat';
+            const storedConversation = await this.storageProvider.getConversation(id);
+            const targetConversation = storedConversation
+                ?? this.conversations.find((conversation) => conversation.id === id)
+                ?? (this.currentConversation?.id === id ? this.currentConversation : null);
+            if (!targetConversation || targetConversation.origin !== 'local') {
+                return;
+            }
+
+            const renamedConversation: Conversation = {
+                ...targetConversation,
+                title: normalizedTitle,
+                updatedAt: Date.now()
+            };
+            await this.storageProvider.saveConversation(renamedConversation);
+
+            if (!this.isPreviewing && this.currentConversation?.id === id) {
+                this.currentConversation = normalizeStoredConversation(renamedConversation);
+            }
+
+            await this.loadLocalConversations();
         },
 
         async toggleConversationStar(id: string) {
@@ -1666,7 +2273,12 @@ export const useChatStore = defineStore('chat', {
             }
         },
 
-        async startNewConversation(input?: { boundNodeName?: string | null }) {
+        async startNewConversation(input?: {
+            boundNodeName?: string | null;
+            agentKey?: string | null;
+            documentPath?: string | null;
+            activeDocument?: ContextDocument | null;
+        }) {
             const isConversationMode = this.workspaceMode === 'conversation';
             const hasWorkspaceAgentContext = this.workspaceAgentContext !== null;
             const shouldClearConversationWorkspaceContext = isConversationMode && input !== undefined;
@@ -1688,7 +2300,7 @@ export const useChatStore = defineStore('chat', {
                 : undefined;
             const boundNodeName = explicitBoundNodeName
                 ?? (shouldClearConversationWorkspaceContext ? undefined : this.resolveConversationBoundNodeName());
-            this.currentConversation = {
+            const nextConversation: Conversation = {
                 id: crypto.randomUUID(),
                 title: 'New Chat',
                 boundNodeName,
@@ -1697,12 +2309,28 @@ export const useChatStore = defineStore('chat', {
                 updatedAt: Date.now(),
                 modelSelection: this.buildCurrentConversationModelSelection()
             };
+            if (!shouldClearConversationWorkspaceContext) {
+                this.applyConversationAgentKey(nextConversation, input?.agentKey ?? this.activeWorkspaceAgentKey);
+                this.applyInitialConversationDocumentRelation(nextConversation, {
+                    documentPath: input?.documentPath ?? this.activeWorkspacePath,
+                    activeDocument: input?.activeDocument ?? this.activeWorkspaceDocument
+                });
+                if (normalizeAgentScopeKey(nextConversation.agentKey) && this.activeWorkspaceContextProvider) {
+                    this.setConversationExecutionContext({
+                        contextProvider: this.activeWorkspaceContextProvider,
+                        onFileChanged: this.onWorkspaceFileChanged
+                    });
+                }
+            }
+            this.clearArchiveConversationProgressPart();
+            this.currentConversation = nextConversation;
             this.historySource = 'local';
             this.previewConversation = null;
             this.currentError = null;
             this.isQuestionIndexPanelOpen = true;
             this.activeQuestionId = null;
             this.pendingScrollQuestionId = null;
+            this.editingQuestionId = null;
             this.refreshCurrentConversationArchiveStatus();
 
             if (hasWorkspaceAgentContext) {
@@ -1713,6 +2341,7 @@ export const useChatStore = defineStore('chat', {
                     this.currentProviderId = '';
                     this.currentModelId = '';
                     this.currentModelOptions = {};
+                    this.currentReasoningEffort = DEFAULT_REASONING_EFFORT;
                 }
             }
 
@@ -1724,6 +2353,7 @@ export const useChatStore = defineStore('chat', {
         },
 
         resetWorkspaceConversationState() {
+            this.clearArchiveConversationProgressPart();
             this.previewConversation = null;
             this.historySource = 'local';
             this.currentError = null;
@@ -1733,6 +2363,7 @@ export const useChatStore = defineStore('chat', {
             this.isQuestionIndexPanelOpen = true;
             this.activeQuestionId = null;
             this.pendingScrollQuestionId = null;
+            this.editingQuestionId = null;
             this.draftPrompt = '';
             this.lastSubmittedPrompt = null;
             this.draftAttachments = [];
@@ -1750,6 +2381,7 @@ export const useChatStore = defineStore('chat', {
             this.isQuestionIndexPanelOpen = true;
             this.activeQuestionId = null;
             this.pendingScrollQuestionId = null;
+            this.editingQuestionId = null;
             this.refreshCurrentConversationArchiveStatus();
         },
 
@@ -2028,11 +2660,39 @@ export const useChatStore = defineStore('chat', {
                 throw new Error('Provider model catalog is not ready');
             }
 
+            this.currentError = null;
+
+            const editingQuestionId = this.editingQuestionId;
+            const firstVisibleQuestion = resolveFirstVisibleQuestionMessage(this.currentConversation?.messages || []);
+            const wasEditingFirstVisibleQuestion = !!editingQuestionId
+                && !!firstVisibleQuestion
+                && getQuestionKey(firstVisibleQuestion) === editingQuestionId;
+            if (editingQuestionId) {
+                this.truncateConversationFromQuestion(editingQuestionId);
+            }
+
             const history = this.currentConversation
                 ? buildProviderHistory(this.currentConversation.messages)
                 : [];
             const isFirstTurn = history.length === 0;
-            const agentContext = this.activeAgentContext;
+            const boundConversationAgentKey = normalizeAgentScopeKey(this.currentConversation?.agentKey);
+            const agentContext = boundConversationAgentKey
+                ? await this.resolveAgentContextByKey(boundConversationAgentKey)
+                : this.getActiveAgentContextSnapshot();
+            const mentionScopePath = this.resolveMentionContextScopePath(agentContext);
+            let mentionedContextDocuments: ResolvedMentionedContextDocument[] = [];
+            const mentionedRefs = extractMentionedFileRefs(trimmedPrompt);
+            if (mentionedRefs.length > 0) {
+                try {
+                    mentionedContextDocuments = await this.resolveMentionedContextDocuments(trimmedPrompt, {
+                        scopePath: mentionScopePath
+                    });
+                } catch (error) {
+                    this.currentError = error instanceof Error ? error.message : 'Failed to resolve referenced workspace files.';
+                    return;
+                }
+            }
+            const mentionedDocumentPaths = mentionedContextDocuments.map((file) => file.path);
             const shouldAutoAttachActiveDocument = !!agentContext && history.length === 0;
             const activeDocumentForRequest = shouldAutoAttachActiveDocument
                 ? this.activeWorkspaceDocument
@@ -2042,17 +2702,21 @@ export const useChatStore = defineStore('chat', {
             const requestProvider = requestProviderId
                 ? this.resolveModelProvider(requestProviderId)
                 : null;
+            const mentionedSections = this.buildMentionedFilesPromptSections(mentionedContextDocuments);
+            const promptWithMentionedFiles = mentionedSections
+                ? `${trimmedPrompt}\n\n${mentionedSections}`
+                : trimmedPrompt;
             const initialPreparedRequest = agentContext && requestProvider
                 ? await prepareRequestWithActiveDocument(
                     requestProvider,
-                    trimmedPrompt,
+                    promptWithMentionedFiles,
                     {
                         activeDocument: activeDocumentForRequest,
                         attachments: pendingAttachments
                     }
                 )
                 : {
-                    prompt: trimmedPrompt,
+                    prompt: promptWithMentionedFiles,
                     attachments: pendingAttachments,
                     mode: 'none' as const
                 };
@@ -2085,6 +2749,14 @@ export const useChatStore = defineStore('chat', {
                 createdAt: createdAt + 1,
                 questionId
             });
+            const initialUserMessage = this.currentConversation!.messages.find((message) => message.id === userMsgId);
+            this.applyConversationDocumentRelation(this.currentConversation!, {
+                documentPath: requestDocumentPath ?? null,
+                activeDocument: activeDocumentForRequest,
+                requestSnapshot: initialUserMessage?.role === 'user' ? initialUserMessage.requestSnapshot : undefined,
+                isFirstTurn
+            });
+            this.applyConversationReferencedDocumentPaths(this.currentConversation!, mentionedDocumentPaths);
             this.refreshCurrentConversationArchiveStatus();
 
             this.isGenerating = true;
@@ -2094,9 +2766,11 @@ export const useChatStore = defineStore('chat', {
             this.lastSubmittedPrompt = prompt;
             this.draftPrompt = '';
             this.draftAttachments = [];
+            this.editingQuestionId = null;
+            await this.persistCurrentConversation({ syncModelSelection: false });
 
             try {
-                const sendTarget = await this.resolveSendTarget();
+                const sendTarget = await this.resolveSendTarget(agentContext);
                 if (!this.storageProvider) {
                     throw new Error('Providers not initialized');
                 }
@@ -2111,50 +2785,48 @@ export const useChatStore = defineStore('chat', {
                 this.currentConversation!.modelSelection = buildConversationModelSelection(
                     sendTarget.providerId,
                     sendTarget.modelId,
-                    sendTarget.modelOptions
+                    sendTarget.modelOptions,
+                    sendTarget.reasoningEffort
                 );
-                const onUpdate = (update: { text: string, annotations?: ConversationMessage['annotations'] }) => {
+                const onUpdate = (
+                    update: {
+                        text: string;
+                        annotations?: ConversationMessage['annotations'];
+                        functionalParts?: ConversationMessage['functionalParts'];
+                    }
+                ) => {
                     const lastMsg = this.currentConversation!.messages[this.currentConversation!.messages.length - 1];
                     if (lastMsg.role === 'assistant') {
                         lastMsg.content = update.text;
                         lastMsg.annotations = update.annotations;
+                        lastMsg.functionalParts = update.functionalParts;
                     }
                 };
+                const conversationContextProvider = this.resolveCurrentConversationContextProvider();
+                const conversationOnFileChanged = this.resolveCurrentConversationFileChangeHandler();
                 const result = this.agentRuntime
                     ? await this.agentRuntime.run(
                         {
-                            prompt: trimmedPrompt,
+                            prompt: promptWithMentionedFiles,
                             agent: agentContext,
                             workspace: {
                                 activePath: this.activeWorkspacePath,
                                 activeDocument: activeDocumentForRequest,
-                                contextProvider: this.activeWorkspaceContextProvider,
-                                onFileChanged: this.onWorkspaceFileChanged ?? undefined
+                                contextProvider: conversationContextProvider,
+                                onFileChanged: conversationOnFileChanged ?? undefined
                             },
                             providerId: sendTarget.providerId,
                             modelId: sendTarget.modelId,
                             attachments: pendingAttachments,
                             history,
                             modelOptions: cloneModelOptions(sendTarget.modelOptions),
+                            reasoningEffort: sendTarget.reasoningEffort,
                             context: { conversationId: backendId }
                         },
                         onUpdate
                     )
                     : await (async () => {
-                        const preparedRequest = agentContext
-                            ? await prepareRequestWithActiveDocument(
-                                sendTarget.provider,
-                                trimmedPrompt,
-                                {
-                                    activeDocument: activeDocumentForRequest,
-                                    attachments: pendingAttachments
-                                }
-                            )
-                            : {
-                                prompt: trimmedPrompt,
-                                attachments: pendingAttachments,
-                                mode: 'none' as const
-                            };
+                        const preparedRequest = initialPreparedRequest;
 
                         const providerResult = await sendTarget.provider.sendMessage(
                             preparedRequest.prompt,
@@ -2163,7 +2835,8 @@ export const useChatStore = defineStore('chat', {
                                 modelId: sendTarget.modelId,
                                 attachments: preparedRequest.attachments,
                                 history,
-                                modelOptions: cloneModelOptions(sendTarget.modelOptions)
+                                modelOptions: cloneModelOptions(sendTarget.modelOptions),
+                                reasoningEffort: sendTarget.reasoningEffort
                             },
                             onUpdate
                         );
@@ -2198,20 +2871,15 @@ export const useChatStore = defineStore('chat', {
                 if (lastMsg.role === 'assistant') {
                     lastMsg.content = result.text;
                     lastMsg.annotations = result.annotations;
+                    lastMsg.functionalParts = result.functionalParts;
                 }
 
-                if (this.currentConversation!.title === 'New Chat') {
+                if (this.currentConversation!.title === 'New Chat' || wasEditingFirstVisibleQuestion) {
                     const seedTitle = trimmedPrompt || pendingAttachments[0]?.name || 'New Chat';
                     this.currentConversation!.title = seedTitle.substring(0, 30) + (seedTitle.length > 30 ? '...' : '');
                 }
 
                 this.applyConversationAgentKey(this.currentConversation!, this.activeWorkspaceAgentKey);
-                this.applyConversationDocumentRelation(this.currentConversation!, {
-                    documentPath: requestDocumentPath ?? null,
-                    activeDocument: activeDocumentForRequest,
-                    requestSnapshot: userMsg?.requestSnapshot,
-                    isFirstTurn
-                });
                 await this.persistCurrentConversation({ syncModelSelection: false });
             } catch (err: unknown) {
                 if (this.isAbortRequested || isAbortError(err)) {
@@ -2220,6 +2888,7 @@ export const useChatStore = defineStore('chat', {
                     await this.persistCurrentConversation();
                 } else {
                     this.currentError = err instanceof Error ? err.message : 'Error sending message';
+                    await this.persistCurrentConversation({ syncModelSelection: false });
                 }
             } finally {
                 this.isGenerating = false;
@@ -2307,6 +2976,9 @@ export const useChatStore = defineStore('chat', {
             }
             if (this.pendingScrollQuestionId === questionId) {
                 this.pendingScrollQuestionId = null;
+            }
+            if (this.editingQuestionId === questionId) {
+                this.editingQuestionId = null;
             }
 
             await this.persistCurrentConversation();

@@ -1,4 +1,13 @@
-English | [Chinese](spec.zh-CN.md) ## MODIFIED Requirements ### Requirement: ChatGPT Web Message Sending
+English | [Chinese](spec.zh-CN.md)
+
+## Purpose
+Define ChatGPT Web provider behavior for request construction, streaming normalization, history handling, host integration, and structured functional metadata extraction.
+
+## Requirements
+
+## MODIFIED Requirements
+
+### Requirement: ChatGPT Web Message Sending
 The system MUST implements the ability to build multi-modal payloads, initiate requests and stream resolve SSE (Server-Sent Events), and standardize the ChatGPT Web private return structure into a unified `text + annotations` output contract. The request construction process MUST consumes `options.modelId` and the normalized `options.modelOptions` at the same time, and MUST be executed in different hosts through the request client and Cookie capability injected by the host. #### Scenario: Streaming response parsing with specific model
 - **WHEN** calls `sendMessage` to send a request and receives a binary stream containing a `data:` block
 - **THEN** The system MUST filter `[DONE]` mark, resolve the current complete body snapshot, and pass the standardized `text` in real time through the `onUpdate` callback
@@ -38,3 +47,16 @@ The system MUST cleans ChatGPT Web private references, image groups and other id
 - **WHEN** ChatGPT Web streaming response contains private identifiers such as references or image groups.
 - **THEN** The system MUST convert these identifiers into standardized `annotations`
 - **AND** The `text` returned to the UI MUST no longer contain the original private token
+
+### Requirement: ChatGPT Web provider MUST normalize functional metadata into functional message parts
+The ChatGPT Web provider MUST normalize confidently structured search, tool, or function metadata from ChatGPT responses into shared functional message parts. It MUST keep response text and annotations compatible with the existing rendering path.
+
+#### Scenario: Normalize search metadata into functional parts
+- **WHEN** a ChatGPT Web response contains structured search metadata separate from assistant answer text
+- **THEN** the provider MUST convert that metadata into `functionalParts` with a search or trace kind
+- **AND** the provider MUST continue returning the assistant answer text through the normal `text` field
+
+#### Scenario: Avoid guessing from unstructured history text
+- **WHEN** a ChatGPT history detail only contains unstructured rendered text
+- **THEN** the provider MUST NOT invent functional parts by parsing ambiguous prose
+- **AND** the conversation MUST continue to preserve the original message text

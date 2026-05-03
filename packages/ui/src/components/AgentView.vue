@@ -156,14 +156,33 @@
         </section>
       </div>
     </header>
+    <DocumentEditorPane
+      v-if="indexDocument"
+      class="agent-view__index-body"
+      :active-path="indexPath ?? null"
+      :active-document="indexDocument ?? null"
+      :active-viewer-id="indexViewerId ?? null"
+      :active-pane-mode="indexPaneMode"
+      :model-value="indexDraftContent"
+      :is-saving="indexIsSaving"
+      :is-dirty="indexIsDirty"
+      :latest-file-change="null"
+      :diff-entries="[]"
+      :can-undo="false"
+      :can-redo="false"
+      @update:model-value="emit('update-index-content', $event)"
+      @save="emit('save-index-document')"
+      @open-document-link="emit('open-document-link', $event)"
+    />
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { ChevronDown } from 'lucide-vue-next';
-import { DEFAULT_SCOPED_AGENT_CONFIG, type AgentInheritanceMode, type AgentToolBinding, type AgentToolDefinition, type ContextNode, type ResolvedAgentConfig } from '@packages/core/src';
+import { DEFAULT_SCOPED_AGENT_CONFIG, type AgentInheritanceMode, type AgentToolBinding, type AgentToolDefinition, type ContextDocument, type ContextNode, type ResolvedAgentConfig } from '@packages/core/src';
 import type { ProviderConfig } from '@packages/core/config';
+import DocumentEditorPane from './DocumentEditorPane.vue';
 import ProviderModelSelector from './ProviderModelSelector.vue';
 import { useWorkspaceI18n } from '../i18n';
 
@@ -177,18 +196,37 @@ export type AgentConfigEditPayload = {
   inheritTools?: boolean;
 };
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   agentKey: string;
   agent: ResolvedAgentConfig;
   ownerNode: ContextNode;
+  indexPath?: string | null;
+  indexDocument?: ContextDocument | null;
+  indexDraftContent?: string;
+  indexViewerId?: string | null;
+  indexPaneMode?: 'empty' | 'viewer' | 'unsupported';
+  indexIsSaving?: boolean;
+  indexIsDirty?: boolean;
   providers: ProviderConfig[];
   builtinTools: AgentToolDefinition[];
   modelLoadStates?: Record<string, { loading?: boolean; loaded?: boolean }>;
-}>();
+}>(), {
+  indexPath: null,
+  indexDocument: null,
+  indexDraftContent: '',
+  indexViewerId: null,
+  indexPaneMode: 'empty',
+  indexIsSaving: false,
+  indexIsDirty: false,
+  modelLoadStates: () => ({})
+});
 
 const emit = defineEmits<{
   (event: 'load-provider-models', providerId: string): void;
   (event: 'save-agent-config', payload: AgentConfigEditPayload): void;
+  (event: 'update-index-content', value: string): void;
+  (event: 'save-index-document'): void;
+  (event: 'open-document-link', path: string): void;
 }>();
 
 const isInstructionsExpanded = ref(false);
@@ -369,6 +407,11 @@ function buildToolBindings(selectedIds: string[], definitions: AgentToolDefiniti
   flex-direction: column;
   gap: 10px;
   padding: 18px;
+}
+
+.agent-view__index-body {
+  min-width: 0;
+  color: #e2e8f0;
 }
 
 .agent-view__hero-main {

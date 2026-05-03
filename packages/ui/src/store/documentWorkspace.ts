@@ -18,6 +18,7 @@ import {
 } from '@packages/core/src';
 import { buildLineDiffEntries, FileChangeService, type FileChangeRecord, type LineDiffEntry } from '../services/FileChangeService';
 import { resolveDocumentViewer } from '../document-viewers';
+import { formatHttpApiError } from '../utils/formatHttpApiError';
 
 type ActiveViewerCapabilities = {
     view: boolean;
@@ -48,9 +49,18 @@ export interface DocumentWorkspaceState {
     activeViewerId: string | null;
     activeViewerCapabilities: ActiveViewerCapabilities;
     activePaneMode: 'empty' | 'viewer' | 'unsupported';
+    agentIndexPath: string | null;
+    agentIndexDocument: ContextDocument | null;
+    agentIndexViewerId: string | null;
+    agentIndexViewerCapabilities: ActiveViewerCapabilities;
+    agentIndexPaneMode: 'empty' | 'viewer' | 'unsupported';
+    agentIndexDraftContent: string;
+    agentIndexIsSaving: boolean;
     draftContent: string;
     dirtyPaths: Record<string, boolean>;
     panelSizes: [number, number, number];
+    middlePaneMode: 'default' | 'maximized';
+    middlePaneZoom: number;
     isHydrating: boolean;
     isSaving: boolean;
     accessInitialized: boolean;
@@ -69,6 +79,11 @@ export interface DocumentWorkspaceState {
 }
 
 const AUTO_SAVE_DELAY_MS = 60_000;
+const DEFAULT_PANEL_SIZES: [number, number, number] = [20, 50, 30];
+const MAXIMIZED_PANEL_SIZES: [number, number, number] = [20, 80, 0];
+const MIN_MIDDLE_PANE_ZOOM = 1;
+const MAX_MIDDLE_PANE_ZOOM = 1.8;
+const MIDDLE_PANE_ZOOM_STEP = 0.1;
 
 function flattenVisibleNodes(nodes: ContextNode[]): ContextNode[] {
     const flattened: ContextNode[] = [];
@@ -183,6 +198,16 @@ function getParentPath(path: string | null): string {
     return lastSlash <= 0 ? '/' : path.slice(0, lastSlash);
 }
 
+export function getDefaultAgentIndexPath(ownerPath: string): string {
+    return ownerPath === '/' ? '/index.md' : `${ownerPath.replace(/\/$/u, '')}/index.md`;
+}
+
+export function findDefaultAgentIndexNode(nodes: ContextNode[], ownerPath: string): ContextNode | null {
+    const indexPath = getDefaultAgentIndexPath(ownerPath);
+    const node = findNodeByPath(nodes, indexPath);
+    return node?.kind === 'file' && node.name === 'index.md' ? node : null;
+}
+
 function remapPath(path: string | null, fromPath: string, toPath: string): string | null {
     if (!path) {
         return path;
@@ -244,6 +269,14 @@ function normalizeSizes(sizes: [number, number, number]): [number, number, numbe
     }
 
     return bounded.map((size) => Number(((size / total) * 100).toFixed(2))) as [number, number, number];
+}
+
+function normalizeMiddlePaneZoom(zoom: number): number {
+    if (!Number.isFinite(zoom)) {
+        return 1;
+    }
+
+    return Math.min(MAX_MIDDLE_PANE_ZOOM, Math.max(MIN_MIDDLE_PANE_ZOOM, Number(zoom.toFixed(2))));
 }
 
 function getEditableDocumentText(document: ContextDocument | null): string {
@@ -332,6 +365,24 @@ function clearActiveDocumentState(store: {
     store.draftContent = '';
 }
 
+function clearAgentIndexDocumentState(store: {
+    agentIndexPath: string | null;
+    agentIndexDocument: ContextDocument | null;
+    agentIndexViewerId: string | null;
+    agentIndexViewerCapabilities: ActiveViewerCapabilities;
+    agentIndexPaneMode: 'empty' | 'viewer' | 'unsupported';
+    agentIndexDraftContent: string;
+    agentIndexIsSaving: boolean;
+}) {
+    store.agentIndexPath = null;
+    store.agentIndexDocument = null;
+    store.agentIndexViewerId = null;
+    store.agentIndexViewerCapabilities = null;
+    store.agentIndexPaneMode = 'empty';
+    store.agentIndexDraftContent = '';
+    store.agentIndexIsSaving = false;
+}
+
 function hasNodePath(path: string | null, nodes: ContextNode[]): boolean {
     return !!path && (
         path === '/'
@@ -379,9 +430,18 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
         activeViewerId: null,
         activeViewerCapabilities: null,
         activePaneMode: 'empty',
+        agentIndexPath: null,
+        agentIndexDocument: null,
+        agentIndexViewerId: null,
+        agentIndexViewerCapabilities: null,
+        agentIndexPaneMode: 'empty',
+        agentIndexDraftContent: '',
+        agentIndexIsSaving: false,
         draftContent: '',
         dirtyPaths: {},
-        panelSizes: [20, 50, 30],
+        panelSizes: DEFAULT_PANEL_SIZES,
+        middlePaneMode: 'default',
+        middlePaneZoom: 1,
         isHydrating: false,
         isSaving: false,
         accessInitialized: false,
@@ -561,6 +621,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             this.expandedPaths = ['/'];
             this.selectedNodePath = '/';
             clearActiveDocumentState(this);
+            clearAgentIndexDocumentState(this);
             this.dirtyPaths = {};
             this.accessInitialized = false;
             this.currentError = null;
@@ -575,6 +636,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             this.nodeHistory = [];
             this.nodeHistoryIndex = -1;
             clearAutoSaveTimer(this);
+            clearAgentIndexAutoSaveTimer(this);
         },
 
         async hydrateWorkspace() {
@@ -589,7 +651,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
                 this.accessInitialized = true;
                 await this.refreshContext();
             } catch (error) {
-                this.currentError = error instanceof Error ? error.message : String(error);
+                this.currentError = formatHttpApiError(error);
             } finally {
                 this.isHydrating = false;
             }
@@ -614,6 +676,23 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
                 this.syncActiveFileChange(null);
             }
 
+            if (this.agentIndexPath && !hasNodePath(this.agentIndexPath, nextNodes)) {
+                clearAgentIndexDocumentState(this);
+            } else if (this.agentIndexPath && this.agentIndexDocument) {
+                const refreshedAgentIndexDocument = await this.contextProvider.readDocument(this.agentIndexPath);
+                const refreshedAgentIndexViewer = resolveDocumentViewer(refreshedAgentIndexDocument);
+                this.agentIndexDocument = refreshedAgentIndexDocument;
+                this.agentIndexViewerId = refreshedAgentIndexViewer?.id ?? null;
+                this.agentIndexViewerCapabilities = refreshedAgentIndexViewer?.capabilities ?? null;
+                this.agentIndexPaneMode = refreshedAgentIndexViewer ? 'viewer' : 'unsupported';
+                if (!this.dirtyPaths[this.agentIndexPath]) {
+                    this.agentIndexDraftContent = refreshedAgentIndexViewer?.capabilities.edit
+                        && isTextDocumentMimeType(refreshedAgentIndexDocument.mimeType)
+                        ? decodeTextDocument(refreshedAgentIndexDocument.dataBase64)
+                        : '';
+                }
+            }
+
             if (this.selectedNodePath && this.selectedNodePath !== '/' && !hasNodePath(this.selectedNodePath, nextNodes)) {
                 this.selectedNodePath = this.activePath && hasNodePath(this.activePath, nextNodes) ? this.activePath : '/';
             }
@@ -625,6 +704,10 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             }
 
             this.syncActiveAgent(this.activePath ?? this.selectedNodePath ?? '/');
+
+            if (!this.activePath && this.isAgentOwnerSelected) {
+                await this.loadAgentIndexDocument(this.selectedNodePath ?? '/');
+            }
         },
 
         async refreshTree() {
@@ -711,9 +794,10 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
                 ? resolveRootAgentKey(this.context)
                 : this.findNodeByPath(path)?.agentKey ?? null;
             const activeNode = path === '/' ? null : this.findNodeByPath(path);
+            const isRootAgentOwner = path === '/' && !!findNodeByPath(this.context.nodes, '/.agent.json');
             this.activeAgentKey = agentKey;
             this.activeAgent = agentKey ? this.context.agentConfigs[agentKey] ?? null : null;
-            this.isAgentOwnerSelected = activeNode?.kind === 'directory' && activeNode.isAgentOwner === true;
+            this.isAgentOwnerSelected = isRootAgentOwner || (activeNode?.kind === 'directory' && activeNode.isAgentOwner === true);
             this.agentResolutionError = agentKey && !this.activeAgent
                 ? `No Agent configuration was found for agentConfigs['${agentKey}'].`
                 : null;
@@ -799,14 +883,17 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
 
             const shouldRecordHistory = options?.recordHistory !== false;
             if (path === '/') {
+                await this.flushAgentIndexDocument();
                 this.selectedNodePath = '/';
                 this.expandedPaths = ensureRootExpanded(this.expandedPaths);
                 clearActiveDocumentState(this);
+                clearAgentIndexDocumentState(this);
                 this.syncActiveFileChange(null);
                 this.syncActiveAgent('/');
                 if (shouldRecordHistory) {
                     this.recordNodeHistory('/');
                 }
+                await this.loadAgentIndexDocument('/');
                 return;
             }
 
@@ -817,17 +904,24 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
 
             const selectedNodePath = options?.selectedNodePath ?? path;
             if (node.kind === 'directory') {
+                await this.flushAgentIndexDocument();
                 this.selectedNodePath = selectedNodePath;
                 clearActiveDocumentState(this);
+                clearAgentIndexDocumentState(this);
                 this.syncActiveFileChange(null);
                 this.syncActiveAgent(selectedNodePath);
                 if (shouldRecordHistory) {
                     this.recordNodeHistory(path);
                 }
+                if (node.isAgentOwner) {
+                    await this.loadAgentIndexDocument(selectedNodePath);
+                }
                 return;
             }
 
+            await this.flushAgentIndexDocument();
             await this.flushActiveDocument();
+            clearAgentIndexDocumentState(this);
             const document = await this.contextProvider.readDocument(path);
             const viewer = resolveDocumentViewer(document);
             this.selectedNodePath = selectedNodePath;
@@ -847,6 +941,100 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             this.syncActiveAgent(selectedNodePath);
             if (shouldRecordHistory) {
                 this.recordNodeHistory(path);
+            }
+        },
+
+        async loadAgentIndexDocument(ownerPath: string): Promise<boolean> {
+            if (!this.contextProvider) {
+                return false;
+            }
+
+            const indexNode = findDefaultAgentIndexNode(this.nodes, ownerPath);
+            if (!indexNode) {
+                clearAgentIndexDocumentState(this);
+                return false;
+            }
+
+            this.agentIndexPath = indexNode.path;
+            const document = await this.contextProvider.readDocument(indexNode.path);
+            const viewer = resolveDocumentViewer(document);
+            this.agentIndexDocument = document;
+            this.agentIndexViewerId = viewer?.id ?? null;
+            this.agentIndexViewerCapabilities = viewer?.capabilities ?? null;
+            this.agentIndexPaneMode = viewer ? 'viewer' : 'unsupported';
+            this.agentIndexDraftContent = viewer?.capabilities.edit && isTextDocumentMimeType(document.mimeType)
+                ? decodeTextDocument(document.dataBase64)
+                : '';
+            this.dirtyPaths = {
+                ...this.dirtyPaths,
+                [indexNode.path]: false
+            };
+            return true;
+        },
+
+        updateAgentIndexDocument(content: string) {
+            if (!this.agentIndexPath || !this.agentIndexViewerCapabilities?.edit) {
+                return;
+            }
+
+            this.agentIndexDraftContent = content;
+            this.dirtyPaths = {
+                ...this.dirtyPaths,
+                [this.agentIndexPath]: getEditableDocumentText(this.agentIndexDocument) !== content
+            };
+            scheduleAgentIndexAutoSave(this);
+        },
+
+        async flushAgentIndexDocument() {
+            if (
+                !this.contextProvider
+                || !this.agentIndexPath
+                || !this.agentIndexDocument
+                || !this.agentIndexViewerCapabilities?.edit
+                || !this.dirtyPaths[this.agentIndexPath]
+                || this.agentIndexIsSaving
+            ) {
+                return;
+            }
+
+            clearAgentIndexAutoSaveTimer(this);
+            const activePath = this.agentIndexPath;
+            const activeDocument = this.agentIndexDocument;
+            const savedContent = this.agentIndexDraftContent;
+            this.agentIndexIsSaving = true;
+            try {
+                this.currentError = null;
+                const writeResult = await this.contextProvider.writeDocument({
+                    path: activePath,
+                    mimeType: activeDocument.mimeType,
+                    dataBase64: encodeTextDocument(savedContent),
+                    expectedVersion: activeDocument.version
+                });
+                const updatedAt = writeResult.updatedAt ?? activeDocument.updatedAt ?? Date.now();
+                this.nodes = this.nodes.map((node) => node.path === activePath
+                    ? { ...node, updatedAt }
+                    : node);
+
+                const hasNewerLocalDraft = this.agentIndexDraftContent !== savedContent;
+                this.agentIndexDocument = {
+                    ...activeDocument,
+                    dataBase64: encodeTextDocument(savedContent),
+                    updatedAt,
+                    version: writeResult.version ?? activeDocument.version
+                };
+                this.dirtyPaths = {
+                    ...this.dirtyPaths,
+                    [activePath]: hasNewerLocalDraft
+                };
+
+                if (hasNewerLocalDraft) {
+                    scheduleAgentIndexAutoSave(this);
+                }
+            } catch (error) {
+                this.currentError = formatHttpApiError(error);
+                throw error;
+            } finally {
+                this.agentIndexIsSaving = false;
             }
         },
 
@@ -916,6 +1104,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             let shouldScheduleNextSave = false;
             this.isSaving = true;
             try {
+                this.currentError = null;
                 const writeResult = await this.contextProvider.writeDocument({
                     path: activePath,
                     mimeType: activeDocument.mimeType,
@@ -928,6 +1117,9 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
                     savedContent,
                     writeResult
                 });
+            } catch (error) {
+                this.currentError = formatHttpApiError(error);
+                throw error;
             } finally {
                 this.isSaving = false;
                 if (shouldScheduleNextSave) {
@@ -941,6 +1133,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
                 return;
             }
 
+            await this.flushAgentIndexDocument();
             const createdNode = await this.contextProvider.createNode(input);
             await this.refreshTree();
 
@@ -970,6 +1163,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             }
 
             const fallbackPath = getParentPath(path);
+            await this.flushAgentIndexDocument();
             await this.flushActiveDocument();
             await this.contextProvider.deleteNode(path);
 
@@ -1001,6 +1195,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
                 return;
             }
 
+            await this.flushAgentIndexDocument();
             await this.flushActiveDocument();
             const renamedNode = await this.contextProvider.renameNode(input);
 
@@ -1115,6 +1310,29 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
 
         setPanelSizes(sizes: [number, number, number]) {
             this.panelSizes = normalizeSizes(sizes);
+            this.middlePaneMode = 'default';
+        },
+
+        setMiddlePaneMode(mode: 'default' | 'maximized') {
+            this.middlePaneMode = mode;
+            this.panelSizes = mode === 'maximized' ? [...MAXIMIZED_PANEL_SIZES] : [...DEFAULT_PANEL_SIZES];
+        },
+
+        toggleMiddlePaneExpanded() {
+            this.setMiddlePaneMode(this.middlePaneMode === 'maximized' ? 'default' : 'maximized');
+        },
+
+        setMiddlePaneZoom(zoom: number) {
+            this.middlePaneZoom = normalizeMiddlePaneZoom(zoom);
+        },
+
+        stepMiddlePaneZoom(delta: number) {
+            const direction = delta === 0 ? 0 : (delta > 0 ? 1 : -1);
+            this.setMiddlePaneZoom(this.middlePaneZoom + direction * MIDDLE_PANE_ZOOM_STEP);
+        },
+
+        resetMiddlePaneZoom() {
+            this.middlePaneZoom = 1;
         },
 
         applyActiveDocumentWriteResult(input: {
@@ -1154,12 +1372,21 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
 });
 
 const autoSaveTimers = new WeakMap<object, ReturnType<typeof setTimeout>>();
+const agentIndexAutoSaveTimers = new WeakMap<object, ReturnType<typeof setTimeout>>();
 
 function clearAutoSaveTimer(store: object) {
     const timer = autoSaveTimers.get(store);
     if (timer) {
         clearTimeout(timer);
         autoSaveTimers.delete(store);
+    }
+}
+
+function clearAgentIndexAutoSaveTimer(store: object) {
+    const timer = agentIndexAutoSaveTimers.get(store);
+    if (timer) {
+        clearTimeout(timer);
+        agentIndexAutoSaveTimers.delete(store);
     }
 }
 
@@ -1197,4 +1424,12 @@ function scheduleAutoSave(store: ReturnType<typeof useDocumentWorkspaceStore>) {
         void store.flushActiveDocument();
     }, AUTO_SAVE_DELAY_MS);
     autoSaveTimers.set(store, timer);
+}
+
+function scheduleAgentIndexAutoSave(store: ReturnType<typeof useDocumentWorkspaceStore>) {
+    clearAgentIndexAutoSaveTimer(store);
+    const timer = setTimeout(() => {
+        void store.flushAgentIndexDocument();
+    }, AUTO_SAVE_DELAY_MS);
+    agentIndexAutoSaveTimers.set(store, timer);
 }

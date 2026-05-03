@@ -5,6 +5,7 @@ import type {
     ConversationQuery,
     ContextDocument,
     ContextNode,
+    ProjectDocumentEntry,
     ContextSearchMatch,
     ContextSearchRequest,
     CreateContextNodeInput,
@@ -27,6 +28,7 @@ declare global {
             initializeContextAccess(): Promise<void>;
             getContext(): Promise<WorkspaceContext>;
             getConversations(query: ConversationQuery): Promise<Conversation[]>;
+            getProjectDocuments(curNode: string): Promise<ProjectDocumentEntry[]>;
             readContextDocument(path: string): Promise<ContextDocument>;
             writeContextDocument(input: WriteContextDocumentInput): Promise<WriteContextDocumentResult>;
             createContextNode(input: CreateContextNodeInput): Promise<ContextNode>;

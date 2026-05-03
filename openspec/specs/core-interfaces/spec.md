@@ -1,4 +1,13 @@
-English | [Chinese](spec.zh-CN.md) ## ADDED Requirements ### Requirement: Core interfaces MUST define an optional agent-capable model provider extension
+English | [Chinese](spec.zh-CN.md)
+
+## Purpose
+Define the shared core contracts for providers, conversations, agent runtime requests, workspace context, persistence, and related cross-host data models.
+
+## Requirements
+
+## ADDED Requirements
+
+### Requirement: Core interfaces MUST define an optional agent-capable model provider extension
 The system MUST 在keep `IModelProvider` compatible性的前提下，定义可选的 Agent-capable provider 扩展契约，以表达某个model provider 具备原生 Agent 执行capability，而不是要求所有 provider 一起升级到新的必选interface。 #### Scenario: Preserve the base model provider contract
 - **WHEN** 现有 ChatGPT Web、Desktop Proxy、Extension Proxy 或其他普通model provider 未实现 Agent capability
 - **THEN** 它们 MUST continueonly通过 `IModelProvider` 契约工作
@@ -21,7 +30,17 @@ The system MUST 为 Agent 运行时定义稳定的请求与result契约，并直
 - **AND** conversation管理层 MUST 基于这份快照updatelocalhistory，而不是only凭发送前的 UI 状态推断 #### Scenario: Reuse existing stream result contracts
 - **WHEN** Agent 运行时或 Agent-capable provider return流式update与最终result
 - **THEN** The system MUST continue复用既有的 `ProviderStreamUpdate` 与 `ProviderSendResult` 契约
-- **AND** 第一阶段 MUST NOT 为 Agent 单独定义新的 UI 事件流result结构 ### Requirement: Core interfaces MUST define MIME-aware context document contracts
+- **AND** 第一阶段 MUST NOT 为 Agent 单独定义新的 UI 事件流result结构 ### Requirement: Core interfaces MUST carry reasoning effort through model provider requests
+The system MUST allow `IModelProvider` 请求显式携带思考推理程度，并让 conversation/model selection 持久化该值，默认值 MUST 为 `high`。该能力用于把 UI、conversation state、Agent runtime 与 provider 请求链路上的推理强度保持一致。 #### Scenario: Send reasoning effort with model provider requests
+- **WHEN** 上层调用 `sendMessage` 或 Agent runtime 发起一次模型请求
+- **THEN** `SendMessageOptions` MUST allow携带 `reasoningEffort`
+- **AND** `reasoningEffort` MUST support `low`、`medium` 与 `high` #### Scenario: Persist reasoning effort with conversation model selection
+- **WHEN** conversation 保存或恢复当前模型选择
+- **THEN** `ConversationModelSelection` MUST carry `reasoningEffort`
+- **AND** 当历史数据未显式提供该值时，系统 MUST default to `high` #### Scenario: Preserve reasoning effort through runtime and archive flows
+- **WHEN** Agent runtime、conversation archive 或 provider proxy 转发一次模型请求
+- **THEN** 这些中间层 MUST 继续透传 `reasoningEffort`
+- **AND** 中间层 MUST NOT 擅自把该值降级、清空或映射成布尔开关 ### Requirement: Core interfaces MUST define MIME-aware context document contracts
 The system MUST 为knowledge workspace定义通用the userdocument契约，使 `IContextProvider.readDocument()` / `writeDocument()` 能表达text与二进制内容，而不是continue把 `ContextDocument` 限定为纯text `content: string`。 #### Scenario: Read a document with MIME-aware payload
 - **WHEN** 上层工作区请求read任意一个the userdocument
 - **THEN** `IContextProvider.readDocument()` MUST return至少包含 `path`、`mimeType` 与 `dataBase64` 的 `ContextDocument`
@@ -96,3 +115,29 @@ The system MUST allow `Conversation` 以可选字段表达其关联的一个或�
 - **WHEN** 调用方read一条旧conversation且该conversation未包含 `documentPaths`
 - **THEN** The system MUST allow该字段缺省
 - **AND** 旧conversation MUST continue可以被正常read和使用
+
+### Requirement: Core conversation model MUST preserve structured functional message parts
+The core conversation model MUST allow assistant messages to carry optional structured functional parts for tool calls, function calls, search traces, and related operational details. Conversations without these parts MUST remain valid.
+
+#### Scenario: Store functional parts on a conversation message
+- **WHEN** a provider or runtime returns structured functional details for an assistant message
+- **THEN** the system MUST allow the message to persist those details as `functionalParts`
+- **AND** the message MUST continue to preserve its normal text content and annotations
+
+#### Scenario: Load conversations without functional parts
+- **WHEN** the system normalizes an older conversation message that has no `functionalParts`
+- **THEN** the system MUST treat the field as absent
+- **AND** the conversation MUST remain readable and renderable
+
+### Requirement: Provider result contracts MUST carry optional functional message parts
+The provider stream and final result contracts MUST support optional functional message parts so normal providers, Agent-capable providers, and proxy providers can share one output shape.
+
+#### Scenario: Stream functional parts during generation
+- **WHEN** a provider has structured functional details during a streaming response
+- **THEN** the provider stream update MAY include `functionalParts`
+- **AND** consumers MUST be able to associate those parts with the active assistant message
+
+#### Scenario: Return functional parts in final result
+- **WHEN** a provider completes a response with structured functional details
+- **THEN** the final provider result MUST be able to include `functionalParts`
+- **AND** the field MUST be optional for providers that do not expose such details

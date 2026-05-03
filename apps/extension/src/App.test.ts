@@ -5,9 +5,13 @@ import { createApp, nextTick, reactive, ref } from 'vue';
 
 const mockOpenConversationImportDialog = vi.fn();
 const mockCurrentRoute = ref({ path: '/chat' });
+const mockInstallGlobalUnhandledErrorFallback = vi.fn();
 
 const chatStore = reactive({
     currentError: null as string | null,
+    reportUnhandledBackendError: vi.fn(function (this: typeof chatStore, error: unknown) {
+        this.currentError = error instanceof Error ? error.message : String(error);
+    }),
     setProviderCatalog: vi.fn(),
     setAgentRuntime: vi.fn(),
     setModelProviderResolver: vi.fn(),
@@ -48,6 +52,7 @@ vi.mock('@packages/ui', () => ({
         `
     },
     openConversationImportDialog: mockOpenConversationImportDialog,
+    installGlobalUnhandledErrorFallback: mockInstallGlobalUnhandledErrorFallback,
     useChatStore: () => chatStore,
     useCompareStore: () => compareStore
 }));
@@ -88,6 +93,10 @@ describe('Extension App workspace host', () => {
         vi.clearAllMocks();
         mockCurrentRoute.value = { path: '/chat' };
         chatStore.currentError = null;
+        mockInstallGlobalUnhandledErrorFallback.mockImplementation(({ reportError }: { reportError: (message: string) => void }) => {
+            mockInstallGlobalUnhandledErrorFallback.reportError = reportError;
+            return vi.fn();
+        });
     });
 
     it('renders the shared workspace host with extension context and switch props', async () => {
@@ -101,5 +110,19 @@ describe('Extension App workspace host', () => {
         expect(host?.getAttribute('data-route-path')).toBe('/chat');
         expect(host?.getAttribute('data-context-id')).toBe('extension-context');
         expect(host?.getAttribute('data-switch')).toBe('true');
+    });
+
+    it('reports unhandled global errors through chatStore', async () => {
+        const { default: App } = await import('./App.vue');
+        const container = document.createElement('div');
+        document.body.appendChild(container);
+        createApp(App).mount(container);
+        await nextTick();
+
+        expect(mockInstallGlobalUnhandledErrorFallback).toHaveBeenCalledTimes(1);
+        mockInstallGlobalUnhandledErrorFallback.reportError('Extension backend request failed.');
+
+        expect(chatStore.reportUnhandledBackendError).toHaveBeenCalledWith('Extension backend request failed.');
+        expect(chatStore.currentError).toBe('Extension backend request failed.');
     });
 });

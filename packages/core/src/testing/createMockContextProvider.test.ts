@@ -49,4 +49,26 @@ describe('createMockContextProvider.getContext', () => {
             sourcePaths: ['/workspace/.agent.json', '/workspace/archive/.agent.json']
         });
     });
+
+    it('lists markdown documents within the current project scope', async () => {
+        const provider = createMockContextProvider({
+            nodes: [
+                { path: '/workspace', name: 'workspace', kind: 'directory' },
+                { path: '/workspace/guide.md', name: 'guide.md', kind: 'file', parentPath: '/workspace' },
+                { path: '/workspace/notes.txt', name: 'notes.txt', kind: 'file', parentPath: '/workspace' },
+                { path: '/workspace/archive', name: 'archive', kind: 'directory', parentPath: '/workspace' },
+                { path: '/workspace/archive/history.markdown', name: 'history.markdown', kind: 'file', parentPath: '/workspace/archive' }
+            ],
+            documents: {
+                '/workspace/guide.md': '# Guide',
+                '/workspace/notes.txt': 'ignore',
+                '/workspace/archive/history.markdown': '# History'
+            }
+        });
+
+        await expect(provider.getProjectDocuments('/workspace')).resolves.toEqual([
+            { path: '/workspace/archive/history.markdown', name: 'history.markdown' },
+            { path: '/workspace/guide.md', name: 'guide.md' }
+        ]);
+    });
 });

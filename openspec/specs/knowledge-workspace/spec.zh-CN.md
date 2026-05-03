@@ -89,6 +89,19 @@
 - **AND** 外部内容同步触发 ProseMirror 重新协调 DOM
 - **THEN** 系统 MUST 重新注入 PDF embed，确保用户可见
 
+### 需求：知识工作区 Markdown viewer SHALL 将 Markdown 文档链接路由到工作区导航
+知识工作区主 Markdown viewer SHALL 将指向其他 Markdown 文档的链接视为工作区内导航目标。当用户点击指向 `.md` 或 `.markdown` 文档的相对链接或已解析链接时，系统 MUST 打开该目标作为工作区中的活动节点，并保留节点历史，以便使用后退/前进时返回之前的选中状态。非 Markdown 链接 MUST 保持其现有行为。
+
+#### 场景：从主 viewer 打开链接的 Markdown 文档
+- **WHEN** `viewer` 模式下的 `text/markdown` 文档包含指向其他 `.md` 或 `.markdown` 文件的链接
+- **AND** 用户点击该链接
+- **THEN** 系统 MUST 将该链接文档打开为当前工作区活动节点
+- **AND** 系统 MUST 记录之前的选中状态到节点历史
+
+#### 场景：保持非 Markdown 链接的现有路径
+- **WHEN** `viewer` 模式下的 `text/markdown` 文档包含一个不会解析为 Markdown 文档的链接
+- **THEN** 系统 MUST 保持该链接类型现有的非导航行为
+
 ### 需求：知识工作区 Markdown viewer SHALL 保持现有 viewer 边界
 Mermaid 和图片预览行为 SHALL 只应用于知识工作区主 Markdown 文档 viewer。聊天消息 Markdown 渲染、PDF viewing、unsupported viewer handling、diff 展示、undo/redo 和 document registry 解析 MUST 保持现有职责。
 
@@ -128,3 +141,76 @@ Mermaid 和图片预览行为 SHALL 只应用于知识工作区主 Markdown 文�
 - **WHEN** 当前激活文档的 `mimeType` 未命中任何已注册 viewer
 - **THEN** 系统 MUST 继续显示明确的“不支持此文档类型”状态
 - **AND** 系统 MUST NOT 因文件看起来像图片就绕过 MIME registry 强行渲染
+
+### 需求：知识工作区 MUST 将可归档 Agent 对话合并到当前 Q/A 文档
+知识工作区 MUST 支持把当前可归档 Agent 对话的完整可见消息历史归档到当前活动且可写的 Markdown 文档。归档过程 MUST 将该文档视为单一 Q/A 文件，仅把用户消息合并进 `Q` 区，仅把 assistant 消息合并进 `A` 区，并在旧段落已被新内容取代时保留最新有效内容。
+
+#### 场景：将完整可见对话归档到当前文档
+- **WHEN** 用户对绑定到当前活动可写 Markdown 文档的可归档 Agent 对话触发归档
+- **THEN** 系统 MUST 使用完整可见对话作为归档输入
+- **AND** 系统 MUST 仅将用户消息合并到 `Q`
+- **AND** 系统 MUST 仅将 assistant 消息合并到 `A`
+
+#### 场景：归档时忽略已软删除消息
+- **WHEN** 当前对话包含软删除消息
+- **THEN** 系统 MUST 将这些已删除消息排除在归档输入之外
+
+### 需求：知识工作区 MUST 在聊天线程中显示轻量归档进度
+当用户从可归档的 Agent 对话触发归档时，知识工作区 MUST 立即在当前聊天线程中显示轻量归档进度，并复用现有 functional-parts / tool-call 呈现方式，让用户在最终结果返回前就能看到归档正在执行。
+
+#### 场景：归档进行中显示线程内工具调用事件
+- **WHEN** 用户在可归档 Agent 对话中点击归档
+- **THEN** 系统 MUST 立即在当前聊天线程中显示一条轻量归档进度事件
+- **AND** 该事件 MUST 使用聊天 functional-parts / tool-call 呈现，而不是只有工具栏级反馈
+
+#### 场景：归档结束后用最终结果替换进度事件
+- **WHEN** 归档成功、无新增内容或失败
+- **THEN** 系统 MUST 将线程内的归档进度事件替换或更新为最终 tool-result 风格事件
+- **AND** 系统 MUST NOT 将该临时归档进度事件作为普通会话消息持久化
+
+### 需求：知识工作区 MUST 使用首个 `***` Markdown 分隔线拆分 Q 和 A
+知识工作区归档流程 MUST 仅使用活动文档中的首个 `***` Markdown horizontal divider 识别顶层 `Q` / `A` 边界。若文档缺失该分隔线，系统 MUST 在生成归档结果前先在文档末尾补上 `***`。`---` MUST NOT 被视为归档分隔线。
+
+#### 场景：使用首个有效 `***` 作为 Q/A 边界
+- **WHEN** 活动 Markdown 文档中存在一个或多个有效的 `***` 分隔线
+- **THEN** 系统 MUST 仅使用首个此类分隔线作为顶层 `Q` / `A` 边界
+- **AND** 后续分隔线 MUST 继续作为普通文档内容保留
+
+#### 场景：文档缺失归档边界时插入分隔线
+- **WHEN** 活动 Markdown 文档不存在有效归档分隔线
+- **THEN** 系统 MUST 先追加 `***` 来建立 `Q` / `A` 边界，再继续执行归档合并
+
+#### 场景：归档边界识别时忽略三横线
+- **WHEN** 活动 Markdown 文档包含 `---`，但不存在有效的 `***` 归档分隔线
+- **THEN** 系统 MUST NOT 将 `---` 识别为归档边界
+- **AND** 系统 MUST 仍然在归档前补上 `***`
+
+### 需求：知识工作区 MUST 保持归档写入的 diff 与 undo 语义
+知识工作区中的归档写入 MUST 走现有文件变更历史管线，而不能通过直接覆盖文档绕过它。归档合并结果 MUST 成为普通的工作区文件变更，这样用户才能查看 diff，并通过 undo/redo 回退或恢复归档结果。
+
+#### 场景：归档写入表现为普通文件变更
+- **WHEN** 某次归档生成了变更后的文档
+- **THEN** 系统 MUST 通过工作区文件变更服务记录该归档结果
+- **AND** 最新文件变更 diff MUST 反映该归档结果
+
+#### 场景：对归档结果执行 undo 与 redo
+- **WHEN** 用户在归档成功写入后触发 undo 或 redo
+- **THEN** 系统 MUST 通过现有工作区 undo/redo 流恢复归档前或归档后的文档内容
+
+#### 场景：归档无新增内容时跳过写入
+- **WHEN** 某次归档得到的合并后文档与当前活动文档完全一致
+- **THEN** 系统 MUST NOT 写入文档
+- **AND** 系统 MUST 报告“没有新增内容被归档”
+
+### 需求：知识工作区 MUST 在本地会话上持久化归档状态
+当一次可归档操作成功完成时，知识工作区 MUST 在当前本地会话上持久化归档元数据，以便归档状态在刷新与重新选择会话后仍然保留。
+
+#### 场景：归档成功后持久化归档元数据
+- **WHEN** 某次归档成功写入了变更结果，或成功得到“无变更”的合并结果
+- **THEN** 系统 MUST 在该会话上持久化归档元数据
+- **AND** 该元数据 MUST 至少包含归档文档路径，以及可用于检测后续对话增长的快照标记
+
+#### 场景：新增后续轮次后将会话标记为过期
+- **WHEN** 某个会话已持久化归档元数据，之后又新增了可见消息
+- **THEN** 系统 MUST 将该会话的归档状态标记为 stale
+- **AND** 之前持久化的归档元数据 MUST 继续可供 UI 展示

@@ -26,20 +26,71 @@
                 ]"
                 :data-question-id="isQuestionRoot(msg) ? getMessageQuestionKey(msg) : undefined"
               >
-                <div v-if="msg.role === 'user'" class="content user-content">{{ msg.content || t('shared.sendingAttachments') }}</div>
+                <div v-if="msg.role === 'user'" class="user-message-row">
+                  <div class="user-bubble-shell">
+                    <div class="content user-content">{{ msg.content || t('shared.sendingAttachments') }}</div>
+                    <button
+                      v-if="canEditMessage(msg)"
+                      type="button"
+                      class="message-edit-btn"
+                      data-testid="message-edit"
+                      :aria-label="t('shared.editQuestion')"
+                      :title="t('shared.editQuestion')"
+                      @click="startEditingMessage(msg)"
+                    >
+                      <svg viewBox="0 0 20 20" class="message-edit-icon" focusable="false" aria-hidden="true">
+                        <path
+                          d="M12.9 3.4a1.5 1.5 0 0 1 2.1 0l1.6 1.6a1.5 1.5 0 0 1 0 2.1l-7.7 7.7-3.4.9.9-3.4 7.7-7.7Z"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="1.6"
+                        />
+                        <path
+                          d="M11.8 4.5 15.5 8.2"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="1.6"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
                 <MessageAttachmentStrip
                   v-if="resolveMessageAttachments(msg).length > 0"
                   :attachments="resolveMessageAttachments(msg)"
                 />
-                <MarkdownContent
-                  v-if="msg.role === 'assistant'"
-                  class="content markdown-body"
-                  :source="msg.content"
-                  :annotations="msg.annotations"
-                />
+                <template v-if="msg.role === 'assistant'">
+                  <template
+                    v-for="block in buildAssistantRenderBlocks(msg)"
+                    :key="block.key"
+                  >
+                    <MarkdownContent
+                      v-if="block.type === 'markdown'"
+                      class="content markdown-body"
+                      :source="block.content"
+                      :annotations="block.annotations"
+                    />
+                    <MessageFunctionalParts
+                      v-else
+                      :parts="block.parts"
+                    />
+                  </template>
+                </template>
               </div>
             </TransitionGroup>
           </template>
+
+          <div
+            v-if="archiveProgressParts.length > 0"
+            class="message assistant archive-progress-message"
+            data-testid="archive-progress-message"
+          >
+            <MessageFunctionalParts :parts="archiveProgressParts" />
+          </div>
 
           <div v-if="chatStore.isGenerating" class="message assistant">
             <div class="content typing">{{ t('shared.typing') }}</div>
@@ -86,6 +137,24 @@
       <template v-if="!isPreviewing">
         <div class="toolbar-stack">
           <div
+            v-if="isEditingQuestion"
+            class="edit-resend-banner"
+            data-testid="edit-resend-banner"
+          >
+            <div class="edit-resend-copy">
+              <strong>{{ t('shared.editingQuestion') }}</strong>
+              <span>{{ t('shared.editResendWarning') }}</span>
+            </div>
+            <button
+              type="button"
+              class="edit-resend-cancel"
+              data-testid="edit-resend-cancel"
+              @click="chatStore.cancelQuestionEdit()"
+            >
+              {{ t('shared.cancelEditQuestion') }}
+            </button>
+          </div>
+          <div
             v-if="showSelectorRow"
             class="selector-row"
             data-testid="selector-row"
@@ -107,6 +176,12 @@
               :disabled="isInputDisabled"
               @provider-change="onProviderChange"
               @model-change="onModelChange"
+            />
+
+            <ReasoningEffortSelector
+              :value="chatStore.currentReasoningEffort"
+              :disabled="isInputDisabled"
+              @change="onReasoningEffortChange"
             />
 
             <ModelOptionToggleGroup
@@ -191,25 +266,6 @@
               >
                 <SquarePen class="action-icon" :size="16" aria-hidden="true" />
               </button>
-              <span
-                v-if="showArchiveAction"
-                class="archive-status"
-                data-testid="archive-status"
-              >
-                {{ archiveStatusText }}
-              </span>
-              <button
-                v-if="showArchiveAction"
-                type="button"
-                class="secondary-action-btn"
-                data-testid="archive-conversation"
-                :title="t('shared.archiveConversation')"
-                :aria-label="t('shared.archiveConversation')"
-                :disabled="isArchiveActionDisabled"
-                @click="archiveConversation"
-              >
-                <Archive class="action-icon" :size="16" aria-hidden="true" />
-              </button>
             </div>
             <button
               v-if="!chatStore.isGenerating"
@@ -263,15 +319,17 @@
 </template>
 
 <script setup lang="ts">
-import type { ConversationMessage } from '@packages/core/src';
+import type { ConversationMessage, MessageAnnotation, MessageFunctionalPart } from '@packages/core/src';
 import { computed, nextTick, onMounted, ref, watch, type PropType } from 'vue';
-import { Archive, ArrowUp, PanelLeftOpen, PanelTopOpen, SquarePen } from 'lucide-vue-next';
+import { ArrowUp, PanelLeftOpen, PanelTopOpen, SquarePen } from 'lucide-vue-next';
 import AttachmentComposer from '../components/AttachmentComposer.vue';
 import MarkdownContent from '../components/MarkdownContent.vue';
 import MessageAttachmentStrip from '../components/MessageAttachmentStrip.vue';
+import MessageFunctionalParts from '../components/MessageFunctionalParts.vue';
 import ModelOptionToggleGroup from '../components/ModelOptionToggleGroup.vue';
 import ProviderModelSelector from '../components/ProviderModelSelector.vue';
 import QuestionIndexPanel from '../components/QuestionIndexPanel.vue';
+import ReasoningEffortSelector from '../components/ReasoningEffortSelector.vue';
 import { useChatStore } from '../store/chat';
 import type { ChatRoutePath } from '../routes';
 import { isPromptSubmitHotkey } from '../utils/promptHotkeys';
@@ -327,8 +385,137 @@ const forceNextMessageScroll = ref(false);
 let scrollSyncFrame: number | null = null;
 const MESSAGE_BOTTOM_THRESHOLD_PX = 32;
 
+type AssistantRenderBlock =
+  | {
+      key: string;
+      type: 'markdown';
+      content: string;
+      annotations?: MessageAnnotation[];
+    }
+  | {
+      key: string;
+      type: 'functional-parts';
+      parts: MessageFunctionalPart[];
+    };
+
 async function refreshAuthStatus() {
   isAuthenticated.value = await chatStore.checkAuth();
+}
+
+function clampFunctionalPartIndex(part: MessageFunctionalPart, contentLength: number): number {
+  if (typeof part.afterCharIndex !== 'number' || !Number.isFinite(part.afterCharIndex)) {
+    return contentLength;
+  }
+
+  return Math.max(0, Math.min(contentLength, Math.floor(part.afterCharIndex)));
+}
+
+function sliceAnnotationsForRange(
+  annotations: MessageAnnotation[] | undefined,
+  start: number,
+  end: number,
+  isLastSlice: boolean
+): MessageAnnotation[] | undefined {
+  if (!annotations?.length || start >= end) {
+    return undefined;
+  }
+
+  const sliced: MessageAnnotation[] = annotations.flatMap((annotation): MessageAnnotation[] => {
+    if (annotation.kind === 'image_group') {
+      if (annotation.range === null) {
+        return isLastSlice ? [annotation] : [];
+      }
+
+      const overlapStart = Math.max(annotation.range.start, start);
+      const overlapEnd = Math.min(annotation.range.end, end);
+      if (overlapStart >= overlapEnd) {
+        return [];
+      }
+
+      return [{
+        ...annotation,
+        range: {
+          start: overlapStart - start,
+          end: overlapEnd - start
+        }
+      }];
+    }
+
+    const overlapStart = Math.max(annotation.range.start, start);
+    const overlapEnd = Math.min(annotation.range.end, end);
+    if (overlapStart >= overlapEnd) {
+      return [];
+    }
+
+    return [{
+      ...annotation,
+      range: {
+        start: overlapStart - start,
+        end: overlapEnd - start
+      }
+    }];
+  });
+
+  return sliced.length > 0 ? sliced : undefined;
+}
+
+function buildAssistantRenderBlocks(message: ConversationMessage): AssistantRenderBlock[] {
+  const content = message.content || '';
+  const contentLength = content.length;
+  const groupedParts = new Map<number, MessageFunctionalPart[]>();
+
+  for (const part of message.functionalParts || []) {
+    const insertionIndex = clampFunctionalPartIndex(part, contentLength);
+    const existing = groupedParts.get(insertionIndex);
+    if (existing) {
+      existing.push(part);
+    } else {
+      groupedParts.set(insertionIndex, [part]);
+    }
+  }
+
+  const insertionIndexes = [...groupedParts.keys()].sort((left, right) => left - right);
+  const blocks: AssistantRenderBlock[] = [];
+  let cursor = 0;
+
+  for (const insertionIndex of insertionIndexes) {
+    if (insertionIndex > cursor) {
+      blocks.push({
+        key: `markdown-${message.id}-${cursor}-${insertionIndex}`,
+        type: 'markdown',
+        content: content.slice(cursor, insertionIndex),
+        annotations: sliceAnnotationsForRange(message.annotations, cursor, insertionIndex, false)
+      });
+      cursor = insertionIndex;
+    }
+
+    const parts = groupedParts.get(insertionIndex);
+    if (parts?.length) {
+      blocks.push({
+        key: `functional-${message.id}-${insertionIndex}`,
+        type: 'functional-parts',
+        parts
+      });
+    }
+  }
+
+  if (cursor < contentLength) {
+    blocks.push({
+      key: `markdown-${message.id}-${cursor}-${contentLength}`,
+      type: 'markdown',
+      content: content.slice(cursor),
+      annotations: sliceAnnotationsForRange(message.annotations, cursor, contentLength, true)
+    });
+  } else if (blocks.length === 0 && contentLength > 0) {
+    blocks.push({
+      key: `markdown-${message.id}-full`,
+      type: 'markdown',
+      content,
+      annotations: message.annotations
+    });
+  }
+
+  return blocks;
 }
 
 const displayConversation = computed(() => chatStore.displayConversation);
@@ -338,17 +525,10 @@ const modelOptionDefinitions = computed(() => chatStore.currentModelOptionDefini
 const isAgentMode = computed(() => chatStore.workspaceMode === 'agent');
 const hasDraftAttachments = computed(() => chatStore.draftAttachments.length > 0);
 const showSelectorRow = computed(() => !isTopToolbarCollapsed.value || hasDraftAttachments.value);
-const showArchiveAction = computed(() => chatStore.canArchiveCurrentConversation());
-const archiveStatusText = computed(() => {
-  switch (chatStore.currentConversationArchiveStatus.state) {
-    case 'archived':
-      return t('shared.archiveConversationStatusArchived');
-    case 'stale':
-      return t('shared.archiveConversationStatusStale');
-    default:
-      return t('shared.archiveConversationStatusIdle');
-  }
+const archiveProgressParts = computed(() => {
+  return chatStore.archiveConversationProgressPart ? [chatStore.archiveConversationProgressPart] : [];
 });
+const isEditingQuestion = computed(() => !!chatStore.editingQuestionId);
 const draftPrompt = computed({
   get: () => chatStore.draftPrompt,
   set: (value: string) => chatStore.setDraftPrompt(value)
@@ -389,9 +569,6 @@ const effectiveIsAuthenticated = computed(() => {
 const authUnavailableText = computed(() => props.authUnavailableMessage || t('shared.currentProviderUnavailable'));
 const isInputDisabled = computed(() => {
   return chatStore.isGenerating || !effectiveIsAuthenticated.value || chatStore.isCurrentProviderModelsLoading || !chatStore.currentModelId;
-});
-const isArchiveActionDisabled = computed(() => {
-  return isInputDisabled.value || isPreviewing.value || chatStore.isArchivingConversation;
 });
 const attachmentDisabledReason = computed(() => {
   if (isInputDisabled.value) {
@@ -610,6 +787,19 @@ function isActiveQuestion(message: ConversationMessage): boolean {
   return !!questionKey && questionKey === chatStore.activeQuestionId;
 }
 
+function canEditMessage(message: ConversationMessage): boolean {
+  return !isPreviewing.value && message.role === 'user' && !!getMessageQuestionKey(message);
+}
+
+function startEditingMessage(message: ConversationMessage) {
+  const questionKey = getMessageQuestionKey(message);
+  if (!questionKey) {
+    return;
+  }
+
+  chatStore.startQuestionEdit(questionKey);
+}
+
 function resolveMessageAttachments(message: ConversationMessage) {
   if (message.attachments?.length) {
     return message.attachments;
@@ -742,16 +932,16 @@ function onModelOptionChange(payload: { key: string; enabled: boolean }) {
   chatStore.setCurrentModelOption(payload.key, payload.enabled);
 }
 
+function onReasoningEffortChange(value: 'low' | 'medium' | 'high') {
+  chatStore.setCurrentReasoningEffort(value);
+}
+
 function toggleTopToolbarCollapsed() {
   isTopToolbarCollapsed.value = !isTopToolbarCollapsed.value;
 }
 
 async function startNewChat() {
   await chatStore.startNewConversation({ boundNodeName: null });
-}
-
-async function archiveConversation() {
-  await chatStore.archiveCurrentConversationToDocument();
 }
 </script>
 
@@ -907,6 +1097,21 @@ async function archiveConversation() {
   align-items: flex-end;
 }
 
+.user-message-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  width: 100%;
+}
+
+.user-bubble-shell {
+  position: relative;
+  display: inline-flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  max-width: min(78%, 620px);
+}
+
 .message.assistant {
   align-items: flex-start;
 }
@@ -924,12 +1129,45 @@ async function archiveConversation() {
 
 .user-content {
   white-space: pre-wrap;
-  max-width: min(78%, 620px);
+  max-width: 100%;
   padding: 12px 16px;
+  padding-right: 44px;
   border-radius: 22px;
   background: linear-gradient(180deg, rgba(42, 108, 230, 0.94), rgba(31, 95, 212, 0.94));
   color: #eef5ff;
   box-shadow: 0 18px 36px rgba(14, 55, 122, 0.22);
+}
+
+.message-edit-btn {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(226, 232, 240, 0.78);
+  background: rgba(15, 23, 42, 0.64);
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.message-edit-btn:hover,
+.message-edit-btn:focus-visible {
+  background: rgba(30, 41, 59, 0.86);
+  border-color: rgba(96, 165, 250, 0.4);
+  color: #f8fafc;
+  transform: translateY(-1px);
+}
+
+.message-edit-icon {
+  width: 15px;
+  height: 15px;
+  display: block;
+  flex: 0 0 auto;
 }
 
 .message.user :deep(.message-attachments) {
@@ -973,6 +1211,44 @@ async function archiveConversation() {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.edit-resend-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(250, 204, 21, 0.24);
+  border-radius: 14px;
+  background: rgba(120, 53, 15, 0.2);
+  color: #fde68a;
+}
+
+.edit-resend-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.edit-resend-copy strong {
+  font-size: 13px;
+}
+
+.edit-resend-copy span {
+  font-size: 12px;
+  color: rgba(254, 240, 138, 0.9);
+}
+
+.edit-resend-cancel {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  border: 1px solid rgba(253, 224, 71, 0.24);
+  border-radius: 999px;
+  color: #fef3c7;
+  background: rgba(15, 23, 42, 0.35);
+  cursor: pointer;
 }
 
 .chat-container.standard-mode .toolbar-stack {

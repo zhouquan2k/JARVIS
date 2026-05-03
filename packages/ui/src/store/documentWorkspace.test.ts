@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
-import { createMockContextProvider, decodeTextDocument, DEFAULT_SCOPED_AGENT_CONFIG } from '@packages/core/src';
+import { createMockContextProvider, decodeTextDocument, DEFAULT_SCOPED_AGENT_CONFIG, HttpApiError } from '@packages/core/src';
 import { useDocumentWorkspaceStore } from './documentWorkspace';
 
 describe('useDocumentWorkspaceStore', () => {
@@ -33,6 +33,23 @@ describe('useDocumentWorkspaceStore', () => {
         expect(store.expandedPaths).toEqual(['/']);
         expect(store.activeAgent?.name).toBe('Default Knowledge Agent');
         expect(store.activeAgent?.scopePath).toBe('/');
+    });
+
+    it('formats normalized context hydration failures into currentError', async () => {
+        const provider = createMockContextProvider();
+        provider.initializeAccess = vi.fn().mockRejectedValue(new HttpApiError({
+            message: 'Workspace access denied.',
+            status: 403,
+            code: 'CONTEXT_INITIALIZE_FAILED',
+            source: 'context'
+        }));
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(provider);
+
+        await store.hydrateWorkspace();
+
+        expect(store.currentError).toBe('Workspace access denied.');
+        expect(store.isHydrating).toBe(false);
     });
 
     it('collects markdown documents while preserving nested directory structure', async () => {
@@ -147,6 +164,107 @@ describe('useDocumentWorkspaceStore', () => {
         expect(store.activeDocument?.path).toBe('/docs/guide.md');
         expect(store.isAgentOwnerSelected).toBe(true);
         expect(store.activeAgentKey).not.toBeNull();
+    });
+
+    it('loads an existing agent owner index document while preserving the owner scope', async () => {
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/docs/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/docs' },
+                { path: '/docs/index.md', name: 'index.md', kind: 'file', parentPath: '/docs' }
+            ],
+            documents: {
+                '/docs/.agent.json': JSON.stringify({ name: 'Docs Agent', instructions: 'Handle docs.' }),
+                '/docs/index.md': '# Docs index'
+            }
+        }));
+
+        await store.hydrateWorkspace();
+        await store.openNode('/docs');
+
+        expect(store.selectedNodePath).toBe('/docs');
+        expect(store.activePath).toBeNull();
+        expect(store.agentIndexPath).toBe('/docs/index.md');
+        expect(store.agentIndexDocument?.path).toBe('/docs/index.md');
+        expect(store.agentIndexViewerId).toBe('text');
+        expect(store.agentIndexDraftContent).toBe('# Docs index');
+        expect(store.isAgentOwnerSelected).toBe(true);
+    });
+
+    it('keeps agent view active when an agent owner index document is absent', async () => {
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/docs/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/docs' }
+            ],
+            documents: {
+                '/docs/.agent.json': JSON.stringify({ name: 'Docs Agent', instructions: 'Handle docs.' })
+            }
+        }));
+
+        await store.hydrateWorkspace();
+        await store.openNode('/docs');
+
+        expect(store.selectedNodePath).toBe('/docs');
+        expect(store.activePath).toBeNull();
+        expect(store.isAgentOwnerSelected).toBe(true);
+    });
+
+    it('loads the root index document when the root agent owner has one', async () => {
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(createMockContextProvider({
+            nodes: [
+                { path: '/.agent.json', name: '.agent.json', kind: 'file' },
+                { path: '/index.md', name: 'index.md', kind: 'file' }
+            ],
+            documents: {
+                '/.agent.json': JSON.stringify({ name: 'Root Agent', instructions: 'Handle root.' }),
+                '/index.md': '# Root index'
+            }
+        }));
+
+        await store.hydrateWorkspace();
+        await store.openNode('/');
+
+        expect(store.selectedNodePath).toBe('/');
+        expect(store.activePath).toBeNull();
+        expect(store.agentIndexPath).toBe('/index.md');
+        expect(store.agentIndexDocument?.path).toBe('/index.md');
+        expect(store.agentIndexViewerId).toBe('text');
+        expect(store.agentIndexDraftContent).toBe('# Root index');
+        expect(store.isAgentOwnerSelected).toBe(true);
+    });
+
+    it('edits and saves the agent owner index document through dedicated state', async () => {
+        const store = useDocumentWorkspaceStore();
+        const contextProvider = createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/docs/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/docs' },
+                { path: '/docs/index.md', name: 'index.md', kind: 'file', parentPath: '/docs' }
+            ],
+            documents: {
+                '/docs/.agent.json': JSON.stringify({ name: 'Docs Agent', instructions: 'Handle docs.' }),
+                '/docs/index.md': '# Docs index'
+            }
+        });
+        store.setContextProvider(contextProvider);
+
+        await store.hydrateWorkspace();
+        await store.openNode('/docs');
+        store.updateAgentIndexDocument('# Updated Docs index');
+
+        expect(store.dirtyPaths['/docs/index.md']).toBe(true);
+        expect(store.agentIndexDraftContent).toBe('# Updated Docs index');
+
+        await store.flushAgentIndexDocument();
+
+        const saved = await contextProvider.readDocument('/docs/index.md');
+        expect(Buffer.from(saved.dataBase64, 'base64').toString('utf8')).toBe('# Updated Docs index');
+        expect(store.dirtyPaths['/docs/index.md']).toBe(false);
+        expect(Buffer.from(store.agentIndexDocument?.dataBase64 ?? '', 'base64').toString('utf8')).toBe('# Updated Docs index');
     });
 
     it('resolves text/plain with the shared text viewer', async () => {
@@ -893,5 +1011,28 @@ describe('useDocumentWorkspaceStore', () => {
         store.updateActiveDocument('# Redo plus manual edit');
         await expect(store.flushActiveDocument()).resolves.toBeUndefined();
         expect(store.activeDocument?.version).toBeTruthy();
+    });
+
+    it('surfaces flushActiveDocument failures as workspace errors', async () => {
+        const provider = createMockContextProvider({
+            nodes: [
+                { path: '/notes.md', name: 'notes.md', kind: 'file' }
+            ],
+            documents: {
+                '/notes.md': '# Before'
+            }
+        });
+        provider.writeDocument = vi.fn(async () => {
+            throw new Error('The document version has changed. Please reload and try again.');
+        });
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(provider);
+
+        await store.hydrateWorkspace();
+        await store.openNode('/notes.md');
+        store.updateActiveDocument('# After');
+
+        await expect(store.flushActiveDocument()).rejects.toThrow('The document version has changed. Please reload and try again.');
+        expect(store.currentError).toBe('The document version has changed. Please reload and try again.');
     });
 });

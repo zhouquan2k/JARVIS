@@ -1,8 +1,10 @@
 import type { AnalysisResult } from '../workflows/compare/types';
 import type { ConversationOrigin } from './IExternalConversationProvider';
+import type { ReasoningEffort } from './IModelProvider';
 
 export type ConversationRole = 'user' | 'assistant';
 export type MessageAttachmentType = 'image' | 'file';
+export type MessageFunctionalPartKind = 'tool_call' | 'tool_result' | 'tool_exchange' | 'function_call' | 'search' | 'trace';
 
 export interface MessageAttachment {
     id: string;
@@ -18,6 +20,17 @@ export interface MessageRequestSnapshot {
     prompt: string;
     attachments?: MessageAttachment[];
     activeDocumentMode?: 'none' | 'primary-context' | 'attachment' | 'omitted';
+}
+
+export interface MessageFunctionalPart {
+    id: string;
+    kind: MessageFunctionalPartKind;
+    title: string;
+    content: string;
+    requestContent?: string;
+    responseContent?: string;
+    collapsed?: boolean;
+    afterCharIndex?: number;
 }
 
 export interface AnnotationRange {
@@ -67,6 +80,7 @@ export interface ConversationMessage {
     attachments?: MessageAttachment[];
     requestSnapshot?: MessageRequestSnapshot;
     annotations?: MessageAnnotation[];
+    functionalParts?: MessageFunctionalPart[];
 }
 
 export interface ConversationSyncState {
@@ -79,6 +93,7 @@ export interface ConversationModelSelection {
     providerId: string;
     modelId: string;
     modelOptions: Record<string, boolean>;
+    reasoningEffort?: ReasoningEffort;
 }
 
 export interface ConversationArchiveMetadata {
@@ -152,12 +167,17 @@ function cloneAnnotation(annotation: MessageAnnotation): MessageAnnotation {
     };
 }
 
+function cloneFunctionalPart(part: MessageFunctionalPart): MessageFunctionalPart {
+    return { ...part };
+}
+
 export function cloneConversationMessage(message: ConversationMessage): ConversationMessage {
     return {
         ...message,
         attachments: message.attachments?.map(cloneAttachment),
         requestSnapshot: message.requestSnapshot ? cloneRequestSnapshot(message.requestSnapshot) : undefined,
-        annotations: message.annotations?.map(cloneAnnotation)
+        annotations: message.annotations?.map(cloneAnnotation),
+        functionalParts: message.functionalParts?.map(cloneFunctionalPart)
     };
 }
 
@@ -280,6 +300,41 @@ function normalizeAnnotation(value: unknown): MessageAnnotation | null {
     return null;
 }
 
+function normalizeFunctionalPart(value: unknown, fallbackId: string): MessageFunctionalPart | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return null;
+    }
+
+    const part = value as Partial<MessageFunctionalPart>;
+    const kind = part.kind === 'tool_call'
+        || part.kind === 'tool_result'
+        || part.kind === 'tool_exchange'
+        || part.kind === 'function_call'
+        || part.kind === 'search'
+        || part.kind === 'trace'
+        ? part.kind
+        : null;
+    const title = typeof part.title === 'string' ? part.title.trim() : '';
+    const content = typeof part.content === 'string' ? part.content : '';
+
+    if (!kind || !title || !content) {
+        return null;
+    }
+
+    return {
+        id: typeof part.id === 'string' && part.id ? part.id : fallbackId,
+        kind,
+        title,
+        content,
+        requestContent: typeof part.requestContent === 'string' ? part.requestContent : undefined,
+        responseContent: typeof part.responseContent === 'string' ? part.responseContent : undefined,
+        collapsed: typeof part.collapsed === 'boolean' ? part.collapsed : undefined,
+        afterCharIndex: typeof part.afterCharIndex === 'number' && Number.isFinite(part.afterCharIndex)
+            ? part.afterCharIndex
+            : undefined
+    };
+}
+
 export function normalizeConversationMessage(value: unknown, index = 0): ConversationMessage {
     const message = value && typeof value === 'object' && !Array.isArray(value)
         ? value as Partial<ConversationMessage>
@@ -330,6 +385,11 @@ export function normalizeConversationMessage(value: unknown, index = 0): Convers
             ? message.annotations
                 .map((annotation) => normalizeAnnotation(annotation))
                 .filter((annotation): annotation is MessageAnnotation => !!annotation)
+            : undefined,
+        functionalParts: Array.isArray(message.functionalParts)
+            ? message.functionalParts
+                .map((part, partIndex) => normalizeFunctionalPart(part, `functional-part-${index}-${partIndex}`))
+                .filter((part): part is MessageFunctionalPart => !!part)
             : undefined
     };
 }
@@ -352,7 +412,8 @@ export function cloneConversation(conversation: Conversation): Conversation {
             ? {
                 providerId: conversation.modelSelection.providerId,
                 modelId: conversation.modelSelection.modelId,
-                modelOptions: { ...conversation.modelSelection.modelOptions }
+                modelOptions: { ...conversation.modelSelection.modelOptions },
+                reasoningEffort: conversation.modelSelection.reasoningEffort
             }
             : undefined,
         compare: conversation.compare
@@ -418,7 +479,12 @@ export function normalizeConversation(conversation: Conversation): Conversation 
                             return typeof entry[0] === 'string' && typeof entry[1] === 'boolean';
                         })
                     )
-                    : {}
+                    : {},
+                reasoningEffort: modelSelection.reasoningEffort === 'low'
+                    || modelSelection.reasoningEffort === 'medium'
+                    || modelSelection.reasoningEffort === 'high'
+                    ? modelSelection.reasoningEffort
+                    : undefined
             }
             : undefined,
         compare: conversation.compare
