@@ -136,7 +136,7 @@ describe('AgentConversationPanel', () => {
         await flushPromises();
         await wrapper.vm.$nextTick();
 
-        expect(wrapper.get('[data-testid="agent-conversation-title"]').text()).toContain('docs - Shared Conversation');
+        expect(wrapper.get('[data-testid="agent-conversation-title"]').text()).toBe('docs - Shared Conversation');
     });
 
     it('restores the previous conversation detail when returning from chat mode on an agent directory', async () => {
@@ -175,7 +175,8 @@ describe('AgentConversationPanel', () => {
         await wrapper.vm.$nextTick();
 
         expect(wrapper.get('[data-testid="agent-conversation-toolbar"]').exists()).toBe(true);
-        expect(wrapper.get('[data-testid="agent-conversation-title"]').text()).toContain('Shared Conversation');
+        expect(wrapper.get('[data-testid="agent-conversation-tools"]').exists()).toBe(true);
+        expect(wrapper.get('[data-testid="agent-conversation-title"]').text()).toBe('Shared Conversation');
         expect(wrapper.find('[data-testid="agent-document-conversation-list-stub"]').exists()).toBe(false);
         expect(wrapper.get('[data-testid="normal-chat-stub"]').exists()).toBe(true);
     });
@@ -215,6 +216,7 @@ describe('AgentConversationPanel', () => {
         await wrapper.vm.$nextTick();
 
         expect(wrapper.get('[data-testid="agent-document-conversation-list-stub"]').exists()).toBe(true);
+        expect(wrapper.find('[data-testid="agent-conversation-title"]').exists()).toBe(false);
         expect(wrapper.find('[data-testid="normal-chat-stub"]').exists()).toBe(false);
     });
 
@@ -402,6 +404,57 @@ describe('AgentConversationPanel', () => {
         });
 
         await flushPromises();
+        await wrapper.get('[data-testid="agent-conversation-rebind-document"]').trigger('click');
+        await flushPromises();
+
+        expect(wrapper.get('[data-testid="agent-conversation-document-picker"]').exists()).toBe(true);
+        await wrapper.get('[data-testid="agent-conversation-document-option-reference.md"]').trigger('click');
+
+        expect(bindSpy).toHaveBeenCalledWith('conversation-1', {
+            documentPath: '/docs/reference.md',
+            previousDocumentPath: '/docs/guide.md'
+        });
+    });
+
+    it('allows imported conversations to rebind their document from the project document picker', async () => {
+        const chatStore = useChatStore();
+        chatStore.setProviders(new PanelTestModelProvider(), new MissingConversationStorageProvider());
+        chatStore.currentConversation = {
+            id: 'conversation-1',
+            title: 'Imported Conversation',
+            origin: 'gemini-web',
+            agentKey: '/docs/',
+            documentPaths: ['/docs/guide.md'],
+            updatedAt: 1,
+            messages: []
+        };
+        const bindSpy = vi.spyOn(chatStore, 'bindConversationToDocument').mockResolvedValue(undefined);
+
+        const wrapper = mount(AgentConversationPanel, {
+            props: {
+                activeAgentKey: '/docs/',
+                activePath: '/docs/guide.md',
+                selectedNodePath: '/docs',
+                activeDocument: {
+                    path: '/docs/guide.md',
+                    mimeType: 'text/markdown',
+                    dataBase64: ''
+                },
+                showAgentConversationList: false,
+                contextProvider: createContextProvider()
+            },
+            global: {
+                stubs: {
+                    NormalChatView: {
+                        template: '<div data-testid="normal-chat-stub" />'
+                    }
+                }
+            }
+        });
+
+        await flushPromises();
+        expect(wrapper.get('[data-testid="agent-conversation-rebind-document"]').attributes('disabled')).toBeUndefined();
+
         await wrapper.get('[data-testid="agent-conversation-rebind-document"]').trigger('click');
         await flushPromises();
 

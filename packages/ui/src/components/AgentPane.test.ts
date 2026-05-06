@@ -147,15 +147,12 @@ describe('AgentPane', () => {
         expect(wrapper.find('[data-testid="agent-conversation-title"]').exists()).toBe(false);
         expect(wrapper.get('[data-testid="agent-conversation-back"]').attributes('disabled')).toBeDefined();
         expect(wrapper.get('[data-testid="agent-conversation-list-plus"]').exists()).toBe(true);
-        expect(wrapper.get('[data-testid="agent-name"]').text()).toContain('Docs Agent（/docs）');
-        expect(wrapper.get('[data-testid="agent-model"]').text()).toContain('gemini-api / gemini-2.5-pro');
-        expect(wrapper.text()).toContain('Docs Agent（/docs）');
-        expect(wrapper.text()).toContain('gemini-api / gemini-2.5-pro');
+        expect(wrapper.find('[data-testid="agent-panel"]').exists()).toBe(false);
         expect(wrapper.text()).not.toContain('当前文档');
         expect(wrapper.text()).not.toContain('新建对话');
     });
 
-    it('prefers the nearest matched agent config directory over the current scope path', () => {
+    it('does not render the old agent banner when a scoped agent is present', () => {
         setActivePinia(createPinia());
         const wrapper = mount(AgentPane, {
             props: {
@@ -185,11 +182,10 @@ describe('AgentPane', () => {
             }
         });
 
-        expect(wrapper.get('[data-testid="agent-name"]').text()).toContain('Archive Agent（/workspace/archive）');
-        expect(wrapper.get('[data-testid="agent-name"]').text()).not.toContain('/workspace/archive/reports');
+        expect(wrapper.find('[data-testid="agent-panel"]').exists()).toBe(false);
     });
 
-    it('shows root scope for the default agent when no scoped config is matched', () => {
+    it('does not render the old banner for the default agent either', () => {
         setActivePinia(createPinia());
         const wrapper = mount(AgentPane, {
             props: {
@@ -217,10 +213,10 @@ describe('AgentPane', () => {
             }
         });
 
-        expect(wrapper.get('[data-testid="agent-name"]').text()).toContain('Default Knowledge Agent（/）');
+        expect(wrapper.find('[data-testid="agent-panel"]').exists()).toBe(false);
     });
 
-    it('renders fallback default agent metadata when no scoped agent is available', () => {
+    it('keeps rendering without the old banner when no scoped agent is available', () => {
         setActivePinia(createPinia());
         const wrapper = mount(AgentPane, {
             props: {
@@ -239,8 +235,8 @@ describe('AgentPane', () => {
             }
         });
 
-        expect(wrapper.get('[data-testid="agent-name"]').text()).toContain('Workspace Agent（/）');
-        expect(wrapper.get('[data-testid="agent-model"]').text()).toContain('gemini-api / Gemini Pro Latest');
+        expect(wrapper.find('[data-testid="agent-panel"]').exists()).toBe(false);
+        expect(wrapper.get('[data-testid="agent-pane"]').exists()).toBe(true);
     });
 
     it('syncs and clears the chat agent context with the pane lifecycle', async () => {

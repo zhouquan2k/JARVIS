@@ -187,6 +187,31 @@ describe('ConversationSidebar', () => {
         expect(wrapper.emitted('rename-local')).toEqual([[{ id: 'local-1', title: '新标题' }]]);
     });
 
+    it('keeps rename available for imported external conversations shown in local history', async () => {
+        const wrapper = mount(ConversationSidebar, {
+            props: {
+                collapsed: false,
+                historySource: 'local',
+                localItems: [
+                    {
+                        ...createLocalConversation('imported-1', '导入会话'),
+                        origin: 'gemini-web'
+                    }
+                ],
+                localConversationFilter: 'all',
+                externalProviders,
+                externalItems: [],
+                externalHistoryLoading: false,
+                externalHistoryQuery: '',
+                activeExternalProviderId: 'chatgpt-web',
+                isCompareMode: false
+            }
+        });
+
+        await wrapper.get('[data-testid="local-history-actions-menu"]').trigger('click');
+        expect(wrapper.find('[data-testid="local-history-rename"]').exists()).toBe(true);
+    });
+
     it('exits rename mode on Escape without emitting rename-local', async () => {
         const wrapper = mount(ConversationSidebar, {
             props: {

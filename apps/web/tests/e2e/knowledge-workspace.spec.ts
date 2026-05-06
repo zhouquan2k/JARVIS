@@ -304,14 +304,41 @@ test('web knowledge workspace renders pdf wiki embeds as inline iframes', async 
   await expect(page.getByTestId('markdown-mode-toggle')).toBeVisible();
   await expect(page.getByTestId('markdown-mode-toggle')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('markdown-mode-toggle')).toHaveAttribute('title', 'Edit');
-  await expect(page.getByTestId('document-editor')).toContainText('Normal Markdown paragraph for PDF viewer fallback.');
+  await expect(page.getByTestId('document-editor')).toContainText('Normal Markdown paragraph for same-directory PDF embed.');
+  await expect(page.getByTestId('document-editor')).toContainText('Fallback PDF embed paragraph.');
+  await expect(page.locator('[data-testid="document-editor-surface"] .markdown-pdf-embed__link')).toHaveCount(0);
   await expect(page.locator('[data-testid="document-editor-surface"] img')).toHaveCount(0);
-  const pdfEmbed = page.locator('[data-testid="document-editor-surface"] .pdf-inline-embed iframe');
-  await expect(pdfEmbed).toBeVisible();
-  await expect(pdfEmbed).toHaveAttribute(
-    'src',
+  const pdfEmbeds = page.locator('[data-testid="document-editor-surface"] .markdown-pdf-embed object');
+  await expect(pdfEmbeds).toHaveCount(2);
+  const sameDirectoryPdfEmbed = pdfEmbeds.nth(0);
+  const fallbackPdfEmbed = pdfEmbeds.nth(1);
+  await expect(sameDirectoryPdfEmbed).toBeVisible();
+  await expect(sameDirectoryPdfEmbed).toHaveAttribute(
+    'data',
+    /document-asset\?path=%2Freport\.pdf$/
+  );
+  await expect(fallbackPdfEmbed).toBeVisible();
+  await expect(fallbackPdfEmbed).toHaveAttribute(
+    'data',
     /document-asset\?path=%2Freferences%2FCustomer_Transactions_4047340\.pdf$/
   );
+  const introParagraph = page.getByTestId('document-editor').getByText('Normal Markdown paragraph for same-directory PDF embed.');
+  const fallbackParagraph = page.getByTestId('document-editor').getByText('Fallback PDF embed paragraph.');
+  const trailingParagraph = page.getByTestId('document-editor').getByText('Trailing paragraph after PDF embed.');
+  const introBox = await introParagraph.boundingBox();
+  const sameDirectoryPdfBox = await sameDirectoryPdfEmbed.boundingBox();
+  const fallbackParagraphBox = await fallbackParagraph.boundingBox();
+  const fallbackPdfBox = await fallbackPdfEmbed.boundingBox();
+  const trailingBox = await trailingParagraph.boundingBox();
+  expect(introBox).not.toBeNull();
+  expect(sameDirectoryPdfBox).not.toBeNull();
+  expect(fallbackParagraphBox).not.toBeNull();
+  expect(fallbackPdfBox).not.toBeNull();
+  expect(trailingBox).not.toBeNull();
+  expect(sameDirectoryPdfBox!.y).toBeGreaterThan(introBox!.y);
+  expect(sameDirectoryPdfBox!.y).toBeLessThan(fallbackParagraphBox!.y);
+  expect(fallbackPdfBox!.y).toBeGreaterThan(fallbackParagraphBox!.y);
+  expect(fallbackPdfBox!.y).toBeLessThan(trailingBox!.y);
 });
 
 test('web knowledge workspace shows AgentView for owner directories and right-pane conversations', async ({ page }) => {

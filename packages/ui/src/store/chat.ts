@@ -2230,7 +2230,7 @@ export const useChatStore = defineStore('chat', {
             const targetConversation = storedConversation
                 ?? this.conversations.find((conversation) => conversation.id === id)
                 ?? (this.currentConversation?.id === id ? this.currentConversation : null);
-            if (!targetConversation || targetConversation.origin !== 'local') {
+            if (!targetConversation) {
                 return;
             }
 

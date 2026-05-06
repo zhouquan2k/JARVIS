@@ -9,5 +9,6 @@ describe('desktop renderer html', () => {
 
         expect(html).toContain("http-equiv=\"Content-Security-Policy\"");
         expect(html).toContain("frame-src 'self' blob:");
+        expect(html).toContain("worker-src 'self' blob:");
     });
 });

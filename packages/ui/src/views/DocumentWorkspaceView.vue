@@ -56,6 +56,7 @@
             <DocumentEditorPane
               v-else
               :active-path="documentStore.activePath"
+              :active-agent-name="documentStore.activeAgent?.name ?? null"
               :active-document="documentStore.activeDocument"
               :active-viewer-id="documentStore.activeViewerId"
               :active-pane-mode="documentStore.activePaneMode"
@@ -96,7 +97,7 @@
           :active-path="documentStore.activePath"
             :selected-node-path="documentStore.selectedNodePath"
             :active-document="activeAssistantDocument"
-            :show-agent-conversation-list="documentStore.isAgentOwnerSelected"
+            :show-agent-conversation-list="!!documentStore.activeAgent && !!documentStore.activeAgentKey && !documentStore.activePath"
             :context-provider="props.contextProvider"
             :on-file-changed="handleAssistantFileChanged"
             :agent-resolution-error="documentStore.agentResolutionError"
@@ -174,11 +175,9 @@ const restoredAgentConversationId = computed(() => {
     return null;
   }
 
-  const matchesSavedSelection = (
-    savedAgentViewStatus.activePath
-      ? documentStore.activePath === savedAgentViewStatus.activePath
-      : false
-  ) || documentStore.selectedNodePath === savedAgentViewStatus.selectedNodePath;
+  const matchesSavedSelection = savedAgentViewStatus.activePath
+    ? documentStore.activePath === savedAgentViewStatus.activePath
+    : documentStore.selectedNodePath === savedAgentViewStatus.selectedNodePath;
 
   return matchesSavedSelection ? savedAgentViewStatus.activeConversationId : null;
 });
@@ -213,10 +212,9 @@ async function syncWorkspaceConversationSelection(): Promise<void> {
   const savedAgentViewStatus = chatStore.restoreAgentViewStatus();
   const isSameSelection = savedAgentViewStatus
     && (
-      (savedAgentViewStatus.activePath
+      savedAgentViewStatus.activePath
         ? documentStore.activePath === savedAgentViewStatus.activePath
-        : false)
-      || documentStore.selectedNodePath === savedAgentViewStatus.selectedNodePath
+        : documentStore.selectedNodePath === savedAgentViewStatus.selectedNodePath
     );
 
   if (isSameSelection) {

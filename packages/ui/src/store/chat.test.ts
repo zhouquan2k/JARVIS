@@ -976,6 +976,43 @@ describe('useChatStore workspace history flow', () => {
         ]);
     });
 
+    it('rebinds the primary document for imported conversations as well', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([
+            {
+                id: 'conversation-imported',
+                title: 'Imported chat',
+                origin: 'gemini-web',
+                agentKey: '/docs/',
+                documentPaths: ['/docs/guide.md', '/docs/appendix.md'],
+                updatedAt: 1,
+                messages: []
+            }
+        ]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+        store.currentConversation = {
+            id: 'conversation-imported',
+            title: 'Imported chat',
+            origin: 'gemini-web',
+            agentKey: '/docs/',
+            documentPaths: ['/docs/guide.md', '/docs/appendix.md'],
+            updatedAt: 1,
+            messages: []
+        };
+
+        await store.bindConversationToDocument('conversation-imported', {
+            documentPath: '/docs/reference.md',
+            previousDocumentPath: '/docs/guide.md'
+        });
+
+        expect((await storage.getConversation('conversation-imported'))?.documentPaths).toEqual([
+            '/docs/reference.md',
+            '/docs/appendix.md'
+        ]);
+    });
+
     it('resets inherited workspace agent selection when starting a new chat in conversation mode', async () => {
         const provider = new MockModelProvider();
         const storage = new MockStorageProvider([]);
@@ -3285,7 +3322,7 @@ describe('useChatStore workspace history flow', () => {
         expect(store.currentConversation?.title).toBe('New Chat');
     });
 
-    it('does not rename external history conversations', async () => {
+    it('renames imported external history conversations after they are saved locally', async () => {
         const storage = new MockStorageProvider([
             {
                 id: 'external-conversation',
@@ -3299,9 +3336,11 @@ describe('useChatStore workspace history flow', () => {
         store.setProviders(new MockModelProvider(), storage);
 
         await store.init();
+        await store.selectLocalConversation('external-conversation');
         await store.renameLocalConversation('external-conversation', 'New title');
 
-        expect(storage.conversations[0]?.title).toBe('External title');
+        expect(store.currentConversation?.title).toBe('New title');
+        expect(storage.conversations[0]?.title).toBe('New title');
     });
 
     it('archives only in eligible agent-mode markdown document contexts', async () => {

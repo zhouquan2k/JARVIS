@@ -2,7 +2,7 @@
   <section class="editor-pane" data-testid="document-editor">
     <header class="editor-header">
       <div class="editor-meta">
-        <span class="editor-path">{{ activePathLabel }}</span>
+        <span class="editor-path" data-testid="document-editor-title">{{ editorTitleLabel }}</span>
       </div>
       <div class="editor-actions">
         <button
@@ -17,7 +17,7 @@
           @click="toggleMarkdownViewerMode"
         >
           <component
-            :is="markdownViewerMode === 'viewer' ? Eye : PencilLine"
+            :is="markdownViewerMode === 'viewer' ? PencilLine : Eye"
             class="save-icon"
             :size="18"
             aria-hidden="true"
@@ -141,6 +141,7 @@ import type { DocumentViewerSearchHandle } from '../document-viewers/types';
 
 const props = withDefaults(defineProps<{
   activePath: string | null;
+  activeAgentName?: string | null;
   activeDocument: ContextDocument | null;
   activeViewerId: string | null;
   activePaneMode: 'empty' | 'viewer' | 'unsupported';
@@ -175,6 +176,18 @@ const activePathLabel = computed(() => {
 
   const segments = props.activePath.split('/').filter(Boolean);
   return segments[segments.length - 1] ?? props.activePath;
+});
+const editorTitleLabel = computed(() => {
+  const activeAgentName = props.activeAgentName?.trim() || '';
+  if (!activeAgentName) {
+    return activePathLabel.value;
+  }
+
+  if (!props.activePath) {
+    return activeAgentName;
+  }
+
+  return `${activeAgentName} / ${activePathLabel.value}`;
 });
 const canSave = computed(() => {
   return props.activeViewerId === 'text'

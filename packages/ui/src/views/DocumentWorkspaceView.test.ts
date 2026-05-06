@@ -460,6 +460,46 @@ describe('DocumentWorkspaceView', () => {
         expect(documentStore.nodeHistoryIndex).toBe(1);
     });
 
+    it('passes the active agent name into the middle document pane title area', async () => {
+        const wrapper = mount(DocumentWorkspaceView, {
+            props: {
+                contextProvider: createMockContextProvider({
+                    nodes: [
+                        { path: '/docs', name: 'docs', kind: 'directory' },
+                        { path: '/docs/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/docs' },
+                        { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' }
+                    ],
+                    documents: {
+                        '/docs/.agent.json': JSON.stringify({
+                            name: 'Docs Agent',
+                            instructions: 'Handle docs.'
+                        }),
+                        '/docs/guide.md': '# Guide'
+                    }
+                })
+            },
+            global: {
+                stubs: {
+                    AgentPane: {
+                        template: '<div data-testid="agent-pane" />'
+                    },
+                    DocumentEditorPane: {
+                        props: ['activeAgentName'],
+                        template: '<div data-testid="document-editor" :data-agent-name="activeAgentName ?? \'\'" />'
+                    }
+                }
+            }
+        });
+
+        await flushPromises();
+
+        const documentStore = useDocumentWorkspaceStore();
+        await documentStore.openNode('/docs/guide.md');
+        await flushPromises();
+
+        expect(wrapper.get('[data-testid="document-editor"]').attributes('data-agent-name')).toBe('Docs Agent');
+    });
+
     it('reuses the same workspace navigation when AgentView emits a markdown document link', async () => {
         const wrapper = mount(DocumentWorkspaceView, {
             props: {
@@ -604,6 +644,69 @@ describe('DocumentWorkspaceView', () => {
         expect(chatStore.currentConversation).toBeNull();
         expect(documentStore.selectedNodePath).toBe('/other.md');
         expect(documentStore.activePath).toBe('/other.md');
+    });
+
+    it('keeps the agent panel in list mode after switching to a different node in the same agent scope', async () => {
+        const chatStore = useChatStore();
+        const storage = new MockConversationStorage([
+            {
+                id: 'conversation-saved',
+                title: 'Saved Chat',
+                origin: 'local',
+                agentKey: '/docs/.agent.json',
+                updatedAt: 10,
+                messages: []
+            }
+        ]);
+
+        chatStore.setProviders(createMockModelProvider(), storage);
+        await chatStore.loadLocalConversations();
+        chatStore.saveAgentViewStatus({
+            selectedNodePath: '/docs',
+            activePath: null,
+            activeConversationId: 'conversation-saved'
+        });
+
+        const wrapper = mount(DocumentWorkspaceView, {
+            props: {
+                contextProvider: createMockContextProvider({
+                    nodes: [
+                        { path: '/docs', name: 'docs', kind: 'directory' },
+                        { path: '/docs/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/docs' },
+                        { path: '/docs/reports', name: 'reports', kind: 'directory', parentPath: '/docs' }
+                    ],
+                    documents: {
+                        '/docs/.agent.json': JSON.stringify({
+                            name: 'Docs Agent',
+                            instructions: 'Handle docs.'
+                        })
+                    }
+                })
+            },
+            global: {
+                stubs: {
+                    NormalChatView: {
+                        template: '<div data-testid="normal-chat-stub" />'
+                    },
+                    DocumentEditorPane: {
+                        template: '<div data-testid="document-editor" />'
+                    }
+                }
+            }
+        });
+
+        await flushPromises();
+        await wrapper.vm.$nextTick();
+
+        expect(chatStore.currentConversation?.id).toBe('conversation-saved');
+        expect(wrapper.get('[data-testid="agent-conversation-title"]').text()).toBe('Saved Chat');
+
+        await wrapper.get('[data-path="/docs/reports"]').trigger('click');
+        await flushPromises();
+
+        expect(wrapper.find('[data-testid="agent-conversation-title"]').exists()).toBe(false);
+        expect(wrapper.get('[data-testid="agent-document-conversation-list"]').exists()).toBe(true);
+        expect(chatStore.currentConversation).toBeNull();
     });
 
     it('restores a saved file selection, directory selection and stale fallback path', async () => {

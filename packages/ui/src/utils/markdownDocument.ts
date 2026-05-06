@@ -38,7 +38,7 @@ interface MarkdownEditorSearchState {
     decorations: DecorationSet | null;
 }
 
-type MarkdownBlockType = 'default-code' | 'mermaid' | 'table';
+type MarkdownBlockType = 'default-code' | 'mermaid' | 'pdf-embed' | 'table';
 
 export interface MarkdownBlockRenderer {
     readonly name: string;
@@ -75,6 +75,10 @@ const MARKDOWN_BLOCK_CONFIGS: Record<MarkdownBlockType, MarkdownBlockConfig> = {
         viewRenderer: mermaidPreviewRenderer,
         editRenderer: sourceRenderer
     },
+    'pdf-embed': {
+        viewRenderer: sourceRenderer,
+        editRenderer: sourceRenderer
+    },
     table: {
         viewRenderer: markdownTablePreviewRenderer,
         editRenderer: sourceRenderer
@@ -87,6 +91,7 @@ const MARKDOWN_BLOCK_CONFIGS: Record<MarkdownBlockType, MarkdownBlockConfig> = {
 
 export async function createMarkdownEditor(options: CreateMarkdownEditorOptions): Promise<MarkdownEditor> {
     const blockRenderConfig = createMarkdownBlockRenderConfig(options.mode);
+    const pdfEmbedPreviewRenderer = createPdfEmbedPreviewRenderer(options.documentPath);
 
     const editor = new Crepe({
         root: options.root,
@@ -97,7 +102,9 @@ export async function createMarkdownEditor(options: CreateMarkdownEditorOptions)
                 previewOnlyByDefault: options.mode === 'viewer',
                 renderPreview(language, content, applyPreview) {
                     const blockType = detectMarkdownBlockType(language, content);
-                    const renderer = resolveMarkdownBlockRenderer(options.mode, blockType);
+                    const renderer = blockType === 'pdf-embed'
+                        ? pdfEmbedPreviewRenderer
+                        : resolveMarkdownBlockRenderer(options.mode, blockType);
                     if (!renderer.renderPreview) {
                         return null;
                     }
@@ -166,6 +173,9 @@ export function detectMarkdownBlockType(language: string, _content: string): Mar
     const normalizedLanguage = language.trim().toLowerCase();
     if (normalizedLanguage === 'mermaid') {
         return 'mermaid';
+    }
+    if (normalizedLanguage === PDF_EMBED_BLOCK_LANGUAGE) {
+        return 'pdf-embed';
     }
     return 'default-code';
 }
@@ -261,11 +271,13 @@ export function resolveMarkdownDocumentLinkPath(href: string, documentPath: stri
     const documentDirectory = documentPath.slice(0, documentPath.lastIndexOf('/') + 1) || '/';
     const resolvedPath = new URL(normalizedHref, `http://workspace.local${documentDirectory}`).pathname;
     const normalizedPath = safeDecodePath(resolvedPath);
-    return isMarkdownDocumentHref(normalizedPath) ? normalizedPath : null;
+    return isWorkspaceDocumentHref(normalizedPath) ? normalizedPath : null;
 }
 
 const WIKI_IMAGE_EMBED_PATTERN = /!\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
 const MARKDOWN_IMAGE_PATTERN = /!\[([^\]]*)\]\(([^)]+)\)/g;
+const PDF_EMBED_BLOCK_LANGUAGE = 'cp-pdf-embed';
+const PDF_EMBED_HEIGHT = 500;
 const RENDERABLE_IMAGE_EXTENSIONS = new Set([
     'apng',
     'avif',
@@ -301,6 +313,10 @@ export function normalizeMarkdownViewerContent(content: string): string {
                 : `![${label}](${encodedTarget})`;
         }
 
+        if (isPdfTarget(normalizedTarget)) {
+            return createPdfEmbedCodeBlock(buildPdfEmbedCandidates(target), label);
+        }
+
         return `[${label}](${encodeMarkdownTargetPath(normalizedTarget)})`;
     };
 
@@ -328,6 +344,11 @@ export function normalizeMarkdownViewerContent(content: string): string {
             return `![${alt}](${encodedTarget})`;
         }
 
+        if (isPdfTarget(trimmedTarget)) {
+            const label = alt.trim() || markdownImageLabelFromTarget(trimmedTarget);
+            return createPdfEmbedCodeBlock([trimmedTarget], label);
+        }
+
         const label = alt.trim() || markdownImageLabelFromTarget(trimmedTarget);
         return `[${label}](${encodedTarget})`;
     });
@@ -348,6 +369,35 @@ function normalizeMarkdownImageTarget(target: string): string {
     }
 
     return `references/${normalized}`;
+}
+
+function isExplicitMarkdownAssetTarget(target: string): boolean {
+    const normalized = target.trim();
+    if (!normalized) {
+        return false;
+    }
+
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(normalized) || normalized.startsWith('data:')) {
+        return true;
+    }
+
+    return normalized.includes('/') || normalized.startsWith('.');
+}
+
+function buildPdfEmbedCandidates(target: string): string[] {
+    const normalized = target.trim().replace(/^\/+/, '');
+    if (!normalized) {
+        return [];
+    }
+
+    if (isExplicitMarkdownAssetTarget(normalized)) {
+        return [normalized];
+    }
+
+    return [
+        normalized,
+        `references/${normalized}`
+    ];
 }
 
 function isRenderableMarkdownImageTarget(target: string): boolean {
@@ -413,6 +463,10 @@ function safeDecodePath(path: string): string {
 function isMarkdownDocumentHref(href: string): boolean {
     const pathname = href.split(/[?#]/, 1)[0].trim().toLowerCase();
     return pathname.endsWith('.md') || pathname.endsWith('.markdown');
+}
+
+function isWorkspaceDocumentHref(href: string): boolean {
+    return isMarkdownDocumentHref(href) || isPdfHref(href);
 }
 
 function encodeMarkdownTargetPath(target: string): string {
@@ -588,7 +642,7 @@ function attachMarkdownImageResolution(
     const controller = new AbortController();
     let pdfEmbedTimer: number | null = null;
 
-    const schedulePdfEmbedInjection = () => {
+    const schedulePdfEmbedHydration = () => {
         if (controller.signal.aborted) {
             return;
         }
@@ -599,24 +653,22 @@ function attachMarkdownImageResolution(
 
         pdfEmbedTimer = window.setTimeout(() => {
             pdfEmbedTimer = null;
-            injectPdfEmbeds(root, documentPath);
-        }, 100);
+            hydratePdfEmbedBlocks(root, documentPath);
+        }, 0);
     };
 
     queueMicrotask(() => {
-        if (!controller.signal.aborted) {
-            injectPdfEmbeds(root, documentPath);
-        }
+        schedulePdfEmbedHydration();
     });
 
     const observer = new MutationObserver(() => {
-        schedulePdfEmbedInjection();
+        schedulePdfEmbedHydration();
     });
     observer.observe(root, {
         childList: true,
         subtree: true
     });
-    schedulePdfEmbedInjection();
+
     controller.signal.addEventListener('abort', () => {
         observer.disconnect();
         if (pdfEmbedTimer !== null) {
@@ -642,10 +694,10 @@ function attachMarkdownImageResolution(
         }
 
         const markdownDocumentPath = resolveMarkdownDocumentLinkPath(href, documentPath);
-        if (markdownDocumentPath) {
+        if (markdownDocumentPath && onOpenDocumentLink) {
             event.preventDefault();
             event.stopPropagation();
-            onOpenDocumentLink?.(markdownDocumentPath);
+            onOpenDocumentLink(markdownDocumentPath);
             return;
         }
 
@@ -660,56 +712,60 @@ function attachMarkdownImageResolution(
     viewerControllers.set(editor, controller);
 }
 
-function injectPdfEmbeds(root: HTMLElement, documentPath: string | null): void {
-    const anchors = root.querySelectorAll<HTMLAnchorElement>('a[href]');
-    anchors.forEach((anchor) => {
-        const href = anchor.getAttribute('href');
-        if (!href || !isPdfHref(href)) {
+function hydratePdfEmbedBlocks(root: HTMLElement, documentPath: string | null): void {
+    const placeholders = root.querySelectorAll<HTMLElement>('.markdown-pdf-embed[data-pdf-candidates]');
+    placeholders.forEach((placeholder) => {
+        if (placeholder.querySelector('.markdown-pdf-embed__frame')) {
             return;
         }
 
-        const resolvedUrl = resolveMarkdownAssetUrl(href, documentPath);
-        const insertAfter = findPdfEmbedInsertionTarget(anchor);
-        if (!insertAfter || root.querySelector(`.pdf-inline-embed[data-pdf-embed-src="${cssEscape(resolvedUrl)}"]`)) {
+        const serializedCandidates = placeholder.dataset.pdfCandidates;
+        if (!serializedCandidates) {
             return;
         }
 
-        const embed = document.createElement('div');
-        embed.className = 'pdf-inline-embed';
-        embed.dataset.pdfEmbedSrc = resolvedUrl;
-        embed.contentEditable = 'false';
+        let candidates: string[] = [];
+        try {
+            const parsed = JSON.parse(serializedCandidates);
+            if (Array.isArray(parsed)) {
+                candidates = parsed.filter((candidate): candidate is string => typeof candidate === 'string' && isPdfHref(candidate));
+            }
+        } catch {
+            return;
+        }
 
-        const iframe = document.createElement('iframe');
-        iframe.src = resolvedUrl;
-        iframe.title = anchor.textContent?.trim() || markdownImageLabelFromTarget(href);
-        iframe.loading = 'lazy';
+        const [primaryCandidate] = candidates;
+        if (!primaryCandidate) {
+            return;
+        }
 
-        embed.append(iframe);
-        insertAfter.insertAdjacentElement('afterend', embed);
+        const label = placeholder.dataset.pdfLabel?.trim() || markdownImageLabelFromTarget(primaryCandidate);
+        const object = document.createElement('object');
+        object.className = 'markdown-pdf-embed__frame';
+        object.type = 'application/pdf';
+        object.setAttribute('aria-label', label);
+        object.data = resolveMarkdownAssetUrl(primaryCandidate, documentPath);
+
+        const fallbackLink = document.createElement('a');
+        fallbackLink.className = 'markdown-pdf-embed__fallback';
+        fallbackLink.textContent = label;
+        fallbackLink.href = primaryCandidate;
+
+        object.append(fallbackLink);
+        placeholder.append(object);
+
+        void resolvePdfEmbedUrl(candidates, documentPath).then((resolvedUrl) => {
+            if (!placeholder.isConnected || !object.isConnected) {
+                return;
+            }
+
+            object.data = resolvedUrl;
+            const resolvedPath = safeDocumentAssetPath(resolvedUrl);
+            if (resolvedPath) {
+                fallbackLink.href = resolvedPath;
+            }
+        });
     });
-}
-
-function findPdfEmbedInsertionTarget(anchor: HTMLAnchorElement): Element | null {
-    const editorHost = anchor.closest<HTMLElement>('[contenteditable="true"]');
-    if (!editorHost) {
-        return anchor.closest('p') ?? anchor.parentElement;
-    }
-
-    let insertAfter: Element = editorHost;
-    let nextElement = insertAfter.nextElementSibling;
-    while (nextElement instanceof HTMLElement && nextElement.classList.contains('pdf-inline-embed')) {
-        insertAfter = nextElement;
-        nextElement = nextElement.nextElementSibling;
-    }
-    return insertAfter;
-}
-
-function cssEscape(value: string): string {
-    if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
-        return CSS.escape(value);
-    }
-
-    return value.replace(/["\\]/g, '\\$&');
 }
 
 function isPdfHref(href: string): boolean {
@@ -717,4 +773,107 @@ function isPdfHref(href: string): boolean {
     const candidate = assetPath ?? safeUrlPathname(href) ?? href;
     const path = candidate.split(/[?#]/, 1)[0];
     return /\.pdf$/i.test(path);
+}
+
+function isPdfTarget(target: string): boolean {
+    return isPdfHref(target);
+}
+
+const pdfEmbedResolutionCache = new Map<string, Promise<string>>();
+
+function createPdfEmbedCodeBlock(targets: string[], label: string): string {
+    const payload = JSON.stringify({
+        label,
+        candidates: targets,
+        showLink: false
+    });
+    return `\`\`\`${PDF_EMBED_BLOCK_LANGUAGE}\n${payload}\n\`\`\``;
+}
+
+function parsePdfEmbedBlockContent(content: string): { label: string; candidates: string[]; showLink: boolean } | null {
+    try {
+        const parsed = JSON.parse(content) as { label?: unknown; candidates?: unknown; showLink?: unknown };
+        const candidates = Array.isArray(parsed.candidates)
+            ? parsed.candidates.filter((candidate): candidate is string => typeof candidate === 'string' && isPdfHref(candidate))
+            : [];
+        if (candidates.length === 0) {
+            return null;
+        }
+
+        return {
+            label: typeof parsed.label === 'string' && parsed.label.trim()
+                ? parsed.label.trim()
+                : markdownImageLabelFromTarget(candidates[0]),
+            candidates,
+            showLink: parsed.showLink === true
+        };
+    } catch {
+        return null;
+    }
+}
+
+async function resolvePdfEmbedUrl(candidates: string[], documentPath: string | null): Promise<string> {
+    const urls = candidates.map((candidate) => resolveMarkdownAssetUrl(candidate, documentPath));
+    const cacheKey = JSON.stringify(urls);
+    const cached = pdfEmbedResolutionCache.get(cacheKey);
+    if (cached) {
+        return cached;
+    }
+
+    const resolution = (async () => {
+        if (typeof fetch !== 'function') {
+            return urls[0] ?? '';
+        }
+
+        for (const url of urls) {
+            try {
+                const response = await fetch(url, {
+                    method: 'GET'
+                });
+                response.body?.cancel?.();
+                if (response.ok) {
+                    return url;
+                }
+            } catch {
+                continue;
+            }
+        }
+
+        return urls[0] ?? '';
+    })();
+
+    pdfEmbedResolutionCache.set(cacheKey, resolution);
+    return resolution;
+}
+
+function createPdfEmbedPreviewRenderer(documentPath: string | null): MarkdownBlockRenderer {
+    return {
+        name: 'pdf-embed-preview',
+        renderPreview(_language, content) {
+            const parsed = parsePdfEmbedBlockContent(content);
+            if (!parsed) {
+                return null;
+            }
+
+            const [primaryCandidate] = parsed.candidates;
+            if (!primaryCandidate) {
+                return null;
+            }
+
+            const wrapper = document.createElement('figure');
+            wrapper.className = 'markdown-pdf-embed';
+            wrapper.contentEditable = 'false';
+            wrapper.dataset.pdfCandidates = JSON.stringify(parsed.candidates);
+            wrapper.dataset.pdfLabel = parsed.label;
+            if (parsed.showLink) {
+                const link = document.createElement('a');
+                link.className = 'markdown-pdf-embed__link';
+                link.textContent = parsed.label;
+                link.href = primaryCandidate;
+                wrapper.append(link);
+            }
+
+            return wrapper;
+        }
+    };
 }

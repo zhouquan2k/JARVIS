@@ -77,6 +77,35 @@ describe('DocumentEditorPane', () => {
         });
     });
 
+    it('shows the active agent name in the middle pane title area', async () => {
+        const { default: DocumentEditorPane } = await import('./DocumentEditorPane.vue');
+        const wrapper = mount(DocumentEditorPane, {
+            props: {
+                activePath: '/docs/guide.md',
+                activeAgentName: 'Docs Agent',
+                activeDocument: {
+                    path: '/docs/guide.md',
+                    mimeType: 'text/markdown',
+                    dataBase64: encodeTextDocument('# Guide'),
+                    canWrite: true
+                },
+                activeViewerId: 'text',
+                activePaneMode: 'viewer',
+                modelValue: '# Guide',
+                isSaving: false,
+                isDirty: false,
+                latestFileChange: null,
+                diffEntries: [],
+                canUndo: false,
+                canRedo: false
+            }
+        });
+
+        await wrapper.vm.$nextTick();
+
+        expect(wrapper.get('[data-testid="document-editor-title"]').text()).toBe('Docs Agent / guide.md');
+    });
+
     it('creates a Milkdown-backed editor and emits markdown updates', async () => {
         let onChange: ((markdown: string) => void) | undefined;
         const editor = { content: '# Today' };
@@ -115,7 +144,9 @@ describe('DocumentEditorPane', () => {
             mode: 'viewer',
             documentPath: '/notes/today.md'
         }));
-        expect(wrapper.get('[data-testid="markdown-mode-toggle"]').attributes('aria-label')).toBe('Edit');
+        const modeToggle = wrapper.get('[data-testid="markdown-mode-toggle"]');
+        expect(modeToggle.attributes('aria-label')).toBe('Edit');
+        expect(modeToggle.html()).toContain('lucide-pencil-line');
         onChange?.('# Updated');
         await wrapper.vm.$nextTick();
 
@@ -157,6 +188,9 @@ describe('DocumentEditorPane', () => {
         await Promise.resolve();
         await wrapper.vm.$nextTick();
 
+        const modeToggle = wrapper.get('[data-testid="markdown-mode-toggle"]');
+        expect(modeToggle.attributes('aria-label')).toBe('View');
+        expect(modeToggle.html()).toContain('lucide-eye');
         expect(wrapper.emitted('update:modelValue')).toBeUndefined();
         expect(destroyMarkdownEditor).toHaveBeenCalledWith(firstEditor);
         expect(createMarkdownEditor).toHaveBeenCalledTimes(1);

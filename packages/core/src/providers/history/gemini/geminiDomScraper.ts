@@ -247,6 +247,19 @@ function locationLooksLikeLogin(location: LocationLike): boolean {
     return /signin|login/i.test(location.pathname) || /accounts\.google\.com/i.test(location.hostname);
 }
 
+function hasExplicitLoginSignal(
+    config: GeminiHistoryRemoteConfig,
+    querySelector: QuerySelector,
+    location: LocationLike,
+    bodyText: string
+): boolean {
+    return Boolean(
+        (config.selectors.loginGate && querySelector(config.selectors.loginGate))
+        || locationLooksLikeLogin(location)
+        || (hasLoginKeyword(bodyText) && !isGeminiAppPath(location))
+    );
+}
+
 export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
     let lastSearchStabilizationState: SearchStabilizationState | null = null;
     let currentDebugTraceId = '';
@@ -1127,26 +1140,20 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
     ): boolean {
         const querySelector = options.querySelector ?? defaultQuerySelector;
         const location = options.location ?? window.location;
-        const loginGateSelector = config.selectors.loginGate;
         const hasHistoryScaffold = hasGeminiHistoryScaffold(config, querySelector);
         const hasGoogleAccountGate = Boolean(querySelector('a[href*="accounts.google.com"], form[action*="accounts.google.com"]'));
         const bodyText = (options.bodyText ?? document.body?.innerText ?? '').trim();
-        const hasLoginKeywordSignal = hasLoginKeyword(bodyText);
-        const locationLooksLikeLoginSignal = locationLooksLikeLogin(location);
+        const explicitLoginSignal = hasExplicitLoginSignal(config, querySelector, location, bodyText);
 
-        if (loginGateSelector && querySelector(loginGateSelector)) {
+        if (config.selectors.loginGate && querySelector(config.selectors.loginGate)) {
             return true;
         }
 
-        if (hasGoogleAccountGate && !hasHistoryScaffold && (hasLoginKeywordSignal || locationLooksLikeLoginSignal)) {
+        if (hasGoogleAccountGate && !hasHistoryScaffold && explicitLoginSignal) {
             return true;
         }
 
-        if (hasLoginKeywordSignal) {
-            return true;
-        }
-
-        if (locationLooksLikeLoginSignal) {
+        if (explicitLoginSignal) {
             return true;
         }
 
@@ -1169,11 +1176,7 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
             return false;
         }
 
-        const explicitLoginSignal = Boolean(
-            (config.selectors.loginGate && querySelector(config.selectors.loginGate))
-            || hasLoginKeyword(bodyText)
-            || locationLooksLikeLogin(location)
-        );
+        const explicitLoginSignal = hasExplicitLoginSignal(config, querySelector, location, bodyText);
 
         if (isGeminiAppPath(location) && !explicitLoginSignal) {
             return false;

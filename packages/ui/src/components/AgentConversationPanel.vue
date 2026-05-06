@@ -17,57 +17,60 @@
       >
         <ArrowLeft :size="16" />
       </button>
-      <h3
-        v-if="toolbarTitle"
-        class="agent-conversation-panel__title"
-        data-testid="agent-conversation-title"
-      >
-        {{ toolbarTitle }}
-      </h3>
-      <div v-else class="agent-conversation-panel__title-spacer" aria-hidden="true" />
-      <button
-        type="button"
-        class="agent-conversation-panel__icon-btn"
-        data-testid="agent-conversation-expand"
-        :title="t('shared.expandConversation')"
-        :aria-label="t('shared.expandConversation')"
-        @click="switchWorkspace('/chat')"
-      >
-        <PanelRightOpen :size="16" />
-      </button>
-      <button
-        v-if="showRebindConversationAction"
-        type="button"
-        class="agent-conversation-panel__icon-btn"
-        data-testid="agent-conversation-rebind-document"
-        :title="t('shared.rebindConversationDocument')"
-        :aria-label="t('shared.rebindConversationDocument')"
-        :disabled="!canRebindConversationDocument"
-        @click="toggleProjectDocumentPicker"
-      >
-        <Files :size="16" />
-      </button>
-      <button
-        v-if="showArchiveConversationAction"
-        type="button"
-        class="agent-conversation-panel__icon-btn"
-        :class="{ 'agent-conversation-panel__icon-btn--highlighted': isArchiveConversationHighlighted }"
-        data-testid="agent-conversation-archive"
-        :title="t('shared.archiveConversation')"
-        :aria-label="t('shared.archiveConversation')"
-        :disabled="isArchiveConversationDisabled"
-        @click="archiveConversationFromToolbar"
-      >
-        <Archive :size="16" />
-      </button>
-      <button
-        type="button"
-        class="agent-conversation-panel__icon-btn"
-        data-testid="agent-conversation-list-plus"
-        @click="createDocumentConversation"
-      >
-        <Plus :size="16" />
-      </button>
+      <div class="agent-conversation-panel__title-wrap">
+        <h3
+          v-if="toolbarTitle"
+          class="agent-conversation-panel__title"
+          data-testid="agent-conversation-title"
+        >
+          {{ toolbarTitle }}
+        </h3>
+      </div>
+      <div class="agent-conversation-panel__tools" data-testid="agent-conversation-tools">
+        <button
+          type="button"
+          class="agent-conversation-panel__icon-btn"
+          data-testid="agent-conversation-expand"
+          :title="t('shared.expandConversation')"
+          :aria-label="t('shared.expandConversation')"
+          @click="switchWorkspace('/chat')"
+        >
+          <PanelRightOpen :size="16" />
+        </button>
+        <button
+          v-if="showRebindConversationAction"
+          type="button"
+          class="agent-conversation-panel__icon-btn"
+          data-testid="agent-conversation-rebind-document"
+          :title="t('shared.rebindConversationDocument')"
+          :aria-label="t('shared.rebindConversationDocument')"
+          :disabled="!canRebindConversationDocument"
+          @click="toggleProjectDocumentPicker"
+        >
+          <Files :size="16" />
+        </button>
+        <button
+          v-if="showArchiveConversationAction"
+          type="button"
+          class="agent-conversation-panel__icon-btn"
+          :class="{ 'agent-conversation-panel__icon-btn--highlighted': isArchiveConversationHighlighted }"
+          data-testid="agent-conversation-archive"
+          :title="t('shared.archiveConversation')"
+          :aria-label="t('shared.archiveConversation')"
+          :disabled="isArchiveConversationDisabled"
+          @click="archiveConversationFromToolbar"
+        >
+          <Archive :size="16" />
+        </button>
+        <button
+          type="button"
+          class="agent-conversation-panel__icon-btn"
+          data-testid="agent-conversation-list-plus"
+          @click="createDocumentConversation"
+        >
+          <Plus :size="16" />
+        </button>
+      </div>
     </header>
 
     <section
@@ -173,6 +176,7 @@ const projectDocumentLoading = ref(false);
 const projectDocumentError = ref<string | null>(null);
 const isProjectDocumentPickerOpen = ref(false);
 const pendingRestoreConversationId = ref<string | null>(props.restoreConversationId ?? null);
+const previousSelectionKey = ref<string | null>(null);
 let documentConversationLoadToken = 0;
 let projectDocumentLoadToken = 0;
 
@@ -190,7 +194,17 @@ const currentConversationTitle = computed(() => {
 });
 const showToolbar = computed(() => hasConversationListContext.value);
 const showBackButton = computed(() => panelMode.value === 'detail' && hasConversationListContext.value);
-const toolbarTitle = computed(() => panelMode.value === 'detail' && hasConversationListContext.value ? currentConversationTitle.value : '');
+const toolbarTitle = computed(() => {
+  if (!hasConversationListContext.value) {
+    return '';
+  }
+
+  if (panelMode.value === 'detail') {
+    return currentConversationTitle.value;
+  }
+
+  return '';
+});
 const hasCurrentConversation = computed(() => !!chatStore.currentConversation);
 const documentScopedConversations = computed(() => {
   const scopedAgentKey = activeAgentKey.value;
@@ -245,7 +259,6 @@ const currentPrimaryDocumentPath = computed(() => {
 const canRebindConversationDocument = computed(() => {
   return !!props.contextProvider
     && !!chatStore.currentConversation
-    && chatStore.currentConversation.origin === 'local'
     && !!currentProjectNodePath.value;
 });
 const currentConversationArchiveState = computed(() => chatStore.currentConversationArchiveStatus.state);
@@ -407,8 +420,28 @@ function consumeRestoreConversationId(): void {
   pendingRestoreConversationId.value = null;
 }
 
-function syncPanelStateFromSelection(): void {
+function buildSelectionKey(): string | null {
+  if (activeDocumentPath.value) {
+    return `document:${activeDocumentPath.value}`;
+  }
+
   if (hasConversationListContext.value) {
+    return `node:${props.selectedNodePath ?? props.activePath ?? activeAgentKey.value}`;
+  }
+
+  return null;
+}
+
+function syncPanelStateFromSelection(): void {
+  const selectionKey = buildSelectionKey();
+  const selectionChanged = previousSelectionKey.value !== selectionKey;
+  previousSelectionKey.value = selectionKey;
+
+  if (hasConversationListContext.value) {
+    if (selectionChanged) {
+      pendingRestoreConversationId.value = props.restoreConversationId ?? null;
+    }
+
     if (pendingRestoreConversationId.value) {
       if (chatStore.currentConversation?.id === pendingRestoreConversationId.value) {
         panelMode.value = 'detail';
@@ -494,11 +527,10 @@ watch(
 }
 
 .agent-conversation-panel__toolbar {
-  display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) repeat(4, 36px);
+  display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
+  gap: 8px;
+  padding: 8px 10px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.16);
   background: rgba(8, 15, 26, 0.9);
 }
@@ -507,13 +539,27 @@ watch(
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 30px;
+  height: 30px;
   border: 0;
   border-radius: 8px;
   color: rgba(226, 232, 240, 0.86);
   background: transparent;
   cursor: pointer;
+}
+
+.agent-conversation-panel__title-wrap {
+  min-width: 0;
+  flex: 1;
+}
+
+.agent-conversation-panel__tools {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
 .agent-conversation-panel__icon-btn:hover,
@@ -541,16 +587,10 @@ watch(
   margin: 0;
   color: #f8fafc;
   font-size: 14px;
-  text-align: center;
+  text-align: left;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.agent-conversation-panel__title-spacer {
-  grid-column: 2;
-  min-width: 0;
-  min-height: 1px;
 }
 
 .agent-conversation-panel__detail {

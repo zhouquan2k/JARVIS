@@ -189,6 +189,33 @@ describe('markdownDocument', () => {
         expect(codeMirrorConfig.renderPreview('mermaid', 'graph TD;', applyPreview)).toBeNull();
     });
 
+    it('renders PDF embed previews as stable block nodes in viewer mode', async () => {
+        const { createMarkdownEditor, detectMarkdownBlockType } = await import('./markdownDocument');
+        const root = document.createElement('div');
+        const applyPreview = vi.fn();
+
+        await createMarkdownEditor({
+            root,
+            content: '![[guide.pdf]]',
+            mode: 'viewer',
+            documentPath: '/notes/current.md',
+            onChange: vi.fn()
+        });
+
+        const codeMirrorConfig = mocks.crepeInstances.at(-1)?.options.featureConfigs['code-mirror'];
+        const preview = codeMirrorConfig.renderPreview(
+            'cp-pdf-embed',
+            JSON.stringify({ label: 'guide.pdf', candidates: ['references/guide.pdf'] }),
+            applyPreview
+        );
+        expect(detectMarkdownBlockType('cp-pdf-embed', '')).toBe('pdf-embed');
+        expect(preview).toBeInstanceOf(HTMLElement);
+        expect((preview as HTMLElement).className).toBe('markdown-pdf-embed');
+        expect((preview as HTMLElement).querySelector('.markdown-pdf-embed__link')).toBeNull();
+        expect((preview as HTMLElement).dataset.pdfCandidates).toBe('["references/guide.pdf"]');
+        expect((preview as HTMLElement).dataset.pdfLabel).toBe('guide.pdf');
+    });
+
     it('uses source rendering as the default fallback for unconfigured code blocks', async () => {
         const {
             createMarkdownBlockRenderConfig,
@@ -214,24 +241,43 @@ describe('markdownDocument', () => {
         expect(resolveMarkdownImageUrl('../shared/flow.png', '/notes/nested/guide.md')).toBe(
             'http://127.0.0.1:8787/api/context/document-asset?path=%2Fnotes%2Fshared%2Fflow.png'
         );
-        // wiki embeds → references/ prefix added, renderable become images, non-renderable become links
+        // wiki embeds → renderable images keep current references behavior, pdf embeds prefer same-directory and
+        // fall back to references/, others become links
         expect(normalizeMarkdownViewerContent('![[flow.svg]]')).toBe('![flow.svg](references/flow.svg)');
         expect(normalizeMarkdownViewerContent('![[Pasted image 20260405095014.png]]')).toBe(
             '![Pasted image 20260405095014.png](references/Pasted%20image%2020260405095014.png)'
         );
         expect(normalizeMarkdownViewerContent('![[references/flow.svg]]')).toBe('![flow.svg](references/flow.svg)');
-        expect(normalizeMarkdownViewerContent('![[Customer_Transactions_4047340.pdf]]')).toBe(
-            '[Customer_Transactions_4047340.pdf](references/Customer_Transactions_4047340.pdf)'
-        );
+        expect(normalizeMarkdownViewerContent('![[Customer_Transactions_4047340.pdf]]')).toBe([
+            '```cp-pdf-embed',
+            '{"label":"Customer_Transactions_4047340.pdf","candidates":["Customer_Transactions_4047340.pdf","references/Customer_Transactions_4047340.pdf"],"showLink":false}',
+            '```'
+        ].join('\n'));
+        expect(normalizeMarkdownViewerContent('![[./Customer_Transactions_4047340.pdf]]')).toBe([
+            '```cp-pdf-embed',
+            '{"label":"Customer_Transactions_4047340.pdf","candidates":["./Customer_Transactions_4047340.pdf"],"showLink":false}',
+            '```'
+        ].join('\n'));
+        expect(normalizeMarkdownViewerContent('![[references/Customer_Transactions_4047340.pdf]]')).toBe([
+            '```cp-pdf-embed',
+            '{"label":"Customer_Transactions_4047340.pdf","candidates":["references/Customer_Transactions_4047340.pdf"],"showLink":false}',
+            '```'
+        ].join('\n'));
         // standard markdown image syntax: references/ prefix never added — paths are document-relative
-        expect(normalizeMarkdownViewerContent('![PDF preview](references/Customer_Transactions_4047340.pdf)')).toBe(
-            '[PDF preview](references/Customer_Transactions_4047340.pdf)'
-        );
+        expect(normalizeMarkdownViewerContent('![PDF preview](references/Customer_Transactions_4047340.pdf)')).toBe([
+            '```cp-pdf-embed',
+            '{"label":"PDF preview","candidates":["references/Customer_Transactions_4047340.pdf"],"showLink":false}',
+            '```'
+        ].join('\n'));
         // standard relative image — must NOT get references/ prepended
         expect(normalizeMarkdownViewerContent('![diagram](./images/flow.png)')).toBe('![diagram](./images/flow.png)');
         expect(normalizeMarkdownViewerContent('![diagram](images/flow.png)')).toBe('![diagram](images/flow.png)');
-        // non-renderable standard image becomes a link without references/ prepended
-        expect(normalizeMarkdownViewerContent('![report](./report.pdf)')).toBe('[report](./report.pdf)');
+        // pdf image syntax remains explicit embed
+        expect(normalizeMarkdownViewerContent('![report](./report.pdf)')).toBe([
+            '```cp-pdf-embed',
+            '{"label":"report","candidates":["./report.pdf"],"showLink":false}',
+            '```'
+        ].join('\n'));
     });
 
     it('opens viewer links without relying on contenteditable default navigation', async () => {
@@ -265,6 +311,58 @@ describe('markdownDocument', () => {
         open.mockRestore();
     });
 
+    it('routes pdf document links to the workspace callback instead of opening a new tab', async () => {
+        const { createMarkdownEditor, destroyMarkdownEditor, resolveMarkdownDocumentLinkPath } = await import('./markdownDocument');
+        const root = document.createElement('div');
+        root.innerHTML = '<div contenteditable="true"><p><a href="./guide.pdf">guide.pdf</a></p></div>';
+        const open = vi.spyOn(window, 'open').mockReturnValue(null);
+        const onOpenDocumentLink = vi.fn();
+
+        expect(resolveMarkdownDocumentLinkPath('./guide.pdf', '/notes/current.md')).toBe('/notes/guide.pdf');
+
+        const editor = await createMarkdownEditor({
+            root,
+            content: '[guide.pdf](./guide.pdf)',
+            mode: 'viewer',
+            documentPath: '/notes/current.md',
+            onOpenDocumentLink,
+            onChange: vi.fn()
+        });
+
+        const anchor = root.querySelector<HTMLAnchorElement>('a[href="./guide.pdf"]');
+        anchor?.dispatchEvent(new MouseEvent('click', {
+            bubbles: true,
+            cancelable: true
+        }));
+
+        expect(onOpenDocumentLink).toHaveBeenCalledWith('/notes/guide.pdf');
+        expect(open).not.toHaveBeenCalled();
+
+        await destroyMarkdownEditor(editor);
+        open.mockRestore();
+    });
+
+    it('keeps ordinary pdf markdown links as links instead of converting them into embeds', async () => {
+        const { createMarkdownEditor, destroyMarkdownEditor } = await import('./markdownDocument');
+        const root = document.createElement('div');
+        root.innerHTML = '<div contenteditable="true"><p><a href="references/guide.pdf">guide.pdf</a></p></div>';
+
+        const editor = await createMarkdownEditor({
+            root,
+            content: '[guide.pdf](references/guide.pdf)',
+            mode: 'viewer',
+            documentPath: '/notes/current.md',
+            onChange: vi.fn()
+        });
+
+        await Promise.resolve();
+
+        expect(root.querySelector<HTMLAnchorElement>('a[href="references/guide.pdf"]')).not.toBeNull();
+        expect(root.querySelectorAll('.markdown-pdf-embed')).toHaveLength(0);
+
+        await destroyMarkdownEditor(editor);
+    });
+
     it('routes markdown document links to the workspace callback instead of opening a new tab', async () => {
         const { createMarkdownEditor, destroyMarkdownEditor, resolveMarkdownDocumentLinkPath } = await import('./markdownDocument');
         const root = document.createElement('div');
@@ -296,60 +394,6 @@ describe('markdownDocument', () => {
         open.mockRestore();
     });
 
-    it('does not inject PDF embeds in edit mode', async () => {
-        const { createMarkdownEditor, destroyMarkdownEditor } = await import('./markdownDocument');
-        const root = document.createElement('div');
-        root.innerHTML = '<div contenteditable="true"><p><a href="references/guide.pdf">guide.pdf</a></p></div>';
-
-        const editor = await createMarkdownEditor({
-            root,
-            content: '[guide.pdf](references/guide.pdf)',
-            mode: 'edit',
-            documentPath: '/notes/current.md',
-            onChange: vi.fn()
-        });
-
-        await Promise.resolve();
-
-        expect(root.querySelectorAll('.pdf-inline-embed')).toHaveLength(0);
-
-        await destroyMarkdownEditor(editor);
-    });
-
-    it('injects PDF iframe embeds and re-injects after DOM mutation without duplicates', async () => {
-        const { createMarkdownEditor, destroyMarkdownEditor } = await import('./markdownDocument');
-        const root = document.createElement('div');
-        root.innerHTML = '<div contenteditable="true"><p><a href="references/guide.pdf">guide.pdf</a></p></div>';
-
-        const editor = await createMarkdownEditor({
-            root,
-            content: '[guide.pdf](references/guide.pdf)',
-            mode: 'viewer',
-            documentPath: '/notes/current.md',
-            onChange: vi.fn()
-        });
-
-        await Promise.resolve();
-
-        let embeds = root.querySelectorAll<HTMLDivElement>('.pdf-inline-embed');
-        expect(embeds).toHaveLength(1);
-        expect(embeds[0]?.querySelector('iframe')?.getAttribute('src')).toBe(
-            'http://127.0.0.1:8787/api/context/document-asset?path=%2Fnotes%2Freferences%2Fguide.pdf'
-        );
-
-        embeds[0]?.remove();
-        await new Promise((resolve) => window.setTimeout(resolve, 130));
-
-        embeds = root.querySelectorAll<HTMLDivElement>('.pdf-inline-embed');
-        expect(embeds).toHaveLength(1);
-
-        root.querySelector('[contenteditable="true"]')?.append(document.createElement('span'));
-        await new Promise((resolve) => window.setTimeout(resolve, 130));
-
-        expect(root.querySelectorAll('.pdf-inline-embed')).toHaveLength(1);
-
-        await destroyMarkdownEditor(editor);
-    });
 
     it('updates markdown editor search state through editor view decorations', async () => {
         const {

@@ -117,6 +117,36 @@ describe('gemini-history.preload auth detection', () => {
         })).toBe(true);
     });
 
+    it('does not treat Gemini detail pages as auth required only because the body mentions sign in', () => {
+        expect(isAuthRequired(CONFIG, {
+            querySelector: () => null,
+            location: {
+                pathname: '/app/remote-1',
+                hostname: 'gemini.google.com'
+            },
+            bodyText: 'Sign in to Gemini settings to manage your account'
+        })).toBe(false);
+    });
+
+    it('still treats Gemini detail pages with an explicit login gate as auth required', () => {
+        const querySelector = vi.fn((selector: string) => {
+            if (selector === CONFIG.selectors.loginGate) {
+                return {} as Element;
+            }
+
+            return null;
+        });
+
+        expect(isAuthRequired(CONFIG, {
+            querySelector,
+            location: {
+                pathname: '/app/remote-1',
+                hostname: 'gemini.google.com'
+            },
+            bodyText: 'Sign in to continue'
+        })).toBe(true);
+    });
+
     it('does not treat a logged-in empty history state as auth required when the list scaffold exists', () => {
         const querySelector = vi.fn((selector: string) => {
             if (selector === CONFIG.selectors.historyListContainer) {

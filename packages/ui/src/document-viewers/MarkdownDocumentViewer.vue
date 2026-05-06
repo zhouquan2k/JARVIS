@@ -17,6 +17,7 @@
         class="editor-input editor-input--markdown-source"
         data-testid="document-editor-input"
         :value="modelValue"
+        wrap="soft"
         :style="zoomStyle"
         spellcheck="false"
         @input="onMarkdownSourceInput"
@@ -132,9 +133,16 @@ let isApplyingExternalSync = false;
 let lastKnownMarkdown = '';
 let activeEditorMode: MarkdownViewerMode | null = null;
 
-watch(() => [props.activePath, props.activeDocument?.mimeType, props.modelValue, props.markdownViewerMode] as const, async ([activePath, mimeType, modelValue], previousValue) => {
+watch(() => [
+  props.activePath,
+  props.activeDocument?.path ?? null,
+  props.activeDocument?.mimeType,
+  props.modelValue,
+  props.markdownViewerMode
+] as const, async ([activePath, documentPath, mimeType, modelValue], previousValue) => {
   const previousPath = previousValue?.[0] ?? null;
-  const previousMimeType = previousValue?.[1] ?? null;
+  const previousDocumentPath = previousValue?.[1] ?? null;
+  const previousMimeType = previousValue?.[2] ?? null;
   if (!activePath) {
     await teardownEditor();
     return;
@@ -169,6 +177,10 @@ watch(() => [props.activePath, props.activeDocument?.mimeType, props.modelValue,
     activeEditorMode = 'edit';
     lastKnownMarkdown = modelValue;
     return;
+  }
+
+  if (editor && documentPath !== previousDocumentPath && requiresMarkdownDocumentPathRebind(modelValue)) {
+    await teardownEditor();
   }
 
   await ensureEditor(modelValue);
@@ -358,6 +370,15 @@ function extractMarkdownCodeBlockLabels(content: string): string[] {
 
   return labels;
 }
+
+function requiresMarkdownDocumentPathRebind(content: string): boolean {
+  if (!content.trim()) {
+    return false;
+  }
+
+  return /!\[\[[^\]]+\]\]/.test(content)
+    || /\]\(((?![a-z][a-z0-9+.-]*:|\/|#)[^)]+)\)/i.test(content);
+}
 </script>
 
 <style scoped>
@@ -395,7 +416,10 @@ function extractMarkdownCodeBlockLabels(content: string): string[] {
   color: #e2e8f0;
   background: transparent;
   font: 15px/1.7 'SFMono-Regular', 'SF Mono', 'Menlo', monospace;
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  overflow-x: hidden;
   tab-size: 2;
 }
 
@@ -609,19 +633,29 @@ function extractMarkdownCodeBlockLabels(content: string): string[] {
   white-space: pre-wrap;
 }
 
-.editor-input :deep(.milkdown .ProseMirror p:has(a[href$='.pdf' i])) {
-  display: none;
-}
-
-.editor-input :deep(.pdf-inline-embed) {
+.editor-input :deep(.markdown-pdf-embed) {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   width: 100%;
-  margin: 12px 0;
+  margin: 16px 0;
 }
 
-.editor-input :deep(.pdf-inline-embed iframe) {
+.editor-input :deep(.markdown-pdf-embed__link) {
+  align-self: flex-start;
+  font-size: 0.95rem;
+}
+
+.editor-input :deep(.markdown-pdf-embed__frame) {
   width: 100%;
   height: 500px;
   border: 0;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.editor-input :deep(.markdown-pdf-embed__fallback) {
+  color: #7dd3fc;
 }
 
 .file-change-panel {

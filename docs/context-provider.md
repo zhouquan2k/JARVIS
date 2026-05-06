@@ -149,3 +149,4 @@ classDiagram
 * Rebind-document candidates come from `getProjectDocuments(curNode)` and are chosen within the current agent scope instead of reusing the middle pane's current document implicitly.
 
 * The archive action reflects persisted archive state: unarchived or stale conversations appear highlighted and actionable, while already-archived conversations appear disabled.
+
