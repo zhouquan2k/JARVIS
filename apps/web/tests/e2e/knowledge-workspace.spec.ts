@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext } from '@playwright/test';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -24,12 +24,12 @@ test('web knowledge workspace supports file browsing markdown editing diff undo 
   await expect(page.getByTestId('document-workspace')).toBeVisible();
   await expect(page.getByTestId('document-file-tree')).toBeVisible();
   await expect(page.getByTestId('agent-pane')).toBeVisible();
-  await expect(page.getByTestId('normal-chat-view')).toBeVisible();
-  await expect(page.getByTestId('agent-name')).toContainText('Default Knowledge Agent（/）');
+  await expect(page.getByTestId('agent-view')).toContainText('Default Knowledge Agent');
+  await expect(page.getByTestId('agent-view-scope')).toContainText('/');
   await expect(page.getByTestId('document-node-root')).toHaveClass(/active/);
   await expect(page.getByTestId('document-editor')).toHaveCount(0);
 
-  await page.getByTestId('document-node-file').filter({ hasText: 'guide.md' }).click();
+  await page.locator('[data-path="/guide.md"]').click();
   await expect(page.getByTestId('agent-document-conversation-list')).toBeVisible();
   await expect(page.getByTestId('agent-document-conversation-empty')).toBeVisible();
   const editor = page.getByTestId('document-editor-input');
@@ -71,7 +71,7 @@ test('web knowledge workspace supports file browsing markdown editing diff undo 
   await page.getByTestId('agent-conversation-back').click();
   await expect(page.getByTestId('agent-document-conversation-item')).toContainText('Notes linked conversation');
 
-  await page.getByTestId('document-node-file').filter({ hasText: 'guide.md' }).click();
+  await page.locator('[data-path="/guide.md"]').click();
   await expect(page.getByTestId('agent-document-conversation-list')).toBeVisible();
   await expect(page.getByTestId('agent-document-conversation-list')).not.toContainText('Notes linked conversation');
 
@@ -84,7 +84,7 @@ test('web knowledge workspace preserves the shared conversation and restores the
   await page.goto('/#/');
 
   await expect(page.getByTestId('document-workspace')).toBeVisible();
-  await page.getByTestId('document-node-file').filter({ hasText: 'guide.md' }).click();
+  await page.locator('[data-path="/guide.md"]').click();
   await expect(page.getByTestId('document-editor-input')).toBeVisible();
 
   await page.getByTestId('agent-conversation-list-plus').click();
@@ -110,6 +110,248 @@ test('web knowledge workspace preserves the shared conversation and restores the
   await expect(page.getByTestId('agent-conversation-toolbar')).toBeVisible();
   await expect(page.getByTestId('agent-conversation-title')).toContainText('Shared agent conversation');
   await expect(page.getByTestId('agent-document-conversation-list')).toHaveCount(0);
+});
+
+test('web knowledge workspace replaces New Chat for a new Agent conversation after the first send', async ({ page }) => {
+  await page.goto('/#/');
+
+  await expect(page.getByTestId('document-workspace')).toBeVisible();
+  await page.locator('[data-path="/guide.md"]').click();
+  await page.getByTestId('agent-conversation-list-plus').click();
+  await expect(page.getByTestId('agent-conversation-title')).toContainText('New Chat');
+
+  await page.getByTestId('normal-input').fill('请帮我总结 guide 文档里的关键步骤和风险');
+  await page.getByTestId('normal-send').click();
+  await expect(page.getByTestId('agent-conversation-title')).not.toContainText('New Chat');
+
+  await page.getByTestId('agent-conversation-back').click();
+  await expect(page.getByTestId('agent-document-conversation-item').first()).not.toContainText('New Chat');
+});
+
+test('web knowledge workspace appends .md on create, hides markdown suffixes, and shows non-markdown icons', async ({ page, request }, testInfo) => {
+  const baseName = `playwright-tree-${testInfo.workerIndex}-${Date.now()}`;
+  const virtualPath = `/${baseName}.md`;
+  const diskPath = path.join(knowledgeFixtureRoot, `${baseName}.md`);
+
+  try {
+    await page.goto('/#/');
+    await expect(page.getByTestId('document-workspace')).toBeVisible();
+
+    await page.getByTestId('document-new-file').click();
+    await page.getByTestId('document-pending-node-input').fill(baseName);
+    await page.getByTestId('document-pending-node-input').press('Enter');
+
+    const createdNode = page.locator(`[data-path="${virtualPath}"]`);
+    await expect(createdNode).toBeVisible();
+    await expect(createdNode).toContainText(baseName);
+    await expect(createdNode).not.toContainText(`${baseName}.md`);
+    await expect(page.getByTestId('document-editor-title')).toContainText(baseName);
+    await expect(page.locator('[data-path="/notes.txt"] [data-testid="document-node-file-icon"][data-icon-kind="text"]')).toBeVisible();
+    await expect.poll(async () => readContextText(request, virtualPath)).toBe('');
+  } finally {
+    await rm(diskPath, { force: true });
+  }
+});
+
+test('web knowledge workspace inserts internal markdown links from the editor UI and opens the linked document', async ({ page, request }, testInfo) => {
+  const baseName = `playwright-link-${testInfo.workerIndex}-${Date.now()}`;
+  const sourceVirtualPath = `/${baseName}-source.md`;
+  const targetVirtualPath = `/${baseName}-target.md`;
+  const sourceDiskPath = path.join(knowledgeFixtureRoot, `${baseName}-source.md`);
+  const targetDiskPath = path.join(knowledgeFixtureRoot, `${baseName}-target.md`);
+
+  await writeFile(sourceDiskPath, 'Intro target', 'utf8');
+  await writeFile(targetDiskPath, '# Target\n', 'utf8');
+
+  try {
+    await page.goto('/#/');
+    await expect(page.getByTestId('document-workspace')).toBeVisible();
+
+    await page.locator(`[data-path="${sourceVirtualPath}"]`).click();
+    await expect(page.getByTestId('markdown-insert-link')).toBeVisible();
+    await page.locator('[data-testid="document-editor-surface"] .ProseMirror p').evaluate(() => {
+      const paragraph = document.querySelector('[data-testid="document-editor-surface"] .ProseMirror p');
+      const textNode = paragraph?.firstChild;
+      if (!textNode) {
+        return;
+      }
+
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.setStart(textNode, 6);
+      range.setEnd(textNode, 12);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    });
+    await page.getByTestId('markdown-insert-link').click();
+    await page.locator(`[data-testid="markdown-link-option-${targetVirtualPath}"]`).click();
+    await expect(page.getByTestId('markdown-mode-toggle')).toHaveAttribute('aria-pressed', 'true');
+    await page.getByTestId('document-save').click();
+
+    await expect.poll(async () => readContextText(request, sourceVirtualPath)).toBe(`Intro [target](${baseName}-target.md)`);
+    await page.getByRole('link', { name: 'target' }).click();
+    await expect(page.locator(`[data-path="${targetVirtualPath}"]`)).toHaveClass(/active/);
+    await expect(page.getByTestId('document-editor-title')).toContainText(`${baseName}-target`);
+  } finally {
+    await rm(sourceDiskPath, { force: true });
+    await rm(targetDiskPath, { force: true });
+  }
+});
+
+test('web knowledge workspace resizes local markdown images from viewer mode and does not rewrite remote or ambiguous sources', async ({ page, request }, testInfo) => {
+  const baseName = `playwright-resize-${testInfo.workerIndex}-${Date.now()}`;
+  const resizableVirtualPath = `/${baseName}.md`;
+  const ambiguousVirtualPath = `/${baseName}-ambiguous.md`;
+  const resizableDiskPath = path.join(knowledgeFixtureRoot, `${baseName}.md`);
+  const ambiguousDiskPath = path.join(knowledgeFixtureRoot, `${baseName}-ambiguous.md`);
+
+  await writeFile(
+    resizableDiskPath,
+    [
+      '# Resize target',
+      '',
+      '![Flow](images/flow.svg)',
+      '',
+      'After image.'
+    ].join('\n'),
+    'utf8'
+  );
+  await writeFile(
+    ambiguousDiskPath,
+    [
+      '# Ambiguous target',
+      '',
+      '![Remote](https://example.com/flow.png)',
+      '',
+      '![First](images/flow.svg)',
+      '![Second](images/flow.svg)'
+    ].join('\n'),
+    'utf8'
+  );
+
+  try {
+    await page.goto('/#/');
+    await expect(page.getByTestId('document-workspace')).toBeVisible();
+
+    await page.locator(`[data-path="${resizableVirtualPath}"]`).click();
+    await expect(page.getByTestId('markdown-mode-toggle')).toHaveAttribute('aria-pressed', 'true');
+    const resizableImage = page.locator('[data-testid="document-editor-surface"] img').first();
+    const initialImageBox = await resizableImage.boundingBox();
+    expect(initialImageBox).not.toBeNull();
+    const resizeHandle = page.locator('[data-testid="markdown-image-resize-handle"]').first();
+    await expect(resizeHandle).toBeVisible();
+    const handleBox = await resizeHandle.boundingBox();
+    expect(handleBox).not.toBeNull();
+    await page.mouse.move(handleBox!.x + handleBox!.width / 2, handleBox!.y + handleBox!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(handleBox!.x + handleBox!.width / 2, handleBox!.y + handleBox!.height / 2 + 120, { steps: 8 });
+    await page.mouse.up();
+    const resizedImageBox = await resizableImage.boundingBox();
+    expect(resizedImageBox).not.toBeNull();
+    expect(resizedImageBox!.width).toBeGreaterThan(initialImageBox!.width + 20);
+    await page.getByTestId('document-save').click();
+
+    let resizedContent = '';
+    await expect.poll(async () => {
+      resizedContent = await readContextText(request, resizableVirtualPath);
+      return resizedContent;
+    }).toMatch(/!\[\d+\.\d+\]\(images\/flow\.svg\)/);
+    const persistedRatio = Number(resizedContent.match(/!\[(\d+\.\d+)\]\(images\/flow\.svg\)/)?.[1] ?? '0');
+    expect(persistedRatio).toBeGreaterThan(1);
+
+    await page.getByTestId('markdown-mode-toggle').click();
+    await expect(page.getByTestId('document-editor-input')).toHaveValue(/!\[\d+\.\d+\]\(images\/flow\.svg\)/);
+    await page.getByTestId('markdown-mode-toggle').click();
+    await expect(page.locator('[data-testid="document-editor-surface"] img')).toHaveCount(1);
+
+    await page.locator(`[data-path="${ambiguousVirtualPath}"]`).click();
+    await expect(page.locator('[data-testid="markdown-image-resize-handle"]')).toHaveCount(2);
+    const ambiguousHandle = page.locator('[data-testid="markdown-image-resize-handle"]').first();
+    const ambiguousBox = await ambiguousHandle.boundingBox();
+    expect(ambiguousBox).not.toBeNull();
+    await page.mouse.move(ambiguousBox!.x + ambiguousBox!.width / 2, ambiguousBox!.y + ambiguousBox!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(ambiguousBox!.x + ambiguousBox!.width / 2 + 80, ambiguousBox!.y + ambiguousBox!.height / 2, { steps: 6 });
+    await page.mouse.up();
+
+    await expect.poll(async () => readContextText(request, ambiguousVirtualPath)).toBe(
+      [
+        '# Ambiguous target',
+        '',
+        '![Remote](https://example.com/flow.png)',
+        '',
+        '![First](images/flow.svg)',
+        '![Second](images/flow.svg)'
+      ].join('\n')
+    );
+    expect(resizedContent).toMatch(/!\[\d+\.\d+\]\(images\/flow\.svg\)/);
+  } finally {
+    await rm(resizableDiskPath, { force: true });
+    await rm(ambiguousDiskPath, { force: true });
+  }
+});
+
+test('web knowledge workspace materializes pasted markdown images into references files', async ({ page, request }, testInfo) => {
+  const baseName = `playwright-paste-${testInfo.workerIndex}-${Date.now()}`;
+  const virtualPath = `/${baseName}.md`;
+  const diskPath = path.join(knowledgeFixtureRoot, `${baseName}.md`);
+  const referencesDir = path.join(knowledgeFixtureRoot, 'references');
+
+  await writeFile(diskPath, 'Intro', 'utf8');
+
+  let pastedFileDiskPath: string | null = null;
+
+  try {
+    await page.goto('/#/');
+    await expect(page.getByTestId('document-workspace')).toBeVisible();
+
+    await page.locator(`[data-path="${virtualPath}"]`).click();
+    const surface = page.getByTestId('document-editor-surface');
+    await surface.locator('.ProseMirror p').evaluate(() => {
+      const paragraph = document.querySelector('[data-testid="document-editor-surface"] .ProseMirror p');
+      const textNode = paragraph?.firstChild;
+      if (!textNode) {
+        return;
+      }
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.setStart(textNode, 5);
+      range.setEnd(textNode, 5);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    });
+    await surface.evaluate((element) => {
+      const input = element as HTMLElement;
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([new Uint8Array([137, 80, 78, 71])], 'pasted.png', { type: 'image/png' }));
+      const event = new ClipboardEvent('paste', {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: transfer
+      });
+      input.dispatchEvent(event);
+    });
+    await expect.poll(async () => readContextText(request, virtualPath)).toBe('Intro');
+    await expect(page.getByTestId('document-editor')).toContainText('Intro');
+
+    await page.getByTestId('document-save').click();
+    let persistedContent = '';
+    await expect.poll(async () => {
+      persistedContent = await readContextText(request, virtualPath);
+      return persistedContent;
+    }).toMatch(/^Intro!\[\]\(references\/Pasted%20image%20\d{14}\.png\)$/);
+
+    const pastedFileName = persistedContent.match(/^Intro!\[\]\(references\/(.+)\)$/)?.[1] ?? null;
+    expect(pastedFileName).not.toBeNull();
+    pastedFileDiskPath = pastedFileName ? path.join(referencesDir, decodeURIComponent(pastedFileName)) : null;
+    const referencesFiles = await readdir(referencesDir);
+    expect(referencesFiles).toContain(decodeURIComponent(pastedFileName!));
+  } finally {
+    await rm(diskPath, { force: true });
+    if (pastedFileDiskPath) {
+      await rm(pastedFileDiskPath, { force: true });
+    }
+  }
 });
 
 test('web knowledge workspace archives an agent conversation into a markdown document and keeps undo redo available', async ({ page, request }, testInfo) => {
@@ -220,12 +462,12 @@ test('web knowledge workspace renders markdown mermaid and images while preservi
   await page.goto('/#/');
 
   await expect(page.getByTestId('document-workspace')).toBeVisible();
-  await page.getByTestId('document-node-file').filter({ hasText: 'md-mermaid.md' }).click();
+  await page.locator('[data-path="/md-mermaid.md"]').click();
 
   const markdownModeToggle = page.getByTestId('markdown-mode-toggle');
   await expect(markdownModeToggle).toBeVisible();
   await expect(markdownModeToggle).toHaveAttribute('aria-pressed', 'true');
-  await expect(markdownModeToggle).toHaveAttribute('title', 'Edit');
+  await expect(markdownModeToggle).toHaveAttribute('title', 'Source');
   await expect(page.getByTestId('document-editor')).toContainText('Normal Markdown paragraph for viewer mode.');
   await expect(page.getByTestId('markdown-mermaid-preview')).toBeVisible();
   const mermaidBlock = page.locator('.milkdown-code-block').filter({
@@ -244,14 +486,14 @@ test('web knowledge workspace renders markdown mermaid and images while preservi
 
   await markdownModeToggle.click();
   await expect(markdownModeToggle).toHaveAttribute('aria-pressed', 'false');
-  await expect(markdownModeToggle).toHaveAttribute('title', 'View');
+  await expect(markdownModeToggle).toHaveAttribute('title', 'Render');
   await expect(page.getByTestId('document-editor-input')).toHaveValue(/classDiagram/);
   await expect(page.getByTestId('document-editor-input')).toHaveValue(/Draft --> Preview/);
   await expect(page.locator('.markdown-mermaid-preview')).toHaveCount(0);
 
   await markdownModeToggle.click();
   await expect(markdownModeToggle).toHaveAttribute('aria-pressed', 'true');
-  await expect(markdownModeToggle).toHaveAttribute('title', 'Edit');
+  await expect(markdownModeToggle).toHaveAttribute('title', 'Source');
   await expect(page.getByTestId('document-editor')).toContainText('Normal Markdown paragraph for viewer mode.');
   await expect(page.getByTestId('markdown-mermaid-preview')).toBeVisible();
   await expect(page.locator('.milkdown-code-block').filter({
@@ -271,27 +513,27 @@ test('web knowledge workspace shows markdown table source in edit mode', async (
   await page.goto('/#/');
 
   await expect(page.getByTestId('document-workspace')).toBeVisible();
-  await page.getByTestId('document-node-file').filter({ hasText: 'table-source.md' }).click();
+  await page.locator('[data-path="/table-source.md"]').click();
 
   const markdownModeToggle = page.getByTestId('markdown-mode-toggle');
   await expect(markdownModeToggle).toBeVisible();
   await expect(markdownModeToggle).toHaveAttribute('aria-pressed', 'true');
-  await expect(markdownModeToggle).toHaveAttribute('title', 'Edit');
+  await expect(markdownModeToggle).toHaveAttribute('title', 'Source');
   await expect(page.getByTestId('document-editor')).toContainText('Normal Markdown paragraph for table mode.');
 
   await markdownModeToggle.click();
   await expect(markdownModeToggle).toHaveAttribute('aria-pressed', 'false');
-  await expect(markdownModeToggle).toHaveAttribute('title', 'View');
+  await expect(markdownModeToggle).toHaveAttribute('title', 'Render');
   await expect(page.getByTestId('document-editor-input')).toHaveValue(/\| Name\s+\| Type\s+\|/);
   await expect(page.getByTestId('document-editor-input')).toHaveValue(/\| id\s+\| string \|/);
 
   await markdownModeToggle.click();
   await expect(markdownModeToggle).toHaveAttribute('aria-pressed', 'true');
-  await expect(markdownModeToggle).toHaveAttribute('title', 'Edit');
+  await expect(markdownModeToggle).toHaveAttribute('title', 'Source');
 
   await markdownModeToggle.click();
   await expect(markdownModeToggle).toHaveAttribute('aria-pressed', 'false');
-  await expect(markdownModeToggle).toHaveAttribute('title', 'View');
+  await expect(markdownModeToggle).toHaveAttribute('title', 'Render');
   await expect(page.getByTestId('document-editor-input')).toHaveValue(/\| Name\s+\| Type\s+\|/);
   await expect(page.getByTestId('document-editor-input')).not.toHaveValue(/```cp-md-table/);
 });
@@ -299,11 +541,11 @@ test('web knowledge workspace shows markdown table source in edit mode', async (
 test('web knowledge workspace renders pdf wiki embeds as inline iframes', async ({ page }) => {
   await page.goto('/#/');
 
-  await page.getByTestId('document-node-file').filter({ hasText: 'pdf-embed.md' }).click();
+  await page.locator('[data-path="/pdf-embed.md"]').click();
 
   await expect(page.getByTestId('markdown-mode-toggle')).toBeVisible();
   await expect(page.getByTestId('markdown-mode-toggle')).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByTestId('markdown-mode-toggle')).toHaveAttribute('title', 'Edit');
+  await expect(page.getByTestId('markdown-mode-toggle')).toHaveAttribute('title', 'Source');
   await expect(page.getByTestId('document-editor')).toContainText('Normal Markdown paragraph for same-directory PDF embed.');
   await expect(page.getByTestId('document-editor')).toContainText('Fallback PDF embed paragraph.');
   await expect(page.locator('[data-testid="document-editor-surface"] .markdown-pdf-embed__link')).toHaveCount(0);
@@ -351,7 +593,7 @@ test('web knowledge workspace shows AgentView for owner directories and right-pa
   await docsNode.click();
   await expect(page.getByTestId('agent-view')).toBeVisible();
   await expect(page.getByTestId('agent-view-scope')).toContainText('/docs');
-  await expect(page.getByTestId('agent-name')).toContainText('Docs Agent');
+  await expect(page.getByTestId('agent-view')).toContainText('Docs Agent');
   await expect(page.getByTestId('agent-view-conversation')).toHaveCount(0);
   await expect(page.getByTestId('agent-view-document')).toHaveCount(0);
   await expect(page.getByTestId('agent-document-conversation-list')).toBeVisible();
@@ -366,7 +608,7 @@ test('web knowledge workspace shows AgentView for owner directories and right-pa
   await expect(page.getByTestId('agent-document-conversation-item')).toContainText('Docs owner conversation');
 
   await docsNode.locator('.tree-toggle').click();
-  await page.getByTestId('document-node-file').filter({ hasText: 'overview.md' }).click();
+  await page.locator('[data-path="/docs/overview.md"]').click();
   await expect(page.getByTestId('document-editor-input')).toBeVisible();
   await expect(page.getByTestId('agent-view')).toHaveCount(0);
 
@@ -378,7 +620,7 @@ test('web knowledge workspace shows AgentView for owner directories and right-pa
   await page.getByTestId('agent-conversation-back').click();
   await expect(page.getByTestId('agent-document-conversation-item')).toContainText('Docs owner conversation');
 
-  await page.getByTestId('document-node-file').filter({ hasText: 'guide.md' }).click();
+  await page.locator('[data-path="/guide.md"]').click();
   await expect(page.getByTestId('agent-view')).toHaveCount(0);
 });
 
@@ -454,14 +696,14 @@ test('web knowledge workspace edits AgentView prompt model and inheritance throu
       .toBe('gemini-api');
     await expect.poll(async () => (await readContextJson(request, `${ownerPath}/.agent.json`)).modelName)
       .toBe('gemini-2.5-flash');
-    await expect(page.getByTestId('agent-model')).toContainText('gemini-api / gemini-2.5-flash');
+    await expect(page.getByTestId('agent-view-model')).toContainText('gemini-api / gemini-2.5-flash');
 
     await ownerNode.locator('.tree-toggle').click();
     const childNode = page.locator(`[data-path="${childPath}"]`);
     await expect(childNode.getByTestId('document-node-agent-owner')).toBeVisible();
     await childNode.click();
-    await expect(page.getByTestId('agent-name')).toContainText('E2E Child Agent');
-    await expect(page.getByTestId('agent-model')).toContainText('gemini-api / gemini-2.5-flash');
+    await expect(page.getByTestId('agent-view')).toContainText('E2E Child Agent');
+    await expect(page.getByTestId('agent-view-model')).toContainText('gemini-api / gemini-2.5-flash');
     if (await page.getByTestId('agent-view-prompt').count() === 0) {
       await page.getByTestId('agent-view-instructions-toggle').click();
     }
@@ -495,7 +737,7 @@ test('web knowledge workspace edits AgentView prompt model and inheritance throu
     await page.getByTestId('agent-view-save').click();
     await expect.poll(async () => (await readContextJson(request, `${childPath}/.agent.json`)).inheritance)
       .toBe('override');
-    await expect(page.getByTestId('agent-model')).not.toContainText('gemini-api / gemini-2.5-flash');
+    await expect(page.getByTestId('agent-view-model')).not.toContainText('gemini-api / gemini-2.5-flash');
     if (await page.getByTestId('agent-view-instructions').count() === 0) {
       await page.getByTestId('agent-view-instructions-toggle').click();
     }

@@ -76,6 +76,40 @@ describe('DesktopProxyProvider', () => {
         }));
     });
 
+    it('proxies generateConversationTitle through the desktop bridge', async () => {
+        const listeners = new Set<(message: unknown) => void>();
+        const sendProxyRequest = vi.fn((message: { requestId: string; channelId: string; action: string; providerId: string; prompt: string }) => {
+            listeners.forEach((listener) => {
+                listener({
+                    type: 'DONE',
+                    requestId: message.requestId,
+                    channelId: message.channelId,
+                    result: '文档归档策略'
+                });
+            });
+        });
+
+        window.chatprismDesktop = {
+            sendProxyRequest,
+            onProxyResponse(listener) {
+                listeners.add(listener);
+                return () => listeners.delete(listener);
+            }
+        };
+
+        const provider = new DesktopProxyProvider('chatgpt-web', { channelId: 'desktop-title-channel' });
+        await expect(provider.generateConversationTitle?.('请为文档归档策略写一个简短标题', { maxLength: 10 })).resolves.toBe('文档归档策略');
+        expect(sendProxyRequest).toHaveBeenCalledWith(expect.objectContaining({
+            action: 'GENERATE_CONVERSATION_TITLE',
+            providerId: 'chatgpt-web',
+            channelId: 'desktop-title-channel',
+            prompt: '请为文档归档策略写一个简短标题',
+            options: {
+                maxLength: 10
+            }
+        }));
+    });
+
     it('forwards structured updates and abort requests independently', async () => {
         const listeners = new Set<(message: unknown) => void>();
         const sendProxyRequest = vi.fn((message: { requestId: string; channelId: string; action: string; options?: unknown }) => {

@@ -112,12 +112,101 @@ describe('useDocumentWorkspaceStore', () => {
 
         await store.hydrateWorkspace();
         await store.createNode({
-            name: 'new-note.md',
+            name: 'new-note',
             kind: 'file'
         });
 
         expect(store.nodes.some((node) => node.path === '/new-note.md')).toBe(true);
         expect(store.activePath).toBe('/new-note.md');
+    });
+
+    it('returns stable linkable markdown documents inside the current agent scope and excludes the active document', async () => {
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/docs/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/docs' },
+                { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' },
+                { path: '/docs/archive', name: 'archive', kind: 'directory', parentPath: '/docs' },
+                { path: '/docs/archive/history.md', name: 'history.md', kind: 'file', parentPath: '/docs/archive' },
+                { path: '/outside.md', name: 'outside.md', kind: 'file' }
+            ],
+            documents: {
+                '/docs/.agent.json': JSON.stringify({ name: 'Docs Agent', instructions: 'Handle docs.' }),
+                '/docs/guide.md': '# Guide',
+                '/docs/archive/history.md': '# History',
+                '/outside.md': '# Outside'
+            }
+        }));
+
+        await store.hydrateWorkspace();
+        await store.openNode('/docs');
+
+        expect(store.getLinkableMarkdownDocuments('/docs/guide.md').map((node) => node.path)).toEqual([
+            '/docs/archive/history.md'
+        ]);
+    });
+
+    it('persists pasted markdown images into a document-local references directory and returns a relative markdown reference', async () => {
+        const provider = createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' }
+            ],
+            documents: {
+                '/docs/guide.md': '# Guide'
+            }
+        });
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(provider);
+
+        await store.hydrateWorkspace();
+        const result = await store.persistPastedMarkdownImage({
+            documentPath: '/docs/guide.md',
+            mimeType: 'image/png',
+            bytes: new Uint8Array([1, 2, 3, 4])
+        });
+
+        expect(result.imagePath).toMatch(/^\/docs\/references\/Pasted image \d{14}\.png$/);
+        expect(result.markdown).toMatch(/^!\[\]\(references\/Pasted%20image%20\d{14}\.png\)$/);
+        expect(store.nodes.some((node) => node.path === '/docs/references' && node.kind === 'directory')).toBe(true);
+        expect(store.nodes.some((node) => node.path === result.imagePath && node.kind === 'file')).toBe(true);
+
+        const persisted = await provider.readDocument(result.imagePath);
+        expect(Buffer.from(persisted.dataBase64, 'base64')).toEqual(Buffer.from([1, 2, 3, 4]));
+    });
+
+    it('de-duplicates pasted markdown image file names when references already contains a collision', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-05-08T12:34:56Z'));
+
+        const provider = createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' },
+                { path: '/docs/references', name: 'references', kind: 'directory', parentPath: '/docs' },
+                { path: '/docs/references/Pasted image 20260508083456.png', name: 'Pasted image 20260508083456.png', kind: 'file', parentPath: '/docs/references' }
+            ],
+            documents: {
+                '/docs/guide.md': '# Guide',
+                '/docs/references/Pasted image 20260508083456.png': {
+                    mimeType: 'image/png',
+                    dataBase64: 'AQID'
+                }
+            }
+        });
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(provider);
+
+        await store.hydrateWorkspace();
+        const result = await store.persistPastedMarkdownImage({
+            documentPath: '/docs/guide.md',
+            mimeType: 'image/png',
+            bytes: new Uint8Array([5, 6, 7])
+        });
+
+        expect(result.imagePath).toBe('/docs/references/Pasted image 20260508083456 2.png');
+        expect(result.markdown).toBe('![](references/Pasted%20image%2020260508083456%202.png)');
     });
 
     it('creates directories and selects them after refreshing the tree', async () => {
@@ -469,7 +558,7 @@ describe('useDocumentWorkspaceStore', () => {
 
         await store.hydrateWorkspace();
         await store.openNode('/workspace/guide.md');
-        await store.renameNode({ path: '/workspace/guide.md', name: 'guide-renamed.md' });
+        await store.renameNode({ path: '/workspace/guide.md', name: 'guide-renamed' });
 
         expect(store.nodes.some((node) => node.path === '/workspace/guide-renamed.md')).toBe(true);
         expect(store.activePath).toBe('/workspace/guide-renamed.md');

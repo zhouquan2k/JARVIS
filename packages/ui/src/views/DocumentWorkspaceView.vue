@@ -47,6 +47,7 @@
               :providers="chatStore.availableProviders"
               :builtin-tools="builtinTools"
               :model-load-states="chatStore.providerModelStates"
+              :linkable-markdown-documents="agentIndexLinkableMarkdownDocuments"
               @load-provider-models="chatStore.ensureProviderModelsLoaded"
               @save-agent-config="saveSelectedAgentConfig"
               @update-index-content="documentStore.updateAgentIndexDocument"
@@ -61,8 +62,10 @@
               :active-viewer-id="documentStore.activeViewerId"
               :active-pane-mode="documentStore.activePaneMode"
               :model-value="draftContent"
+              :linkable-markdown-documents="activeLinkableMarkdownDocuments"
               :is-saving="documentStore.isSaving"
               :is-dirty="activeDocumentIsDirty"
+              :persist-markdown-image="documentStore.persistPastedMarkdownImage"
               :middle-pane-mode="documentStore.middlePaneMode"
               :middle-pane-zoom="documentStore.middlePaneZoom"
               :latest-file-change="documentStore.latestFileChange"
@@ -153,6 +156,12 @@ const gridTemplateColumns = computed(() => {
 });
 const activeDocumentIsDirty = computed(() => {
   return !!documentStore.activePath && documentStore.dirtyPaths[documentStore.activePath] === true;
+});
+const activeLinkableMarkdownDocuments = computed(() => {
+  return documentStore.getLinkableMarkdownDocuments(documentStore.activePath);
+});
+const agentIndexLinkableMarkdownDocuments = computed(() => {
+  return documentStore.getLinkableMarkdownDocuments(documentStore.agentIndexPath);
 });
 const isWorkspaceSelectionReady = ref(false);
 const selectedOwnerNode = computed<ContextNode | null>(() => {

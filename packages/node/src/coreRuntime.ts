@@ -3,6 +3,7 @@ import * as agentConfigRuntime from '../../core/src/agents/config/resolveScopedA
 export type {
     ContextDocument,
     ContextNode,
+    ProjectDocumentEntry,
     ContextSearchMatch,
     ContextSearchRequest,
     CreateContextNodeInput,

@@ -183,6 +183,23 @@ test('extension host applies unified host font baseline', async () => {
   }
 });
 
+test('extension host replaces New Chat after the first successful send', async () => {
+  const session = await launchExtensionPage();
+  try {
+    const { page } = session;
+    await expect(page.getByTestId('conversation-workspace')).toBeVisible();
+
+    await page.getByTestId('sidebar-new-chat').click();
+    await page.getByTestId('normal-input').fill('请帮我梳理 extension 侧标题生成链路');
+    await page.getByTestId('normal-send').click();
+
+    await expect(page.getByTestId('normal-messages')).toContainText('请帮我梳理 extension 侧标题生成链路');
+    await expect(page.getByTestId('local-history-item').first()).not.toContainText('New Chat');
+  } finally {
+    await session.close();
+  }
+});
+
 test('extension host exposes the knowledge workspace route with editable markdown documents and top-level workspace switching', async () => {
   const session = await launchExtensionPage({ routeHash: '#/' });
   try {
@@ -190,11 +207,12 @@ test('extension host exposes the knowledge workspace route with editable markdow
     await expect(page.getByTestId('document-workspace')).toBeVisible();
     await expect(page.getByTestId('document-file-tree')).toBeVisible();
     await expect(page.getByTestId('agent-pane')).toBeVisible();
-    await expect(page.getByTestId('normal-chat-view')).toBeVisible();
+    await expect(page.getByTestId('agent-view')).toContainText('Default Knowledge Agent');
+    await expect(page.getByTestId('agent-view-scope')).toContainText('/');
     await expect(page.getByTestId('document-node-root')).toHaveClass(/active/);
     await expect(page.getByTestId('document-editor')).toHaveCount(0);
 
-    await page.getByTestId('document-node-file').filter({ hasText: 'guide.md' }).click();
+    await page.locator('[data-path="/guide.md"]').click();
     const editor = page.getByTestId('document-editor-input');
     await expect(editor).toBeVisible();
     await editor.fill('Playwright extension knowledge');
@@ -217,10 +235,10 @@ test('extension knowledge workspace renders agent metadata', async () => {
   try {
     const { page } = session;
     await expect(page.getByTestId('document-workspace')).toBeVisible();
-    await expect(page.getByTestId('agent-name')).toContainText('Default Knowledge Agent（/）');
-    await expect(page.getByTestId('agent-model')).toContainText('gemini-api / Gemini Pro Latest');
+    await expect(page.getByTestId('agent-view')).toContainText('Default Knowledge Agent');
+    await expect(page.getByTestId('agent-view-scope')).toContainText('/');
+    await expect(page.getByTestId('agent-view-model')).toContainText('gemini-api / Gemini Pro Latest');
     await expect(page.getByTestId('agent-pane')).toBeVisible();
-    await expect(page.getByTestId('normal-chat-view')).toBeVisible();
   } finally {
     await session.close();
   }
@@ -279,7 +297,7 @@ test('extension knowledge workspace shows AgentView for owner directories and ri
     await docsNode.click();
     await expect(page.getByTestId('agent-view')).toBeVisible();
     await expect(page.getByTestId('agent-view-scope')).toContainText('/docs');
-    await expect(page.getByTestId('agent-name')).toContainText('Docs Agent');
+    await expect(page.getByTestId('agent-view')).toContainText('Docs Agent');
     await expect(page.getByTestId('agent-view-document')).toHaveCount(0);
 
     await page.getByTestId('agent-conversation-list-plus').click();
@@ -291,7 +309,7 @@ test('extension knowledge workspace shows AgentView for owner directories and ri
     await expect(page.getByTestId('agent-document-conversation-item')).toContainText('Extension docs owner');
 
     await docsNode.locator('.tree-toggle').click();
-    await page.getByTestId('document-node-file').filter({ hasText: 'overview.md' }).click();
+    await page.locator('[data-path="/docs/overview.md"]').click();
     await expect(page.getByTestId('document-editor-input')).toBeVisible();
     await expect(page.getByTestId('agent-view')).toHaveCount(0);
 
@@ -300,7 +318,7 @@ test('extension knowledge workspace shows AgentView for owner directories and ri
     await page.getByTestId('agent-document-conversation-item').click();
     await expect(page.getByTestId('normal-messages')).toContainText('Extension docs owner');
 
-    await page.getByTestId('document-node-file').filter({ hasText: 'guide.md' }).click();
+    await page.locator('[data-path="/guide.md"]').click();
     await expect(page.getByTestId('agent-view')).toHaveCount(0);
   } finally {
     await session.close();

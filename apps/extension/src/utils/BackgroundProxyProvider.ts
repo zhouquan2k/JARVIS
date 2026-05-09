@@ -2,6 +2,7 @@
 import {
     IModelProvider,
     type AnalysisResult,
+    type GenerateConversationTitleOptions,
     type ProviderDocumentCapability,
     type ProviderSendResult,
     type ProviderStreamUpdate
@@ -11,6 +12,7 @@ import type {
     AnalyzeComparisonRequest,
     CheckAuthRequest,
     GetAvailableModelsRequest,
+    GenerateConversationTitleRequest,
     ProviderSendOptions,
     ProxyRequest,
     ProxyResponse,
@@ -129,6 +131,22 @@ export class BackgroundProxyProvider implements IModelProvider {
             channelId: this.channelId,
             providerId: this.id
         });
+    }
+
+    generateConversationTitle(
+        prompt: string,
+        options: GenerateConversationTitleOptions = {}
+    ): Promise<string> {
+        const request: GenerateConversationTitleRequest = {
+            action: 'GENERATE_CONVERSATION_TITLE',
+            requestId: this.nextRequestId('GENERATE_CONVERSATION_TITLE'),
+            channelId: this.channelId,
+            providerId: this.id,
+            prompt,
+            options
+        };
+
+        return this.createTrackedRequest<string>(request);
     }
 
     sendMessage(

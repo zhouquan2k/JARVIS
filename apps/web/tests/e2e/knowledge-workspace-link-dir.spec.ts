@@ -66,17 +66,17 @@ test.describe.serial('web knowledge workspace linkDir', () => {
     await reportsNode.click();
     await expect(page.getByTestId('agent-view')).toBeVisible();
     await expect(page.getByTestId('agent-view-scope')).toContainText('/reports');
-    await expect(page.getByTestId('agent-name')).toContainText('Reports Mount');
+    await expect(page.getByTestId('agent-view')).toContainText('Reports Mount');
     await expect(page.getByTestId('agent-view-document')).toHaveCount(0);
     await reportsNode.locator('.tree-toggle').click();
-    await expect(page.getByTestId('document-node-file').filter({ hasText: 'summary.md' })).toHaveCount(1);
+    await expect(page.locator('[data-path="/reports/summary.md"]')).toHaveCount(1);
   });
 
   test('writes to a mounted document and keeps the update after reload', async ({ page }) => {
     await page.goto('/#/');
 
     await page.locator('[data-path="/reports"] .tree-toggle').click();
-    await page.getByTestId('document-node-file').filter({ hasText: 'summary.md' }).click();
+    await page.locator('[data-path="/reports/summary.md"]').click();
 
     await expect(page.getByTestId('markdown-mode-toggle')).toBeVisible();
     await fs.writeFile(
@@ -91,7 +91,7 @@ test.describe.serial('web knowledge workspace linkDir', () => {
 
     await page.reload();
     await page.locator('[data-path="/reports"] .tree-toggle').click();
-    await page.getByTestId('document-node-file').filter({ hasText: 'summary.md' }).click();
+    await page.locator('[data-path="/reports/summary.md"]').click();
     await expect(page.getByTestId('markdown-mode-toggle')).toBeVisible();
     await expect(page.getByTestId('document-editor-input')).toContainText('Playwright Mounted Summary');
   });

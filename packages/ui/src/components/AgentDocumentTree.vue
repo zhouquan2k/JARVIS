@@ -13,7 +13,16 @@
         data-testid="agent-view-document"
         @click="emit('open-document', node.path)"
       >
-        <span>{{ node.name }}</span>
+        <component
+          :is="resolveNodeIcon(node)"
+          v-if="resolveNodeIcon(node)"
+          class="agent-document-tree__icon"
+          :size="14"
+          aria-hidden="true"
+          data-testid="agent-view-document-icon"
+          :data-icon-kind="getContextNodeIconKind(node) ?? undefined"
+        />
+        <span>{{ getNodeLabel(node) }}</span>
       </button>
 
       <div v-else class="agent-document-tree__directory">
@@ -32,7 +41,9 @@
 </template>
 
 <script setup lang="ts">
+import { FileJson2, FileText, FileType2, Image } from 'lucide-vue-next';
 import type { ContextNode } from '@packages/core/src';
+import { getContextNodeDisplayName, getContextNodeIconKind } from '../utils/contextNodePresentation';
 
 defineOptions({
     name: 'AgentDocumentTree'
@@ -45,6 +56,28 @@ defineProps<{
 const emit = defineEmits<{
     (event: 'open-document', path: string): void;
 }>();
+
+function getNodeLabel(node: ContextNode): string {
+    return node.kind === 'file'
+        ? getContextNodeDisplayName(node.name)
+        : node.name;
+}
+
+function resolveNodeIcon(node: ContextNode) {
+    switch (getContextNodeIconKind(node)) {
+        case 'image':
+            return Image;
+        case 'json':
+            return FileJson2;
+        case 'pdf':
+        case 'text':
+            return FileText;
+        case 'file':
+            return FileType2;
+        default:
+            return null;
+    }
+}
 </script>
 
 <style scoped>
@@ -92,6 +125,11 @@ const emit = defineEmits<{
   background: transparent;
   text-align: left;
   cursor: pointer;
+}
+
+.agent-document-tree__icon {
+  flex: 0 0 auto;
+  color: rgba(148, 163, 184, 0.9);
 }
 
 .agent-document-tree__item span {

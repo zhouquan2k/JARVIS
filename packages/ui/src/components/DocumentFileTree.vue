@@ -122,7 +122,16 @@
             aria-hidden="true"
             data-testid="document-node-agent-owner"
           />
-          <span class="tree-label">{{ item.node.name }}</span>
+          <component
+            :is="resolveNodeIcon(item.node)"
+            v-if="resolveNodeIcon(item.node)"
+            class="tree-file-icon"
+            :size="14"
+            aria-hidden="true"
+            data-testid="document-node-file-icon"
+            :data-icon-kind="getContextNodeIconKind(item.node) ?? undefined"
+          />
+          <span class="tree-label">{{ getNodeLabel(item.node) }}</span>
         </span>
       </button>
     </div>
@@ -141,9 +150,10 @@
 
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref } from 'vue';
-import { Bot, FilePlus, FolderPlus, RefreshCw, Trash2 } from 'lucide-vue-next';
+import { Bot, FileJson2, FilePlus, FileText, FileType2, FolderPlus, Image, RefreshCw, Trash2 } from 'lucide-vue-next';
 import type { ContextNode } from '@packages/core/src';
 import { useWorkspaceI18n } from '../i18n';
+import { getContextNodeDisplayName, getContextNodeIconKind, isMarkdownDisplayName } from '../utils/contextNodePresentation';
 
 const props = defineProps<{
   nodes: ContextNode[];
@@ -388,7 +398,9 @@ function beginRename(node: ContextNode) {
   inlineEdit.active = true;
   inlineEdit.mode = 'rename';
   inlineEdit.kind = node.kind;
-  inlineEdit.name = node.name;
+  inlineEdit.name = node.kind === 'file' && isMarkdownDisplayName(node.name)
+    ? getContextNodeDisplayName(node.name)
+    : node.name;
   inlineEdit.parentPath = node.parentPath;
   inlineEdit.path = node.path;
 
@@ -427,6 +439,28 @@ function showTooltip(event: MouseEvent | FocusEvent, text: string) {
 
 function hideTooltip() {
   tooltipState.visible = false;
+}
+
+function getNodeLabel(node: ContextNode): string {
+  return node.kind === 'file'
+    ? getContextNodeDisplayName(node.name)
+    : node.name;
+}
+
+function resolveNodeIcon(node: ContextNode) {
+  switch (getContextNodeIconKind(node)) {
+    case 'image':
+      return Image;
+    case 'json':
+      return FileJson2;
+    case 'pdf':
+    case 'text':
+      return FileText;
+    case 'file':
+      return FileType2;
+    default:
+      return null;
+  }
 }
 </script>
 
@@ -603,6 +637,11 @@ function hideTooltip() {
 
 .tree-agent-icon {
   color: #38bdf8;
+  flex: 0 0 auto;
+}
+
+.tree-file-icon {
+  color: rgba(148, 163, 184, 0.9);
   flex: 0 0 auto;
 }
 

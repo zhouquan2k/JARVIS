@@ -87,6 +87,45 @@ describe('BackgroundProxyProvider', () => {
         }));
     });
 
+    it('proxies generateConversationTitle through the background channel', async () => {
+        let onMessage: ((message: unknown) => void) | undefined;
+        const postMessage = vi.fn((message: { requestId: string; channelId: string; action: string; providerId: string; prompt: string }) => {
+            onMessage?.({
+                type: 'DONE',
+                requestId: message.requestId,
+                channelId: message.channelId,
+                result: '事故时间线'
+            });
+        });
+
+        // @ts-expect-error simplified test double
+        globalThis.chrome = {
+            runtime: {
+                connect: () => ({
+                    postMessage,
+                    onDisconnect: { addListener: vi.fn() },
+                    onMessage: {
+                        addListener: (listener: (message: unknown) => void) => {
+                            onMessage = listener;
+                        }
+                    }
+                })
+            }
+        };
+
+        const provider = new BackgroundProxyProvider('chatgpt-web', { channelId: 'title-channel' });
+        await expect(provider.generateConversationTitle?.('请帮我梳理事故时间线', { maxLength: 12 })).resolves.toBe('事故时间线');
+        expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            action: 'GENERATE_CONVERSATION_TITLE',
+            providerId: 'chatgpt-web',
+            channelId: 'title-channel',
+            prompt: '请帮我梳理事故时间线',
+            options: {
+                maxLength: 12
+            }
+        }));
+    });
+
     it('forwards attachments and structured updates for sendMessage', async () => {
         let onMessage: ((message: unknown) => void) | undefined;
         const postMessage = vi.fn((message: { requestId: string; channelId: string; action: string; options?: unknown }) => {

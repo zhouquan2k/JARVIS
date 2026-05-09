@@ -62,6 +62,11 @@ class MockModelProvider implements IModelProvider {
         };
     }
 
+    async generateConversationTitle(prompt: string, options?: { maxLength?: number }): Promise<string> {
+        const maxLength = options?.maxLength ?? 30;
+        return prompt.length <= maxLength ? prompt : `${prompt.slice(0, maxLength)}...`;
+    }
+
     async sendMessage(
         prompt: string,
         _options = {},
@@ -218,6 +223,22 @@ class FailingMockModelProvider extends MockModelProvider {
         this.promptsUsed.push(prompt);
         this.optionsUsed.push(options as Record<string, unknown>);
         throw new Error('Provider unavailable');
+    }
+}
+
+class TitleFailingMockModelProvider extends MockModelProvider {
+    override async generateConversationTitle(): Promise<string> {
+        throw new Error('Title provider unavailable');
+    }
+}
+
+class StaticTitleMockModelProvider extends MockModelProvider {
+    constructor(private readonly title: string) {
+        super();
+    }
+
+    override async generateConversationTitle(): Promise<string> {
+        return this.title;
     }
 }
 
@@ -2909,7 +2930,7 @@ describe('useChatStore workspace history flow', () => {
     });
 
     it('updates the persisted conversation title when resending an edited first question', async () => {
-        const provider = new MockModelProvider();
+        const provider = new StaticTitleMockModelProvider('新的第一条问题标题应该更新');
         const storage = new MockStorageProvider([
             {
                 id: 'conversation-edit-first-title',
@@ -2961,6 +2982,55 @@ describe('useChatStore workspace history flow', () => {
 
         expect(store.currentConversation?.title).toBe('新的第一条问题标题应该更新');
         expect(storage.conversations[0]?.title).toBe('新的第一条问题标题应该更新');
+    });
+
+    it('generates a provider-backed title after the first successful send', async () => {
+        const provider = new StaticTitleMockModelProvider('"事故时间线梳理"');
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+        await store.startNewConversation();
+
+        store.setDraftPrompt('请帮我梳理这次事故的时间线和影响范围');
+        await store.sendDraft();
+
+        expect(store.currentConversation?.title).toBe('事故时间线梳理');
+        expect(storage.conversations[0]?.title).toBe('事故时间线梳理');
+    });
+
+    it('falls back to a deterministic local title when provider title generation fails', async () => {
+        const provider = new TitleFailingMockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+        await store.startNewConversation();
+
+        store.setDraftPrompt('请帮我梳理这次事故的时间线和影响范围。然后总结修复动作。');
+        await store.sendDraft();
+
+        expect(store.currentConversation?.title).toBe('请帮我梳理这次事故的时间线和影响范围');
+        expect(storage.conversations[0]?.title).toBe('请帮我梳理这次事故的时间线和影响范围');
+    });
+
+    it('keeps a manual rename during ordinary follow-up sends', async () => {
+        const provider = new StaticTitleMockModelProvider('初始标题');
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+        await store.startNewConversation();
+
+        store.setDraftPrompt('第一问');
+        await store.sendDraft();
+        await store.renameLocalConversation(store.currentConversation!.id, '手动标题');
+
+        store.setDraftPrompt('第二问');
+        await store.sendDraft();
+
+        expect(store.currentConversation?.title).toBe('手动标题');
+        expect(storage.conversations[0]?.title).toBe('手动标题');
     });
 
     it('exits edit mode as soon as an edited question is resent', async () => {

@@ -60,6 +60,18 @@ test('normal chat can send message and recover local history after reload', asyn
   await expect(page.getByTestId('local-history-item').first()).toContainText('Playwright normal flow message');
 });
 
+test('normal chat replaces New Chat after the first successful send', async ({ page }) => {
+  await page.goto('/#/chat');
+  await expect(page.getByTestId('conversation-workspace')).toBeVisible();
+
+  await page.getByTestId('sidebar-new-chat').click();
+  await page.getByTestId('normal-input').fill('请帮我梳理这次事故的时间线和影响范围');
+  await page.getByTestId('normal-send').click();
+
+  await expect(page.getByTestId('normal-messages')).toContainText('请帮我梳理这次事故的时间线和影响范围');
+  await expect(page.getByTestId('local-history-item').first()).not.toContainText('New Chat');
+});
+
 test('workspace locale toggle persists after refresh', async ({ page }) => {
   await page.goto('/#/chat');
   await expect(page.getByTestId('conversation-workspace')).toBeVisible();
@@ -209,8 +221,10 @@ test('local history deletes the active conversation with hover-only controls and
   await expect(localHistoryItems).toHaveCount(2);
 
   const historyRows = page.locator('.local-history-row');
-  const activeRow = historyRows.first();
-  const inactiveRow = historyRows.nth(1);
+  const activeRow = historyRows.filter({ has: page.locator('.history-item.active') });
+  const inactiveRow = historyRows.filter({ hasNot: page.locator('.history-item.active') });
+  await expect(activeRow).toHaveCount(1);
+  await expect(inactiveRow).toHaveCount(1);
   await inactiveRow.hover();
   await inactiveRow.getByTestId('local-history-actions-menu').click({ force: true });
   await expect(inactiveRow.getByTestId('local-history-actions-popup')).toBeVisible();

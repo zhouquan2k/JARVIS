@@ -272,6 +272,17 @@ describe('markdownDocument', () => {
         // standard relative image — must NOT get references/ prepended
         expect(normalizeMarkdownViewerContent('![diagram](./images/flow.png)')).toBe('![diagram](./images/flow.png)');
         expect(normalizeMarkdownViewerContent('![diagram](images/flow.png)')).toBe('![diagram](images/flow.png)');
+        // HTML img is normalized to Crepe's markdown image form. Width is dropped because
+        // Crepe ImageBlock treats the alt slot as a numeric ratio, not arbitrary text;
+        // the previous numeric alt ("1.00") is preserved as the ratio.
+        expect(normalizeMarkdownViewerContent('<img src="references/Pasted%20image%2020260508103448.png" alt="1.00" width="545" />')).toBe(
+            '![1.00](references/Pasted%20image%2020260508103448.png)'
+        );
+        // Non-numeric legacy alt collapses to empty (Crepe parseMarkdown would coerce it
+        // to ratio=1 anyway); width attribute is also dropped.
+        expect(normalizeMarkdownViewerContent('<img src="references/foo.png" alt="legacy text" width="600" />')).toBe(
+            '![](references/foo.png)'
+        );
         // pdf image syntax remains explicit embed
         expect(normalizeMarkdownViewerContent('![report](./report.pdf)')).toBe([
             '```cp-pdf-embed',
@@ -364,13 +375,16 @@ describe('markdownDocument', () => {
     });
 
     it('routes markdown document links to the workspace callback instead of opening a new tab', async () => {
-        const { createMarkdownEditor, destroyMarkdownEditor, resolveMarkdownDocumentLinkPath } = await import('./markdownDocument');
+        const { buildRelativeMarkdownLinkPath, createMarkdownEditor, destroyMarkdownEditor, resolveMarkdownDocumentLinkPath } = await import('./markdownDocument');
         const root = document.createElement('div');
         root.innerHTML = '<div contenteditable="true"><p><a href="./guide.md">guide.md</a></p></div>';
         const open = vi.spyOn(window, 'open').mockReturnValue(null);
         const onOpenDocumentLink = vi.fn();
 
         expect(resolveMarkdownDocumentLinkPath('./guide.md', '/notes/current.md')).toBe('/notes/guide.md');
+        expect(buildRelativeMarkdownLinkPath('/notes/current.md', '/notes/guide.md')).toBe('guide.md');
+        expect(buildRelativeMarkdownLinkPath('/notes/current.md', '/notes/archive/guide.md')).toBe('archive/guide.md');
+        expect(buildRelativeMarkdownLinkPath('/notes/current.md', '/guide.md')).toBe('../guide.md');
 
         const editor = await createMarkdownEditor({
             root,
@@ -392,6 +406,108 @@ describe('markdownDocument', () => {
 
         await destroyMarkdownEditor(editor);
         open.mockRestore();
+    });
+
+    it('captures render selections from simple text blocks and resolves them back into markdown source offsets', async () => {
+        const { captureRenderableMarkdownSelection, resolveMarkdownSourceSelection } = await import('./markdownDocument');
+        const root = document.createElement('div');
+        root.innerHTML = '<div class="milkdown"><div class="ProseMirror"><p>Intro target</p></div></div>';
+        document.body.append(root);
+
+        const textNode = root.querySelector('p')?.firstChild;
+        expect(textNode).not.toBeNull();
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.setStart(textNode!, 6);
+        range.setEnd(textNode!, 12);
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+
+        const snapshot = captureRenderableMarkdownSelection(root);
+        expect(snapshot).toEqual({
+            blockText: 'Intro target',
+            start: 6,
+            end: 12,
+            selectedText: 'target'
+        });
+        expect(resolveMarkdownSourceSelection('Intro target', snapshot!)).toEqual({
+            start: 6,
+            end: 12
+        });
+    });
+
+    it('finds a unique local markdown image source and rewrites the ratio in Crepe markdown image form', async () => {
+        const {
+            findResizableMarkdownImageSource,
+            rewriteMarkdownImageRatio,
+            resolveMarkdownImageUrl
+        } = await import('./markdownDocument');
+        const markdown = 'Intro\n\n![Diagram](./images/flow.png)\n';
+        const renderedSrc = resolveMarkdownImageUrl('./images/flow.png', '/notes/guide.md');
+
+        const match = findResizableMarkdownImageSource(markdown, renderedSrc, '/notes/guide.md');
+        expect(match).toEqual({
+            start: 7,
+            end: 36,
+            kind: 'markdown-image',
+            raw: '![Diagram](./images/flow.png)'
+        });
+        expect(rewriteMarkdownImageRatio(markdown, match!, 1.5)).toBe(
+            'Intro\n\n![1.50](./images/flow.png)\n'
+        );
+    });
+
+    it('rewrites html image source into Crepe markdown ratio form and preserves unsupported ambiguous sources', async () => {
+        const {
+            findResizableMarkdownImageSource,
+            rewriteMarkdownImageRatio,
+            resolveMarkdownImageUrl
+        } = await import('./markdownDocument');
+        const htmlMarkdown = '<img src="./images/flow.png" alt="Flow" width="120" />';
+        const renderedSrc = resolveMarkdownImageUrl('./images/flow.png', '/notes/guide.md');
+        const htmlMatch = findResizableMarkdownImageSource(htmlMarkdown, renderedSrc, '/notes/guide.md');
+
+        expect(htmlMatch?.kind).toBe('html-image');
+        expect(rewriteMarkdownImageRatio(htmlMarkdown, htmlMatch!, 0.75)).toBe(
+            '![0.75](./images/flow.png)'
+        );
+
+        const ambiguousMarkdown = '![A](./images/flow.png)\n![B](./images/flow.png)';
+        expect(findResizableMarkdownImageSource(ambiguousMarkdown, renderedSrc, '/notes/guide.md')).toBeNull();
+        expect(findResizableMarkdownImageSource('![Remote](https://example.com/flow.png)', 'https://example.com/flow.png', '/notes/guide.md')).toBeNull();
+        expect(findResizableMarkdownImageSource('![Inline](data:image/png;base64,abc)', 'data:image/png;base64,abc', '/notes/guide.md')).toBeNull();
+    });
+
+    it('rewrites wiki image embeds into Crepe markdown ratio form and builds deterministic pasted image references', async () => {
+        const {
+            buildPastedMarkdownImagePath,
+            buildRelativeMarkdownImageReference,
+            findResizableMarkdownImageSource,
+            insertPastedMarkdownImage,
+            resolveMarkdownImageUrl,
+            rewriteMarkdownImageRatio
+        } = await import('./markdownDocument');
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-05-08T12:34:56Z'));
+
+        const wikiMarkdown = '![[flow.svg|Flow diagram]]';
+        const wikiRenderedSrc = resolveMarkdownImageUrl('references/flow.svg', '/notes/guide.md');
+        const wikiMatch = findResizableMarkdownImageSource(wikiMarkdown, wikiRenderedSrc, '/notes/guide.md');
+        expect(wikiMatch?.kind).toBe('wiki-image');
+        expect(rewriteMarkdownImageRatio(wikiMarkdown, wikiMatch!, 1.25)).toBe(
+            '![1.25](references/flow.svg)'
+        );
+
+        const takenPaths = new Set<string>(['/notes/references/Pasted image 20260508083456.png']);
+        expect(buildPastedMarkdownImagePath('/notes/guide.md', 'image/png', takenPaths)).toBe(
+            '/notes/references/Pasted image 20260508083456 2.png'
+        );
+        expect(buildRelativeMarkdownImageReference('/notes/guide.md', '/notes/references/Pasted image 20260508083456 2.png')).toBe(
+            '![](references/Pasted%20image%2020260508083456%202.png)'
+        );
+        expect(insertPastedMarkdownImage('Hello world', { start: 6, end: 11 }, '![](references/pasted.png)')).toBe(
+            'Hello ![](references/pasted.png)'
+        );
     });
 
 

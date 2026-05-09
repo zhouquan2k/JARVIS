@@ -11,6 +11,7 @@ import type {
 import type { MessageAttachment, MessageFunctionalPart } from '../../interfaces/Conversation';
 import {
     IModelProvider,
+    type GenerateConversationTitleOptions,
     type ProviderContextMessage,
     type ReasoningEffort,
     type ProviderSendResult,
@@ -63,6 +64,8 @@ type GeminiResponsePart = {
         id?: string;
     };
 };
+
+const GEMINI_TITLE_MAX_LENGTH = 30;
 
 function getGeminiModelCatalog(): ProviderModelCatalog {
     const provider = APP_CONFIG.providers.find((item) => item.id === 'gemini-api');
@@ -133,6 +136,33 @@ function findGeminiModelMatch(
 
 function normalizedModelToken(value: string): string {
     return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function buildGeminiConversationTitlePrompt(prompt: string, maxLength = GEMINI_TITLE_MAX_LENGTH): string {
+    return [
+        `Generate a concise conversation title in at most ${maxLength} characters.`,
+        'Return title text only.',
+        'Do not use quotes.',
+        'Do not add explanation.',
+        '',
+        `User question: ${prompt.trim()}`
+    ].join('\n');
+}
+
+function normalizeGeneratedTitle(raw: string, maxLength = GEMINI_TITLE_MAX_LENGTH): string {
+    const normalized = raw
+        .trim()
+        .replace(/\s+/g, ' ')
+        .replace(/^["'“”‘’]+|["'“”‘’]+$/gu, '')
+        .replace(/[。．.!?！？]+$/u, '');
+
+    if (!normalized) {
+        return 'New Chat';
+    }
+
+    return normalized.length <= maxLength
+        ? normalized
+        : `${normalized.slice(0, maxLength)}...`;
 }
 
 function isGeminiProLatestAlias(value: string | undefined): boolean {
@@ -622,6 +652,49 @@ export class GeminiApiProvider implements IAgentCapableProvider {
         return {
             acceptedMimeTypes: ['text/plain', 'text/markdown', 'application/pdf']
         };
+    }
+
+    private async resolveConversationTitleModelId(requestedModel?: string): Promise<string> {
+        const normalizedRequested = requestedModel?.trim();
+        if (normalizedRequested) {
+            return this.resolveStaticGeminiModelId(normalizedRequested);
+        }
+
+        return 'gemini-2.0-flash';
+    }
+
+    async generateConversationTitle(
+        prompt: string,
+        options: GenerateConversationTitleOptions = {}
+    ): Promise<string> {
+        const apiKey = this.resolveApiKey();
+        if (!apiKey) {
+            throw new Error('No Gemini API Key found in environment variables');
+        }
+
+        const modelId = await this.resolveConversationTitleModelId(options.modelId);
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:streamGenerateContent?alt=sse&key=${apiKey}`;
+        const payload: Record<string, unknown> = {
+            contents: buildGeminiContents(
+                buildGeminiConversationTitlePrompt(prompt, options.maxLength ?? GEMINI_TITLE_MAX_LENGTH),
+                {}
+            )
+        };
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload)
+        });
+        if (!response.ok) {
+            const err = await response.text();
+            throw new Error(`Gemini title request failed: ${response.status} ${response.statusText} - ${err}`);
+        }
+
+        const streamResult = await parseGeminiSse(response, () => undefined);
+        return normalizeGeneratedTitle(streamResult.text, options.maxLength ?? GEMINI_TITLE_MAX_LENGTH);
     }
 
     async sendMessage(

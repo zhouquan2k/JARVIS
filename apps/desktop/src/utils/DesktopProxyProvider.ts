@@ -2,6 +2,7 @@ import {
     type AgentCapabilities,
     type AgentRunRequest,
     type AnalysisResult,
+    type GenerateConversationTitleOptions,
     type IAgentCapableProvider,
     type ProviderDocumentCapability,
     type ProviderSendResult,
@@ -12,6 +13,7 @@ import type {
     AnalyzeComparisonRequest,
     CheckAuthRequest,
     GetAvailableModelsRequest,
+    GenerateConversationTitleRequest,
     ProviderSendOptions,
     ProxyRequest,
     ProxyResponse,
@@ -127,6 +129,22 @@ export class DesktopProxyProvider implements IAgentCapableProvider {
             channelId: this.channelId,
             providerId: this.id
         });
+    }
+
+    generateConversationTitle(
+        prompt: string,
+        options: GenerateConversationTitleOptions = {}
+    ): Promise<string> {
+        const request: GenerateConversationTitleRequest = {
+            action: 'GENERATE_CONVERSATION_TITLE',
+            requestId: this.nextRequestId('GENERATE_CONVERSATION_TITLE'),
+            channelId: this.channelId,
+            providerId: this.id,
+            prompt,
+            options
+        };
+
+        return this.createTrackedRequest<string>(request);
     }
 
     sendMessage(

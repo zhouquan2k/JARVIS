@@ -51,7 +51,7 @@ describe('DocumentFileTree', () => {
         expect(wrapper.get('[data-path="/docs"]').find('[data-testid="document-node-agent-owner"]').exists()).toBe(true);
 
         await wrapper.get('[data-testid="document-new-file"]').trigger('click');
-        await wrapper.get('[data-testid="document-pending-node-input"]').setValue('note.md');
+        await wrapper.get('[data-testid="document-pending-node-input"]').setValue('note');
         await wrapper.get('[data-testid="document-pending-node-input"]').trigger('keydown.enter');
 
         await wrapper.setProps({
@@ -62,7 +62,7 @@ describe('DocumentFileTree', () => {
         await wrapper.get('[data-testid="document-pending-node-input"]').trigger('blur');
 
         expect(wrapper.emitted('create')).toEqual([
-            [{ name: 'note.md', kind: 'file', parentPath: '/docs' }],
+            [{ name: 'note', kind: 'file', parentPath: '/docs' }],
             [{ name: 'archive', kind: 'directory', parentPath: '/docs' }]
         ]);
     });
@@ -125,11 +125,32 @@ describe('DocumentFileTree', () => {
         });
 
         await wrapper.get('[data-path="/docs/guide.md"]').trigger('dblclick');
-        await wrapper.get('[data-testid="document-rename-node-input"]').setValue('renamed.md');
+        expect((wrapper.get('[data-testid="document-rename-node-input"]').element as HTMLInputElement).value).toBe('guide');
+        await wrapper.get('[data-testid="document-rename-node-input"]').setValue('renamed');
         await wrapper.get('[data-testid="document-rename-node-input"]').trigger('keydown.enter');
 
         expect(wrapper.emitted('rename')).toEqual([
-            [{ path: '/docs/guide.md', name: 'renamed.md' }]
+            [{ path: '/docs/guide.md', name: 'renamed' }]
         ]);
+    });
+
+    it('hides markdown suffixes while keeping non-markdown file labels and icons', async () => {
+        const wrapper = mount(DocumentFileTree, {
+            props: {
+                nodes: [
+                    { path: '/docs', name: 'docs', kind: 'directory' },
+                    { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' },
+                    { path: '/docs/notes.txt', name: 'notes.txt', kind: 'file', parentPath: '/docs' }
+                ],
+                expandedPaths: ['/', '/docs'],
+                activePath: '/docs/guide.md',
+                currentError: null
+            }
+        });
+
+        expect(wrapper.get('[data-path="/docs/guide.md"]').text()).toContain('guide');
+        expect(wrapper.get('[data-path="/docs/guide.md"]').text()).not.toContain('guide.md');
+        expect(wrapper.get('[data-path="/docs/notes.txt"]').text()).toContain('notes.txt');
+        expect(wrapper.get('[data-path="/docs/notes.txt"]').find('[data-testid="document-node-file-icon"]').attributes('data-icon-kind')).toBe('text');
     });
 });

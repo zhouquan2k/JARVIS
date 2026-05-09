@@ -14,7 +14,13 @@ import type {
     MessageAttachment,
     MessageFunctionalPart
 } from '../../interfaces/Conversation';
-import { IModelProvider, type ProviderSendResult, type ProviderStreamUpdate, type SendMessageOptions } from '../../interfaces/IModelProvider';
+import {
+    IModelProvider,
+    type GenerateConversationTitleOptions,
+    type ProviderSendResult,
+    type ProviderStreamUpdate,
+    type SendMessageOptions
+} from '../../interfaces/IModelProvider';
 import { sha3_512 } from 'js-sha3';
 import type { ChatGPTWebProviderOptions, ProviderCookieStore, ProviderRequestClient } from './providerHostTypes';
 
@@ -119,6 +125,7 @@ type ChatGPTConversationDetail = {
 
 const CHATGPT_HISTORY_ORIGIN: ExternalHistoryProviderId = 'chatgpt-web';
 const CHATGPT_HISTORY_LIST_LIMIT = 28;
+const CHATGPT_TITLE_MAX_LENGTH = 30;
 const PRIVATE_CITE_PATTERN = /cite(?:([^]+))?/g;
 const PRIVATE_IMAGE_GROUP_PATTERN = /image_group(?:([^]+))??/g;
 const DEFAULT_CHATGPT_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
@@ -202,6 +209,33 @@ function normalizeTitle(title: string | null | undefined): string {
 
 function normalizeHistoryQuery(query: string | undefined): string {
     return query?.trim() || '';
+}
+
+function extractStandaloneTitle(raw: string, maxLength = CHATGPT_TITLE_MAX_LENGTH): string {
+    const normalized = raw
+        .trim()
+        .replace(/\s+/g, ' ')
+        .replace(/^["'“”‘’]+|["'“”‘’]+$/gu, '')
+        .replace(/[。．.!?！？]+$/u, '');
+
+    if (!normalized) {
+        return 'New Chat';
+    }
+
+    return normalized.length <= maxLength
+        ? normalized
+        : `${normalized.slice(0, maxLength)}...`;
+}
+
+function buildConversationTitlePrompt(prompt: string, maxLength = CHATGPT_TITLE_MAX_LENGTH): string {
+    return [
+        `Generate a concise conversation title in at most ${maxLength} characters.`,
+        'Return title text only.',
+        'Do not use quotes.',
+        'Do not add explanation or punctuation wrappers.',
+        '',
+        `User question: ${prompt.trim()}`
+    ].join('\n');
 }
 
 function extractTextPart(part: unknown): string {
@@ -952,6 +986,15 @@ export class ChatGPTWebProvider implements IModelProvider, IExternalConversation
         };
     }
 
+    private async resolveConversationTitleModelId(requestedModel?: string): Promise<string> {
+        const normalizedRequested = requestedModel?.trim();
+        if (normalizedRequested) {
+            return normalizedRequested;
+        }
+
+        return 'gpt-4o-mini';
+    }
+
     private async fetchModelCatalogPayload(): Promise<unknown> {
         const candidateUrls = [
             'https://chatgpt.com/backend-api/models?history_and_training_disabled=false',
@@ -1110,6 +1153,110 @@ export class ChatGPTWebProvider implements IModelProvider, IExternalConversation
             console.warn('Failed to get chat requirements:', e);
             return null;
         }
+    }
+
+    async generateConversationTitle(
+        prompt: string,
+        options: GenerateConversationTitleOptions = {}
+    ): Promise<string> {
+        await this.ensureAccessToken();
+
+        const requirements = await this.getChatRequirements();
+        const requirementToken = requirements?.token;
+        let proofToken: string | undefined;
+        if (requirements?.proofofwork?.required) {
+            proofToken = generateProofToken(
+                requirements.proofofwork.seed,
+                requirements.proofofwork.difficulty,
+                this.userAgent
+            );
+        }
+
+        const titleModelId = await this.resolveConversationTitleModelId(options.modelId);
+        const deviceId = await this.getOaiDeviceId();
+        const titlePrompt = buildConversationTitlePrompt(prompt, options.maxLength ?? CHATGPT_TITLE_MAX_LENGTH);
+        const payload: Record<string, unknown> = {
+            action: 'next',
+            messages: [
+                {
+                    id: generateUUID(),
+                    author: { role: 'user' },
+                    content: buildChatGPTRequestContent(titlePrompt, [])
+                }
+            ],
+            parent_message_id: generateUUID(),
+            model: titleModelId,
+            timezone_offset_min: new Date().getTimezoneOffset(),
+            history_and_training_disabled: false
+        };
+
+        const headers: Record<string, string> = {
+            Authorization: `Bearer ${this.accessToken}`,
+            'Content-Type': 'application/json',
+            Accept: 'text/event-stream',
+            'OAI-Device-Id': deviceId,
+            'OAI-Language': 'en-US'
+        };
+        if (requirementToken) {
+            headers['Openai-Sentinel-Chat-Requirements-Token'] = requirementToken;
+        }
+        if (proofToken) {
+            headers['Openai-Sentinel-Proof-Token'] = proofToken;
+        }
+
+        const response = await this.requestClient.fetch('https://chatgpt.com/backend-api/conversation', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(payload)
+        });
+        if (!response.ok) {
+            const errorDetail = await response.text().catch(() => '');
+            const detailSuffix = errorDetail ? ` - ${errorDetail}` : '';
+            throw new Error(`ChatGPT title request failed: ${response.status} ${response.statusText}${detailSuffix}`);
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) {
+            throw new Error('No response body stream available');
+        }
+
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+        let fullText = '';
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const parts = buffer.split('\n\n');
+            buffer = parts.pop() || '';
+
+            for (const part of parts) {
+                if (part.trim() === '' || !part.startsWith('data: ')) {
+                    continue;
+                }
+
+                const dataStr = part.substring(6).trim();
+                if (dataStr === '[DONE]') {
+                    continue;
+                }
+
+                try {
+                    const data = JSON.parse(dataStr);
+                    const normalizedMessage = normalizeChatGPTMessage(
+                        data.message?.content,
+                        toRecord(data.message?.metadata)
+                    );
+                    if (normalizedMessage.content) {
+                        fullText = normalizedMessage.content;
+                    }
+                } catch {
+                    // ignore malformed incremental chunks
+                }
+            }
+        }
+
+        return extractStandaloneTitle(fullText, options.maxLength ?? CHATGPT_TITLE_MAX_LENGTH);
     }
 
     async sendMessage(

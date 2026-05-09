@@ -47,11 +47,20 @@ export interface ProviderDocumentCapability {
   acceptedMimeTypes: string[];
 }
 
+export interface GenerateConversationTitleOptions {
+  modelId?: string;
+  maxLength?: number;
+}
+
 export interface IModelProvider {
   id: string; // 如：'chatgpt-web'
   getAvailableModels(): Promise<ProviderModelCatalog>;
   checkAuth(): Promise<boolean>;
   getDocumentCapability?(): Promise<ProviderDocumentCapability>;
+  generateConversationTitle?(
+    prompt: string,
+    options?: GenerateConversationTitleOptions
+  ): Promise<string>;
   sendMessage(
     prompt: string,
     options: SendMessageOptions,

@@ -37,6 +37,10 @@ class StreamingProvider implements IModelProvider {
         };
     }
 
+    async generateConversationTitle(prompt: string): Promise<string> {
+        return `${this.label}:${prompt}:title`;
+    }
+
     async sendMessage(
         prompt: string,
         options: SendMessageOptions,
@@ -268,6 +272,30 @@ describe('createProviderHost', () => {
                 result: {
                     acceptedMimeTypes: ['text/plain', 'text/markdown', 'application/pdf']
                 }
+            })
+        ]);
+    });
+
+    it('returns provider-generated conversation title through the host bridge', async () => {
+        const responses: ProxyResponse[] = [];
+        const host = createProviderHost({
+            runtime: createRuntime(() => new StreamingProvider('provider'))
+        });
+
+        await host.handleRequest({
+            action: 'GENERATE_CONVERSATION_TITLE',
+            requestId: 'title-request',
+            channelId: 'provider-channel',
+            providerId: 'chatgpt-web',
+            prompt: '事故复盘'
+        }, (response) => responses.push(response));
+
+        expect(responses).toEqual([
+            expect.objectContaining({
+                type: 'DONE',
+                requestId: 'title-request',
+                channelId: 'provider-channel',
+                result: 'provider:事故复盘:title'
             })
         ]);
     });

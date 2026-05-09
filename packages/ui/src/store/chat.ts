@@ -33,7 +33,7 @@ import type { ModelConfig, ModelOptionDefinition, ProviderConfig, ProviderModelC
 import { markRaw, toRaw } from 'vue';
 import { translateWorkspaceMessage } from '../i18n';
 import { executeConversationArchive, type ArchiveExecutionResult } from '../services/conversationArchive';
-import { extractNodeNameFromPath } from '../utils/conversationTitle';
+import { buildFallbackConversationTitle, extractNodeNameFromPath, sanitizeConversationTitle } from '../utils/conversationTitle';
 import { formatHttpApiError } from '../utils/formatHttpApiError';
 
 export type WorkspaceHistorySource = 'local' | 'external';
@@ -137,6 +137,7 @@ export interface ChatState {
 
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
 const DEFAULT_REASONING_EFFORT: ReasoningEffort = 'high';
+const NEW_CHAT_TITLE = 'New Chat';
 const FILE_REFERENCE_PATTERN = /(^|[\s([{\u3000\uFF08\u3010])@([^\s@]+)/gu;
 const TRAILING_MENTION_PUNCTUATION = /[.,;:!?)\]}>\u3001\u3002\uFF0C\uFF1B\uFF1A\uFF01\uFF1F\uFF09\u3011\u300B]+$/u;
 const FILE_EXTENSION_MIME_TYPES: Record<string, string> = {
@@ -2225,7 +2226,7 @@ export const useChatStore = defineStore('chat', {
                 return;
             }
 
-            const normalizedTitle = title.trim() || 'New Chat';
+            const normalizedTitle = title.trim() || NEW_CHAT_TITLE;
             const storedConversation = await this.storageProvider.getConversation(id);
             const targetConversation = storedConversation
                 ?? this.conversations.find((conversation) => conversation.id === id)
@@ -2302,7 +2303,7 @@ export const useChatStore = defineStore('chat', {
                 ?? (shouldClearConversationWorkspaceContext ? undefined : this.resolveConversationBoundNodeName());
             const nextConversation: Conversation = {
                 id: crypto.randomUUID(),
-                title: 'New Chat',
+                title: NEW_CHAT_TITLE,
                 boundNodeName,
                 origin: 'local',
                 messages: [],
@@ -2874,9 +2875,12 @@ export const useChatStore = defineStore('chat', {
                     lastMsg.functionalParts = result.functionalParts;
                 }
 
-                if (this.currentConversation!.title === 'New Chat' || wasEditingFirstVisibleQuestion) {
-                    const seedTitle = trimmedPrompt || pendingAttachments[0]?.name || 'New Chat';
-                    this.currentConversation!.title = seedTitle.substring(0, 30) + (seedTitle.length > 30 ? '...' : '');
+                if (this.shouldRegenerateConversationTitle(this.currentConversation!, wasEditingFirstVisibleQuestion)) {
+                    const seedTitle = trimmedPrompt || pendingAttachments[0]?.name || NEW_CHAT_TITLE;
+                    this.currentConversation!.title = await this.resolveConversationTitleFromPrompt(
+                        sendTarget.provider,
+                        seedTitle
+                    );
                 }
 
                 this.applyConversationAgentKey(this.currentConversation!, this.activeWorkspaceAgentKey);
@@ -2894,6 +2898,24 @@ export const useChatStore = defineStore('chat', {
                 this.isGenerating = false;
                 this.isAbortRequested = false;
                 this.lastSubmittedPrompt = null;
+            }
+        },
+
+        shouldRegenerateConversationTitle(conversation: Conversation, wasEditingFirstVisibleQuestion: boolean): boolean {
+            return conversation.title === NEW_CHAT_TITLE || wasEditingFirstVisibleQuestion;
+        },
+
+        async resolveConversationTitleFromPrompt(provider: IModelProvider | null, prompt: string): Promise<string> {
+            const fallbackTitle = buildFallbackConversationTitle(prompt);
+            if (typeof provider?.generateConversationTitle !== 'function') {
+                return fallbackTitle;
+            }
+
+            try {
+                const generated = await provider.generateConversationTitle(prompt, { maxLength: 30 });
+                return sanitizeConversationTitle(generated, 30);
+            } catch {
+                return fallbackTitle;
             }
         },
 

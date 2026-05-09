@@ -7,8 +7,19 @@ enableAutoUnmount(afterEach);
 import { encodeTextDocument } from '@packages/core/src';
 
 const createMarkdownEditor = vi.fn();
+const buildRelativeMarkdownLinkPath = vi.fn((from: string, to: string) => {
+    const fromDirectory = from.slice(0, from.lastIndexOf('/') + 1);
+    return to.startsWith(fromDirectory) ? to.slice(fromDirectory.length) : to;
+});
+const captureRenderableMarkdownSelection = vi.fn(() => null);
+const findResizableMarkdownImageSource = vi.fn(() => null);
+const insertPastedMarkdownImage = vi.fn((markdown: string, selection: { start: number; end: number }, imageMarkdown: string) => (
+    `${markdown.slice(0, selection.start)}${imageMarkdown}${markdown.slice(selection.end)}`
+));
 const replaceMarkdownDocument = vi.fn();
 const readMarkdownDocument = vi.fn();
+const resolveMarkdownSourceSelection = vi.fn(() => null);
+const rewriteMarkdownImageRatio = vi.fn((markdown: string) => markdown);
 const destroyMarkdownEditor = vi.fn();
 const normalizeMarkdownViewerContent = vi.fn((content: string) => content.replace(
     /!\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
@@ -47,9 +58,15 @@ const createObjectURL = vi.fn(() => 'blob:pdf-preview');
 const revokeObjectURL = vi.fn();
 
 vi.mock('../utils/markdownDocument', () => ({
+    buildRelativeMarkdownLinkPath,
+    captureRenderableMarkdownSelection,
     createMarkdownEditor,
+    findResizableMarkdownImageSource,
+    insertPastedMarkdownImage,
     replaceMarkdownDocument,
     readMarkdownDocument,
+    resolveMarkdownSourceSelection,
+    rewriteMarkdownImageRatio,
     destroyMarkdownEditor,
     normalizeMarkdownViewerContent,
     setMarkdownEditorSearchQuery,
@@ -103,7 +120,45 @@ describe('DocumentEditorPane', () => {
 
         await wrapper.vm.$nextTick();
 
-        expect(wrapper.get('[data-testid="document-editor-title"]').text()).toBe('Docs Agent / guide.md');
+        expect(wrapper.get('[data-testid="document-editor-title"]').text()).toBe('Docs Agent / guide');
+    });
+
+    it('inserts a relative markdown link from the chooser and wraps the current selection', async () => {
+        const { default: DocumentEditorPane } = await import('./DocumentEditorPane.vue');
+        const wrapper = mount(DocumentEditorPane, {
+            props: {
+                activePath: '/docs/guide.md',
+                activeDocument: {
+                    path: '/docs/guide.md',
+                    mimeType: 'text/markdown',
+                    dataBase64: encodeTextDocument('Read this'),
+                    canWrite: true
+                },
+                activeViewerId: 'text',
+                activePaneMode: 'viewer',
+                modelValue: 'Read this',
+                linkableMarkdownDocuments: [
+                    { path: '/docs/reference.md', name: 'reference.md', kind: 'file', parentPath: '/docs' }
+                ],
+                isSaving: false,
+                isDirty: false,
+                latestFileChange: null,
+                diffEntries: [],
+                canUndo: false,
+                canRedo: false
+            }
+        });
+
+        await wrapper.get('[data-testid="markdown-insert-link"]').trigger('click');
+        await wrapper.get('[data-testid="markdown-link-option-/docs/reference.md"]').trigger('click');
+        await wrapper.vm.$nextTick();
+        await wrapper.vm.$nextTick();
+        await wrapper.vm.$nextTick();
+
+        expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['Read this[reference](reference.md)']);
+        expect(wrapper.get('[data-testid="markdown-mode-toggle"]').attributes('aria-pressed')).toBe('true');
+        expect(wrapper.find('[data-testid="document-editor-input"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid="markdown-link-picker"]').exists()).toBe(false);
     });
 
     it('creates a Milkdown-backed editor and emits markdown updates', async () => {
@@ -145,7 +200,7 @@ describe('DocumentEditorPane', () => {
             documentPath: '/notes/today.md'
         }));
         const modeToggle = wrapper.get('[data-testid="markdown-mode-toggle"]');
-        expect(modeToggle.attributes('aria-label')).toBe('Edit');
+        expect(modeToggle.attributes('aria-label')).toBe('Source');
         expect(modeToggle.html()).toContain('lucide-pencil-line');
         onChange?.('# Updated');
         await wrapper.vm.$nextTick();
@@ -189,7 +244,7 @@ describe('DocumentEditorPane', () => {
         await wrapper.vm.$nextTick();
 
         const modeToggle = wrapper.get('[data-testid="markdown-mode-toggle"]');
-        expect(modeToggle.attributes('aria-label')).toBe('View');
+        expect(modeToggle.attributes('aria-label')).toBe('Render');
         expect(modeToggle.html()).toContain('lucide-eye');
         expect(wrapper.emitted('update:modelValue')).toBeUndefined();
         expect(destroyMarkdownEditor).toHaveBeenCalledWith(firstEditor);

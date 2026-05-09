@@ -585,10 +585,6 @@ export class FileSystemContextProvider implements IContextProvider {
             throw new Error('Document path must not be empty.');
         }
 
-        if (!isTextDocumentMimeType(input.mimeType)) {
-            throw new Error(`Current document type does not support writing yet: ${input.mimeType}`);
-        }
-
         const realPath = await this.resolveRealPath(normalizedPath, { expectExisting: true, expectDirectory: false });
         if (input.expectedVersion) {
             const stats = await fs.stat(realPath);

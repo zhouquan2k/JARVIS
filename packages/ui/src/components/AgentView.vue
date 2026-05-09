@@ -164,6 +164,7 @@
       :active-viewer-id="indexViewerId ?? null"
       :active-pane-mode="indexPaneMode"
       :model-value="indexDraftContent"
+      :linkable-markdown-documents="linkableMarkdownDocuments"
       :is-saving="indexIsSaving"
       :is-dirty="indexIsDirty"
       :latest-file-change="null"
@@ -205,6 +206,7 @@ const props = withDefaults(defineProps<{
   indexDraftContent?: string;
   indexViewerId?: string | null;
   indexPaneMode?: 'empty' | 'viewer' | 'unsupported';
+  linkableMarkdownDocuments?: ContextNode[];
   indexIsSaving?: boolean;
   indexIsDirty?: boolean;
   providers: ProviderConfig[];
@@ -216,6 +218,7 @@ const props = withDefaults(defineProps<{
   indexDraftContent: '',
   indexViewerId: null,
   indexPaneMode: 'empty',
+  linkableMarkdownDocuments: () => [],
   indexIsSaving: false,
   indexIsDirty: false,
   modelLoadStates: () => ({})

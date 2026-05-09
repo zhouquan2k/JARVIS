@@ -735,6 +735,33 @@ describe('GeminiApiProvider', () => {
         vi.unstubAllGlobals();
     });
 
+    it('generates a normalized conversation title with a low-cost flash model', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(
+            createGeminiSseResponse([
+                {
+                    candidates: [
+                        {
+                            content: {
+                                parts: [{ text: '"文档归档策略说明"' }]
+                            }
+                        }
+                    ]
+                }
+            ])
+        );
+        vi.stubGlobal('fetch', fetchMock);
+
+        const provider = new GeminiApiProvider({ apiKey: 'test-key' });
+        await expect(provider.generateConversationTitle?.('请为文档归档策略写一个简短标题', { maxLength: 10 })).resolves.toBe('文档归档策略说明');
+
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/models/gemini-2.0-flash:streamGenerateContent');
+        const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+        expect(requestBody.contents[0]?.parts[0]?.text).toContain('Generate a concise conversation title');
+
+        vi.unstubAllGlobals();
+    });
+
     it('returns tool calls from the native agent SSE stream while preserving text updates', async () => {
         const fetchMock = vi.fn().mockResolvedValue(
             createGeminiSseResponse([

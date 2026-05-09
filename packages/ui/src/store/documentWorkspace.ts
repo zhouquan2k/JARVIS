@@ -19,6 +19,8 @@ import {
 import { buildLineDiffEntries, FileChangeService, type FileChangeRecord, type LineDiffEntry } from '../services/FileChangeService';
 import { resolveDocumentViewer } from '../document-viewers';
 import { formatHttpApiError } from '../utils/formatHttpApiError';
+import { buildPastedMarkdownImagePath, buildRelativeMarkdownImageReference } from '../utils/markdownDocument';
+import { normalizeCreatedFileName, normalizeRenamedFileName } from '../utils/contextNodePresentation';
 
 type ActiveViewerCapabilities = {
     view: boolean;
@@ -319,6 +321,38 @@ function parseJsonObject(content: string, path: string): Record<string, unknown>
     return { ...parsed };
 }
 
+function bytesToBase64(bytes: Uint8Array): string {
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let index = 0; index < bytes.length; index += chunkSize) {
+        const chunk = bytes.subarray(index, index + chunkSize);
+        binary += String.fromCharCode(...chunk);
+    }
+
+    if (typeof btoa === 'function') {
+        return btoa(binary);
+    }
+
+    return Buffer.from(bytes).toString('base64');
+}
+
+function createSyntheticContextNode(input: {
+    path: string;
+    name: string;
+    kind: 'file' | 'directory';
+    parentPath: string;
+    agentKey: string;
+}): ContextNode {
+    return {
+        path: input.path,
+        name: input.name,
+        kind: input.kind,
+        parentPath: input.parentPath,
+        hasChildren: false,
+        agentKey: input.agentKey
+    };
+}
+
 function getErrorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
 }
@@ -499,6 +533,21 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             }
 
             return collectMarkdownTree(ownerNode.children ?? []);
+        },
+
+        getLinkableMarkdownDocuments(path: string | null): ContextNode[] {
+            if (!path) {
+                return [];
+            }
+
+            const scopePath = this.activeAgent?.scopePath ?? '/';
+            const scopedTree = scopePath === '/'
+                ? collectMarkdownTree(this.context?.nodes ?? [])
+                : this.collectMarkdownDocuments(scopePath);
+
+            return flattenAllNodes(scopedTree)
+                .filter((node) => node.kind === 'file' && node.path !== path)
+                .sort((left, right) => left.path.localeCompare(right.path, 'zh-Hans-CN'));
         },
 
         syncActiveFileChange(path?: string | null) {
@@ -1128,13 +1177,93 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             }
         },
 
+        async persistPastedMarkdownImage(input: {
+            documentPath: string;
+            mimeType: string;
+            bytes: Uint8Array;
+        }): Promise<{ imagePath: string; markdown: string }> {
+            if (!this.contextProvider) {
+                throw new Error('Context provider is not available.');
+            }
+
+            const documentDirectory = getParentPath(input.documentPath);
+            const referencesDirectoryPath = documentDirectory === '/' ? '/references' : `${documentDirectory}/references`;
+            const referencesNode = this.findNodeByPath(referencesDirectoryPath);
+            const parentAgentKey = this.findNodeByPath(documentDirectory)?.agentKey
+                ?? this.findNodeByPath(input.documentPath)?.agentKey
+                ?? this.activeAgentKey
+                ?? DEFAULT_WORKSPACE_AGENT_KEY;
+
+            if (!referencesNode) {
+                await this.contextProvider.createNode({
+                    parentPath: documentDirectory === '/' ? undefined : documentDirectory,
+                    name: 'references',
+                    kind: 'directory'
+                });
+                this.nodes = [
+                    ...this.nodes,
+                    createSyntheticContextNode({
+                        path: referencesDirectoryPath,
+                        name: 'references',
+                        kind: 'directory',
+                        parentPath: documentDirectory,
+                        agentKey: parentAgentKey
+                    })
+                ];
+            }
+
+            const siblingPaths = new Set(
+                this.nodes
+                    .filter((node) => node.parentPath === referencesDirectoryPath)
+                    .map((node) => node.path)
+            );
+            const imagePath = buildPastedMarkdownImagePath(input.documentPath, input.mimeType, siblingPaths);
+            const imageName = imagePath.split('/').pop() ?? 'pasted-image';
+
+            if (!this.findNodeByPath(imagePath)) {
+                await this.contextProvider.createNode({
+                    parentPath: referencesDirectoryPath,
+                    name: imageName,
+                    kind: 'file'
+                });
+                this.nodes = [
+                    ...this.nodes,
+                    createSyntheticContextNode({
+                        path: imagePath,
+                        name: imageName,
+                        kind: 'file',
+                        parentPath: referencesDirectoryPath,
+                        agentKey: parentAgentKey
+                    })
+                ];
+            }
+
+            const writeResult = await this.contextProvider.writeDocument({
+                path: imagePath,
+                mimeType: input.mimeType,
+                dataBase64: bytesToBase64(input.bytes)
+            });
+            const updatedAt = writeResult.updatedAt ?? Date.now();
+            this.nodes = this.nodes.map((node) => node.path === imagePath
+                ? { ...node, updatedAt }
+                : node);
+
+            return {
+                imagePath,
+                markdown: buildRelativeMarkdownImageReference(input.documentPath, imagePath)
+            };
+        },
+
         async createNode(input: CreateContextNodeInput) {
             if (!this.contextProvider) {
                 return;
             }
 
             await this.flushAgentIndexDocument();
-            const createdNode = await this.contextProvider.createNode(input);
+            const createdNode = await this.contextProvider.createNode({
+                ...input,
+                name: normalizeCreatedFileName(input.name, input.kind)
+            });
             await this.refreshTree();
 
             if (input.parentPath && !this.expandedPaths.includes(input.parentPath)) {
@@ -1197,7 +1326,11 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
 
             await this.flushAgentIndexDocument();
             await this.flushActiveDocument();
-            const renamedNode = await this.contextProvider.renameNode(input);
+            const currentNode = this.findNodeByPath(input.path);
+            const renamedNode = await this.contextProvider.renameNode({
+                ...input,
+                name: normalizeRenamedFileName(input.name, currentNode?.kind ?? 'file')
+            });
 
             const previousActivePath = this.activePath;
             const previousSelectedPath = this.selectedNodePath;

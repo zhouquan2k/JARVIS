@@ -100,7 +100,7 @@ test('assistant message shows collapsible functional detail parts', async ({ pag
 
 // --- Agent folder index.md ---
 
-test.describe.serial('agent folder shows index.md inside AgentView when present', () => {
+test.describe.serial('agent folder shows index inside AgentView when present', () => {
   test.beforeEach(async () => {
     await fs.writeFile(
       docsIndexPath,
@@ -112,7 +112,7 @@ test.describe.serial('agent folder shows index.md inside AgentView when present'
     await fs.rm(docsIndexPath, { force: true });
   });
 
-  test('clicking agent owner directory shows editable index.md inside AgentView and preserves agent context', async ({ page }) => {
+  test('clicking agent owner directory shows editable index inside AgentView and preserves agent context', async ({ page }) => {
     await page.goto('/#/');
     await expect(page.getByTestId('document-workspace')).toBeVisible();
 
@@ -120,7 +120,7 @@ test.describe.serial('agent folder shows index.md inside AgentView when present'
 
     await expect(page.getByTestId('agent-view')).toBeVisible();
     await expect(page.getByTestId('document-editor')).toBeVisible();
-    await expect(page.locator('.editor-path')).toContainText('index.md');
+    await expect(page.locator('.editor-path')).toContainText('index');
 
     const editorInput = page.getByTestId('document-editor-input');
     await expect(editorInput).toBeVisible();
@@ -134,6 +134,6 @@ test.describe.serial('agent folder shows index.md inside AgentView when present'
     await expect.poll(async () => await fs.readFile(docsIndexPath, 'utf8')).toContain('Updated from AgentView editor.');
 
     await expect(page.getByTestId('agent-pane')).toBeVisible();
-    await expect(page.getByTestId('agent-name')).toContainText('Docs Agent');
+    await expect(page.getByTestId('agent-view')).toContainText('Docs Agent');
   });
 });

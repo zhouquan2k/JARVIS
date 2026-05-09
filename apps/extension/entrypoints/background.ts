@@ -7,6 +7,7 @@ import type {
     AbortRequest,
     AnalyzeComparisonRequest,
     CheckAuthRequest,
+    GenerateConversationTitleRequest,
     GetDocumentCapabilityRequest,
     GetAvailableModelsRequest,
     GetHistoryDetailRequest,
@@ -309,6 +310,24 @@ export default defineBackground(() => {
                 }
             };
 
+            const handleGenerateConversationTitle = async (msg: GenerateConversationTitleRequest) => {
+                try {
+                    const provider = await resolveProvider(msg.providerId);
+                    if (typeof provider.generateConversationTitle !== 'function') {
+                        throw new Error(`Provider '${msg.providerId}' does not support conversation title generation`);
+                    }
+                    const result = await provider.generateConversationTitle(msg.prompt, msg.options);
+                    postResponse({
+                        type: 'DONE',
+                        requestId: msg.requestId,
+                        channelId: msg.channelId,
+                        result
+                    });
+                } catch (error) {
+                    postError(msg.requestId, msg.channelId, error);
+                }
+            };
+
             const handleGetHistoryList = async (msg: GetHistoryListRequest) => {
                 try {
                     const provider = await resolveHistoryProvider(msg.providerId);
@@ -366,6 +385,9 @@ export default defineBackground(() => {
                         break;
                     case 'SEND_MESSAGE':
                         void handleSendMessage(msg);
+                        break;
+                    case 'GENERATE_CONVERSATION_TITLE':
+                        void handleGenerateConversationTitle(msg);
                         break;
                     case 'ANALYZE_COMPARISON':
                         void handleAnalyzeComparison(msg);

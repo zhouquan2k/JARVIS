@@ -5,6 +5,37 @@
         <span class="editor-path" data-testid="document-editor-title">{{ editorTitleLabel }}</span>
       </div>
       <div class="editor-actions">
+        <div v-if="showMarkdownLinkPicker" class="editor-link-picker">
+          <button
+            type="button"
+            class="save-button save-button--link-picker"
+            data-testid="markdown-insert-link"
+            :title="t('shared.insertMarkdownLink')"
+            :aria-label="t('shared.insertMarkdownLink')"
+            :aria-expanded="isLinkPickerOpen ? 'true' : 'false'"
+            :disabled="!canInsertMarkdownLink"
+            @mousedown.prevent
+            @click="toggleLinkPicker"
+          >
+            <Link2 class="save-icon" :size="18" aria-hidden="true" />
+          </button>
+          <div
+            v-if="isLinkPickerOpen"
+            class="editor-link-menu"
+            data-testid="markdown-link-picker"
+          >
+            <button
+              v-for="node in props.linkableMarkdownDocuments"
+              :key="node.path"
+              type="button"
+              class="editor-link-option"
+              :data-testid="`markdown-link-option-${node.path}`"
+              @click="insertMarkdownLink(node.path)"
+            >
+              {{ getContextNodeDisplayName(node.name) }}
+            </button>
+          </div>
+        </div>
         <button
           v-if="isMarkdownDocument"
           type="button"
@@ -111,7 +142,8 @@
           :can-undo="canUndo"
           :can-redo="canRedo"
           :middle-pane-zoom="props.middlePaneZoom ?? 1"
-          ref="viewerRef"
+          :persist-markdown-image="props.persistMarkdownImage"
+          ref="markdownViewerRef"
           @update:model-value="emit('update:modelValue', $event)"
           @undo-change="emit('undo-change')"
           @redo-change="emit('redo-change')"
@@ -131,13 +163,14 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
-import { Eye, Maximize2, Minimize2, PencilLine, Save } from 'lucide-vue-next';
-import type { ContextDocument } from '@packages/core/src';
+import { Eye, Link2, Maximize2, Minimize2, PencilLine, Save } from 'lucide-vue-next';
+import type { ContextDocument, ContextNode } from '@packages/core/src';
 import { useWorkspaceI18n } from '../i18n';
 import { resolveDocumentViewer } from '../document-viewers';
-import type { MarkdownViewerMode } from '../utils/markdownDocument';
+import { buildRelativeMarkdownLinkPath, type MarkdownViewerMode } from '../utils/markdownDocument';
 import type { FileChangeRecord, LineDiffEntry } from '../services/FileChangeService';
 import type { DocumentViewerSearchHandle } from '../document-viewers/types';
+import { getContextNodeDisplayName } from '../utils/contextNodePresentation';
 
 const props = withDefaults(defineProps<{
   activePath: string | null;
@@ -146,8 +179,14 @@ const props = withDefaults(defineProps<{
   activeViewerId: string | null;
   activePaneMode: 'empty' | 'viewer' | 'unsupported';
   modelValue: string;
+  linkableMarkdownDocuments?: ContextNode[];
   isSaving: boolean;
-  isDirty: boolean;
+  isDirty?: boolean;
+  persistMarkdownImage?: (input: {
+    documentPath: string;
+    mimeType: string;
+    bytes: Uint8Array;
+  }) => Promise<{ imagePath: string; markdown: string }>;
   middlePaneMode?: 'default' | 'maximized';
   middlePaneZoom?: number;
   latestFileChange: FileChangeRecord | null;
@@ -156,6 +195,7 @@ const props = withDefaults(defineProps<{
   canRedo: boolean;
 }>(), {
   isDirty: false,
+  linkableMarkdownDocuments: () => [],
   middlePaneZoom: 1
 });
 const { t } = useWorkspaceI18n();
@@ -175,7 +215,7 @@ const activePathLabel = computed(() => {
   }
 
   const segments = props.activePath.split('/').filter(Boolean);
-  return segments[segments.length - 1] ?? props.activePath;
+  return getContextNodeDisplayName(segments[segments.length - 1] ?? props.activePath);
 });
 const editorTitleLabel = computed(() => {
   const activeAgentName = props.activeAgentName?.trim() || '';
@@ -219,9 +259,13 @@ const isMarkdownDocument = computed(() => {
   return props.activeDocument?.mimeType === 'text/markdown';
 });
 const markdownViewerMode = ref<MarkdownViewerMode>('viewer');
-const viewerRef = ref<Partial<DocumentViewerSearchHandle> | null>(null);
+const markdownViewerRef = ref<(Partial<DocumentViewerSearchHandle> & {
+  insertMarkdownLink?: (input: { label: string; href: string }) => boolean;
+  prepareMarkdownSelectionFromViewer?: () => boolean;
+}) | null>(null);
 const searchInputRef = ref<HTMLInputElement | null>(null);
 const isSearchOpen = ref(false);
+const isLinkPickerOpen = ref(false);
 const searchQuery = ref('');
 const activeSearchMatchIndex = ref(0);
 const searchMatchCount = ref(0);
@@ -233,6 +277,14 @@ const activeViewerComponent = computed(() => {
   return resolveDocumentViewer(props.activeDocument)?.component ?? null;
 });
 const supportsViewerSearch = computed(() => props.activeDocument?.mimeType === 'text/markdown');
+const showMarkdownLinkPicker = computed(() => {
+  return isMarkdownDocument.value;
+});
+const canInsertMarkdownLink = computed(() => {
+  return isMarkdownDocument.value
+    && props.linkableMarkdownDocuments.length > 0
+    && !!props.activePath;
+});
 const searchMatchCurrent = computed(() => searchMatchCount.value === 0 ? 0 : activeSearchMatchIndex.value + 1);
 const tooltipState = reactive({
   text: '',
@@ -247,9 +299,17 @@ watch(
     if (mimeType === 'text/markdown') {
       markdownViewerMode.value = 'viewer';
     }
+    isLinkPickerOpen.value = false;
     closeViewerSearch();
   },
   { immediate: true }
+);
+
+watch(
+  () => props.activePath,
+  () => {
+    isLinkPickerOpen.value = false;
+  }
 );
 
 onMounted(() => {
@@ -270,7 +330,7 @@ function toggleMarkdownViewerMode() {
 }
 
 function getViewerSearchHandle(): DocumentViewerSearchHandle | null {
-  const candidate = viewerRef.value;
+  const candidate = markdownViewerRef.value;
   if (
     candidate
     && typeof candidate.setSearchQuery === 'function'
@@ -344,6 +404,52 @@ function goToPreviousSearchMatch() {
   getViewerSearchHandle()?.scrollToSearchMatch(activeSearchMatchIndex.value);
 }
 
+function toggleLinkPicker() {
+  if (!canInsertMarkdownLink.value) {
+    return;
+  }
+  isLinkPickerOpen.value = !isLinkPickerOpen.value;
+}
+
+function insertMarkdownLink(targetPath: string) {
+  if (!props.activePath) {
+    return;
+  }
+
+  const node = props.linkableMarkdownDocuments.find((candidate) => candidate.path === targetPath);
+  if (!node) {
+    return;
+  }
+
+  const href = buildRelativeMarkdownLinkPath(props.activePath, targetPath);
+  const returnToViewer = markdownViewerMode.value === 'viewer';
+  if (returnToViewer) {
+    markdownViewerRef.value?.prepareMarkdownSelectionFromViewer?.();
+  }
+  const insert = () => {
+    markdownViewerRef.value?.insertMarkdownLink?.({
+      label: getContextNodeDisplayName(node.name),
+      href
+    });
+    isLinkPickerOpen.value = false;
+    if (returnToViewer) {
+      nextTick(() => {
+        markdownViewerMode.value = 'viewer';
+      });
+    }
+  };
+
+  if (markdownViewerMode.value === 'edit') {
+    insert();
+    return;
+  }
+
+  markdownViewerMode.value = 'edit';
+  nextTick(() => {
+    nextTick(insert);
+  });
+}
+
 function onGlobalKeydown(event: KeyboardEvent) {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f' && supportsViewerSearch.value) {
     event.preventDefault();
@@ -412,6 +518,10 @@ function hideTooltip() {
   flex-shrink: 0;
 }
 
+.editor-link-picker {
+  position: relative;
+}
+
 .save-button {
   border: 0;
   border-radius: 8px;
@@ -463,6 +573,38 @@ function hideTooltip() {
 .save-button--active:not(:disabled) {
   background: rgba(14, 165, 233, 0.16);
   color: #f8fafc;
+}
+
+.editor-link-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 10;
+  display: flex;
+  min-width: 180px;
+  max-height: 220px;
+  flex-direction: column;
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.96);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.28);
+}
+
+.editor-link-option {
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: #e2e8f0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.editor-link-option:hover,
+.editor-link-option:focus-visible {
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .editor-content {

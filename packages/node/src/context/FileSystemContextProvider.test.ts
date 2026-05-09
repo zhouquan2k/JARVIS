@@ -315,4 +315,22 @@ describe('FileSystemContextProvider', () => {
             await expect(provider.getContext(), testCase.name).rejects.toThrow(testCase.message);
         }
     });
+
+    it('writes binary document payloads for non-text workspace assets', async () => {
+        const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-node-binary-write-'));
+        tempRoots.push(rootPath);
+
+        await mkdir(path.join(rootPath, 'references'), { recursive: true });
+        await writeFile(path.join(rootPath, 'references', 'diagram.png'), Buffer.from([0]));
+
+        const provider = new FileSystemContextProvider({ rootPath });
+        await provider.writeDocument({
+            path: '/references/diagram.png',
+            mimeType: 'image/png',
+            dataBase64: Buffer.from([137, 80, 78, 71]).toString('base64')
+        });
+
+        const persisted = await readFile(path.join(rootPath, 'references', 'diagram.png'));
+        expect(Array.from(persisted)).toEqual([137, 80, 78, 71]);
+    });
 });

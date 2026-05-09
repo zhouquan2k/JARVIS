@@ -775,4 +775,39 @@ describe('normalizeChatGPTConversationDetail', () => {
             'OAI-Device-Id': 'desktop-device-id'
         });
     });
+
+    it('generates a normalized conversation title with a dedicated low-cost model path', async () => {
+        const requestClient = {
+            fetch: vi.fn()
+                .mockResolvedValueOnce({
+                    ok: true,
+                    json: async () => ({ token: 'requirements-token' })
+                })
+                .mockResolvedValueOnce(
+                    createSseResponse([
+                        {
+                            message: {
+                                id: 'title-message',
+                                content: {
+                                    parts: ['"事故时间线梳理"']
+                                }
+                            }
+                        }
+                    ])
+                )
+        };
+
+        const provider = new ChatGPTWebProvider({ requestClient });
+        (provider as { accessToken: string }).accessToken = 'token';
+        vi.stubGlobal('fetch', requestClient.fetch);
+
+        await expect(provider.generateConversationTitle?.('请帮我梳理事故时间线和修复步骤', { maxLength: 12 })).resolves.toBe('事故时间线梳理');
+
+        expect(requestClient.fetch).toHaveBeenCalledTimes(2);
+        const requestBody = JSON.parse(String(requestClient.fetch.mock.calls[1]?.[1]?.body));
+        expect(requestBody.model).toBe('gpt-4o-mini');
+        expect(requestBody.messages[0]?.content.parts[0]).toContain('Generate a concise conversation title');
+
+        vi.unstubAllGlobals();
+    });
 });

@@ -14,13 +14,18 @@
       />
       <textarea
         v-else
+        ref="markdownSourceRef"
         class="editor-input editor-input--markdown-source"
         data-testid="document-editor-input"
         :value="modelValue"
         wrap="soft"
         :style="zoomStyle"
         spellcheck="false"
+        @click="rememberMarkdownSelection"
         @input="onMarkdownSourceInput"
+        @paste="onMarkdownSourcePaste"
+        @keyup="rememberMarkdownSelection"
+        @select="rememberMarkdownSelection"
       />
     </div>
 
@@ -80,12 +85,17 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import type { ContextDocument } from '@packages/core/src';
 import { useWorkspaceI18n } from '../i18n';
 import {
+  captureRenderableMarkdownSelection,
   createMarkdownEditor,
   getMarkdownEditorSearchMatchCount,
   destroyMarkdownEditor,
+  findResizableMarkdownImageSource,
+  insertPastedMarkdownImage,
   normalizeMarkdownViewerContent,
   readMarkdownDocument,
   replaceMarkdownDocument,
+  resolveMarkdownSourceSelection,
+  rewriteMarkdownImageRatio,
   scrollToMarkdownEditorSearchMatch,
   setMarkdownEditorActiveSearchMatchIndex,
   setMarkdownEditorSearchQuery,
@@ -104,6 +114,11 @@ export interface MarkdownDocumentViewerProps {
   canUndo: boolean;
   canRedo: boolean;
   middlePaneZoom?: number;
+  persistMarkdownImage?: (input: {
+    documentPath: string;
+    mimeType: string;
+    bytes: Uint8Array;
+  }) => Promise<{ imagePath: string; markdown: string }>;
 }
 
 const props = withDefaults(defineProps<MarkdownDocumentViewerProps>(), {
@@ -124,6 +139,7 @@ const zoomStyle = computed(() => ({
   transform: `scale(${props.middlePaneZoom})`
 }));
 const editorRoot = ref<HTMLElement | null>(null);
+const markdownSourceRef = ref<HTMLTextAreaElement | null>(null);
 const searchQuery = ref('');
 const activeSearchMatchIndex = ref(0);
 
@@ -132,6 +148,43 @@ let creationToken = 0;
 let isApplyingExternalSync = false;
 let lastKnownMarkdown = '';
 let activeEditorMode: MarkdownViewerMode | null = null;
+let lastMarkdownSelection: { start: number; end: number } | null = null;
+let pendingMarkdownSelectionFromViewer: { start: number; end: number } | null = null;
+let preferRememberedMarkdownSelection = false;
+let viewerPasteAbortController: AbortController | null = null;
+const MARKDOWN_IMAGE_DEBUG_STORAGE_KEY = 'chatprism:debug-markdown-image';
+
+function logMarkdownImageViewerDebug(event: string, payload: Record<string, unknown>) {
+  if (!isMarkdownImageDebugEnabled()) {
+    return;
+  }
+
+  console.debug(`[markdown-image-viewer] ${event}`, payload);
+}
+
+function isMarkdownImageDebugEnabled(): boolean {
+  if (import.meta.env.DEV) {
+    return true;
+  }
+
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  const runtimeFlag = (window as typeof window & {
+    __CHATPRISM_DEBUG_MARKDOWN_IMAGE__?: boolean;
+  }).__CHATPRISM_DEBUG_MARKDOWN_IMAGE__;
+
+  if (runtimeFlag === true) {
+    return true;
+  }
+
+  try {
+    return window.localStorage.getItem(MARKDOWN_IMAGE_DEBUG_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
 
 watch(() => [
   props.activePath,
@@ -165,6 +218,9 @@ watch(() => [
     activeEditorMode = desiredMode;
     if (desiredMode === 'edit') {
       lastKnownMarkdown = currentMarkdown;
+      lastMarkdownSelection = pendingMarkdownSelectionFromViewer;
+      preferRememberedMarkdownSelection = !!pendingMarkdownSelectionFromViewer;
+      pendingMarkdownSelectionFromViewer = null;
       return;
     }
     await nextTick();
@@ -176,6 +232,9 @@ watch(() => [
     await teardownEditor();
     activeEditorMode = 'edit';
     lastKnownMarkdown = modelValue;
+    lastMarkdownSelection = pendingMarkdownSelectionFromViewer;
+    preferRememberedMarkdownSelection = !!pendingMarkdownSelectionFromViewer;
+    pendingMarkdownSelectionFromViewer = null;
     return;
   }
 
@@ -207,6 +266,12 @@ async function ensureEditor(content: string) {
   const renderedContent = isMarkdownDocument.value && props.markdownViewerMode === 'viewer'
     ? normalizeMarkdownViewerContent(content)
     : content;
+  logMarkdownImageViewerDebug('ensure-editor', {
+    mode: props.markdownViewerMode,
+    documentPath: props.activeDocument?.path ?? props.activePath,
+    sourcePreview: content.slice(0, 240),
+    renderedPreview: renderedContent.slice(0, 240)
+  });
   const instance = await createMarkdownEditor({
     root: editorRoot.value,
     content: renderedContent,
@@ -215,6 +280,10 @@ async function ensureEditor(content: string) {
     onOpenDocumentLink(path) {
       emit('open-document-link', path);
     },
+    onResizeMarkdownImage(payload) {
+      applyViewerImageRatio(payload);
+    },
+    getMarkdownSource: () => props.modelValue,
     onChange(markdown) {
       lastKnownMarkdown = markdown;
       if (isApplyingExternalSync || !props.activePath) {
@@ -240,6 +309,7 @@ async function ensureEditor(content: string) {
   lastKnownMarkdown = content;
   applyReadonlyCodeBlockLabels(renderedContent);
   applySearchHighlights();
+  bindViewerPasteHandler();
 }
 
 function syncEditorContent(content: string) {
@@ -251,6 +321,13 @@ function syncEditorContent(content: string) {
   const renderedContent = isMarkdownDocument.value && props.markdownViewerMode === 'viewer'
     ? normalizeMarkdownViewerContent(content)
     : content;
+  logMarkdownImageViewerDebug('sync-editor-content', {
+    mode: props.markdownViewerMode,
+    documentPath: props.activeDocument?.path ?? props.activePath,
+    sourcePreview: content.slice(0, 240),
+    renderedPreview: renderedContent.slice(0, 240),
+    lastKnownPreview: lastKnownMarkdown.slice(0, 240)
+  });
   replaceMarkdownDocument(editor, renderedContent);
   lastKnownMarkdown = content;
   applyReadonlyCodeBlockLabels(renderedContent);
@@ -266,8 +343,180 @@ function onMarkdownSourceInput(event: Event) {
     return;
   }
 
+  lastMarkdownSelection = {
+    start: target.selectionStart ?? target.value.length,
+    end: target.selectionEnd ?? target.selectionStart ?? target.value.length
+  };
+  preferRememberedMarkdownSelection = false;
   lastKnownMarkdown = target.value;
   emit('update:modelValue', target.value);
+}
+
+async function onMarkdownSourcePaste(event: ClipboardEvent) {
+  const imageFile = findFirstPastedImage(event.clipboardData);
+  const documentPath = props.activeDocument?.path ?? props.activePath;
+  if (!imageFile || !documentPath || !props.persistMarkdownImage) {
+    return;
+  }
+
+  event.preventDefault();
+
+  try {
+    const bytes = new Uint8Array(await imageFile.arrayBuffer());
+    logMarkdownImageViewerDebug('source-paste-start', {
+      documentPath,
+      mimeType: imageFile.type || 'image/png',
+      byteLength: bytes.byteLength
+    });
+    const persisted = await props.persistMarkdownImage({
+      documentPath,
+      mimeType: imageFile.type || 'image/png',
+      bytes
+    });
+    logMarkdownImageViewerDebug('source-paste-persisted', {
+      documentPath,
+      imagePath: persisted.imagePath,
+      markdown: persisted.markdown
+    });
+    const textarea = markdownSourceRef.value;
+    if (!textarea) {
+      return;
+    }
+
+    const selection = {
+      start: textarea.selectionStart ?? lastMarkdownSelection?.start ?? textarea.value.length,
+      end: textarea.selectionEnd ?? lastMarkdownSelection?.end ?? textarea.value.length
+    };
+    const nextValue = insertPastedMarkdownImage(textarea.value, selection, persisted.markdown);
+    const caret = selection.start + persisted.markdown.length;
+
+    lastKnownMarkdown = nextValue;
+    lastMarkdownSelection = { start: caret, end: caret };
+    preferRememberedMarkdownSelection = false;
+    emit('update:modelValue', nextValue);
+
+    await nextTick();
+    textarea.focus();
+    textarea.setSelectionRange(caret, caret);
+  } catch {
+    // Fail closed: keep existing document content unchanged when the image cannot be persisted.
+    logMarkdownImageViewerDebug('source-paste-failed', {
+      documentPath
+    });
+  }
+}
+
+function bindViewerPasteHandler() {
+  viewerPasteAbortController?.abort();
+  viewerPasteAbortController = null;
+  if (!editorRoot.value || !isMarkdownDocument.value || props.markdownViewerMode !== 'viewer' || !props.persistMarkdownImage) {
+    return;
+  }
+
+  const controller = new AbortController();
+  viewerPasteAbortController = controller;
+  editorRoot.value.addEventListener('paste', (event) => {
+    void onMarkdownViewerPaste(event);
+  }, {
+    capture: true,
+    signal: controller.signal
+  });
+}
+
+function rememberMarkdownSelection(event: Event) {
+  const target = event.target;
+  if (!(target instanceof HTMLTextAreaElement)) {
+    return;
+  }
+
+  lastMarkdownSelection = {
+    start: target.selectionStart ?? target.value.length,
+    end: target.selectionEnd ?? target.selectionStart ?? target.value.length
+  };
+  preferRememberedMarkdownSelection = false;
+}
+
+function findFirstPastedImage(clipboardData: DataTransfer | null): File | null {
+  const item = Array.from(clipboardData?.items ?? []).find((candidate) => candidate.kind === 'file' && candidate.type.startsWith('image/'));
+  const itemFile = item?.getAsFile();
+  if (itemFile) {
+    return itemFile;
+  }
+
+  return Array.from(clipboardData?.files ?? []).find((candidate) => candidate.type.startsWith('image/')) ?? null;
+}
+
+async function onMarkdownViewerPaste(event: ClipboardEvent) {
+  const imageFile = findFirstPastedImage(event.clipboardData);
+  const documentPath = props.activeDocument?.path ?? props.activePath;
+  logMarkdownImageViewerDebug('viewer-paste-event', {
+    documentPath,
+    hasClipboardData: !!event.clipboardData,
+    clipboardItemTypes: Array.from(event.clipboardData?.items ?? []).map((item) => ({
+      kind: item.kind,
+      type: item.type
+    })),
+    matchedImage: imageFile
+      ? {
+        type: imageFile.type,
+        size: imageFile.size
+      }
+      : null
+  });
+  if (!imageFile || !documentPath || !props.persistMarkdownImage || !editorRoot.value) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  try {
+    const bytes = new Uint8Array(await imageFile.arrayBuffer());
+    logMarkdownImageViewerDebug('viewer-paste-start', {
+      documentPath,
+      mimeType: imageFile.type || 'image/png',
+      byteLength: bytes.byteLength
+    });
+    const persisted = await props.persistMarkdownImage({
+      documentPath,
+      mimeType: imageFile.type || 'image/png',
+      bytes
+    });
+    const nextSelection = resolveViewerPasteSelection();
+    const nextValue = insertPastedMarkdownImage(props.modelValue, nextSelection, persisted.markdown);
+    logMarkdownImageViewerDebug('viewer-paste-persisted', {
+      documentPath,
+      imagePath: persisted.imagePath,
+      markdown: persisted.markdown,
+      nextSelection
+    });
+    emit('update:modelValue', nextValue);
+  } catch {
+    // Fail closed: keep the existing markdown unchanged if persistence fails.
+    logMarkdownImageViewerDebug('viewer-paste-failed', {
+      documentPath
+    });
+  }
+}
+
+function resolveViewerPasteSelection(): { start: number; end: number } {
+  if (!editorRoot.value) {
+    return { start: props.modelValue.length, end: props.modelValue.length };
+  }
+
+  const snapshot = captureRenderableMarkdownSelection(editorRoot.value);
+  const resolved = snapshot ? resolveMarkdownSourceSelection(props.modelValue, snapshot) : null;
+  logMarkdownImageViewerDebug('resolve-viewer-paste-selection', {
+    documentPath: props.activeDocument?.path ?? props.activePath,
+    snapshot,
+    resolved,
+    sourcePreview: props.modelValue.slice(0, 240)
+  });
+  if (resolved) {
+    return resolved;
+  }
+
+  return { start: props.modelValue.length, end: props.modelValue.length };
 }
 
 function applyReadonlyCodeBlockLabels(content: string) {
@@ -339,11 +588,109 @@ function scrollToSearchMatch(index: number) {
 }
 
 defineExpose({
+  prepareMarkdownSelectionFromViewer,
   setSearchQuery,
   setActiveSearchMatchIndex,
   getSearchMatchCount,
-  scrollToSearchMatch
+  scrollToSearchMatch,
+  insertMarkdownLink
 });
+
+function prepareMarkdownSelectionFromViewer(): boolean {
+  if (!editorRoot.value || !isMarkdownDocument.value || props.markdownViewerMode !== 'viewer') {
+    pendingMarkdownSelectionFromViewer = null;
+    return false;
+  }
+
+  const snapshot = captureRenderableMarkdownSelection(editorRoot.value);
+  if (!snapshot) {
+    pendingMarkdownSelectionFromViewer = null;
+    return false;
+  }
+
+  const resolved = resolveMarkdownSourceSelection(props.modelValue, snapshot);
+  pendingMarkdownSelectionFromViewer = resolved;
+  return !!resolved;
+}
+
+function insertMarkdownLink(input: { label: string; href: string }): boolean {
+  if (!isMarkdownEditMode.value || !markdownSourceRef.value) {
+    return false;
+  }
+
+  const textarea = markdownSourceRef.value;
+  const hasFocus = document.activeElement === textarea;
+  const pendingSelection = pendingMarkdownSelectionFromViewer;
+  const useRememberedSelection = preferRememberedMarkdownSelection
+    && !!(lastMarkdownSelection ?? pendingSelection);
+  const rememberedSelection = useRememberedSelection || !hasFocus
+    ? (lastMarkdownSelection ?? pendingSelection)
+    : null;
+  const selectionStart = rememberedSelection
+    ? rememberedSelection.start
+    : hasFocus
+    ? (textarea.selectionStart ?? 0)
+    : textarea.value.length;
+  const selectionEnd = rememberedSelection
+    ? rememberedSelection.end
+    : hasFocus
+    ? (textarea.selectionEnd ?? selectionStart)
+    : selectionStart;
+  const selectedText = textarea.value.slice(selectionStart, selectionEnd);
+  const label = selectedText || input.label;
+  const replacement = `[${label}](${input.href})`;
+  const nextValue = `${textarea.value.slice(0, selectionStart)}${replacement}${textarea.value.slice(selectionEnd)}`;
+
+  lastKnownMarkdown = nextValue;
+  lastMarkdownSelection = {
+    start: selectionStart + replacement.length,
+    end: selectionStart + replacement.length
+  };
+  pendingMarkdownSelectionFromViewer = null;
+  preferRememberedMarkdownSelection = false;
+  emit('update:modelValue', nextValue);
+
+  nextTick(() => {
+    textarea.focus();
+    const caret = selectionStart + replacement.length;
+    textarea.setSelectionRange(caret, caret);
+  });
+
+  return true;
+}
+
+function applyViewerImageRatio(payload: { src: string; ratio: number }) {
+  const documentPath = props.activeDocument?.path ?? props.activePath;
+  if (!documentPath) {
+    return;
+  }
+
+  const match = findResizableMarkdownImageSource(props.modelValue, payload.src, documentPath);
+  logMarkdownImageViewerDebug('apply-ratio', {
+    documentPath,
+    src: payload.src,
+    ratio: payload.ratio,
+    match
+  });
+  if (!match) {
+    return;
+  }
+
+  const nextValue = rewriteMarkdownImageRatio(props.modelValue, match, payload.ratio);
+  logMarkdownImageViewerDebug('apply-ratio-result', {
+    documentPath,
+    src: payload.src,
+    ratio: payload.ratio,
+    changed: nextValue !== props.modelValue,
+    sourcePreview: props.modelValue.slice(0, 240),
+    nextValuePreview: nextValue.slice(0, 240)
+  });
+  if (nextValue === props.modelValue) {
+    return;
+  }
+
+  emit('update:modelValue', nextValue);
+}
 
 async function teardownEditor() {
   creationToken += 1;
@@ -351,6 +698,8 @@ async function teardownEditor() {
   editor = null;
   activeEditorMode = null;
   lastKnownMarkdown = '';
+  viewerPasteAbortController?.abort();
+  viewerPasteAbortController = null;
 
   await destroyMarkdownEditor(currentEditor);
   if (editorRoot.value) {
@@ -767,5 +1116,40 @@ function requiresMarkdownDocumentPathRebind(content: string): boolean {
 .editor-input :deep(.markdown-search-highlight--active) {
   background: rgba(251, 146, 60, 0.72);
   outline: 1px solid rgba(251, 191, 36, 0.88);
+}
+
+.editor-input :deep(.markdown-image-resize-frame) {
+  position: relative;
+  display: inline-flex;
+  max-width: 100%;
+  vertical-align: top;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.editor-input :deep(.markdown-image-resize-frame img) {
+  max-width: 100%;
+  height: auto;
+}
+
+.editor-input :deep(.markdown-image-resize-handle) {
+  position: absolute;
+  right: -8px;
+  bottom: -8px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid rgba(125, 211, 252, 0.72);
+  border-radius: 999px;
+  background: rgba(14, 165, 233, 0.9);
+  box-shadow: 0 2px 10px rgba(8, 47, 73, 0.35);
+  cursor: nwse-resize;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.editor-input :deep(.markdown-image-resize-frame--active .markdown-image-resize-handle) {
+  background: rgba(56, 189, 248, 1);
 }
 </style>

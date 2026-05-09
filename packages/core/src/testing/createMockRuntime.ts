@@ -5,7 +5,13 @@ import type {
     AgentRunRequest,
     IAgentCapableProvider
 } from '../interfaces/IAgentCapableProvider';
-import type { IModelProvider, ProviderSendResult, ProviderStreamUpdate, SendMessageOptions } from '../interfaces/IModelProvider';
+import type {
+    GenerateConversationTitleOptions,
+    IModelProvider,
+    ProviderSendResult,
+    ProviderStreamUpdate,
+    SendMessageOptions
+} from '../interfaces/IModelProvider';
 import type { MessageAnnotation, MessageAttachment } from '../interfaces/Conversation';
 import type { ModelProviderRuntime } from '../runtime/modelProviderRuntime.types';
 
@@ -89,6 +95,17 @@ function extractByLabel(text: string, label: string): string {
 function excerpt(text: string, maxLen = 96): string {
     if (!text) return '';
     return text.length <= maxLen ? text : `${text.slice(0, maxLen)}...`;
+}
+
+function buildMockTitle(prompt: string, maxLength = 30): string {
+    const normalized = prompt.trim().replace(/\s+/g, ' ').replace(/^["'“”‘’]+|["'“”‘’]+$/gu, '');
+    if (!normalized) {
+        return 'New Chat';
+    }
+
+    return normalized.length <= maxLength
+        ? normalized
+        : `${normalized.slice(0, maxLength)}...`;
 }
 
 function buildStructuredMockResponse(providerId: string, modelId?: string): { text: string; annotations?: MessageAnnotation[] } {
@@ -228,6 +245,13 @@ class MockStreamingProvider implements IAgentCapableProvider {
             })),
             defaultModel: this.modelCatalog.defaultModel
         };
+    }
+
+    async generateConversationTitle(
+        prompt: string,
+        options: GenerateConversationTitleOptions = {}
+    ): Promise<string> {
+        return buildMockTitle(prompt, options.maxLength ?? 30);
     }
 
     async sendMessage(

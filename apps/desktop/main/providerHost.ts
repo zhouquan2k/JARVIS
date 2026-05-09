@@ -13,6 +13,7 @@ import type {
     AbortRequest,
     AnalyzeComparisonRequest,
     CheckAuthRequest,
+    GenerateConversationTitleRequest,
     GetDocumentCapabilityRequest,
     GetAvailableModelsRequest,
     GetHistoryDetailRequest,
@@ -277,6 +278,24 @@ export function createProviderHost(options: ProviderHostOptions = {}): ProviderH
         }
     };
 
+    const handleGenerateConversationTitle = async (msg: GenerateConversationTitleRequest, sendResponse: ResponseSender) => {
+        try {
+            const provider = await resolveProvider(msg.providerId);
+            if (typeof provider.generateConversationTitle !== 'function') {
+                throw new Error(`Provider '${msg.providerId}' does not support conversation title generation`);
+            }
+            const result = await provider.generateConversationTitle(msg.prompt, msg.options);
+            sendResponse({
+                type: 'DONE',
+                requestId: msg.requestId,
+                channelId: msg.channelId,
+                result
+            });
+        } catch (error) {
+            postError(msg.requestId, msg.channelId, error, sendResponse);
+        }
+    };
+
     const handleRunAgent = async (msg: RunAgentRequest, sendResponse: ResponseSender) => {
         try {
             const provider = await resolveProvider(msg.providerId);
@@ -367,6 +386,9 @@ export function createProviderHost(options: ProviderHostOptions = {}): ProviderH
                     break;
                 case 'SEND_MESSAGE':
                     await handleSendMessage(message, sendResponse);
+                    break;
+                case 'GENERATE_CONVERSATION_TITLE':
+                    await handleGenerateConversationTitle(message, sendResponse);
                     break;
                 case 'RUN_AGENT':
                     await handleRunAgent(message, sendResponse);
