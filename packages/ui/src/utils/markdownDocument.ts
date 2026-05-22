@@ -17,6 +17,10 @@ export interface RenderSelectionSnapshot {
     selectedText: string;
 }
 
+export interface MarkdownConversationLinkTarget {
+    conversationId: string;
+}
+
 export interface CreateMarkdownEditorOptions {
     root: HTMLElement;
     content: string;
@@ -24,6 +28,7 @@ export interface CreateMarkdownEditorOptions {
     documentPath: string | null;
     onChange: (markdown: string) => void;
     onOpenDocumentLink?: (path: string) => void;
+    onOpenConversationLink?: (target: MarkdownConversationLinkTarget) => void;
     onResizeMarkdownImage?: (payload: { src: string; ratio: number }) => void;
     /**
      * Source of truth for the current markdown text. Hydration reads it to
@@ -149,8 +154,17 @@ export async function createMarkdownEditor(options: CreateMarkdownEditorOptions)
         }
     });
     editor.on((listener) => {
-        listener.markdownUpdated((_ctx, markdown) => {
+        const handleMarkdownUpdated = (_ctx: unknown, markdown: string) => {
             options.onChange(markdown);
+        };
+
+        listener.markdownUpdated(handleMarkdownUpdated);
+        listener.destroy(() => {
+            const listeners = listener.listeners.markdownUpdated;
+            const index = listeners.indexOf(handleMarkdownUpdated);
+            if (index >= 0) {
+                listeners.splice(index, 1);
+            }
         });
     });
 
@@ -168,6 +182,7 @@ export async function createMarkdownEditor(options: CreateMarkdownEditorOptions)
         options.documentPath,
         options.mode,
         options.onOpenDocumentLink,
+        options.onOpenConversationLink,
         options.onResizeMarkdownImage,
         options.getMarkdownSource
     );
@@ -186,7 +201,7 @@ export function createMarkdownBlockRenderConfig(mode: MarkdownViewerMode): Markd
             [CrepeFeature.Latex]: false,
             [CrepeFeature.LinkTooltip]: false,
             [CrepeFeature.ListItem]: false,
-            [CrepeFeature.Placeholder]: true,
+            [CrepeFeature.Placeholder]: mode !== 'viewer',
             [CrepeFeature.Table]: resolveMarkdownBlockRenderer(mode, 'table') === markdownTablePreviewRenderer,
             [CrepeFeature.Toolbar]: false
         }
@@ -303,6 +318,26 @@ export function resolveMarkdownDocumentLinkPath(href: string, documentPath: stri
     const resolvedPath = new URL(normalizedHref, `http://workspace.local${documentDirectory}`).pathname;
     const normalizedPath = safeDecodePath(resolvedPath);
     return isWorkspaceDocumentHref(normalizedPath) ? normalizedPath : null;
+}
+
+const MARKDOWN_CONVERSATION_LINK_PROTOCOL = 'chatprism://conversation/';
+
+export function buildMarkdownConversationLinkHref(conversationId: string): string {
+    return `${MARKDOWN_CONVERSATION_LINK_PROTOCOL}${encodeURIComponent(conversationId.trim())}`;
+}
+
+export function resolveMarkdownConversationLinkTarget(href: string): MarkdownConversationLinkTarget | null {
+    const normalizedHref = href.trim();
+    if (!normalizedHref.startsWith(MARKDOWN_CONVERSATION_LINK_PROTOCOL)) {
+        return null;
+    }
+
+    const conversationId = decodeURIComponent(normalizedHref.slice(MARKDOWN_CONVERSATION_LINK_PROTOCOL.length)).trim();
+    if (!conversationId) {
+        return null;
+    }
+
+    return { conversationId };
 }
 
 export function buildRelativeMarkdownLinkPath(fromDocumentPath: string, toDocumentPath: string): string {
@@ -1186,6 +1221,10 @@ function buildMarkdownEditorSearchState(
 
 function withMarkdownEditorView(editor: MarkdownEditor, callback: (view: ProseMirrorEditorView) => void) {
     editor.editor.action((ctx) => {
+        if (!ctx.isInjected(editorViewCtx)) {
+            return;
+        }
+
         callback(ctx.get(editorViewCtx));
     });
 }
@@ -1196,6 +1235,7 @@ function attachMarkdownImageEnhancements(
     documentPath: string | null,
     mode: MarkdownViewerMode,
     onOpenDocumentLink?: (path: string) => void,
+    onOpenConversationLink?: (target: MarkdownConversationLinkTarget) => void,
     onResizeMarkdownImage?: (payload: { src: string; ratio: number }) => void,
     getMarkdownSource?: () => string
 ) {
@@ -1280,6 +1320,14 @@ function attachMarkdownImageEnhancements(
 
         const href = anchor.getAttribute('href');
         if (!href || href.startsWith('#')) {
+            return;
+        }
+
+        const conversationTarget = resolveMarkdownConversationLinkTarget(href);
+        if (conversationTarget && onOpenConversationLink) {
+            event.preventDefault();
+            event.stopPropagation();
+            onOpenConversationLink(conversationTarget);
             return;
         }
 

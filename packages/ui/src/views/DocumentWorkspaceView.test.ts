@@ -552,6 +552,63 @@ describe('DocumentWorkspaceView', () => {
         expect(documentStore.nodeHistoryIndex).toBe(1);
     });
 
+    it('routes markdown conversation links to the assistant pane without changing the active document', async () => {
+        const wrapper = mount(DocumentWorkspaceView, {
+            props: {
+                contextProvider: createMockContextProvider({
+                    nodes: [
+                        { path: '/docs', name: 'docs', kind: 'directory' },
+                        { path: '/docs/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/docs' },
+                        { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' }
+                    ],
+                    documents: {
+                        '/docs/.agent.json': JSON.stringify({
+                            name: 'Docs Agent',
+                            instructions: 'Handle docs.'
+                        }),
+                        '/docs/guide.md': '# Guide'
+                    }
+                })
+            },
+            global: {
+                stubs: {
+                    AgentPane: {
+                        props: ['openConversationRequest'],
+                        template: '<div data-testid="agent-pane" :data-open-conversation-id="openConversationRequest?.conversationId ?? \'\'" />'
+                    },
+                    DocumentEditorPane: {
+                        template: '<button data-testid="document-editor-conversation-link" @click="$emit(\'open-conversation-link\', { conversationId: \'conversation-1\' })" />'
+                    }
+                }
+            }
+        });
+
+        const chatStore = useChatStore();
+        chatStore.conversations = [
+            {
+                id: 'conversation-1',
+                title: 'Guide discussion',
+                origin: 'local',
+                agentKey: '/docs/',
+                updatedAt: 1,
+                messages: []
+            }
+        ];
+
+        await flushPromises();
+        const documentStore = useDocumentWorkspaceStore();
+        await documentStore.openNode('/docs/guide.md');
+        await flushPromises();
+
+        expect(documentStore.activePath).toBe('/docs/guide.md');
+        await wrapper.get('[data-testid="document-editor-conversation-link"]').trigger('click');
+        await flushPromises();
+
+        expect(wrapper.get('[data-testid="agent-pane"]').attributes('data-open-conversation-id')).toBe('conversation-1');
+        expect(documentStore.activePath).toBe('/docs/guide.md');
+        expect(documentStore.selectedNodePath).toBe('/docs/guide.md');
+    });
+
     it('restores the saved agent conversation and document selection when remounting', async () => {
         const chatStore = useChatStore();
         const storage = new MockConversationStorage([

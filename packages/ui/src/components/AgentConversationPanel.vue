@@ -149,6 +149,7 @@ import { useChatStore } from '../store/chat';
 import type { ChatRoutePath } from '../routes';
 import { useWorkspaceI18n } from '../i18n';
 import { formatConversationTitle, extractNodeNameFromPath } from '../utils/conversationTitle';
+import type { OpenConversationRequest } from '../types/conversationLink';
 
 type PanelMode = 'list' | 'detail';
 
@@ -160,6 +161,7 @@ const props = defineProps<{
   showAgentConversationList?: boolean;
   contextProvider?: IContextProvider | null;
   restoreConversationId?: string | null;
+  openConversationRequest?: OpenConversationRequest | null;
 }>();
 
 const chatStore = useChatStore();
@@ -366,6 +368,20 @@ async function openConversationDetail(conversationId: string): Promise<void> {
   panelMode.value = 'detail';
 }
 
+async function openRequestedConversation(request: OpenConversationRequest): Promise<void> {
+  const conversation = agentScopedConversations.value.find((candidate) => candidate.id === request.conversationId);
+  if (!conversation) {
+    return;
+  }
+
+  await chatStore.activateConversationSnapshot(conversation);
+  if (chatStore.currentConversation?.id !== request.conversationId) {
+    return;
+  }
+
+  panelMode.value = 'detail';
+}
+
 async function createDocumentConversation(): Promise<void> {
   await chatStore.startNewConversation({
     boundNodeName: extractNodeNameFromPath(props.selectedNodePath ?? props.activeDocument?.path ?? props.activePath ?? null),
@@ -494,6 +510,17 @@ watch(
     isProjectDocumentPickerOpen.value = false;
   },
   { immediate: true, flush: 'sync' }
+);
+
+watch(
+  () => props.openConversationRequest ?? null,
+  (request) => {
+    if (!request) {
+      return;
+    }
+
+    void openRequestedConversation(request);
+  }
 );
 
 watch(

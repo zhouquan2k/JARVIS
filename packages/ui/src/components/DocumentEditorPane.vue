@@ -36,6 +36,37 @@
             </button>
           </div>
         </div>
+        <div v-if="showMarkdownConversationPicker" class="editor-link-picker">
+          <button
+            type="button"
+            class="save-button save-button--link-picker"
+            data-testid="markdown-insert-conversation-link"
+            :title="t('shared.insertMarkdownConversationLink')"
+            :aria-label="t('shared.insertMarkdownConversationLink')"
+            :aria-expanded="isConversationPickerOpen ? 'true' : 'false'"
+            :disabled="!canInsertConversationLink"
+            @mousedown.prevent
+            @click="toggleConversationPicker"
+          >
+            <MessageSquareQuote class="save-icon" :size="18" aria-hidden="true" />
+          </button>
+          <div
+            v-if="isConversationPickerOpen"
+            class="editor-link-menu"
+            data-testid="markdown-conversation-link-picker"
+          >
+            <button
+              v-for="conversation in props.linkableConversations"
+              :key="conversation.conversationId"
+              type="button"
+              class="editor-link-option"
+              :data-testid="`markdown-conversation-link-option-${conversation.conversationId}`"
+              @click="insertConversationLink(conversation.conversationId)"
+            >
+              {{ conversation.title }}
+            </button>
+          </div>
+        </div>
         <button
           v-if="isMarkdownDocument"
           type="button"
@@ -148,6 +179,7 @@
           @undo-change="emit('undo-change')"
           @redo-change="emit('redo-change')"
           @open-document-link="emit('open-document-link', $event)"
+          @open-conversation-link="emit('open-conversation-link', $event)"
         />
         <div
           v-else
@@ -163,14 +195,15 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
-import { Eye, Link2, Maximize2, Minimize2, PencilLine, Save } from 'lucide-vue-next';
+import { Eye, Link2, Maximize2, MessageSquareQuote, Minimize2, PencilLine, Save } from 'lucide-vue-next';
 import type { ContextDocument, ContextNode } from '@packages/core/src';
 import { useWorkspaceI18n } from '../i18n';
 import { resolveDocumentViewer } from '../document-viewers';
-import { buildRelativeMarkdownLinkPath, type MarkdownViewerMode } from '../utils/markdownDocument';
+import { buildRelativeMarkdownLinkPath, type MarkdownConversationLinkTarget, type MarkdownViewerMode } from '../utils/markdownDocument';
 import type { FileChangeRecord, LineDiffEntry } from '../services/FileChangeService';
 import type { DocumentViewerSearchHandle } from '../document-viewers/types';
 import { getContextNodeDisplayName } from '../utils/contextNodePresentation';
+import type { LinkableConversationEntry } from '../types/conversationLink';
 
 const props = withDefaults(defineProps<{
   activePath: string | null;
@@ -180,6 +213,7 @@ const props = withDefaults(defineProps<{
   activePaneMode: 'empty' | 'viewer' | 'unsupported';
   modelValue: string;
   linkableMarkdownDocuments?: ContextNode[];
+  linkableConversations?: LinkableConversationEntry[];
   isSaving: boolean;
   isDirty?: boolean;
   persistMarkdownImage?: (input: {
@@ -196,6 +230,7 @@ const props = withDefaults(defineProps<{
 }>(), {
   isDirty: false,
   linkableMarkdownDocuments: () => [],
+  linkableConversations: () => [],
   middlePaneZoom: 1
 });
 const { t } = useWorkspaceI18n();
@@ -207,6 +242,7 @@ const emit = defineEmits<{
   (event: 'undo-change'): void;
   (event: 'redo-change'): void;
   (event: 'open-document-link', path: string): void;
+  (event: 'open-conversation-link', target: MarkdownConversationLinkTarget): void;
 }>();
 
 const activePathLabel = computed(() => {
@@ -261,11 +297,13 @@ const isMarkdownDocument = computed(() => {
 const markdownViewerMode = ref<MarkdownViewerMode>('viewer');
 const markdownViewerRef = ref<(Partial<DocumentViewerSearchHandle> & {
   insertMarkdownLink?: (input: { label: string; href: string }) => boolean;
+  insertMarkdownConversationLink?: (input: { label: string; conversationId: string }) => boolean;
   prepareMarkdownSelectionFromViewer?: () => boolean;
 }) | null>(null);
 const searchInputRef = ref<HTMLInputElement | null>(null);
 const isSearchOpen = ref(false);
 const isLinkPickerOpen = ref(false);
+const isConversationPickerOpen = ref(false);
 const searchQuery = ref('');
 const activeSearchMatchIndex = ref(0);
 const searchMatchCount = ref(0);
@@ -280,9 +318,17 @@ const supportsViewerSearch = computed(() => props.activeDocument?.mimeType === '
 const showMarkdownLinkPicker = computed(() => {
   return isMarkdownDocument.value;
 });
+const showMarkdownConversationPicker = computed(() => {
+  return isMarkdownDocument.value;
+});
 const canInsertMarkdownLink = computed(() => {
   return isMarkdownDocument.value
     && props.linkableMarkdownDocuments.length > 0
+    && !!props.activePath;
+});
+const canInsertConversationLink = computed(() => {
+  return isMarkdownDocument.value
+    && props.linkableConversations.length > 0
     && !!props.activePath;
 });
 const searchMatchCurrent = computed(() => searchMatchCount.value === 0 ? 0 : activeSearchMatchIndex.value + 1);
@@ -300,6 +346,7 @@ watch(
       markdownViewerMode.value = 'viewer';
     }
     isLinkPickerOpen.value = false;
+    isConversationPickerOpen.value = false;
     closeViewerSearch();
   },
   { immediate: true }
@@ -309,6 +356,7 @@ watch(
   () => props.activePath,
   () => {
     isLinkPickerOpen.value = false;
+    isConversationPickerOpen.value = false;
   }
 );
 
@@ -409,6 +457,20 @@ function toggleLinkPicker() {
     return;
   }
   isLinkPickerOpen.value = !isLinkPickerOpen.value;
+  if (isLinkPickerOpen.value) {
+    isConversationPickerOpen.value = false;
+  }
+}
+
+function toggleConversationPicker() {
+  if (!canInsertConversationLink.value) {
+    return;
+  }
+
+  isConversationPickerOpen.value = !isConversationPickerOpen.value;
+  if (isConversationPickerOpen.value) {
+    isLinkPickerOpen.value = false;
+  }
 }
 
 function insertMarkdownLink(targetPath: string) {
@@ -432,6 +494,40 @@ function insertMarkdownLink(targetPath: string) {
       href
     });
     isLinkPickerOpen.value = false;
+    if (returnToViewer) {
+      nextTick(() => {
+        markdownViewerMode.value = 'viewer';
+      });
+    }
+  };
+
+  if (markdownViewerMode.value === 'edit') {
+    insert();
+    return;
+  }
+
+  markdownViewerMode.value = 'edit';
+  nextTick(() => {
+    nextTick(insert);
+  });
+}
+
+function insertConversationLink(conversationId: string) {
+  const conversation = props.linkableConversations.find((candidate) => candidate.conversationId === conversationId);
+  if (!conversation) {
+    return;
+  }
+
+  const returnToViewer = markdownViewerMode.value === 'viewer';
+  if (returnToViewer) {
+    markdownViewerRef.value?.prepareMarkdownSelectionFromViewer?.();
+  }
+  const insert = () => {
+    markdownViewerRef.value?.insertMarkdownConversationLink?.({
+      label: conversation.title,
+      conversationId: conversation.conversationId
+    });
+    isConversationPickerOpen.value = false;
     if (returnToViewer) {
       nextTick(() => {
         markdownViewerMode.value = 'viewer';

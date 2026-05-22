@@ -174,12 +174,23 @@ export const APP_CONFIG: { providers: ProviderConfig[]; analyzer: AnalyzerConfig
                     nameKey: 'model.gemini25Flash',
                     options: [
                         {
+                            key: 'web_search',
+                            label: 'Web search',
+                            labelKey: 'option.webSearch',
+                            type: 'boolean',
+                            description: 'Allow the model to use web search for fresh information.',
+                            descriptionKey: 'option.webSearchDescription',
+                            conflictsWith: ['deep_research'],
+                            defaultValue: false
+                        },
+                        {
                             key: 'deep_research',
                             label: 'Deep Research',
                             labelKey: 'option.deepResearch',
                             type: 'boolean',
                             description: 'Switch to Gemini’s research request path.',
                             descriptionKey: 'option.deepResearchDescription',
+                            conflictsWith: ['web_search'],
                             defaultValue: false
                         }
                     ]
@@ -190,12 +201,23 @@ export const APP_CONFIG: { providers: ProviderConfig[]; analyzer: AnalyzerConfig
                     nameKey: 'model.gemini20Flash',
                     options: [
                         {
+                            key: 'web_search',
+                            label: 'Web search',
+                            labelKey: 'option.webSearch',
+                            type: 'boolean',
+                            description: 'Allow the model to use web search for fresh information.',
+                            descriptionKey: 'option.webSearchDescription',
+                            conflictsWith: ['deep_research'],
+                            defaultValue: false
+                        },
+                        {
                             key: 'deep_research',
                             label: 'Deep Research',
                             labelKey: 'option.deepResearch',
                             type: 'boolean',
                             description: 'Switch to Gemini’s research request path.',
                             descriptionKey: 'option.deepResearchDescription',
+                            conflictsWith: ['web_search'],
                             defaultValue: false
                         }
                     ]
@@ -206,12 +228,23 @@ export const APP_CONFIG: { providers: ProviderConfig[]; analyzer: AnalyzerConfig
                     nameKey: 'model.geminiProLatest',
                     options: [
                         {
+                            key: 'web_search',
+                            label: 'Web search',
+                            labelKey: 'option.webSearch',
+                            type: 'boolean',
+                            description: 'Allow the model to use web search for fresh information.',
+                            descriptionKey: 'option.webSearchDescription',
+                            conflictsWith: ['deep_research'],
+                            defaultValue: false
+                        },
+                        {
                             key: 'deep_research',
                             label: 'Deep Research',
                             labelKey: 'option.deepResearch',
                             type: 'boolean',
                             description: 'Switch to Gemini’s research request path.',
                             descriptionKey: 'option.deepResearchDescription',
+                            conflictsWith: ['web_search'],
                             defaultValue: false
                         }
                     ]
@@ -222,12 +255,23 @@ export const APP_CONFIG: { providers: ProviderConfig[]; analyzer: AnalyzerConfig
                     nameKey: 'model.gemini25Pro',
                     options: [
                         {
+                            key: 'web_search',
+                            label: 'Web search',
+                            labelKey: 'option.webSearch',
+                            type: 'boolean',
+                            description: 'Allow the model to use web search for fresh information.',
+                            descriptionKey: 'option.webSearchDescription',
+                            conflictsWith: ['deep_research'],
+                            defaultValue: false
+                        },
+                        {
                             key: 'deep_research',
                             label: 'Deep Research',
                             labelKey: 'option.deepResearch',
                             type: 'boolean',
                             description: 'Switch to Gemini’s research request path.',
                             descriptionKey: 'option.deepResearchDescription',
+                            conflictsWith: ['web_search'],
                             defaultValue: false
                         }
                     ]

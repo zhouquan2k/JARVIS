@@ -266,6 +266,56 @@ describe('AgentConversationPanel', () => {
         expect(wrapper.get('[data-testid="normal-chat-stub"]').exists()).toBe(true);
     });
 
+    it('opens a requested scoped conversation in detail mode from list mode', async () => {
+        const chatStore = useChatStore();
+        chatStore.conversations = [
+            {
+                id: 'conversation-1',
+                title: 'Shared Conversation',
+                origin: 'local',
+                agentKey: '/docs/',
+                updatedAt: 1,
+                messages: []
+            }
+        ];
+
+        const wrapper = mount(AgentConversationPanel, {
+            props: {
+                activeAgentKey: '/docs/',
+                activePath: null,
+                selectedNodePath: '/docs',
+                activeDocument: null,
+                showAgentConversationList: true,
+                contextProvider: createContextProvider()
+            },
+            global: {
+                stubs: {
+                    AgentDocumentConversationList: {
+                        template: '<div data-testid="agent-document-conversation-list-stub" />'
+                    },
+                    NormalChatView: {
+                        template: '<div data-testid="normal-chat-stub" />'
+                    }
+                }
+            }
+        });
+
+        await flushPromises();
+        expect(wrapper.get('[data-testid="agent-document-conversation-list-stub"]').exists()).toBe(true);
+
+        await wrapper.setProps({
+            openConversationRequest: {
+                conversationId: 'conversation-1',
+                nonce: 1
+            }
+        });
+        await flushPromises();
+
+        expect(chatStore.currentConversation?.id).toBe('conversation-1');
+        expect(wrapper.find('[data-testid="agent-document-conversation-list-stub"]').exists()).toBe(false);
+        expect(wrapper.get('[data-testid="normal-chat-stub"]').exists()).toBe(true);
+    });
+
     it('opens a document conversation from context provider even when local storage has not synced it yet', async () => {
         const chatStore = useChatStore();
         chatStore.setProviders(new PanelTestModelProvider(), new MissingConversationStorageProvider());

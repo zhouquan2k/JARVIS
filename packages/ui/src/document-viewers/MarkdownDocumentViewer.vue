@@ -81,10 +81,11 @@
 import '@milkdown/crepe/theme/common/prosemirror.css';
 import '@milkdown/crepe/theme/common/table.css';
 import '@milkdown/crepe/theme/nord-dark.css';
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { ContextDocument } from '@packages/core/src';
 import { useWorkspaceI18n } from '../i18n';
 import {
+  buildMarkdownConversationLinkHref,
   captureRenderableMarkdownSelection,
   createMarkdownEditor,
   getMarkdownEditorSearchMatchCount,
@@ -99,6 +100,7 @@ import {
   scrollToMarkdownEditorSearchMatch,
   setMarkdownEditorActiveSearchMatchIndex,
   setMarkdownEditorSearchQuery,
+  type MarkdownConversationLinkTarget,
   type MarkdownEditor,
   type MarkdownViewerMode
 } from '../utils/markdownDocument';
@@ -131,6 +133,7 @@ const emit = defineEmits<{
   (event: 'undo-change'): void;
   (event: 'redo-change'): void;
   (event: 'open-document-link', path: string): void;
+  (event: 'open-conversation-link', target: MarkdownConversationLinkTarget): void;
 }>();
 
 const isMarkdownDocument = computed(() => props.activeDocument?.mimeType === 'text/markdown');
@@ -152,7 +155,10 @@ let lastMarkdownSelection: { start: number; end: number } | null = null;
 let pendingMarkdownSelectionFromViewer: { start: number; end: number } | null = null;
 let preferRememberedMarkdownSelection = false;
 let viewerPasteAbortController: AbortController | null = null;
+let isNavigatingAwayFromViewer = false;
+let lastViewerNavigationTarget: { kind: 'document'; path: string } | { kind: 'conversation'; conversationId: string } | null = null;
 const MARKDOWN_IMAGE_DEBUG_STORAGE_KEY = 'chatprism:debug-markdown-image';
+const MARKDOWN_VIEWER_DEBUG_STORAGE_KEY = 'chatprism:debug-markdown-viewer';
 
 function logMarkdownImageViewerDebug(event: string, payload: Record<string, unknown>) {
   if (!isMarkdownImageDebugEnabled()) {
@@ -160,6 +166,14 @@ function logMarkdownImageViewerDebug(event: string, payload: Record<string, unkn
   }
 
   console.debug(`[markdown-image-viewer] ${event}`, payload);
+}
+
+function logMarkdownViewerDebug(event: string, payload: Record<string, unknown>) {
+  if (!isMarkdownViewerDebugEnabled()) {
+    return;
+  }
+
+  console.debug(`[markdown-viewer] ${event}`, payload);
 }
 
 function isMarkdownImageDebugEnabled(): boolean {
@@ -181,6 +195,30 @@ function isMarkdownImageDebugEnabled(): boolean {
 
   try {
     return window.localStorage.getItem(MARKDOWN_IMAGE_DEBUG_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function isMarkdownViewerDebugEnabled(): boolean {
+  if (import.meta.env.DEV) {
+    return true;
+  }
+
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  const runtimeFlag = (window as typeof window & {
+    __CHATPRISM_DEBUG_MARKDOWN_VIEWER__?: boolean;
+  }).__CHATPRISM_DEBUG_MARKDOWN_VIEWER__;
+
+  if (runtimeFlag === true) {
+    return true;
+  }
+
+  try {
+    return window.localStorage.getItem(MARKDOWN_VIEWER_DEBUG_STORAGE_KEY) === '1';
   } catch {
     return false;
   }
@@ -253,9 +291,67 @@ watch(() => [
   }
 }, { immediate: true, flush: 'post' });
 
+onMounted(() => {
+  window.addEventListener('error', onWindowError);
+  window.addEventListener('unhandledrejection', onWindowUnhandledRejection);
+});
+
 onBeforeUnmount(async () => {
+  window.removeEventListener('error', onWindowError);
+  window.removeEventListener('unhandledrejection', onWindowUnhandledRejection);
   await teardownEditor();
 });
+
+function extractEditorViewContextErrorMessage(value: unknown): string | null {
+  if (typeof value === 'string') {
+    return value.includes('Context "editorView" not found') ? value : null;
+  }
+
+  if (value instanceof Error) {
+    return value.message.includes('Context "editorView" not found') ? value.message : null;
+  }
+
+  if (value && typeof value === 'object' && 'message' in value) {
+    const message = (value as { message?: unknown }).message;
+    return typeof message === 'string' && message.includes('Context "editorView" not found')
+      ? message
+      : null;
+  }
+
+  return null;
+}
+
+function logEditorViewContextError(source: 'error' | 'unhandledrejection', message: string) {
+  logMarkdownViewerDebug('editor-view-context-missing', {
+    source,
+    message,
+    activePath: props.activePath,
+    documentPath: props.activeDocument?.path ?? props.activePath,
+    markdownViewerMode: props.markdownViewerMode,
+    activeEditorMode,
+    creationToken,
+    navigatingAway: isNavigatingAwayFromViewer,
+    lastNavigationTarget: lastViewerNavigationTarget
+  });
+}
+
+function onWindowError(event: ErrorEvent) {
+  const message = extractEditorViewContextErrorMessage(event.error ?? event.message);
+  if (!message) {
+    return;
+  }
+
+  logEditorViewContextError('error', message);
+}
+
+function onWindowUnhandledRejection(event: PromiseRejectionEvent) {
+  const message = extractEditorViewContextErrorMessage(event.reason);
+  if (!message) {
+    return;
+  }
+
+  logEditorViewContextError('unhandledrejection', message);
+}
 
 async function ensureEditor(content: string) {
   if (editor || !editorRoot.value) {
@@ -263,9 +359,17 @@ async function ensureEditor(content: string) {
   }
 
   const token = ++creationToken;
+  isNavigatingAwayFromViewer = false;
   const renderedContent = isMarkdownDocument.value && props.markdownViewerMode === 'viewer'
     ? normalizeMarkdownViewerContent(content)
     : content;
+  logMarkdownViewerDebug('ensure-editor-start', {
+    token,
+    mode: props.markdownViewerMode,
+    activePath: props.activePath,
+    documentPath: props.activeDocument?.path ?? props.activePath,
+    navigatingAway: isNavigatingAwayFromViewer
+  });
   logMarkdownImageViewerDebug('ensure-editor', {
     mode: props.markdownViewerMode,
     documentPath: props.activeDocument?.path ?? props.activePath,
@@ -278,7 +382,32 @@ async function ensureEditor(content: string) {
     mode: isMarkdownDocument.value ? props.markdownViewerMode : 'edit',
     documentPath: props.activeDocument?.path ?? props.activePath,
     onOpenDocumentLink(path) {
+      isNavigatingAwayFromViewer = true;
+      lastViewerNavigationTarget = {
+        kind: 'document',
+        path
+      };
+      logMarkdownViewerDebug('open-document-link', {
+        token,
+        fromPath: props.activeDocument?.path ?? props.activePath,
+        toPath: path,
+        mode: props.markdownViewerMode
+      });
       emit('open-document-link', path);
+    },
+    onOpenConversationLink(target) {
+      isNavigatingAwayFromViewer = true;
+      lastViewerNavigationTarget = {
+        kind: 'conversation',
+        conversationId: target.conversationId
+      };
+      logMarkdownViewerDebug('open-conversation-link', {
+        token,
+        fromPath: props.activeDocument?.path ?? props.activePath,
+        conversationId: target.conversationId,
+        mode: props.markdownViewerMode
+      });
+      emit('open-conversation-link', target);
     },
     onResizeMarkdownImage(payload) {
       applyViewerImageRatio(payload);
@@ -300,6 +429,11 @@ async function ensureEditor(content: string) {
   });
 
   if (token !== creationToken || !props.activePath) {
+    logMarkdownViewerDebug('ensure-editor-abort', {
+      token,
+      latestToken: creationToken,
+      activePath: props.activePath
+    });
     await destroyMarkdownEditor(instance);
     return;
   }
@@ -310,6 +444,12 @@ async function ensureEditor(content: string) {
   applyReadonlyCodeBlockLabels(renderedContent);
   applySearchHighlights();
   bindViewerPasteHandler();
+  logMarkdownViewerDebug('ensure-editor-ready', {
+    token,
+    mode: activeEditorMode,
+    activePath: props.activePath,
+    documentPath: props.activeDocument?.path ?? props.activePath
+  });
 }
 
 function syncEditorContent(content: string) {
@@ -593,7 +733,8 @@ defineExpose({
   setActiveSearchMatchIndex,
   getSearchMatchCount,
   scrollToSearchMatch,
-  insertMarkdownLink
+  insertMarkdownLink,
+  insertMarkdownConversationLink
 });
 
 function prepareMarkdownSelectionFromViewer(): boolean {
@@ -659,6 +800,13 @@ function insertMarkdownLink(input: { label: string; href: string }): boolean {
   return true;
 }
 
+function insertMarkdownConversationLink(input: { label: string; conversationId: string }): boolean {
+  return insertMarkdownLink({
+    label: input.label,
+    href: buildMarkdownConversationLinkHref(input.conversationId)
+  });
+}
+
 function applyViewerImageRatio(payload: { src: string; ratio: number }) {
   const documentPath = props.activeDocument?.path ?? props.activePath;
   if (!documentPath) {
@@ -694,17 +842,32 @@ function applyViewerImageRatio(payload: { src: string; ratio: number }) {
 
 async function teardownEditor() {
   creationToken += 1;
+  const teardownToken = creationToken;
   const currentEditor = editor;
   editor = null;
   activeEditorMode = null;
   lastKnownMarkdown = '';
   viewerPasteAbortController?.abort();
   viewerPasteAbortController = null;
+  logMarkdownViewerDebug('teardown-editor-start', {
+    token: teardownToken,
+    activePath: props.activePath,
+    documentPath: props.activeDocument?.path ?? props.activePath,
+    navigatingAway: isNavigatingAwayFromViewer,
+    hadEditor: !!currentEditor
+  });
 
   await destroyMarkdownEditor(currentEditor);
   if (editorRoot.value) {
     editorRoot.value.innerHTML = '';
   }
+  logMarkdownViewerDebug('teardown-editor-done', {
+    token: teardownToken,
+    activePath: props.activePath,
+    navigatingAway: isNavigatingAwayFromViewer
+  });
+  isNavigatingAwayFromViewer = false;
+  lastViewerNavigationTarget = null;
 }
 
 function extractMarkdownCodeBlockLabels(content: string): string[] {

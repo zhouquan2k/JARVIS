@@ -64,12 +64,18 @@ describe('GeminiApiProvider', () => {
                 {
                     id: 'gemini-2.5-flash',
                     name: 'Gemini 2.5 Flash',
-                    options: [expect.objectContaining({ key: 'deep_research', type: 'boolean' })]
+                    options: [
+                        expect.objectContaining({ key: 'web_search', type: 'boolean' }),
+                        expect.objectContaining({ key: 'deep_research', type: 'boolean' })
+                    ]
                 },
                 {
                     id: 'gemini-2.5-pro',
                     name: 'Gemini Pro Latest',
-                    options: [expect.objectContaining({ key: 'deep_research', type: 'boolean' })]
+                    options: [
+                        expect.objectContaining({ key: 'web_search', type: 'boolean' }),
+                        expect.objectContaining({ key: 'deep_research', type: 'boolean' })
+                    ]
                 }
             ],
             defaultModel: 'gemini-2.5-pro'
@@ -95,25 +101,37 @@ describe('GeminiApiProvider', () => {
                     id: 'gemini-2.5-flash',
                     name: 'Gemini 2.5 Flash',
                     nameKey: 'model.gemini25Flash',
-                    options: [expect.objectContaining({ key: 'deep_research', type: 'boolean' })]
+                    options: [
+                        expect.objectContaining({ key: 'web_search', type: 'boolean' }),
+                        expect.objectContaining({ key: 'deep_research', type: 'boolean' })
+                    ]
                 },
                 {
                     id: 'gemini-2.0-flash',
                     name: 'Gemini 2.0 Flash',
                     nameKey: 'model.gemini20Flash',
-                    options: [expect.objectContaining({ key: 'deep_research', type: 'boolean' })]
+                    options: [
+                        expect.objectContaining({ key: 'web_search', type: 'boolean' }),
+                        expect.objectContaining({ key: 'deep_research', type: 'boolean' })
+                    ]
                 },
                 {
                     id: 'gemini-pro-latest',
                     name: 'Gemini Pro Latest',
                     nameKey: 'model.geminiProLatest',
-                    options: [expect.objectContaining({ key: 'deep_research', type: 'boolean' })]
+                    options: [
+                        expect.objectContaining({ key: 'web_search', type: 'boolean' }),
+                        expect.objectContaining({ key: 'deep_research', type: 'boolean' })
+                    ]
                 },
                 {
                     id: 'gemini-2.5-pro',
                     name: 'Gemini 2.5 Pro',
                     nameKey: 'model.gemini25Pro',
-                    options: [expect.objectContaining({ key: 'deep_research', type: 'boolean' })]
+                    options: [
+                        expect.objectContaining({ key: 'web_search', type: 'boolean' }),
+                        expect.objectContaining({ key: 'deep_research', type: 'boolean' })
+                    ]
                 }
             ],
             defaultModel: 'gemini-pro-latest'
@@ -562,7 +580,7 @@ describe('GeminiApiProvider', () => {
         vi.unstubAllGlobals();
     });
 
-    it('adds research tools when deep research is enabled', async () => {
+    it('adds Google Search tools when web search is enabled', async () => {
         const fetchMock = vi.fn().mockResolvedValue(
             createGeminiSseResponse([
                 {
@@ -580,10 +598,10 @@ describe('GeminiApiProvider', () => {
 
         const provider = new GeminiApiProvider({ apiKey: 'test-key' });
         await provider.sendMessage(
-            '做研究',
+            '查最新信息',
             {
                 modelId: 'gemini-2.5-flash',
-                modelOptions: { deep_research: true }
+                modelOptions: { web_search: true }
             },
             () => undefined
         );
@@ -636,7 +654,7 @@ describe('GeminiApiProvider', () => {
                         }
                     }
                 ],
-                modelOptions: { deep_research: true },
+                modelOptions: { web_search: true },
                 toolExchanges: [
                     {
                         modelTurn: {
@@ -727,8 +745,9 @@ describe('GeminiApiProvider', () => {
             }
         ]);
         expect(requestBody.toolConfig).toEqual({
+            includeServerSideToolInvocations: true,
             functionCallingConfig: {
-                mode: 'AUTO'
+                mode: 'VALIDATED'
             }
         });
 
@@ -762,6 +781,125 @@ describe('GeminiApiProvider', () => {
         vi.unstubAllGlobals();
     });
 
+    it('preserves Gemini server-side tool parts across native agent tool exchanges', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(
+            createGeminiSseResponse([
+                {
+                    candidates: [
+                        {
+                            content: {
+                                parts: [{ text: 'Agent 已响应' }]
+                            }
+                        }
+                    ]
+                }
+            ])
+        );
+        vi.stubGlobal('fetch', fetchMock);
+
+        const provider = new GeminiApiProvider({ apiKey: 'test-key' });
+        await provider.runAgent(
+            {
+                prompt: '请分析当前文档',
+                agent: scopedAgent,
+                tools: [
+                    {
+                        id: 'read_file',
+                        description: 'Read docs',
+                        inputSchema: {
+                            type: 'OBJECT',
+                            properties: {
+                                path: { type: 'STRING', description: 'Absolute file path inside the workspace scope.' }
+                            },
+                            required: ['path']
+                        }
+                    }
+                ],
+                modelOptions: { web_search: true },
+                toolExchanges: [
+                    {
+                        modelTurn: {
+                            role: 'model',
+                            parts: [
+                                {
+                                    text: '先搜索'
+                                },
+                                {
+                                    toolCall: {
+                                        id: 'search-1',
+                                        tool: 'googleSearch'
+                                    }
+                                },
+                                {
+                                    toolResponse: {
+                                        id: 'search-1',
+                                        tool: 'googleSearch',
+                                        output: {
+                                            snippets: ['A']
+                                        }
+                                    }
+                                },
+                                {
+                                    functionCall: {
+                                        id: 'call-1',
+                                        name: 'read_file',
+                                        args: { path: '/docs/guide.md' }
+                                    }
+                                }
+                            ]
+                        },
+                        call: {
+                            id: 'call-1',
+                            name: 'read_file',
+                            arguments: { path: '/docs/guide.md' }
+                        },
+                        result: {
+                            toolCallId: 'call-1',
+                            name: 'read_file',
+                            result: '文档内容',
+                            isError: false
+                        }
+                    }
+                ]
+            },
+            () => undefined
+        );
+
+        const requestBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+        expect(requestBody.contents.at(-2)).toEqual({
+            role: 'model',
+            parts: [
+                {
+                    text: '先搜索'
+                },
+                {
+                    toolCall: {
+                        id: 'search-1',
+                        tool: 'googleSearch'
+                    }
+                },
+                {
+                    toolResponse: {
+                        id: 'search-1',
+                        tool: 'googleSearch',
+                        output: {
+                            snippets: ['A']
+                        }
+                    }
+                },
+                {
+                    functionCall: {
+                        id: 'call-1',
+                        name: 'read_file',
+                        args: { path: '/docs/guide.md' }
+                    }
+                }
+            ]
+        });
+
+        vi.unstubAllGlobals();
+    });
+
     it('returns tool calls from the native agent SSE stream while preserving text updates', async () => {
         const fetchMock = vi.fn().mockResolvedValue(
             createGeminiSseResponse([
@@ -773,6 +911,21 @@ describe('GeminiApiProvider', () => {
                                     {
                                         text: '前置思考',
                                         thoughtSignature: 'sig-1'
+                                    },
+                                    {
+                                        toolCall: {
+                                            id: 'search-1',
+                                            tool: 'googleSearch'
+                                        }
+                                    },
+                                    {
+                                        toolResponse: {
+                                            id: 'search-1',
+                                            tool: 'googleSearch',
+                                            output: {
+                                                snippets: ['A']
+                                            }
+                                        }
                                     },
                                     {
                                         functionCall: {
@@ -874,6 +1027,21 @@ describe('GeminiApiProvider', () => {
                 {
                     text: '前置思考',
                     thoughtSignature: 'sig-1'
+                },
+                {
+                    toolCall: {
+                        id: 'search-1',
+                        tool: 'googleSearch'
+                    }
+                },
+                {
+                    toolResponse: {
+                        id: 'search-1',
+                        tool: 'googleSearch',
+                        output: {
+                            snippets: ['A']
+                        }
+                    }
                 },
                 {
                     functionCall: {
@@ -1003,3 +1171,34 @@ describe('GeminiApiProvider', () => {
         vi.unstubAllGlobals();
     });
 });
+    it('does not add Google Search tools when only deep research is enabled', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(
+            createGeminiSseResponse([
+                {
+                    candidates: [
+                        {
+                            content: {
+                                parts: [{ text: '研究结果' }]
+                            }
+                        }
+                    ]
+                }
+            ])
+        );
+        vi.stubGlobal('fetch', fetchMock);
+
+        const provider = new GeminiApiProvider({ apiKey: 'test-key' });
+        await provider.sendMessage(
+            '做研究',
+            {
+                modelId: 'gemini-2.5-flash',
+                modelOptions: { deep_research: true }
+            },
+            () => undefined
+        );
+
+        const requestBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+        expect(requestBody.tools).toBeUndefined();
+
+        vi.unstubAllGlobals();
+    });

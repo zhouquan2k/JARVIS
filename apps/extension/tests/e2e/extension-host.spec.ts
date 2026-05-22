@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 const EXTENSION_PATH = path.resolve(__dirname, '../../dist/chrome-mv3');
+const knowledgeFixtureRoot = path.resolve(process.cwd(), '../server/tests/fixtures/knowledge-workspace');
 
 async function launchExtensionPage(
   options: {
@@ -322,6 +323,54 @@ test('extension knowledge workspace shows AgentView for owner directories and ri
     await expect(page.getByTestId('agent-view')).toHaveCount(0);
   } finally {
     await session.close();
+  }
+});
+
+test('extension knowledge workspace inserts conversation links and reopens the requested conversation', async () => {
+  const baseName = `extension-conversation-link-${Date.now()}`;
+  const virtualPath = `/${baseName}.md`;
+  const diskPath = path.join(knowledgeFixtureRoot, `${baseName}.md`);
+  fs.writeFileSync(diskPath, 'Hello notes', 'utf8');
+  const session = await launchExtensionPage({ routeHash: '#/' });
+  try {
+    const { page } = session;
+
+    await expect(page.getByTestId('document-workspace')).toBeVisible();
+    await page.locator(`[data-path="${virtualPath}"]`).click();
+    await expect(page.getByTestId('document-editor-input')).toBeVisible();
+
+    await page.getByTestId('agent-conversation-list-plus').click();
+    await expect(page.getByTestId('normal-input')).toBeVisible();
+    await page.getByTestId('normal-input').fill('Extension conversation link target');
+    await page.getByTestId('normal-send').click();
+    await expect(page.getByTestId('agent-conversation-title')).toContainText('Extension conversation link ta');
+    await page.getByTestId('agent-conversation-back').click();
+    await expect(page.getByTestId('agent-document-conversation-item')).toContainText('Extension conversation link ta');
+
+    await page.locator('[data-testid="document-editor-surface"] .ProseMirror p').evaluate(() => {
+      const paragraph = document.querySelector('[data-testid="document-editor-surface"] .ProseMirror p');
+      const textNode = paragraph?.firstChild;
+      if (!textNode) {
+        return;
+      }
+
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.setStart(textNode, 6);
+      range.setEnd(textNode, 11);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    });
+    await page.getByTestId('markdown-insert-conversation-link').click();
+    await page.locator('[data-testid^="markdown-conversation-link-option-"]').first().click();
+    await expect(page.getByTestId('markdown-mode-toggle')).toHaveAttribute('aria-pressed', 'true');
+    await page.getByRole('link', { name: 'notes' }).click();
+
+    await expect(page.getByTestId('agent-conversation-title')).toContainText('Extension conversation link ta');
+    await expect(page.locator(`[data-path="${virtualPath}"]`)).toHaveClass(/active/);
+  } finally {
+    await session.close();
+    fs.rmSync(diskPath, { force: true });
   }
 });
 

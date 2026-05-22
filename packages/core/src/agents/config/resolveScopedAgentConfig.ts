@@ -28,7 +28,7 @@ export const DEFAULT_SCOPED_AGENT_CONFIG: AgentConfig = Object.freeze({
     ].join(' '),
     tools: [
         { id: 'read_current_file', description: 'Read the currently active file.' },
-        { id: 'list_directory', description: 'List files and directories within the knowledge workspace.' },
+        { id: 'list_directory', description: 'List files and directories within the knowledge workspace. Use "." for the current agent root and absolute paths for workspace locations.' },
         { id: 'read_file', description: 'Read a file within the current knowledge workspace.' },
         { id: 'search_in_scope', description: 'Search for relevant text within the current agent scope.' },
         { id: 'replace_text_in_file', description: 'Replace an exact text match in a file.' },

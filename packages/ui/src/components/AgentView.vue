@@ -165,6 +165,7 @@
       :active-pane-mode="indexPaneMode"
       :model-value="indexDraftContent"
       :linkable-markdown-documents="linkableMarkdownDocuments"
+      :linkable-conversations="linkableConversations"
       :is-saving="indexIsSaving"
       :is-dirty="indexIsDirty"
       :latest-file-change="null"
@@ -174,6 +175,7 @@
       @update:model-value="emit('update-index-content', $event)"
       @save="emit('save-index-document')"
       @open-document-link="emit('open-document-link', $event)"
+      @open-conversation-link="emit('open-conversation-link', $event)"
     />
   </section>
 </template>
@@ -186,6 +188,7 @@ import type { ProviderConfig } from '@packages/core/config';
 import DocumentEditorPane from './DocumentEditorPane.vue';
 import ProviderModelSelector from './ProviderModelSelector.vue';
 import { useWorkspaceI18n } from '../i18n';
+import type { LinkableConversationEntry, MarkdownConversationLinkTarget } from '../types/conversationLink';
 
 export type AgentConfigEditPayload = {
   description?: string;
@@ -207,6 +210,7 @@ const props = withDefaults(defineProps<{
   indexViewerId?: string | null;
   indexPaneMode?: 'empty' | 'viewer' | 'unsupported';
   linkableMarkdownDocuments?: ContextNode[];
+  linkableConversations?: LinkableConversationEntry[];
   indexIsSaving?: boolean;
   indexIsDirty?: boolean;
   providers: ProviderConfig[];
@@ -219,6 +223,7 @@ const props = withDefaults(defineProps<{
   indexViewerId: null,
   indexPaneMode: 'empty',
   linkableMarkdownDocuments: () => [],
+  linkableConversations: () => [],
   indexIsSaving: false,
   indexIsDirty: false,
   modelLoadStates: () => ({})
@@ -230,6 +235,7 @@ const emit = defineEmits<{
   (event: 'update-index-content', value: string): void;
   (event: 'save-index-document'): void;
   (event: 'open-document-link', path: string): void;
+  (event: 'open-conversation-link', target: MarkdownConversationLinkTarget): void;
 }>();
 
 const isInstructionsExpanded = ref(false);

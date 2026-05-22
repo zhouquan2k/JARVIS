@@ -23,6 +23,8 @@ export interface AgentToolCall {
 export interface AgentResponsePart {
     text?: string;
     thoughtSignature?: string;
+    toolCall?: Record<string, unknown>;
+    toolResponse?: Record<string, unknown>;
     functionCall?: {
         id?: string;
         name: string;

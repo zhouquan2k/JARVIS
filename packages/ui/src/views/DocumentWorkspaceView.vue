@@ -48,11 +48,13 @@
               :builtin-tools="builtinTools"
               :model-load-states="chatStore.providerModelStates"
               :linkable-markdown-documents="agentIndexLinkableMarkdownDocuments"
+              :linkable-conversations="agentIndexLinkableConversations"
               @load-provider-models="chatStore.ensureProviderModelsLoaded"
               @save-agent-config="saveSelectedAgentConfig"
               @update-index-content="documentStore.updateAgentIndexDocument"
               @save-index-document="documentStore.flushAgentIndexDocument"
               @open-document-link="onOpenDocumentLink"
+              @open-conversation-link="onOpenConversationLink"
             />
             <DocumentEditorPane
               v-else
@@ -63,6 +65,7 @@
               :active-pane-mode="documentStore.activePaneMode"
               :model-value="draftContent"
               :linkable-markdown-documents="activeLinkableMarkdownDocuments"
+              :linkable-conversations="activeLinkableConversations"
               :is-saving="documentStore.isSaving"
               :is-dirty="activeDocumentIsDirty"
               :persist-markdown-image="documentStore.persistPastedMarkdownImage"
@@ -78,6 +81,7 @@
               @undo-change="documentStore.undoActiveFileChange"
               @redo-change="documentStore.redoActiveFileChange"
               @open-document-link="onOpenDocumentLink"
+              @open-conversation-link="onOpenConversationLink"
             />
           </div>
         </section>
@@ -105,6 +109,7 @@
             :on-file-changed="handleAssistantFileChanged"
             :agent-resolution-error="documentStore.agentResolutionError"
             :restore-conversation-id="restoredAgentConversationId"
+            :open-conversation-request="openConversationRequest"
           />
         </slot>
       </div>
@@ -129,6 +134,9 @@ import DocumentFileTree from '../components/DocumentFileTree.vue';
 import { useChatStore } from '../store/chat';
 import { useDocumentWorkspaceStore } from '../store/documentWorkspace';
 import type { ChatRoutePath } from '../routes';
+import type { MarkdownConversationLinkTarget } from '../utils/markdownDocument';
+import type { OpenConversationRequest } from '../types/conversationLink';
+import { buildLinkableConversationEntries } from '../utils/conversationLink';
 
 const props = withDefaults(defineProps<{
   contextProvider: IContextProvider;
@@ -163,7 +171,10 @@ const activeLinkableMarkdownDocuments = computed(() => {
 const agentIndexLinkableMarkdownDocuments = computed(() => {
   return documentStore.getLinkableMarkdownDocuments(documentStore.agentIndexPath);
 });
+const activeLinkableConversations = computed(() => buildLinkableConversations(documentStore.activeAgentKey));
+const agentIndexLinkableConversations = computed(() => buildLinkableConversations(documentStore.activeAgentKey));
 const isWorkspaceSelectionReady = ref(false);
+const openConversationRequest = ref<OpenConversationRequest | null>(null);
 const selectedOwnerNode = computed<ContextNode | null>(() => {
   if (documentStore.selectedNodePath === '/' && documentStore.activeAgent) {
     return {
@@ -261,6 +272,25 @@ async function onOpenDocumentLink(path: string): Promise<void> {
   documentStore.setMiddlePaneMode('default');
   documentStore.resetMiddlePaneZoom();
   await syncWorkspaceConversationSelection();
+}
+
+function buildLinkableConversations(agentKey: string | null) {
+  if (!agentKey) {
+    return [];
+  }
+
+  return buildLinkableConversationEntries(chatStore.getConversationsByAgent(agentKey));
+}
+
+async function onOpenConversationLink(target: MarkdownConversationLinkTarget): Promise<void> {
+  if (!documentStore.activeAgentKey) {
+    return;
+  }
+
+  openConversationRequest.value = {
+    conversationId: target.conversationId,
+    nonce: Date.now()
+  };
 }
 
 async function saveSelectedAgentConfig(patch: {

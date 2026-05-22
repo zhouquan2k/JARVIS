@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { enableAutoUnmount, mount } from '@vue/test-utils';
 
 enableAutoUnmount(afterEach);
@@ -40,6 +40,22 @@ vi.mock('../utils/markdownDocument', () => ({
 }));
 
 describe('MarkdownDocumentViewer', () => {
+    beforeEach(() => {
+        createMarkdownEditor.mockReset();
+        destroyMarkdownEditor.mockReset();
+        findResizableMarkdownImageSource.mockReset();
+        normalizeMarkdownViewerContent.mockClear();
+        readMarkdownDocument.mockReset();
+        replaceMarkdownDocument.mockReset();
+        setMarkdownEditorSearchQuery.mockReset();
+        setMarkdownEditorActiveSearchMatchIndex.mockReset();
+        getMarkdownEditorSearchMatchCount.mockReset();
+        scrollToMarkdownEditorSearchMatch.mockReset();
+        captureRenderableMarkdownSelection.mockReset();
+        resolveMarkdownSourceSelection.mockReset();
+        rewriteMarkdownImageRatio.mockReset();
+    });
+
     it('enables soft wrapping in markdown edit mode', async () => {
         const { default: MarkdownDocumentViewer } = await import('./MarkdownDocumentViewer.vue');
         const wrapper = mount(MarkdownDocumentViewer, {
@@ -396,5 +412,58 @@ describe('MarkdownDocumentViewer', () => {
         expect(persistMarkdownImage).toHaveBeenCalledTimes(1);
         expect(insertPastedMarkdownImage).toHaveBeenCalledWith('Intro target', { start: 5, end: 5 }, '![](references/Pasted%20image.png)');
         expect(wrapper.emitted('update:modelValue')?.at(0)).toEqual(['Intro![](references/Pasted%20image.png) target']);
+    });
+
+    it('logs editorView context errors with navigation context while the viewer is tearing down', async () => {
+        let onOpenDocumentLink: ((path: string) => void) | undefined;
+        const consoleDebug = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+        createMarkdownEditor.mockImplementation(async (options: { onOpenDocumentLink?: (path: string) => void }) => {
+            onOpenDocumentLink = options.onOpenDocumentLink;
+            return { content: '[Guide](./next.md)' };
+        });
+
+        const { default: MarkdownDocumentViewer } = await import('./MarkdownDocumentViewer.vue');
+        mount(MarkdownDocumentViewer, {
+            props: {
+                activePath: '/docs/guide.md',
+                activeDocument: {
+                    path: '/docs/guide.md',
+                    mimeType: 'text/markdown',
+                    dataBase64: '',
+                    canWrite: true
+                },
+                modelValue: '[Guide](./next.md)',
+                markdownViewerMode: 'viewer',
+                latestFileChange: null,
+                diffEntries: [],
+                canUndo: false,
+                canRedo: false,
+                middlePaneZoom: 1
+            }
+        });
+
+        await Promise.resolve();
+        await Promise.resolve();
+
+        onOpenDocumentLink?.('/docs/next.md');
+        window.dispatchEvent(new ErrorEvent('error', {
+            message: 'Context "editorView" not found, do you forget to inject it?'
+        }));
+
+        expect(consoleDebug).toHaveBeenCalledWith(
+            '[markdown-viewer] editor-view-context-missing',
+            expect.objectContaining({
+                source: 'error',
+                activePath: '/docs/guide.md',
+                markdownViewerMode: 'viewer',
+                navigatingAway: true,
+                lastNavigationTarget: {
+                    kind: 'document',
+                    path: '/docs/next.md'
+                }
+            })
+        );
+
+        consoleDebug.mockRestore();
     });
 });

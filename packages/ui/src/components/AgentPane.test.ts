@@ -701,4 +701,44 @@ describe('AgentPane', () => {
 
         expect(wrapper.emitted('request-workspace-switch')).toEqual([['/chat']]);
     });
+
+    it('forwards open conversation requests to the conversation panel', async () => {
+        setActivePinia(createPinia());
+        const wrapper = mount(AgentPane, {
+            props: {
+                activeAgent: {
+                    name: 'Docs Agent',
+                    effectiveInstructions: 'Use docs context',
+                    modelProviderName: 'gemini-api',
+                    modelName: 'gemini-2.5-flash',
+                    scopePath: '/docs',
+                    sourcePaths: ['/docs/.agent.json']
+                },
+                activeAgentKey: '/docs/',
+                activePath: '/docs/guide.md',
+                selectedNodePath: '/docs/guide.md',
+                activeDocument: null,
+                showAgentConversationList: false,
+                contextProvider: createPaneContextProvider(),
+                onFileChanged: null,
+                openConversationRequest: {
+                    conversationId: 'conversation-1',
+                    nonce: 1
+                }
+            },
+            global: {
+                stubs: {
+                    AgentConversationPanel: {
+                        props: ['openConversationRequest'],
+                        template: '<div data-testid="agent-conversation-panel-stub" :data-open-conversation-id="openConversationRequest?.conversationId || \'\'" />'
+                    },
+                    NormalChatView: {
+                        template: '<div data-testid="normal-chat-stub" />'
+                    }
+                }
+            }
+        });
+
+        expect(wrapper.get('[data-testid="agent-conversation-panel-stub"]').attributes('data-open-conversation-id')).toBe('conversation-1');
+    });
 });

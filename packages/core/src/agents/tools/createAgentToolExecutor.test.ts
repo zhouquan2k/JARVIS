@@ -79,6 +79,62 @@ describe('createAgentToolExecutor', () => {
         });
     });
 
+    it('lists the current agent root with "." while keeping "/" as the workspace root', async () => {
+        const provider = createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/docs/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/docs' },
+                { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' }
+            ],
+            documents: {
+                '/docs/.agent.json': JSON.stringify({ name: 'Docs Agent' }),
+                '/docs/guide.md': '# Guide'
+            }
+        });
+        const executor = createAgentToolExecutor(createBuiltinWorkspaceToolDefinitions());
+
+        const scopedResult = await executor.execute(
+            {
+                id: 'call-1',
+                name: 'list_directory',
+                arguments: { path: '.' }
+            },
+            {
+                agent,
+                activePath: '/docs/guide.md',
+                contextProvider: provider
+            }
+        );
+
+        expect(scopedResult.isError).toBeUndefined();
+        expect(JSON.parse(scopedResult.result)).toEqual({
+            path: '/docs',
+            entries: [
+                expect.objectContaining({ path: '/docs/.agent.json', kind: 'file' }),
+                expect.objectContaining({ path: '/docs/guide.md', kind: 'file' })
+            ]
+        });
+
+        const rootResult = await executor.execute(
+            {
+                id: 'call-2',
+                name: 'list_directory',
+                arguments: { path: '/' }
+            },
+            {
+                agent,
+                activePath: '/docs/guide.md',
+                contextProvider: provider
+            }
+        );
+
+        expect(rootResult.isError).toBe(true);
+        expect(JSON.parse(rootResult.result)).toEqual({
+            ok: false,
+            error: "Path '/' is outside the current agent scope '/docs'."
+        });
+    });
+
     it('records before/after content for edit tools and rejects missing matches', async () => {
         const provider = createMockContextProvider({
             nodes: [

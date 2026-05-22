@@ -98,6 +98,7 @@ export const zhCNMessages = {
         markdownViewerMode: '渲染',
         markdownEditMode: '源码',
         insertMarkdownLink: '插入文档链接',
+        insertMarkdownConversationLink: '插入会话链接',
         importConversationTitle: '导入会话 {index}',
         noImportableConversationJson: '未识别到可导入的会话 JSON。',
         compareInputPlaceholder: '输入内容，按 Enter 换行，Ctrl/Cmd + Enter 开始对比',

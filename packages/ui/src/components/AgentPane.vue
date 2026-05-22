@@ -9,6 +9,7 @@
       :show-agent-conversation-list="props.showAgentConversationList"
       :context-provider="props.contextProvider"
       :restore-conversation-id="props.restoreConversationId"
+      :open-conversation-request="props.openConversationRequest"
       @request-workspace-switch="emit('request-workspace-switch', $event)"
     />
   </aside>
@@ -20,6 +21,7 @@ import { onBeforeUnmount, watch } from 'vue';
 import type { ChatRoutePath } from '../routes';
 import AgentConversationPanel from './AgentConversationPanel.vue';
 import { useChatStore } from '../store/chat';
+import type { OpenConversationRequest } from '../types/conversationLink';
 
 const props = defineProps<{
   activeAgent?: ResolvedAgentConfig | null;
@@ -32,6 +34,7 @@ const props = defineProps<{
   onFileChanged?: ((change: { path: string; beforeContent: string; afterContent: string; alreadyPersisted?: boolean }) => void | Promise<void>) | null;
   agentResolutionError?: string | null;
   restoreConversationId?: string | null;
+  openConversationRequest?: OpenConversationRequest | null;
 }>();
 const chatStore = useChatStore();
 const emit = defineEmits<{

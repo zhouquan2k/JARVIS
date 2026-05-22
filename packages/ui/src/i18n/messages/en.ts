@@ -98,6 +98,7 @@ export const enMessages = {
         markdownViewerMode: 'Render',
         markdownEditMode: 'Source',
         insertMarkdownLink: 'Insert document link',
+        insertMarkdownConversationLink: 'Insert conversation link',
         importConversationTitle: 'Imported conversation {index}',
         noImportableConversationJson: 'No importable conversation JSON was detected.',
         compareInputPlaceholder: 'Enter text, press Enter for a new line, Ctrl/Cmd + Enter to start comparison',

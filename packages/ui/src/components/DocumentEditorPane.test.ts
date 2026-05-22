@@ -11,6 +11,7 @@ const buildRelativeMarkdownLinkPath = vi.fn((from: string, to: string) => {
     const fromDirectory = from.slice(0, from.lastIndexOf('/') + 1);
     return to.startsWith(fromDirectory) ? to.slice(fromDirectory.length) : to;
 });
+const buildMarkdownConversationLinkHref = vi.fn((conversationId: string) => `chatprism://conversation/${conversationId}`);
 const captureRenderableMarkdownSelection = vi.fn(() => null);
 const findResizableMarkdownImageSource = vi.fn(() => null);
 const insertPastedMarkdownImage = vi.fn((markdown: string, selection: { start: number; end: number }, imageMarkdown: string) => (
@@ -58,6 +59,7 @@ const createObjectURL = vi.fn(() => 'blob:pdf-preview');
 const revokeObjectURL = vi.fn();
 
 vi.mock('../utils/markdownDocument', () => ({
+    buildMarkdownConversationLinkHref,
     buildRelativeMarkdownLinkPath,
     captureRenderableMarkdownSelection,
     createMarkdownEditor,
@@ -155,10 +157,52 @@ describe('DocumentEditorPane', () => {
         await wrapper.vm.$nextTick();
         await wrapper.vm.$nextTick();
 
+        expect(wrapper.get('[data-testid="markdown-insert-link"]').attributes('aria-label')).toBe('Insert document link');
+        expect(wrapper.get('[data-testid="markdown-insert-link"]').html()).toContain('lucide-link-2');
         expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['Read this[reference](reference.md)']);
         expect(wrapper.get('[data-testid="markdown-mode-toggle"]').attributes('aria-pressed')).toBe('true');
         expect(wrapper.find('[data-testid="document-editor-input"]').exists()).toBe(false);
         expect(wrapper.find('[data-testid="markdown-link-picker"]').exists()).toBe(false);
+    });
+
+    it('inserts a conversation markdown link from the chooser', async () => {
+        const { default: DocumentEditorPane } = await import('./DocumentEditorPane.vue');
+        const wrapper = mount(DocumentEditorPane, {
+            props: {
+                activePath: '/docs/guide.md',
+                activeDocument: {
+                    path: '/docs/guide.md',
+                    mimeType: 'text/markdown',
+                    dataBase64: encodeTextDocument('See discussion'),
+                    canWrite: true
+                },
+                activeViewerId: 'text',
+                activePaneMode: 'viewer',
+                modelValue: 'See discussion',
+                linkableConversations: [
+                    { conversationId: 'conversation-1', title: 'Plan review' }
+                ],
+                isSaving: false,
+                isDirty: false,
+                latestFileChange: null,
+                diffEntries: [],
+                canUndo: false,
+                canRedo: false
+            }
+        });
+
+        await wrapper.get('[data-testid="markdown-insert-conversation-link"]').trigger('click');
+        await wrapper.get('[data-testid="markdown-conversation-link-option-conversation-1"]').trigger('click');
+        await wrapper.vm.$nextTick();
+        await wrapper.vm.$nextTick();
+        await wrapper.vm.$nextTick();
+
+        expect(wrapper.get('[data-testid="markdown-insert-conversation-link"]').attributes('aria-label')).toBe('Insert conversation link');
+        expect(wrapper.get('[data-testid="markdown-insert-conversation-link"]').html()).toContain('lucide-message-square-quote');
+        expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([
+            'See discussion[Plan review](chatprism://conversation/conversation-1)'
+        ]);
+        expect(wrapper.find('[data-testid="markdown-conversation-link-picker"]').exists()).toBe(false);
     });
 
     it('creates a Milkdown-backed editor and emits markdown updates', async () => {

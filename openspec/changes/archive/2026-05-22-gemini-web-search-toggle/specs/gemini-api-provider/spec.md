@@ -1,5 +1,3 @@
-English | [Chinese](spec.zh-CN.md)
-
 ## MODIFIED Requirements
 
 ### Requirement: Implementation of Gemini API via SSE

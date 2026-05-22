@@ -19,6 +19,16 @@ const mocks = vi.hoisted(() => {
             updateState: ReturnType<typeof vi.fn>;
         };
         readonly editor: { action: ReturnType<typeof vi.fn> };
+        readonly setReadonly: ReturnType<typeof vi.fn>;
+        injectedEditorView = true;
+        readonly listenerManager: {
+            listeners: {
+                markdownUpdated: Array<(ctx: unknown, markdown: string, prevMarkdown: string) => void>;
+                destroy: Array<(ctx: unknown) => void>;
+            };
+            markdownUpdated: (fn: (ctx: unknown, markdown: string, prevMarkdown: string) => void) => void;
+            destroy: (fn: (ctx: unknown) => void) => void;
+        };
         private markdown = '';
 
         constructor(options: Record<string, any>) {
@@ -37,16 +47,33 @@ const mocks = vi.hoisted(() => {
                 updateState: vi.fn()
             };
             this.editor = {
-                action: vi.fn((callback: (ctx: { get: (slice: symbol) => typeof this.mockView }) => void) => {
+                action: vi.fn((callback: (ctx: { get: (slice: symbol) => typeof this.mockView; isInjected: (slice: symbol) => boolean }) => void) => {
                     callback({
+                        isInjected: () => this.injectedEditorView,
                         get: () => this.mockView
                     });
                 })
             };
+            this.setReadonly = vi.fn();
+            const markdownUpdated: Array<(ctx: unknown, markdown: string, prevMarkdown: string) => void> = [];
+            const destroy: Array<(ctx: unknown) => void> = [];
+            this.listenerManager = {
+                listeners: {
+                    markdownUpdated,
+                    destroy
+                },
+                markdownUpdated: (fn) => {
+                    markdownUpdated.push(fn);
+                },
+                destroy: (fn) => {
+                    destroy.push(fn);
+                }
+            };
             crepeInstances.push(this);
         }
 
-        on() {
+        on(fn?: (listener: MockCrepe['listenerManager']) => void) {
+            fn?.(this.listenerManager);
             return this;
         }
 
@@ -55,6 +82,7 @@ const mocks = vi.hoisted(() => {
         }
 
         async destroy() {
+            this.listenerManager.listeners.destroy.forEach((fn) => fn({}));
             return undefined;
         }
 
@@ -144,6 +172,44 @@ describe('markdownDocument', () => {
         expect(createMarkdownBlockRenderConfig('edit').enabledFeatures.table).toBe(false);
         expect(resolveMarkdownBlockRenderer('edit', 'table').name).toBe('source');
         expect(readMarkdownDocument(editor)).toBe(content);
+    });
+
+    it('keeps placeholders disabled only for viewer mode without forcing the editor readonly', async () => {
+        const { createMarkdownBlockRenderConfig, createMarkdownEditor } = await import('./markdownDocument');
+        const root = document.createElement('div');
+
+        await createMarkdownEditor({
+            root,
+            content: '# Viewer',
+            mode: 'viewer',
+            documentPath: '/notes/viewer.md',
+            onChange: vi.fn()
+        });
+
+        const viewerInstance = mocks.crepeInstances.at(-1);
+        expect(viewerInstance?.setReadonly).not.toHaveBeenCalled();
+        expect(createMarkdownBlockRenderConfig('viewer').enabledFeatures.placeholder).toBe(false);
+        expect(createMarkdownBlockRenderConfig('edit').enabledFeatures.placeholder).toBe(true);
+    });
+
+    it('removes markdownUpdated listeners before editor destroy to avoid late serialization after teardown', async () => {
+        const { createMarkdownEditor, destroyMarkdownEditor } = await import('./markdownDocument');
+        const root = document.createElement('div');
+
+        const editor = await createMarkdownEditor({
+            root,
+            content: '# Viewer',
+            mode: 'viewer',
+            documentPath: '/notes/viewer.md',
+            onChange: vi.fn()
+        });
+
+        const crepeInstance = mocks.crepeInstances.at(-1);
+        expect(crepeInstance?.listenerManager.listeners.markdownUpdated).toHaveLength(1);
+
+        await destroyMarkdownEditor(editor);
+
+        expect(crepeInstance?.listenerManager.listeners.markdownUpdated).toHaveLength(0);
     });
 
     it('wires Mermaid preview only in viewer mode', async () => {
@@ -289,6 +355,17 @@ describe('markdownDocument', () => {
             '{"label":"report","candidates":["./report.pdf"],"showLink":false}',
             '```'
         ].join('\n'));
+    });
+
+    it('builds and parses conversation-only markdown hrefs', async () => {
+        const { buildMarkdownConversationLinkHref, resolveMarkdownConversationLinkTarget } = await import('./markdownDocument');
+
+        expect(buildMarkdownConversationLinkHref('conversation 1')).toBe('chatprism://conversation/conversation%201');
+        expect(resolveMarkdownConversationLinkTarget('chatprism://conversation/conversation%201')).toEqual({
+            conversationId: 'conversation 1'
+        });
+        expect(resolveMarkdownConversationLinkTarget('chatprism://conversation/')).toBeNull();
+        expect(resolveMarkdownConversationLinkTarget('./guide.md')).toBeNull();
     });
 
     it('opens viewer links without relying on contenteditable default navigation', async () => {
@@ -547,5 +624,34 @@ describe('markdownDocument', () => {
 
         scrollToMarkdownEditorSearchMatch(editor, 1);
         expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' });
+    });
+
+    it('skips editor-view dependent search helpers when editorView context is not injected', async () => {
+        const {
+            createMarkdownEditor,
+            getMarkdownEditorSearchMatchCount,
+            scrollToMarkdownEditorSearchMatch,
+            setMarkdownEditorActiveSearchMatchIndex,
+            setMarkdownEditorSearchQuery
+        } = await import('./markdownDocument');
+        const root = document.createElement('div');
+
+        const editor = await createMarkdownEditor({
+            root,
+            content: 'Alpha beta Alpha',
+            mode: 'viewer',
+            documentPath: '/notes/search-missing-view.md',
+            onChange: vi.fn()
+        });
+
+        const crepeInstance = mocks.crepeInstances.at(-1);
+        expect(crepeInstance).toBeDefined();
+        crepeInstance!.injectedEditorView = false;
+
+        expect(() => setMarkdownEditorSearchQuery(editor, 'alpha')).not.toThrow();
+        expect(() => setMarkdownEditorActiveSearchMatchIndex(editor, 1)).not.toThrow();
+        expect(() => scrollToMarkdownEditorSearchMatch(editor, 1)).not.toThrow();
+        expect(getMarkdownEditorSearchMatchCount(editor)).toBe(0);
+        expect(crepeInstance?.mockView.updateState).not.toHaveBeenCalled();
     });
 });

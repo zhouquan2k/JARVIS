@@ -72,7 +72,7 @@ function kindLabel(kind: MessageFunctionalPartKind): string {
 
 .message-functional-part {
   max-width: 100%;
-  color: var(--text-muted, #98a2b3);
+  color: var(--text-color, #d7dde7);
 }
 
 .message-functional-part[open] {
@@ -85,7 +85,7 @@ function kindLabel(kind: MessageFunctionalPartKind): string {
   gap: 6px;
   padding: 2px 0;
   cursor: pointer;
-  color: var(--text-muted, #98a2b3);
+  color: var(--text-color, #d7dde7);
   font-size: 12px;
   line-height: 1.4;
   list-style: none;
@@ -107,7 +107,7 @@ function kindLabel(kind: MessageFunctionalPartKind): string {
   flex: 0 0 auto;
   font-size: 12px;
   font-weight: 500;
-  opacity: 0.72;
+  color: color-mix(in srgb, var(--text-color, #d7dde7) 84%, var(--text-muted, #98a2b3));
 }
 
 .message-functional-part__title {
@@ -115,7 +115,7 @@ function kindLabel(kind: MessageFunctionalPartKind): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--text-muted, #98a2b3);
+  color: color-mix(in srgb, var(--text-color, #d7dde7) 88%, var(--text-muted, #98a2b3));
   font-size: 12px;
 }
 
@@ -123,7 +123,7 @@ function kindLabel(kind: MessageFunctionalPartKind): string {
   flex: 0 0 auto;
   font-size: 14px;
   line-height: 1;
-  opacity: 0.72;
+  color: color-mix(in srgb, var(--text-color, #d7dde7) 80%, var(--text-muted, #98a2b3));
   transform: translateY(-1px);
   transition: transform 0.14s ease;
 }
@@ -144,10 +144,9 @@ function kindLabel(kind: MessageFunctionalPartKind): string {
 
 .message-functional-part__label {
   margin-bottom: 3px;
-  color: var(--text-muted, #98a2b3);
+  color: color-mix(in srgb, var(--text-color, #d7dde7) 84%, var(--text-muted, #98a2b3));
   font-size: 11px;
   font-weight: 500;
-  opacity: 0.78;
 }
 
 .message-functional-part__content {
@@ -156,7 +155,7 @@ function kindLabel(kind: MessageFunctionalPartKind): string {
   overflow-x: auto;
   white-space: pre-wrap;
   word-break: break-word;
-  color: color-mix(in srgb, var(--text-color, #1f2937) 82%, var(--text-muted, #98a2b3));
+  color: color-mix(in srgb, var(--text-color, #d7dde7) 90%, var(--text-muted, #98a2b3));
   font-size: 11px;
   font-family: ui-monospace, SFMono-Regular, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace;
   line-height: 1.5;

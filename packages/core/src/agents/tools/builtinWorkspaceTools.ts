@@ -56,6 +56,14 @@ function normalizeOptionalTargetPath(context: AgentToolExecutionContext, value: 
     return normalizeWorkspacePath(value, label);
 }
 
+function resolveListDirectoryPath(context: AgentToolExecutionContext, value: unknown): string {
+    if (value === undefined || value === null || value === '' || value === '.') {
+        return context.agent.scopePath;
+    }
+
+    return normalizeWorkspacePath(value, 'path', { allowRoot: true });
+}
+
 function isPathWithinScope(path: string, scopePath: string): boolean {
     if (scopePath === '/') {
         return true;
@@ -361,19 +369,17 @@ export function createBuiltinWorkspaceToolDefinitions(): AgentToolDefinition[] {
         },
         {
             id: 'list_directory',
-            description: 'List files and directories under a workspace directory.',
+            description: 'List files and directories under a workspace directory. Use "." for the current agent root and "/" for the workspace root when allowed.',
             inputSchema: {
                 type: 'OBJECT',
                 properties: {
-                    path: { type: 'STRING', description: 'Absolute directory path inside the workspace scope.' }
+                    path: { type: 'STRING', description: 'Use "." for the current agent root, or an absolute workspace path such as "/docs".' }
                 }
             },
             async execute(rawArgs, context) {
                 const args = asObject(rawArgs, 'list_directory arguments');
                 const provider = requireContextProvider(context);
-                const path = args.path === undefined
-                    ? context.agent.scopePath
-                    : normalizeWorkspacePath(args.path, 'path', { allowRoot: true });
+                const path = resolveListDirectoryPath(context, args.path);
                 assertPathWithinScope(path, context);
                 const entries = await listDirectoryEntries(provider, path);
                 return serializeDirectoryEntries(path, entries);

@@ -205,25 +205,37 @@ describe('createModelProviderRuntime', () => {
                     id: 'gemini-2.5-flash',
                     name: 'Gemini 2.5 Flash',
                     nameKey: 'model.gemini25Flash',
-                    options: [expect.objectContaining({ key: 'deep_research', type: 'boolean' })]
+                    options: [
+                        expect.objectContaining({ key: 'web_search', type: 'boolean' }),
+                        expect.objectContaining({ key: 'deep_research', type: 'boolean' })
+                    ]
                 },
                 {
                     id: 'gemini-2.0-flash',
                     name: 'Gemini 2.0 Flash',
                     nameKey: 'model.gemini20Flash',
-                    options: [expect.objectContaining({ key: 'deep_research', type: 'boolean' })]
+                    options: [
+                        expect.objectContaining({ key: 'web_search', type: 'boolean' }),
+                        expect.objectContaining({ key: 'deep_research', type: 'boolean' })
+                    ]
                 },
                 {
                     id: 'gemini-pro-latest',
                     name: 'Gemini Pro Latest',
                     nameKey: 'model.geminiProLatest',
-                    options: [expect.objectContaining({ key: 'deep_research', type: 'boolean' })]
+                    options: [
+                        expect.objectContaining({ key: 'web_search', type: 'boolean' }),
+                        expect.objectContaining({ key: 'deep_research', type: 'boolean' })
+                    ]
                 },
                 {
                     id: 'gemini-2.5-pro',
                     name: 'Gemini 2.5 Pro',
                     nameKey: 'model.gemini25Pro',
-                    options: [expect.objectContaining({ key: 'deep_research', type: 'boolean' })]
+                    options: [
+                        expect.objectContaining({ key: 'web_search', type: 'boolean' }),
+                        expect.objectContaining({ key: 'deep_research', type: 'boolean' })
+                    ]
                 }
             ],
             defaultModel: 'gemini-pro-latest'

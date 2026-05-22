@@ -33,9 +33,16 @@ const chatgptOptionDefinitions = [
 
 const geminiOptionDefinitions = [
     {
+        key: 'web_search',
+        label: '联网搜索',
+        type: 'boolean' as const,
+        conflictsWith: ['deep_research']
+    },
+    {
         key: 'deep_research',
         label: 'Deep Research',
-        type: 'boolean' as const
+        type: 'boolean' as const,
+        conflictsWith: ['web_search']
     }
 ];
 
@@ -863,6 +870,37 @@ describe('useChatStore workspace history flow', () => {
         expect((await storage.getAllConversations())[0]?.modelSelection).toEqual({
             providerId: 'mock-provider',
             modelId: 'dynamic-model',
+            modelOptions: { web_search: true },
+            reasoningEffort: 'high'
+        });
+    });
+
+    it('normalizes and persists shared web_search for Gemini-style model definitions', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        store.setProviderModelsResolver(async () => ({
+            models: [
+                { id: 'gemini-dynamic', name: 'Gemini Dynamic', options: geminiOptionDefinitions }
+            ],
+            defaultModel: 'gemini-dynamic'
+        }));
+
+        await store.initializeProviderCatalog(providerCatalog);
+        await store.setCurrentModelProvider('gemini-api');
+        await store.startNewConversation();
+
+        store.setCurrentModelOption('web_search', true);
+        await store.sendMessage('测试 Gemini web search');
+
+        expect(store.currentProviderId).toBe('gemini-api');
+        expect(store.currentModelId).toBe('gemini-dynamic');
+        expect(store.currentModelOptions).toEqual({ web_search: true });
+        expect(provider.optionsUsed[0]?.modelOptions).toEqual({ web_search: true });
+        expect(store.currentConversation?.modelSelection).toEqual({
+            providerId: 'gemini-api',
+            modelId: 'gemini-dynamic',
             modelOptions: { web_search: true },
             reasoningEffort: 'high'
         });

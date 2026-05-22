@@ -34,6 +34,8 @@ type GeminiModelListResponse = {
 type GeminiRequestPart = {
     text?: string;
     thoughtSignature?: string;
+    toolCall?: Record<string, unknown>;
+    toolResponse?: Record<string, unknown>;
     inlineData?: {
         mimeType: string;
         data: string;
@@ -58,6 +60,8 @@ type GeminiRequestContent = {
 type GeminiResponsePart = {
     text?: string;
     thoughtSignature?: string;
+    toolCall?: Record<string, unknown>;
+    toolResponse?: Record<string, unknown>;
     functionCall?: {
         name?: string;
         args?: Record<string, unknown> | string;
@@ -347,6 +351,8 @@ function buildGeminiAgentContents(request: AgentRunRequest) {
             parts: exchange.modelTurn.parts.map((part) => ({
                 text: part.text,
                 thoughtSignature: part.thoughtSignature,
+                toolCall: part.toolCall,
+                toolResponse: part.toolResponse,
                 functionCall: part.functionCall
                     ? {
                         id: part.functionCall.id,
@@ -383,7 +389,7 @@ function buildGeminiSystemInstruction(request: AgentRunRequest): string {
 function buildGeminiRequestTools(input: { modelOptions?: Record<string, boolean>, tools?: AgentToolDeclaration[] }) {
     const declaredTools: Array<Record<string, unknown>> = [];
 
-    if (input.modelOptions?.deep_research === true) {
+    if (input.modelOptions?.web_search === true) {
         declaredTools.push({ googleSearch: {} });
     }
 
@@ -393,6 +399,23 @@ function buildGeminiRequestTools(input: { modelOptions?: Record<string, boolean>
     }
 
     return declaredTools;
+}
+
+function buildGeminiToolConfig(input: { hasFunctionDeclarations: boolean, includeServerSideToolInvocations: boolean }) {
+    if (!input.hasFunctionDeclarations && !input.includeServerSideToolInvocations) {
+        return undefined;
+    }
+
+    return {
+        ...(input.includeServerSideToolInvocations ? { includeServerSideToolInvocations: true } : {}),
+        ...(input.hasFunctionDeclarations
+            ? {
+                functionCallingConfig: {
+                    mode: input.includeServerSideToolInvocations ? 'VALIDATED' : 'AUTO'
+                }
+            }
+            : {})
+    };
 }
 
 function formatGeminiFunctionalPartContent(value: unknown): string {
@@ -451,6 +474,8 @@ async function parseGeminiSse(
                     aggregatedModelParts.push({
                         text: contentPart.text,
                         thoughtSignature: contentPart.thoughtSignature,
+                        toolCall: contentPart.toolCall,
+                        toolResponse: contentPart.toolResponse,
                         functionCall
                     } satisfies AgentResponsePart);
 
@@ -802,12 +827,12 @@ export class GeminiApiProvider implements IAgentCapableProvider {
         }
 
         const functionDeclarations = buildGeminiFunctionDeclarations(request.tools);
-        if (functionDeclarations.length > 0) {
-            payload.toolConfig = {
-                functionCallingConfig: {
-                    mode: 'AUTO'
-                }
-            };
+        const toolConfig = buildGeminiToolConfig({
+            hasFunctionDeclarations: functionDeclarations.length > 0,
+            includeServerSideToolInvocations: request.modelOptions?.web_search === true
+        });
+        if (toolConfig) {
+            payload.toolConfig = toolConfig;
         }
 
         const response = await fetch(url, {

@@ -198,6 +198,58 @@ test('web knowledge workspace inserts internal markdown links from the editor UI
   }
 });
 
+test('web knowledge workspace inserts conversation links and opens the requested conversation without replacing the document', async ({ page, request }, testInfo) => {
+  const baseName = `playwright-conversation-link-${testInfo.workerIndex}-${Date.now()}`;
+  const sourceVirtualPath = `/${baseName}.md`;
+  const sourceDiskPath = path.join(knowledgeFixtureRoot, `${baseName}.md`);
+
+  await writeFile(sourceDiskPath, 'See notes', 'utf8');
+
+  try {
+    await page.goto('/#/');
+    await expect(page.getByTestId('document-workspace')).toBeVisible();
+
+    await page.locator(`[data-path="${sourceVirtualPath}"]`).click();
+    await page.getByTestId('agent-conversation-list-plus').click();
+    await expect(page.getByTestId('normal-input')).toBeVisible();
+    await page.getByTestId('normal-input').fill('Conversation link target');
+    await page.getByTestId('normal-send').click();
+    await expect(page.getByTestId('agent-conversation-title')).toContainText('Conversation link target');
+    await page.getByTestId('agent-conversation-back').click();
+    await expect(page.getByTestId('agent-document-conversation-item')).toContainText('Conversation link target');
+
+    await page.locator('[data-testid="document-editor-surface"] .ProseMirror p').evaluate(() => {
+      const paragraph = document.querySelector('[data-testid="document-editor-surface"] .ProseMirror p');
+      const textNode = paragraph?.firstChild;
+      if (!textNode) {
+        return;
+      }
+
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.setStart(textNode, 4);
+      range.setEnd(textNode, 9);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    });
+    await page.getByTestId('markdown-insert-conversation-link').click();
+    await page.locator('[data-testid^="markdown-conversation-link-option-"]').first().click();
+    await expect(page.getByTestId('markdown-mode-toggle')).toHaveAttribute('aria-pressed', 'true');
+    await page.getByTestId('document-save').click();
+
+    await expect.poll(async () => readContextText(request, sourceVirtualPath)).toMatch(
+      /\[notes\]\(chatprism:\/\/conversation\/[A-Za-z0-9._%-]+\)/
+    );
+
+    await page.getByRole('link', { name: 'notes' }).click();
+    await expect(page.getByTestId('agent-conversation-title')).toContainText('Conversation link target');
+    await expect(page.getByTestId('document-editor-title')).toContainText(baseName);
+    await expect(page.locator(`[data-path="${sourceVirtualPath}"]`)).toHaveClass(/active/);
+  } finally {
+    await rm(sourceDiskPath, { force: true });
+  }
+});
+
 test('web knowledge workspace resizes local markdown images from viewer mode and does not rewrite remote or ambiguous sources', async ({ page, request }, testInfo) => {
   const baseName = `playwright-resize-${testInfo.workerIndex}-${Date.now()}`;
   const resizableVirtualPath = `/${baseName}.md`;
