@@ -304,6 +304,18 @@ function getAgentConfigPath(ownerPath: string): string {
     return normalizedOwnerPath === '/' ? '/.agent.json' : `${normalizedOwnerPath}/.agent.json`;
 }
 
+function buildDefaultAgentConfig(ownerPath: string): Record<string, unknown> {
+    const normalizedOwnerPath = normalizeDocumentPath(ownerPath);
+    const folderName = normalizedOwnerPath === '/'
+        ? 'Root'
+        : normalizedOwnerPath.split('/').filter(Boolean).pop() ?? 'Agent';
+
+    return {
+        ...DEFAULT_SCOPED_AGENT_CONFIG,
+        name: `${folderName} Agent`
+    };
+}
+
 function parseJsonObject(content: string, path: string): Record<string, unknown> {
     let parsed: unknown;
 
@@ -1284,6 +1296,66 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             clearActiveDocumentState(this);
             this.syncActiveFileChange(null);
             this.syncActiveAgent(createdNode.path);
+        },
+
+        async convertDirectoryToAgent(ownerPath: string) {
+            if (!this.contextProvider) {
+                return;
+            }
+
+            const normalizedOwnerPath = normalizeDocumentPath(ownerPath);
+            if (normalizedOwnerPath === '/') {
+                return;
+            }
+
+            const ownerNode = this.findNodeByPath(normalizedOwnerPath);
+            if (!ownerNode || ownerNode.kind !== 'directory' || ownerNode.isAgentOwner) {
+                return;
+            }
+
+            await this.flushAgentIndexDocument();
+            const tempConfigName = '.agent.json.tmp';
+            const finalConfigPath = getAgentConfigPath(normalizedOwnerPath);
+            const tempConfigPath = normalizedOwnerPath === '/'
+                ? `/${tempConfigName}`
+                : `${normalizedOwnerPath}/${tempConfigName}`;
+            const configDocument = encodeTextDocument(`${JSON.stringify(buildDefaultAgentConfig(normalizedOwnerPath), null, 2)}\n`);
+
+            try {
+                await this.contextProvider.readDocument(finalConfigPath);
+                await this.refreshTree();
+                await this.openNode(normalizedOwnerPath);
+                return;
+            } catch {
+                // Continue creating the config when the final agent file does not exist.
+            }
+
+            let tempConfigExists = false;
+            try {
+                await this.contextProvider.readDocument(tempConfigPath);
+                tempConfigExists = true;
+            } catch {
+                tempConfigExists = false;
+            }
+
+            if (!tempConfigExists) {
+                await this.contextProvider.createNode({
+                    parentPath: normalizedOwnerPath,
+                    name: tempConfigName,
+                    kind: 'file'
+                });
+            }
+            await this.contextProvider.writeDocument({
+                path: tempConfigPath,
+                mimeType: 'application/json',
+                dataBase64: configDocument
+            });
+            await this.contextProvider.renameNode({
+                path: tempConfigPath,
+                name: '.agent.json'
+            });
+            await this.refreshTree();
+            await this.openNode(normalizedOwnerPath);
         },
 
         async deleteNode(path: string) {

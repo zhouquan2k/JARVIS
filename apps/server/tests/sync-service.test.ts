@@ -10,7 +10,10 @@ function createConfig(): ServerConfig {
         port: 8787,
         dbPath: ':memory:',
         isDevelopment: true,
-        corsAllowlist: []
+        corsAllowlist: [],
+        contextBackend: 'local-file',
+        codexCommand: 'codex',
+        codexWorkingDirectory: process.cwd()
     };
 }
 

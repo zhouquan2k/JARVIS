@@ -192,6 +192,28 @@ describe('markdownDocument', () => {
         expect(createMarkdownBlockRenderConfig('edit').enabledFeatures.placeholder).toBe(true);
     });
 
+    it('enables list item checkboxes while keeping the other blocked features unchanged', async () => {
+        const { createMarkdownBlockRenderConfig, createMarkdownEditor } = await import('./markdownDocument');
+        const root = document.createElement('div');
+
+        await createMarkdownEditor({
+            root,
+            content: '- [ ] task',
+            mode: 'edit',
+            documentPath: '/notes/task.md',
+            onChange: vi.fn()
+        });
+
+        const crepeOptions = mocks.crepeInstances.at(-1)?.options;
+        expect(crepeOptions?.features?.['list-item']).toBe(true);
+        expect(createMarkdownBlockRenderConfig('viewer').enabledFeatures['list-item']).toBe(true);
+        expect(createMarkdownBlockRenderConfig('edit').enabledFeatures['list-item']).toBe(true);
+        expect(createMarkdownBlockRenderConfig('viewer').enabledFeatures['block-edit']).toBe(false);
+        expect(createMarkdownBlockRenderConfig('viewer').enabledFeatures.latex).toBe(false);
+        expect(createMarkdownBlockRenderConfig('viewer').enabledFeatures['link-tooltip']).toBe(false);
+        expect(createMarkdownBlockRenderConfig('viewer').enabledFeatures.toolbar).toBe(false);
+    });
+
     it('removes markdownUpdated listeners before editor destroy to avoid late serialization after teardown', async () => {
         const { createMarkdownEditor, destroyMarkdownEditor } = await import('./markdownDocument');
         const root = document.createElement('div');

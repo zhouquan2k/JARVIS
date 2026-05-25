@@ -1,14 +1,19 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import {
+    DESKTOP_CONTEXT_CREATE_TASK_CHANNEL,
     DESKTOP_CONTEXT_CREATE_NODE_CHANNEL,
+    DESKTOP_CONTEXT_DELETE_TASK_CHANNEL,
     DESKTOP_CONTEXT_DELETE_NODE_CHANNEL,
     DESKTOP_CONTEXT_GET_CONVERSATIONS_CHANNEL,
     DESKTOP_CONTEXT_GET_CONTEXT_CHANNEL,
+    DESKTOP_CONTEXT_GET_TASKS_CHANNEL,
     DESKTOP_CONTEXT_GET_PROJECT_DOCUMENTS_CHANNEL,
     DESKTOP_CONTEXT_INITIALIZE_CHANNEL,
     DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL,
     DESKTOP_CONTEXT_RENAME_NODE_CHANNEL,
     DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL,
+    DESKTOP_CONTEXT_SET_TASK_COMPLETED_CHANNEL,
+    DESKTOP_CONTEXT_UPDATE_TASK_CHANNEL,
     DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL
 } from '../shared/contextBridge';
 import {
@@ -34,6 +39,21 @@ contextBridge.exposeInMainWorld('chatprismDesktop', {
     },
     getConversations(query: { documentPath?: string }) {
         return ipcRenderer.invoke(DESKTOP_CONTEXT_GET_CONVERSATIONS_CHANNEL, query);
+    },
+    getTasks(query: { documentPath?: string | null; agentKey?: string | null; completed?: boolean }) {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_GET_TASKS_CHANNEL, query);
+    },
+    createTask(task: Record<string, unknown>) {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_CREATE_TASK_CHANNEL, task);
+    },
+    updateTask(task: Record<string, unknown>) {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_UPDATE_TASK_CHANNEL, task);
+    },
+    deleteTask(taskId: string) {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_DELETE_TASK_CHANNEL, taskId);
+    },
+    setTaskCompleted(taskId: string, completed: boolean) {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_SET_TASK_COMPLETED_CHANNEL, { taskId, completed });
     },
     getProjectDocuments(curNode: string) {
         return ipcRenderer.invoke(DESKTOP_CONTEXT_GET_PROJECT_DOCUMENTS_CHANNEL, curNode);

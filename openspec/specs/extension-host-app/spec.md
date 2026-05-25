@@ -1,4 +1,10 @@
-English | [Chinese](spec.zh-CN.md) ## MODIFIED Requirements ### Requirement: Extension host MUST initialize shared stores with proxy runtime
+English | [Chinese](spec.zh-CN.md)
+
+## Purpose
+Define extension host runtime composition for proxy-backed chat, external history, knowledge workspace, and local sync behavior.
+
+## Requirements
+### Requirement: Extension host MUST initialize shared stores with proxy runtime
 扩展全窗口host MUST 在启动时同时初始化普通聊天、history导入与对比流程所需的 store，并通过 extension runtime 注入可用 Provider、external history provider 注册表与sync存储实现；sync命名空间 MUST 由设置中的 `syncKey` 决定。该 runtime 还 MUST 能support经 Background 代理转发的多模态发送capability，并驱动共享 `conversation-workspace`。 #### Scenario: Host bootstraps runtime and stores on page load
 - **WHEN** 扩展全窗口页面完成初始化
 - **THEN** host MUST 为 `useChatStore` 注入modelresolve器、external history provider 注册表与 `SyncStorageProvider`

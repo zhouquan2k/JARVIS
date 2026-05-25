@@ -1,0 +1,195 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import type { Task } from '../../../core/src/interfaces/ITaskProvider.ts';
+import type { ITaskCalendarSyncService } from './ITaskCalendarSyncService.ts';
+import { FileSystemTaskProvider } from './FileSystemTaskProvider.ts';
+
+const tempRoots: string[] = [];
+
+function createTask(overrides: Partial<Task> = {}): Task {
+    return {
+        id: 'temp-task',
+        title: 'Follow up',
+        notes: '',
+        completed: false,
+        dueAt: null,
+        priority: null,
+        documentPath: '/workspace/guide.md',
+        agentKey: null,
+        createdAt: 0,
+        updatedAt: 0,
+        completedAt: null,
+        calendarProviderId: null,
+        calendarEventId: null,
+        calendarSyncStatus: null,
+        calendarLastSyncedAt: null,
+        calendarLastSyncError: null,
+        ...overrides
+    };
+}
+
+async function createProvider(syncService?: ITaskCalendarSyncService | null) {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-node-task-provider-'));
+    tempRoots.push(rootPath);
+    await mkdir(path.join(rootPath, 'workspace'), { recursive: true });
+
+    return {
+        rootPath,
+        provider: new FileSystemTaskProvider({
+            resolveRootDirectory: async () => rootPath,
+            calendarSyncService: syncService ?? null
+        })
+    };
+}
+
+describe('FileSystemTaskProvider', () => {
+    afterEach(async () => {
+        await Promise.all(tempRoots.map(async (root) => {
+            await rm(root, { recursive: true, force: true });
+        }));
+        tempRoots.length = 0;
+    });
+
+    it('skips sync for non-timed tasks', async () => {
+        const syncService = {
+            syncTask: vi.fn(),
+            deleteTask: vi.fn()
+        } satisfies ITaskCalendarSyncService;
+        const { provider } = await createProvider(syncService);
+
+        const created = await provider.createTask(createTask());
+
+        expect(syncService.syncTask).not.toHaveBeenCalled();
+        expect(created.calendarSyncStatus).toBeNull();
+        expect(created.calendarEventId).toBeNull();
+    });
+
+    it('syncs timed tasks on create and persists sync metadata', async () => {
+        const syncService = {
+            syncTask: vi.fn(async () => ({
+                providerId: 'google-calendar',
+                eventId: 'event-1',
+                syncedAt: 500
+            })),
+            deleteTask: vi.fn(async () => undefined)
+        } satisfies ITaskCalendarSyncService;
+        const { provider, rootPath } = await createProvider(syncService);
+
+        const created = await provider.createTask(createTask({
+            dueAt: new Date('2026-05-24T09:00:00-04:00').getTime()
+        }));
+
+        expect(syncService.syncTask).toHaveBeenCalledTimes(1);
+        expect(created.calendarProviderId).toBe('google-calendar');
+        expect(created.calendarEventId).toBe('event-1');
+        expect(created.calendarSyncStatus).toBe('synced');
+        expect(created.calendarLastSyncedAt).toBe(500);
+        expect(created.calendarLastSyncError).toBeNull();
+
+        const stored = await readFile(path.join(rootPath, '.chatprism', 'tasks.json'), 'utf8');
+        expect(stored).toContain('"calendarEventId": "event-1"');
+        expect(stored).toContain('"calendarSyncStatus": "synced"');
+    });
+
+    it('updates existing synced events on task update', async () => {
+        const syncService = {
+            syncTask: vi.fn(async (task: Task) => ({
+                providerId: 'google-calendar',
+                eventId: task.calendarEventId ?? 'event-created',
+                syncedAt: 900
+            })),
+            deleteTask: vi.fn(async () => undefined)
+        } satisfies ITaskCalendarSyncService;
+        const { provider } = await createProvider(syncService);
+
+        const created = await provider.createTask(createTask({
+            dueAt: new Date('2026-05-24T09:00:00-04:00').getTime(),
+            calendarEventId: 'event-1',
+            calendarProviderId: 'google-calendar'
+        }));
+        const updated = await provider.updateTask({
+            ...created,
+            notes: 'Updated notes'
+        });
+
+        expect(syncService.syncTask).toHaveBeenCalledTimes(2);
+        expect(updated.calendarEventId).toBe('event-1');
+        expect(updated.calendarSyncStatus).toBe('synced');
+        expect(updated.calendarLastSyncedAt).toBe(900);
+    });
+
+    it('persists failed sync state without rolling back the task save', async () => {
+        const syncService = {
+            syncTask: vi.fn(async () => {
+                throw new Error('calendar unavailable');
+            }),
+            deleteTask: vi.fn(async () => undefined)
+        } satisfies ITaskCalendarSyncService;
+        const { provider } = await createProvider(syncService);
+
+        const created = await provider.createTask(createTask({
+            dueAt: new Date('2026-05-24T07:30:00-04:00').getTime()
+        }));
+
+        expect(created.id).toContain('task-');
+        expect(created.calendarProviderId).toBe('google-calendar');
+        expect(created.calendarSyncStatus).toBe('failed');
+        expect(created.calendarLastSyncError).toContain('calendar unavailable');
+
+        await expect(provider.getTasks('/workspace/guide.md', null, false)).resolves.toEqual([
+            expect.objectContaining({
+                id: created.id,
+                calendarSyncStatus: 'failed'
+            })
+        ]);
+    });
+
+    it('deletes synced calendar events when removing a task', async () => {
+        const syncService = {
+            syncTask: vi.fn(async () => ({
+                providerId: 'google-calendar',
+                eventId: 'event-1',
+                syncedAt: 500
+            })),
+            deleteTask: vi.fn(async () => undefined)
+        } satisfies ITaskCalendarSyncService;
+        const { provider } = await createProvider(syncService);
+
+        const created = await provider.createTask(createTask({
+            dueAt: new Date('2026-05-24T09:00:00-04:00').getTime()
+        }));
+
+        await provider.deleteTask(created.id);
+
+        expect(syncService.deleteTask).toHaveBeenCalledWith(expect.objectContaining({
+            id: created.id,
+            calendarEventId: 'event-1'
+        }));
+        await expect(provider.getTasks('/workspace/guide.md', null, false)).resolves.toEqual([]);
+    });
+
+    it('still deletes the local task when calendar event deletion fails', async () => {
+        const syncService = {
+            syncTask: vi.fn(async () => ({
+                providerId: 'google-calendar',
+                eventId: 'event-1',
+                syncedAt: 500
+            })),
+            deleteTask: vi.fn(async () => {
+                throw new Error('calendar delete failed');
+            })
+        } satisfies ITaskCalendarSyncService;
+        const { provider } = await createProvider(syncService);
+
+        const created = await provider.createTask(createTask({
+            dueAt: new Date('2026-05-24T09:00:00-04:00').getTime()
+        }));
+
+        await provider.deleteTask(created.id);
+
+        expect(syncService.deleteTask).toHaveBeenCalledTimes(1);
+        await expect(provider.getTasks('/workspace/guide.md', null, false)).resolves.toEqual([]);
+    });
+});

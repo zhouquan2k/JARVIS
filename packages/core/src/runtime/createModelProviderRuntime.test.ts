@@ -70,6 +70,12 @@ describe('createModelProviderRuntime', () => {
         expect(typeof provider.abort).toBe('function');
     });
 
+    it('exposes chatgpt-codex in supported runtime modes', () => {
+        const runtime = createModelProviderRuntime({ runtimeMode: 'web' });
+        expect(runtime.getProviderCatalog().some((provider) => provider.id === 'chatgpt-codex')).toBe(true);
+        expect(runtime.getProvider('chatgpt-codex').id).toBe('chatgpt-codex');
+    });
+
     it('returns cached instance in default mode', () => {
         const runtime = createModelProviderRuntime({ runtimeMode: 'web' });
         const providerA = runtime.getProvider('gemini-api');
@@ -145,6 +151,83 @@ describe('createModelProviderRuntime', () => {
             credentials: 'include'
         });
         expect(cookieStore.get).not.toHaveBeenCalled();
+    });
+
+    it('passes resolved codex baseUrl into the default chatgpt-codex factory', async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            text: async () => JSON.stringify({ authenticated: true })
+        });
+
+        const runtime = createModelProviderRuntime({
+            runtimeMode: 'web',
+            providerOptionsResolver(providerId) {
+                if (providerId !== 'chatgpt-codex') {
+                    return undefined;
+                }
+
+                return {
+                    baseUrl: 'http://127.0.0.1:8787/api/codex',
+                    requestClient: { fetch: fetchMock }
+                };
+            }
+        });
+
+        await expect(runtime.getProvider('chatgpt-codex').checkAuth()).resolves.toBe(true);
+        expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:8787/api/codex/auth/status', expect.objectContaining({
+            method: 'GET'
+        }));
+    });
+
+    it('falls back to the static auto catalog when chatgpt-codex dynamic models fail', async () => {
+        const runtime = createModelProviderRuntime({
+            runtimeMode: 'web',
+            providerFactory(providerId) {
+                if (providerId !== 'chatgpt-codex') {
+                    return undefined;
+                }
+                return {
+                    id: 'chatgpt-codex',
+                    async getAvailableModels() {
+                        throw new Error('boom');
+                    },
+                    async checkAuth() {
+                        return true;
+                    },
+                    async sendMessage() {
+                        return {
+                            text: 'ok',
+                            conversationId: 'conv',
+                            messageId: 'msg'
+                        };
+                    },
+                    abort() {}
+                };
+            }
+        });
+
+        await expect(runtime.getProviderModels('chatgpt-codex')).resolves.toEqual({
+            models: [
+                {
+                    id: 'auto',
+                    name: 'Auto (Default)',
+                    nameKey: 'model.autoDefault',
+                    options: [
+                        expect.objectContaining({ key: 'web_search', type: 'boolean' }),
+                        expect.objectContaining({ key: 'deep_research', type: 'boolean' })
+                    ]
+                },
+                {
+                    id: 'gpt-5.4',
+                    name: 'gpt-5.4',
+                    options: [
+                        expect.objectContaining({ key: 'web_search', type: 'boolean' }),
+                        expect.objectContaining({ key: 'deep_research', type: 'boolean' })
+                    ]
+                }
+            ],
+            defaultModel: 'auto'
+        });
     });
 
     it('returns provider-driven model catalogs', async () => {

@@ -17,10 +17,13 @@
       示例：`pnpm test -- <spec>`、`pnpm exec playwright test <spec>`
     - 目标范围完整回归测试
       示例：`pnpm test`、`pnpm --filter <pkg> test`、`pnpm exec playwright test`
+  - ui/外观相关验证请参考playwright-interactive skill
+  - 对于 e2e 测试、UI 闭环验证、浏览器侧交互验证，如使用 `playwright_mcp`，必须确保当前会话暴露的是完整工具集，而不是仅有 `snapshot` / `screenshot` / `tabs` / `resize` 一类只读子集；至少应具备 `click` / `type` / `fill` 等交互能力。若当前会话未暴露完整 `playwright_mcp` 工具集，应优先切换到完整工具集，或改用能够完成真实交互闭环验证的等效方式，而不是基于只读子集继续给出不完整结论。
+  - 当任务涉及 e2e、Playwright 失败排查、浏览器侧调试或 flaky 用例修复时，请参考 e2e-debugging skill
   - e2e 是最终验证，原则上不应该使用mock；应尽量覆盖真实运行链路，而不是为了加快测试跳过关键环节。
   - 对关键能力，e2e 不仅要覆盖失败入口，还要覆盖关键恢复路径和最终成功态；如果全自动验证不现实，应补半自动或手动辅助 e2e 来锁定真实链路。
   - 在验证阶段用户报告的问题，在解决完后，需要总结故障原因，包括自动测试未能覆盖的原因，是否需要增加测试用例
   - 对于浏览器插件extension的e2e测试用例，因为codex沙盒的限制，请申请提权运行。
   - MV3 扩展测试需要走 channel: 'chromium'，否则 Playwright 默认的 headless shell 拉不起扩展 service worker。
   - extension e2e测试通过后，请运行pnpm --filter extension build
-  - 当任务涉及 e2e、Playwright 失败排查、浏览器侧调试或 flaky 用例修复时，请参考 [`.codex/skills/e2e-debugging/SKILL.md`](/Users/quanzhou/Workspace/ChatPrism/.codex/skills/e2e-debugging/SKILL.md)。
+  

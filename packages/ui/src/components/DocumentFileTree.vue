@@ -19,6 +19,21 @@
         <button
           type="button"
           class="tree-icon-button"
+          data-testid="document-convert-directory-to-agent"
+          :title="t('shared.convertDirectoryToAgent')"
+          :aria-label="t('shared.convertDirectoryToAgent')"
+          :disabled="!canConvertSelectedDirectoryToAgent"
+          @mouseenter="showTooltip($event, t('shared.convertDirectoryToAgent'))"
+          @mouseleave="hideTooltip"
+          @focus="showTooltip($event, t('shared.convertDirectoryToAgent'))"
+          @blur="hideTooltip"
+          @click="convertSelectedDirectoryToAgent"
+        >
+          <Bot class="tree-icon" :size="18" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          class="tree-icon-button"
           data-testid="document-delete-node"
           :title="t('shared.deleteSelectedNode')"
           :aria-label="t('shared.deleteSelectedNode')"
@@ -166,6 +181,7 @@ const emit = defineEmits<{
   (event: 'open', path: string): void;
   (event: 'toggle-expand', path: string): void;
   (event: 'create', input: { parentPath?: string; name: string; kind: 'file' | 'directory' }): void;
+  (event: 'convert-to-agent', path: string): void;
   (event: 'delete', path: string): void;
   (event: 'rename', input: { path: string; name: string }): void;
   (event: 'refresh'): void;
@@ -207,6 +223,9 @@ const activeNode = computed(() => {
 });
 
 const canDeleteSelectedNode = computed(() => !!activeNode.value);
+const canConvertSelectedDirectoryToAgent = computed(() => {
+  return activeNode.value?.kind === 'directory' && activeNode.value.isAgentOwner !== true;
+});
 
 const tooltipState = reactive({
   text: '',
@@ -330,6 +349,14 @@ function beginDeleteConfirmation() {
   deleteConfirmation.message = activeNode.value.kind === 'directory'
     ? t('shared.confirmDeleteDirectory', { name: activeNode.value.name })
     : t('shared.confirmDeleteFile', { name: activeNode.value.name });
+}
+
+function convertSelectedDirectoryToAgent() {
+  if (!canConvertSelectedDirectoryToAgent.value || !activeNode.value) {
+    return;
+  }
+
+  emit('convert-to-agent', activeNode.value.path);
 }
 
 function confirmDelete() {

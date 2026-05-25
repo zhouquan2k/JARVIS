@@ -4,14 +4,14 @@
     :navigate-to="navigateTo"
     :context-provider="contextProvider"
     :show-history-source-switch="true"
-    :auth-status-override="chatgptAuthStatusOverride"
-    :auth-unavailable-message="chatgptAuthMessage"
-    :auth-recovery-action-label="chatgptAuthRecoveryLabel"
-    :auth-recovery-action-disabled="isLoginActionDisabled('chatgpt-web')"
+    :auth-status-override="primaryAuthStatusOverride"
+    :auth-unavailable-message="primaryAuthMessage"
+    :auth-recovery-action-label="primaryAuthRecoveryLabel"
+    :auth-recovery-action-disabled="primaryAuthRecoveryDisabled"
     :host-recovery-message="hostRecoveryMessage"
     :host-recovery-action-label="hostRecoveryActionLabel"
     :host-recovery-action-disabled="hostRecoveryActionDisabled"
-    @request-auth-recovery="requestChatGPTLogin"
+    @request-auth-recovery="requestPrimaryAuthRecovery"
     @request-host-recovery="requestGeminiHistoryLogin"
   />
 </template>
@@ -25,6 +25,7 @@ import {
   useCompareStore,
   WorkspaceHostApp
 } from '@packages/ui';
+import { resolveCodexBaseUrl } from '@packages/core/src';
 import { currentRoute, navigateTo } from './router';
 import { createDesktopContextProvider } from './context/createDesktopContextProvider';
 import { agentRuntime, createDesktopHistoryProviders, modelProviderRuntime } from './modelProviderRuntime';
@@ -33,9 +34,10 @@ import { createDesktopSyncStorageProvider } from './sync';
 const chatStore = useChatStore();
 const compareStore = useCompareStore();
 const historyProviders = createDesktopHistoryProviders();
-type LoginProviderId = 'chatgpt-web' | 'gemini-web';
+type LoginProviderId = 'chatgpt-web' | 'gemini-web' | 'chatgpt-codex';
 const contextProvider = createDesktopContextProvider();
 const chatgptAuthStatus = ref<boolean | null>(null);
+const codexAuthStatus = ref<boolean | null>(null);
 const openingProviderLoginId = ref<LoginProviderId | null>(null);
 const acknowledgedProviderLoginId = ref<LoginProviderId | null>(null);
 let removeLoginWindowClosedListener: (() => void) | null = null;
@@ -48,6 +50,9 @@ let geminiCompletedRefreshInFlight = false;
 let removeUnhandledErrorFallback: (() => void) | null = null;
 const GEMINI_LOGIN_REFRESH_MAX_ATTEMPTS = 4;
 const GEMINI_LOGIN_REFRESH_RETRY_DELAY_MS = 1200;
+const codexBaseUrl = resolveCodexBaseUrl({
+  env: import.meta.env as Record<string, string | undefined>
+});
 
 function isLoginOpening(providerId: LoginProviderId) {
   return openingProviderLoginId.value === providerId;
@@ -61,10 +66,32 @@ function isLoginActionDisabled(providerId: LoginProviderId) {
   return isLoginOpening(providerId);
 }
 
-const chatgptAuthStatusOverride = computed(() => {
-  return chatStore.currentProviderId === 'chatgpt-web' ? chatgptAuthStatus.value : null;
+const primaryAuthStatusOverride = computed(() => {
+  if (chatStore.currentProviderId === 'chatgpt-web') {
+    return chatgptAuthStatus.value;
+  }
+
+  if (chatStore.currentProviderId === 'chatgpt-codex') {
+    return codexAuthStatus.value;
+  }
+
+  return null;
 });
-const chatgptAuthMessage = computed(() => {
+const primaryAuthMessage = computed(() => {
+  if (chatStore.currentProviderId === 'chatgpt-codex') {
+    if (isLoginOpening('chatgpt-codex')) {
+      return 'Opening the Codex sign-in flow...';
+    }
+
+    if (isLoginAcknowledged('chatgpt-codex')) {
+      return 'A Codex sign-in flow was requested. If nothing opened, check your browser or pop-up settings.';
+    }
+
+    return primaryAuthStatusOverride.value === false
+      ? 'The Codex provider is unavailable until sign-in completes.'
+      : '';
+  }
+
   if (isLoginOpening('chatgpt-web')) {
     return 'Opening the ChatGPT sign-in window...';
   }
@@ -73,20 +100,39 @@ const chatgptAuthMessage = computed(() => {
     return 'A ChatGPT sign-in window was requested. If you do not see it, check the current desktop, Dock, or switch spaces.';
   }
 
-  return chatgptAuthStatusOverride.value === false
+  return primaryAuthStatusOverride.value === false
     ? 'The desktop host ChatGPT sign-in state is unavailable. Please sign in before continuing.'
     : '';
 });
-const chatgptAuthRecoveryLabel = computed(() => {
+const primaryAuthRecoveryLabel = computed(() => {
+  if (chatStore.currentProviderId === 'chatgpt-codex') {
+    if (isLoginOpening('chatgpt-codex')) {
+      return 'Opening...';
+    }
+
+    if (primaryAuthStatusOverride.value === false && isLoginAcknowledged('chatgpt-codex')) {
+      return 'Reopen Codex';
+    }
+
+    return primaryAuthStatusOverride.value === false ? 'Sign in to Codex' : '';
+  }
+
   if (isLoginOpening('chatgpt-web')) {
     return 'Opening...';
   }
 
-  if (chatgptAuthStatusOverride.value === false && isLoginAcknowledged('chatgpt-web')) {
+  if (primaryAuthStatusOverride.value === false && isLoginAcknowledged('chatgpt-web')) {
     return 'Reopen ChatGPT';
   }
 
-  return chatgptAuthStatusOverride.value === false ? 'Sign in to ChatGPT' : '';
+  return primaryAuthStatusOverride.value === false ? 'Sign in to ChatGPT' : '';
+});
+const primaryAuthRecoveryDisabled = computed(() => {
+  if (chatStore.currentProviderId === 'chatgpt-codex') {
+    return isLoginActionDisabled('chatgpt-codex');
+  }
+
+  return isLoginActionDisabled('chatgpt-web');
 });
 const hostRecoveryMessage = computed(() => {
   if (
@@ -119,6 +165,11 @@ const hostRecoveryActionLabel = computed(() => {
 const hostRecoveryActionDisabled = computed(() => isLoginActionDisabled('gemini-web'));
 
 async function refreshChatGPTAuthStatus(): Promise<boolean | null> {
+  if (chatStore.currentProviderId === 'chatgpt-codex') {
+    chatgptAuthStatus.value = null;
+    return null;
+  }
+
   if (chatStore.currentProviderId !== 'chatgpt-web') {
     chatgptAuthStatus.value = null;
     return null;
@@ -136,6 +187,23 @@ async function refreshChatGPTAuthStatus(): Promise<boolean | null> {
       chatgptAuthStatus.value = false;
     }
     console.warn('Desktop ChatGPT auth refresh failed.', error);
+    return false;
+  }
+}
+
+async function refreshCodexAuthStatus(): Promise<boolean | null> {
+  if (chatStore.currentProviderId !== 'chatgpt-codex') {
+    codexAuthStatus.value = null;
+    return null;
+  }
+
+  try {
+    const isAuthenticated = await chatStore.checkAuth();
+    codexAuthStatus.value = isAuthenticated;
+    return isAuthenticated;
+  } catch (error) {
+    codexAuthStatus.value = false;
+    console.warn('Desktop Codex auth refresh failed.', error);
     return false;
   }
 }
@@ -181,6 +249,69 @@ async function requestProviderLogin(providerId: LoginProviderId): Promise<void> 
 
 async function requestChatGPTLogin(): Promise<void> {
   await requestProviderLogin('chatgpt-web');
+}
+
+async function requestCodexLogin(): Promise<void> {
+  if (chatStore.currentProviderId !== 'chatgpt-codex' || isLoginOpening('chatgpt-codex')) {
+    return;
+  }
+
+  openingProviderLoginId.value = 'chatgpt-codex';
+  acknowledgedProviderLoginId.value = null;
+  if (loginLaunchTimer) {
+    clearTimeout(loginLaunchTimer);
+  }
+  loginLaunchTimer = setTimeout(() => {
+    openingProviderLoginId.value = null;
+    acknowledgedProviderLoginId.value = 'chatgpt-codex';
+  }, 1500);
+
+  try {
+    const response = await fetch(`${codexBaseUrl}/auth/login`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json'
+      },
+      body: '{}'
+    });
+    const payload = await response.json() as { verificationUri?: string; message?: string };
+    if (!response.ok) {
+      throw new Error(payload.message || 'Failed to start Codex login.');
+    }
+
+    if (payload.verificationUri) {
+      window.open(payload.verificationUri, '_blank', 'noopener');
+    }
+
+    openingProviderLoginId.value = null;
+    acknowledgedProviderLoginId.value = 'chatgpt-codex';
+    if (loginLaunchTimer) {
+      clearTimeout(loginLaunchTimer);
+      loginLaunchTimer = null;
+    }
+
+    for (let attempt = 0; attempt < 15; attempt += 1) {
+      await waitForGeminiRefreshRetry(1000);
+      if (await refreshCodexAuthStatus()) {
+        await chatStore.reloadProviderModels('chatgpt-codex');
+        break;
+      }
+    }
+  } catch (error) {
+    openingProviderLoginId.value = null;
+    acknowledgedProviderLoginId.value = 'chatgpt-codex';
+    codexAuthStatus.value = false;
+    console.error('Failed to open chatgpt-codex login flow.', error);
+  }
+}
+
+async function requestPrimaryAuthRecovery(): Promise<void> {
+  if (chatStore.currentProviderId === 'chatgpt-codex') {
+    await requestCodexLogin();
+    return;
+  }
+
+  await requestChatGPTLogin();
 }
 
 async function requestGeminiHistoryLogin(): Promise<void> {
@@ -267,6 +398,7 @@ onMounted(() => {
         await chatStore.initializeProviderCatalog(providerCatalog);
         await chatStore.init();
         await refreshChatGPTAuthStatus();
+        await refreshCodexAuthStatus();
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -335,6 +467,7 @@ onMounted(() => {
 
 watch(() => chatStore.currentProviderId, () => {
   void refreshChatGPTAuthStatus();
+  void refreshCodexAuthStatus();
 });
 
 onBeforeUnmount(() => {

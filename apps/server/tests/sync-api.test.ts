@@ -8,6 +8,9 @@ function createConfig(overrides: Partial<ServerConfig> = {}): ServerConfig {
         dbPath: ':memory:',
         isDevelopment: false,
         corsAllowlist: ['https://chatprism.test'],
+        contextBackend: 'local-file',
+        codexCommand: 'codex',
+        codexWorkingDirectory: process.cwd(),
         ...overrides
     };
 }

@@ -5,6 +5,7 @@ import type {
     ConversationQuery,
     ContextDocument,
     ContextNode,
+    Task,
     ProjectDocumentEntry,
     ContextSearchMatch,
     ContextSearchRequest,
@@ -28,6 +29,11 @@ declare global {
             initializeContextAccess(): Promise<void>;
             getContext(): Promise<WorkspaceContext>;
             getConversations(query: ConversationQuery): Promise<Conversation[]>;
+            getTasks(query: { documentPath?: string | null; agentKey?: string | null; completed?: boolean }): Promise<Task[]>;
+            createTask(task: Task): Promise<Task>;
+            updateTask(task: Task): Promise<Task>;
+            deleteTask(taskId: string): Promise<void>;
+            setTaskCompleted(taskId: string, completed: boolean): Promise<Task>;
             getProjectDocuments(curNode: string): Promise<ProjectDocumentEntry[]>;
             readContextDocument(path: string): Promise<ContextDocument>;
             writeContextDocument(input: WriteContextDocumentInput): Promise<WriteContextDocumentResult>;

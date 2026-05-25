@@ -996,23 +996,94 @@ function requiresMarkdownDocumentPathRebind(content: string): boolean {
   padding-left: 1.35em;
 }
 
-.editor-input :deep(.milkdown .ProseMirror li) {
+.editor-input :deep(.milkdown .ProseMirror .milkdown-list-item-block) {
   margin: 0.12em 0;
-  padding-left: 0.18em;
 }
 
-.editor-input :deep(.milkdown .ProseMirror li > p) {
+.editor-input :deep(.milkdown .ProseMirror .milkdown-list-item-block > .list-item) {
+  display: grid;
+  grid-template-columns: 1.35em minmax(0, 1fr);
+  column-gap: 0.48em;
+  align-items: start;
   margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-.editor-input :deep(.milkdown .ProseMirror li > ul),
-.editor-input :deep(.milkdown .ProseMirror li > ol) {
-  margin-top: 0.2em;
+.editor-input :deep(.milkdown .ProseMirror .milkdown-list-item-block > .list-item::marker) {
+  content: '';
 }
 
-.editor-input :deep(.milkdown .ProseMirror ul li::marker),
-.editor-input :deep(.milkdown .ProseMirror ol li::marker) {
+.editor-input :deep(.milkdown .ProseMirror .milkdown-list-item-block .label-wrapper) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 1.35em;
+  width: 1.35em;
+  min-height: 1.75em;
+  color: rgba(226, 232, 240, 0.8);
+  pointer-events: none;
+}
+
+.editor-input :deep(.milkdown .ProseMirror .milkdown-list-item-block .label-wrapper .label) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1em;
+  height: 1.1em;
+  color: inherit;
+}
+
+.editor-input :deep(.milkdown .ProseMirror .milkdown-list-item-block .label-wrapper .label.bullet) {
   color: rgba(226, 232, 240, 0.72);
+}
+
+.editor-input :deep(.milkdown .ProseMirror .milkdown-list-item-block .label-wrapper .label.ordered) {
+  width: auto;
+  height: auto;
+  font-size: 0.95em;
+  font-variant-numeric: tabular-nums;
+}
+
+.editor-input :deep(.milkdown .ProseMirror .milkdown-list-item-block .label-wrapper .label.unchecked),
+.editor-input :deep(.milkdown .ProseMirror .milkdown-list-item-block .label-wrapper .label.checked) {
+  width: 1.15em;
+  height: 1.15em;
+  border-radius: 0.22em;
+  color: rgba(226, 232, 240, 0.92);
+  background: rgba(15, 23, 42, 0.82);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.34);
+}
+
+.editor-input :deep(.milkdown .ProseMirror .milkdown-list-item-block .label-wrapper .label.checked) {
+  color: #7dd3fc;
+  box-shadow: inset 0 0 0 1px rgba(125, 211, 252, 0.44);
+}
+
+.editor-input :deep(.milkdown .ProseMirror .milkdown-list-item-block .label-wrapper .label svg) {
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
+}
+
+.editor-input :deep(.milkdown .ProseMirror .milkdown-list-item-block .children) {
+  min-width: 0;
+}
+
+.editor-input :deep(.milkdown .ProseMirror .milkdown-list-item-block .children > .content-dom) {
+  min-width: 0;
+}
+
+.editor-input :deep(.milkdown .ProseMirror .milkdown-list-item-block .children > .content-dom > p) {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  min-height: 1.75em;
+}
+
+.editor-input :deep(.milkdown .ProseMirror .milkdown-list-item-block .children > .content-dom > ul),
+.editor-input :deep(.milkdown .ProseMirror .milkdown-list-item-block .children > .content-dom > ol) {
+  margin-top: 0.2em;
 }
 
 .editor-input :deep(.milkdown .ProseMirror h1),

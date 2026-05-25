@@ -1,6 +1,11 @@
 export const DESKTOP_CONTEXT_INITIALIZE_CHANNEL = 'chatprism:context:initialize';
 export const DESKTOP_CONTEXT_GET_CONTEXT_CHANNEL = 'chatprism:context:get-context';
 export const DESKTOP_CONTEXT_GET_CONVERSATIONS_CHANNEL = 'chatprism:context:get-conversations';
+export const DESKTOP_CONTEXT_GET_TASKS_CHANNEL = 'chatprism:context:get-tasks';
+export const DESKTOP_CONTEXT_CREATE_TASK_CHANNEL = 'chatprism:context:create-task';
+export const DESKTOP_CONTEXT_UPDATE_TASK_CHANNEL = 'chatprism:context:update-task';
+export const DESKTOP_CONTEXT_DELETE_TASK_CHANNEL = 'chatprism:context:delete-task';
+export const DESKTOP_CONTEXT_SET_TASK_COMPLETED_CHANNEL = 'chatprism:context:set-task-completed';
 export const DESKTOP_CONTEXT_GET_PROJECT_DOCUMENTS_CHANNEL = 'chatprism:context:get-project-documents';
 export const DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL = 'chatprism:context:read-document';
 export const DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL = 'chatprism:context:write-document';

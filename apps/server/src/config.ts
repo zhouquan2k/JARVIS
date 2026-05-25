@@ -8,6 +8,8 @@ export interface ServerConfig {
     corsAllowlist: string[];
     knowledgeRoot?: string;
     contextBackend: 'local-file' | 'database';
+    codexCommand: string;
+    codexWorkingDirectory: string;
 }
 
 const SERVER_ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -43,6 +45,8 @@ export function resolveServerConfig(env: NodeJS.ProcessEnv = process.env): Serve
         isDevelopment: env.NODE_ENV !== 'production',
         corsAllowlist: parseAllowlist(env.CHATPRISM_SYNC_ALLOWED_ORIGINS),
         knowledgeRoot: env.CHATPRISM_KNOWLEDGE_ROOT?.trim() || undefined,
-        contextBackend: parseContextBackend(env.CHATPRISM_CONTEXT_BACKEND)
+        contextBackend: parseContextBackend(env.CHATPRISM_CONTEXT_BACKEND),
+        codexCommand: env.CHATPRISM_CODEX_COMMAND?.trim() || 'codex',
+        codexWorkingDirectory: env.CHATPRISM_CODEX_CWD?.trim() || process.cwd()
     };
 }

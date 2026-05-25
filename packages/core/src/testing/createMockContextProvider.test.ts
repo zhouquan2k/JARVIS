@@ -71,4 +71,109 @@ describe('createMockContextProvider.getContext', () => {
             { path: '/workspace/guide.md', name: 'guide.md' }
         ]);
     });
+
+    it('filters document-scoped and project-scoped tasks independently', async () => {
+        const provider = createMockContextProvider({
+            nodes: [],
+            documents: {},
+            tasks: [
+                {
+                    id: 'task-doc',
+                    title: 'Document task',
+                    notes: '',
+                    completed: false,
+                    dueAt: null,
+                    priority: null,
+                    documentPath: '/workspace/guide.md',
+                    agentKey: null,
+                    createdAt: 1,
+                    updatedAt: 2,
+                    completedAt: null,
+                    calendarProviderId: null,
+                    calendarEventId: null,
+                    calendarSyncStatus: null,
+                    calendarLastSyncedAt: null,
+                    calendarLastSyncError: null
+                },
+                {
+                    id: 'task-project',
+                    title: 'Project task',
+                    notes: '',
+                    completed: false,
+                    dueAt: null,
+                    priority: 'high',
+                    documentPath: null,
+                    agentKey: '/workspace/',
+                    createdAt: 3,
+                    updatedAt: 4,
+                    completedAt: null,
+                    calendarProviderId: null,
+                    calendarEventId: null,
+                    calendarSyncStatus: null,
+                    calendarLastSyncedAt: null,
+                    calendarLastSyncError: null
+                }
+            ]
+        });
+
+        const taskProvider = provider.getTaskProvider();
+
+        await expect(taskProvider.getTasks('/workspace/guide.md', '/workspace/', false)).resolves.toEqual([
+            expect.objectContaining({ id: 'task-doc' })
+        ]);
+        await expect(taskProvider.getTasks(null, '/workspace/', false)).resolves.toEqual([
+            expect.objectContaining({ id: 'task-project' })
+        ]);
+    });
+
+    it('normalizes task system fields when creating and updating tasks', async () => {
+        const provider = createMockContextProvider({
+            nodes: [],
+            documents: {}
+        });
+        const taskProvider = provider.getTaskProvider();
+
+        const created = await taskProvider.createTask({
+            id: 'temp',
+            title: 'Follow up',
+            notes: 'Initial',
+            completed: false,
+            dueAt: null,
+            priority: 'medium',
+            documentPath: '/docs/guide.md',
+            agentKey: '/docs/',
+            createdAt: 0,
+            updatedAt: 0,
+            completedAt: 123,
+            calendarProviderId: 'google-calendar',
+            calendarEventId: 'event-1',
+            calendarSyncStatus: 'synced',
+            calendarLastSyncedAt: 456,
+            calendarLastSyncError: null
+        });
+
+        expect(created.id).toBe('mock-task-1');
+        expect(created.documentPath).toBe('/docs/guide.md');
+        expect(created.agentKey).toBeNull();
+        expect(created.createdAt).toBeGreaterThan(0);
+        expect(created.updatedAt).toBe(created.createdAt);
+        expect(created.completedAt).toBeNull();
+        expect(created.calendarProviderId).toBe('google-calendar');
+        expect(created.calendarEventId).toBe('event-1');
+        expect(created.calendarSyncStatus).toBe('synced');
+        expect(created.calendarLastSyncedAt).toBe(456);
+        expect(created.calendarLastSyncError).toBeNull();
+
+        const updated = await taskProvider.updateTask({
+            ...created,
+            completed: true,
+            calendarSyncStatus: 'failed',
+            calendarLastSyncError: 'sync failed'
+        });
+
+        expect(updated.updatedAt).toBeGreaterThanOrEqual(created.updatedAt);
+        expect(updated.completedAt).toBeGreaterThan(0);
+        expect(updated.calendarSyncStatus).toBe('failed');
+        expect(updated.calendarLastSyncError).toBe('sync failed');
+    });
 });

@@ -133,7 +133,7 @@ test.describe.serial('agent folder shows index inside AgentView when present', (
 
     await expect.poll(async () => await fs.readFile(docsIndexPath, 'utf8')).toContain('Updated from AgentView editor.');
 
-    await expect(page.getByTestId('agent-pane')).toBeVisible();
+    await expect(page.getByTestId('agent-right-pane')).toBeVisible();
     await expect(page.getByTestId('agent-view')).toContainText('Docs Agent');
   });
 });

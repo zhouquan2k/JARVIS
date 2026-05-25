@@ -1,9 +1,34 @@
 import { describe, expect, it, vi } from 'vitest';
 import { HttpContextService } from '../src/services/httpContextService.js';
 import type { ContextProvider } from '../src/types/context.js';
-import { encodeTextDocument, type Conversation } from '@packages/core/src';
+import { encodeTextDocument, type Conversation, type Task } from '@packages/core/src';
 
 function createProvider(): ContextProvider {
+    const taskProvider = {
+        getTasks: vi.fn(async (): Promise<Task[]> => []),
+        createTask: vi.fn(async (task: Task): Promise<Task> => task),
+        updateTask: vi.fn(async (task: Task): Promise<Task> => task),
+        deleteTask: vi.fn(async () => undefined),
+        setTaskCompleted: vi.fn(async (taskId: string, completed: boolean): Promise<Task> => ({
+            id: taskId,
+            title: 'Task',
+            notes: '',
+            completed,
+            dueAt: null,
+            priority: null,
+            documentPath: null,
+            agentKey: '/',
+            createdAt: 1,
+            updatedAt: 2,
+            completedAt: completed ? 2 : null,
+            calendarProviderId: null,
+            calendarEventId: null,
+            calendarSyncStatus: null,
+            calendarLastSyncedAt: null,
+            calendarLastSyncError: null
+        }))
+    };
+
     return {
         id: 'test-context',
         initializeAccess: vi.fn(async () => undefined),
@@ -20,6 +45,7 @@ function createProvider(): ContextProvider {
             messages: [],
             updatedAt: 100
         }]),
+        getTaskProvider: vi.fn(() => taskProvider),
         getProjectDocuments: vi.fn(async () => [{ path: '/welcome.md', name: 'welcome.md' }]),
         readDocument: vi.fn(async (path: string) => ({ path, mimeType: 'text/markdown', dataBase64: encodeTextDocument('# hello') })),
         writeDocument: vi.fn(async () => ({ version: 'v2', updatedAt: 2 })),
@@ -45,6 +71,7 @@ describe('http context service', () => {
     it('delegates context operations to the injected provider', async () => {
         const provider = createProvider();
         const service = new HttpContextService(provider);
+        const taskProvider = provider.getTaskProvider();
 
         await service.initializeAccess();
         await expect(service.getContext()).resolves.toEqual({
@@ -57,6 +84,7 @@ describe('http context service', () => {
                 documentPaths: ['/welcome.md']
             })
         ]);
+        await expect(service.getTasks('/welcome.md', null, false)).resolves.toEqual([]);
         await expect(service.getProjectDocuments('/')).resolves.toEqual([
             { path: '/welcome.md', name: 'welcome.md' }
         ]);
@@ -96,6 +124,7 @@ describe('http context service', () => {
         expect(provider.initializeAccess).toHaveBeenCalledTimes(1);
         expect(provider.getContext).toHaveBeenCalledTimes(1);
         expect(provider.getConversations).toHaveBeenCalledWith({ documentPath: '/welcome.md' });
+        expect(taskProvider.getTasks).toHaveBeenCalledWith('/welcome.md', null, false);
         expect(provider.getProjectDocuments).toHaveBeenCalledWith('/');
         expect(provider.readDocument).toHaveBeenCalledWith('/welcome.md');
         expect(provider.writeDocument).toHaveBeenCalledWith({

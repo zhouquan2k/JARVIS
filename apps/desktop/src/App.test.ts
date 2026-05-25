@@ -26,6 +26,8 @@ const mockCreateDesktopSyncStorageProvider = vi.fn(() => ({
 }));
 const mockCurrentRoute = ref({ path: '/chat' });
 const workspaceHostCalls = vi.fn();
+const fetchMock = vi.fn();
+const openMock = vi.fn();
 
 const chatStore = reactive({
     currentProviderId: 'chatgpt-web',
@@ -138,6 +140,18 @@ describe('Desktop App auth recovery', () => {
             mockInstallGlobalUnhandledErrorFallback.reportError = reportError;
             return vi.fn();
         });
+        fetchMock.mockResolvedValue({
+            ok: true,
+            json: async () => ({ verificationUri: 'https://chatgpt.com/auth/device' })
+        });
+        vi.stubGlobal('fetch', fetchMock);
+        vi.stubGlobal('open', openMock);
+        vi.stubGlobal('setTimeout', ((handler: TimerHandler) => {
+            if (typeof handler === 'function') {
+                handler();
+            }
+            return 0;
+        }) as typeof setTimeout);
         window.chatprismDesktop = undefined;
     });
 
@@ -166,8 +180,8 @@ describe('Desktop App auth recovery', () => {
         expect(workspace.attributes('data-context-id')).toBe('desktop-context');
         expect(workspace.attributes('data-switch')).toBe('true');
         expect(workspace.attributes('data-auth-status')).toBe('false');
-        expect(workspace.attributes('data-auth-message')).toContain('当前桌面宿主的 ChatGPT 登录态不可用');
-        expect(workspace.attributes('data-auth-label')).toBe('登录 ChatGPT');
+        expect(workspace.attributes('data-auth-message')).toContain('The desktop host ChatGPT sign-in state is unavailable');
+        expect(workspace.attributes('data-auth-label')).toBe('Sign in to ChatGPT');
 
         await workspace.trigger('click');
         expect(openProviderLoginWindow).toHaveBeenCalledWith('chatgpt-web');
@@ -227,11 +241,33 @@ describe('Desktop App auth recovery', () => {
         await flushPromises();
 
         const workspace = wrapper.get('[data-testid="workspace-host-stub"]');
-        expect(workspace.attributes('data-host-message')).toContain('Gemini 登录态不可用');
-        expect(workspace.attributes('data-host-label')).toBe('登录 Gemini');
+        expect(workspace.attributes('data-host-message')).toContain('The desktop host Gemini sign-in state is unavailable');
+        expect(workspace.attributes('data-host-label')).toBe('Sign in to Gemini');
 
         await workspace.trigger('click');
         expect(openProviderLoginWindow).toHaveBeenCalledWith('gemini-web');
+    });
+
+    it('shows the Codex login entry and triggers the server-backed login flow', async () => {
+        chatStore.currentProviderId = 'chatgpt-codex';
+        chatStore.checkAuth = vi.fn().mockResolvedValue(false) as typeof chatStore.checkAuth;
+
+        const { default: App } = await import('./App.vue');
+        const wrapper = mount(App);
+        await flushPromises();
+
+        const workspace = wrapper.get('[data-testid="workspace-auth-stub"]');
+        expect(workspace.attributes('data-auth-status')).toBe('false');
+        expect(workspace.attributes('data-auth-message')).toContain('Codex provider');
+        expect(workspace.attributes('data-auth-label')).toBe('Sign in to Codex');
+
+        chatStore.checkAuth = vi.fn().mockResolvedValue(true) as typeof chatStore.checkAuth;
+        await workspace.trigger('click');
+        await flushPromises();
+        expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/codex/auth/login'), expect.objectContaining({
+            method: 'POST'
+        }));
+        expect(openMock).toHaveBeenCalledWith('https://chatgpt.com/auth/device', '_blank', 'noopener');
     });
 
     it('refreshes Gemini external history after the Gemini login window closes', async () => {

@@ -44,6 +44,7 @@ export const DEFAULT_SYNC_KEY = '0';
 export const SYNC_KEY_STORAGE_KEY = 'chatprism:sync-key';
 export const DEFAULT_SYNC_BASE_URL = 'http://127.0.0.1:8787/api/sync';
 export const DEFAULT_PROVIDER_CONFIG_BASE_URL = 'http://127.0.0.1:8787/api/provider-configs';
+export const DEFAULT_CODEX_BASE_URL = 'http://127.0.0.1:8787/api/codex';
 export const DEFAULT_GEMINI_HISTORY_PAGE_ORIGIN = 'https://gemini.google.com';
 export const DEFAULT_GEMINI_HISTORY_PAGE_URL = `${DEFAULT_GEMINI_HISTORY_PAGE_ORIGIN}/app`;
 export const DEFAULT_GEMINI_HISTORY_CONFIG_STORAGE_KEY = 'chatprism:provider-config:gemini-history';
@@ -60,6 +61,10 @@ export interface SyncBaseUrlOptions {
 }
 
 export interface ProviderConfigBaseUrlOptions {
+    env?: Record<string, string | undefined>;
+}
+
+export interface CodexBaseUrlOptions {
     env?: Record<string, string | undefined>;
 }
 
@@ -83,6 +88,11 @@ const PROVIDER_CONFIG_BASE_URL_ENV_KEYS = [
     'VITE_PROVIDER_CONFIG_BASE_URL',
     'WXT_PROVIDER_CONFIG_BASE_URL'
 ] as const;
+const CODEX_BASE_URL_ENV_KEYS = [
+    'CHATPRISM_CODEX_BASE_URL',
+    'VITE_CODEX_BASE_URL',
+    'WXT_CODEX_BASE_URL'
+] as const;
 
 const DEFAULT_ANALYZER_PROMPT = [
     'You are a strict evidence extractor for side-by-side model outputs.',
@@ -101,6 +111,68 @@ const DEFAULT_ANALYZER_PROMPT = [
 
 export const APP_CONFIG: { providers: ProviderConfig[]; analyzer: AnalyzerConfig } = {
     providers: [
+        {
+            id: 'chatgpt-codex',
+            name: 'ChatGPT (Codex)',
+            models: [
+                {
+                    id: 'auto',
+                    name: 'Auto (Default)',
+                    nameKey: 'model.autoDefault',
+                    options: [
+                        {
+                            key: 'web_search',
+                            label: 'Web search',
+                            labelKey: 'option.webSearch',
+                            type: 'boolean',
+                            description: 'Allow Codex to use web search for fresh information.',
+                            descriptionKey: 'option.webSearchDescription',
+                            conflictsWith: ['deep_research'],
+                            defaultValue: false
+                        },
+                        {
+                            key: 'deep_research',
+                            label: 'Deep Research',
+                            labelKey: 'option.deepResearch',
+                            type: 'boolean',
+                            description: 'Switch to a heavier research-oriented Codex request.',
+                            descriptionKey: 'option.deepResearchDescription',
+                            conflictsWith: ['web_search'],
+                            defaultValue: false
+                        }
+                    ]
+                },
+                {
+                    id: 'gpt-5.4',
+                    name: 'gpt-5.4',
+                    options: [
+                        {
+                            key: 'web_search',
+                            label: 'Web search',
+                            labelKey: 'option.webSearch',
+                            type: 'boolean',
+                            description: 'Allow Codex to use web search for fresh information.',
+                            descriptionKey: 'option.webSearchDescription',
+                            conflictsWith: ['deep_research'],
+                            defaultValue: false
+                        },
+                        {
+                            key: 'deep_research',
+                            label: 'Deep Research',
+                            labelKey: 'option.deepResearch',
+                            type: 'boolean',
+                            description: 'Switch to a heavier research-oriented Codex request.',
+                            descriptionKey: 'option.deepResearchDescription',
+                            conflictsWith: ['web_search'],
+                            defaultValue: false
+                        }
+                    ]
+                }
+            ],
+            defaultModel: 'auto',
+            preferredDefaultModel: 'gpt-5.4',
+            supportedRuntimeModes: ['extension', 'web', 'desktop']
+        },
         {
             id: 'chatgpt-web',
             name: 'ChatGPT (Web)',
@@ -378,6 +450,26 @@ export function readProviderConfigBaseUrl(options: ProviderConfigBaseUrlOptions 
 
 export function resolveProviderConfigBaseUrl(options: ProviderConfigBaseUrlOptions = {}): string {
     return readProviderConfigBaseUrl(options);
+}
+
+export function readCodexBaseUrl(options: CodexBaseUrlOptions = {}): string {
+    for (const key of CODEX_BASE_URL_ENV_KEYS) {
+        const candidate = normalizeUrl(options.env?.[key]);
+        if (candidate) {
+            return candidate;
+        }
+    }
+
+    const syncBaseUrl = resolveSyncBaseUrl({ env: options.env });
+    if (syncBaseUrl !== DEFAULT_SYNC_BASE_URL && syncBaseUrl.endsWith('/api/sync')) {
+        return `${syncBaseUrl.slice(0, -'/api/sync'.length)}/api/codex`;
+    }
+
+    return DEFAULT_CODEX_BASE_URL;
+}
+
+export function resolveCodexBaseUrl(options: CodexBaseUrlOptions = {}): string {
+    return readCodexBaseUrl(options);
 }
 
 export function resolveGeminiHistoryRuntimeConfig(

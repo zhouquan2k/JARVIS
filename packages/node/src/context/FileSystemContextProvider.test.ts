@@ -235,6 +235,52 @@ describe('FileSystemContextProvider', () => {
         expect(targetStats.isDirectory()).toBe(true);
     });
 
+    it('creates hidden agent config files even though they are not visible in context nodes', async () => {
+        const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-node-hidden-agent-create-'));
+        tempRoots.push(rootPath);
+
+        await mkdir(path.join(rootPath, 'docs'), { recursive: true });
+        const provider = new FileSystemContextProvider({ rootPath });
+
+        const createdNode = await provider.createNode({
+            parentPath: '/docs',
+            name: '.agent.json',
+            kind: 'file'
+        });
+
+        expect(createdNode).toMatchObject({
+            path: '/docs/.agent.json',
+            name: '.agent.json',
+            kind: 'file',
+            parentPath: '/docs',
+            agentKey: '/'
+        });
+        await expect(readFile(path.join(rootPath, 'docs', '.agent.json'), 'utf8')).resolves.toBe('');
+    });
+
+    it('renames a visible file into hidden agent config without requiring context visibility', async () => {
+        const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-node-hidden-agent-rename-'));
+        tempRoots.push(rootPath);
+
+        await mkdir(path.join(rootPath, 'docs'), { recursive: true });
+        await writeFile(path.join(rootPath, 'docs', 'agent-config.json'), '{}\n');
+        const provider = new FileSystemContextProvider({ rootPath });
+
+        const renamedNode = await provider.renameNode({
+            path: '/docs/agent-config.json',
+            name: '.agent.json'
+        });
+
+        expect(renamedNode).toMatchObject({
+            path: '/docs/.agent.json',
+            name: '.agent.json',
+            kind: 'file',
+            parentPath: '/docs',
+            agentKey: '/'
+        });
+        await expect(readFile(path.join(rootPath, 'docs', '.agent.json'), 'utf8')).resolves.toBe('{}\n');
+    });
+
     it('lists markdown documents in the current project scope', async () => {
         const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-node-project-docs-'));
         tempRoots.push(rootPath);
@@ -249,6 +295,120 @@ describe('FileSystemContextProvider', () => {
         await expect(provider.getProjectDocuments('/workspace')).resolves.toEqual([
             { path: '/workspace/archive/history.markdown', name: 'history.markdown' },
             { path: '/workspace/guide.md', name: 'guide.md' }
+        ]);
+    });
+
+    it('persists document-scoped and project-scoped tasks in local task storage', async () => {
+        const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-node-tasks-'));
+        tempRoots.push(rootPath);
+        await mkdir(path.join(rootPath, 'workspace'), { recursive: true });
+        await writeFile(path.join(rootPath, 'workspace', 'guide.md'), '# Guide\n');
+
+        const provider = new FileSystemContextProvider({ rootPath });
+        const taskProvider = provider.getTaskProvider();
+
+        const docTask = await taskProvider.createTask({
+            id: 'temp-doc',
+            title: 'Document task',
+            notes: '',
+            completed: false,
+            dueAt: null,
+            priority: 'medium',
+            documentPath: '/workspace/guide.md',
+            agentKey: '/workspace/',
+            createdAt: 0,
+            updatedAt: 0,
+            completedAt: null,
+            calendarProviderId: null,
+            calendarEventId: null,
+            calendarSyncStatus: null,
+            calendarLastSyncedAt: null,
+            calendarLastSyncError: null
+        });
+        const projectTask = await taskProvider.createTask({
+            id: 'temp-project',
+            title: 'Project task',
+            notes: '',
+            completed: false,
+            dueAt: null,
+            priority: null,
+            documentPath: null,
+            agentKey: '/workspace/',
+            createdAt: 0,
+            updatedAt: 0,
+            completedAt: null,
+            calendarProviderId: null,
+            calendarEventId: null,
+            calendarSyncStatus: null,
+            calendarLastSyncedAt: null,
+            calendarLastSyncError: null
+        });
+
+        await expect(taskProvider.getTasks('/workspace/guide.md', '/workspace/', false)).resolves.toEqual([
+            expect.objectContaining({ id: docTask.id, agentKey: '/workspace/', documentPath: '/workspace/guide.md' })
+        ]);
+        await expect(taskProvider.getTasks(null, '/workspace/', false)).resolves.toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: docTask.id, agentKey: '/workspace/', documentPath: '/workspace/guide.md' }),
+            expect.objectContaining({ id: projectTask.id, agentKey: '/workspace/', documentPath: null })
+        ]));
+
+        const completedTask = await taskProvider.setTaskCompleted(docTask.id, true);
+        expect(completedTask.completedAt).toBeGreaterThan(0);
+
+        const storedTaskFile = await readFile(path.join(rootPath, '.chatprism', 'tasks.json'), 'utf8');
+        expect(storedTaskFile).toContain(docTask.id);
+        expect(storedTaskFile).toContain(projectTask.id);
+    });
+
+    it('does not include child-agent tasks when listing top-level agent tasks', async () => {
+        const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-node-agent-scope-'));
+        tempRoots.push(rootPath);
+        await mkdir(path.join(rootPath, 'workspace', 'child'), { recursive: true });
+        await writeFile(path.join(rootPath, 'workspace', 'guide.md'), '# Guide\n');
+        await writeFile(path.join(rootPath, 'workspace', 'child', 'note.md'), '# Child\n');
+
+        const provider = new FileSystemContextProvider({ rootPath });
+        const taskProvider = provider.getTaskProvider();
+
+        await taskProvider.createTask({
+            id: 'top-doc',
+            title: 'Top document task',
+            notes: '',
+            completed: false,
+            dueAt: null,
+            priority: null,
+            documentPath: '/workspace/guide.md',
+            agentKey: '/workspace/',
+            createdAt: 0,
+            updatedAt: 0,
+            completedAt: null,
+            calendarProviderId: null,
+            calendarEventId: null,
+            calendarSyncStatus: null,
+            calendarLastSyncedAt: null,
+            calendarLastSyncError: null
+        });
+        await taskProvider.createTask({
+            id: 'child-doc',
+            title: 'Child document task',
+            notes: '',
+            completed: false,
+            dueAt: null,
+            priority: null,
+            documentPath: '/workspace/child/note.md',
+            agentKey: '/workspace/child/',
+            createdAt: 0,
+            updatedAt: 0,
+            completedAt: null,
+            calendarProviderId: null,
+            calendarEventId: null,
+            calendarSyncStatus: null,
+            calendarLastSyncedAt: null,
+            calendarLastSyncError: null
+        });
+
+        await expect(taskProvider.getTasks(null, '/workspace/', false)).resolves.toEqual([
+            expect.objectContaining({ title: 'Top document task', agentKey: '/workspace/' })
         ]);
     });
 

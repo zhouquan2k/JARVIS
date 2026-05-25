@@ -2,6 +2,7 @@ import { DEFAULT_SCOPED_AGENT_CONFIG, resolveScopedAgentConfig } from '../agents
 import type { Conversation } from '../interfaces/Conversation';
 import type { ConversationQuery } from '../interfaces/IConversationPersistProvider';
 import { DEFAULT_WORKSPACE_AGENT_KEY } from '../interfaces/IContextProvider';
+import type { Task } from '../interfaces/ITaskProvider';
 import type {
     ContextDocument,
     ContextNode,
@@ -35,6 +36,7 @@ export interface StoredWorkspaceSnapshot {
     nodes: StoredContextNode[];
     documents: Record<string, string | Partial<ContextDocument>>;
     conversations?: Conversation[];
+    tasks?: Task[];
 }
 
 function cloneSnapshot(snapshot: StoredWorkspaceSnapshot): StoredWorkspaceSnapshot {
@@ -60,7 +62,8 @@ function cloneSnapshot(snapshot: StoredWorkspaceSnapshot): StoredWorkspaceSnapsh
                     : undefined,
                 annotations: message.annotations?.map((annotation) => ({ ...annotation }))
             }))
-        }))
+        })),
+        tasks: snapshot.tasks?.map((task) => ({ ...task }))
     };
 }
 
@@ -130,6 +133,40 @@ function readStoredDocument(snapshot: StoredWorkspaceSnapshot, path: string): Co
     };
 }
 
+function cloneTask(task: Task): Task {
+    return { ...task };
+}
+
+function normalizeTaskCalendarState(task: Task): Pick<
+    Task,
+    'calendarProviderId' | 'calendarEventId' | 'calendarSyncStatus' | 'calendarLastSyncedAt' | 'calendarLastSyncError'
+> {
+    return {
+        calendarProviderId: task.calendarProviderId ?? null,
+        calendarEventId: task.calendarEventId ?? null,
+        calendarSyncStatus: task.calendarSyncStatus ?? null,
+        calendarLastSyncedAt: task.calendarLastSyncedAt ?? null,
+        calendarLastSyncError: task.calendarLastSyncError ?? null
+    };
+}
+
+function normalizeTaskScope(documentPath?: string | null, agentKey?: string | null): { documentPath: string | null; agentKey: string | null } {
+    const normalizedDocumentPath = documentPath ? normalizePath(documentPath) ?? null : null;
+    const normalizedAgentKey = agentKey?.trim() ? agentKey.trim() : null;
+
+    if (normalizedDocumentPath) {
+        return {
+            documentPath: normalizedDocumentPath,
+            agentKey: null
+        };
+    }
+
+    return {
+        documentPath: null,
+        agentKey: normalizedAgentKey
+    };
+}
+
 export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): IContextProvider {
     let currentSnapshot = cloneSnapshot(snapshot ?? {
         nodes: [
@@ -142,8 +179,97 @@ export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): I
         documents: {
             '/welcome.md': '# Welcome\n\nMock context provider'
         },
-        conversations: []
+        conversations: [],
+        tasks: []
     });
+
+    let taskSequence = (currentSnapshot.tasks?.length ?? 0) + 1;
+
+    const taskProvider = {
+        async getTasks(documentPath?: string | null, agentKey?: string | null, completed?: boolean): Promise<Task[]> {
+            const scope = normalizeTaskScope(documentPath, agentKey);
+            return (currentSnapshot.tasks ?? [])
+                .filter((task) => {
+                    if (scope.documentPath !== null) {
+                        if (task.documentPath !== scope.documentPath) {
+                            return false;
+                        }
+                    } else if ((scope.agentKey ?? null) !== (task.agentKey ?? null)) {
+                        return false;
+                    }
+
+                    if (typeof completed === 'boolean' && task.completed !== completed) {
+                        return false;
+                    }
+
+                    return true;
+                })
+                .map(cloneTask)
+                .sort((left, right) => right.updatedAt - left.updatedAt);
+        },
+        async createTask(task: Task): Promise<Task> {
+            const now = Date.now();
+            const scope = normalizeTaskScope(task.documentPath, task.agentKey);
+            const normalized: Task = {
+                ...cloneTask(task),
+                ...scope,
+                ...normalizeTaskCalendarState(task),
+                id: `mock-task-${taskSequence++}`,
+                notes: task.notes ?? '',
+                dueAt: task.dueAt ?? null,
+                priority: task.priority ?? null,
+                completed: !!task.completed,
+                createdAt: now,
+                updatedAt: now,
+                completedAt: task.completed ? now : null
+            };
+            currentSnapshot.tasks = [...(currentSnapshot.tasks ?? []), normalized];
+            return cloneTask(normalized);
+        },
+        async updateTask(task: Task): Promise<Task> {
+            const scope = normalizeTaskScope(task.documentPath, task.agentKey);
+            const index = (currentSnapshot.tasks ?? []).findIndex((item) => item.id === task.id);
+            if (index < 0) {
+                throw new Error(`Task does not exist: ${task.id}`);
+            }
+
+            const existing = currentSnapshot.tasks![index];
+            const updatedAt = Date.now();
+            const normalized: Task = {
+                ...existing,
+                ...cloneTask(task),
+                ...scope,
+                ...normalizeTaskCalendarState(task),
+                notes: task.notes ?? '',
+                dueAt: task.dueAt ?? null,
+                priority: task.priority ?? null,
+                updatedAt,
+                completedAt: task.completed ? (existing.completedAt ?? updatedAt) : null
+            };
+            currentSnapshot.tasks![index] = normalized;
+            return cloneTask(normalized);
+        },
+        async deleteTask(taskId: string): Promise<void> {
+            currentSnapshot.tasks = (currentSnapshot.tasks ?? []).filter((task) => task.id !== taskId);
+        },
+        async setTaskCompleted(taskId: string, completed: boolean): Promise<Task> {
+            const index = (currentSnapshot.tasks ?? []).findIndex((item) => item.id === taskId);
+            if (index < 0) {
+                throw new Error(`Task does not exist: ${taskId}`);
+            }
+
+            const existing = currentSnapshot.tasks![index];
+            const updatedAt = Date.now();
+            const normalized: Task = {
+                ...existing,
+                completed,
+                updatedAt,
+                completedAt: completed ? updatedAt : null
+            };
+            currentSnapshot.tasks![index] = normalized;
+            return cloneTask(normalized);
+        }
+    };
 
     const provider: IContextProvider = {
         id: 'mock-context',
@@ -253,6 +379,9 @@ export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): I
                     }))
                 }))
                 .sort((left, right) => right.updatedAt - left.updatedAt);
+        },
+        getTaskProvider() {
+            return taskProvider;
         },
         async getProjectDocuments(curNode: string): Promise<ProjectDocumentEntry[]> {
             const normalizedCurNode = normalizePath(curNode) ?? '/';

@@ -3,7 +3,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount } from '@vue/test-utils';
-import type { Conversation, IContextProvider, IConversationPersistProvider, IModelProvider } from '@packages/core/src';
+import type { Conversation, IContextProvider, IConversationPersistProvider, IModelProvider, Task } from '@packages/core/src';
 import AgentConversationPanel from './AgentConversationPanel.vue';
 import { useChatStore } from '../store/chat';
 
@@ -36,6 +36,31 @@ class PanelTestModelProvider implements IModelProvider {
 }
 
 function createContextProvider(conversations: Conversation[] = []): IContextProvider {
+    const taskProvider = {
+        getTasks: vi.fn(async (): Promise<Task[]> => []),
+        createTask: vi.fn(async (task: Task): Promise<Task> => task),
+        updateTask: vi.fn(async (task: Task): Promise<Task> => task),
+        deleteTask: vi.fn(async () => undefined),
+        setTaskCompleted: vi.fn(async (taskId: string, completed: boolean): Promise<Task> => ({
+            id: taskId,
+            title: 'Task',
+            notes: '',
+            completed,
+            dueAt: null,
+            priority: null,
+            documentPath: null,
+            agentKey: '/',
+            createdAt: 1,
+            updatedAt: 2,
+            completedAt: completed ? 2 : null,
+            calendarProviderId: null,
+            calendarEventId: null,
+            calendarSyncStatus: null,
+            calendarLastSyncedAt: null,
+            calendarLastSyncError: null
+        }))
+    };
+
     return {
         id: 'agent-panel-context',
         initializeAccess: vi.fn().mockResolvedValue(undefined),
@@ -43,6 +68,7 @@ function createContextProvider(conversations: Conversation[] = []): IContextProv
         getConversations: vi.fn(async (query: { documentPath?: string }) => conversations.filter((conversation) => (
             query.documentPath ? conversation.documentPaths?.includes(query.documentPath) : true
         ))),
+        getTaskProvider: vi.fn(() => taskProvider),
         getProjectDocuments: vi.fn(async () => [
             { path: '/docs/guide.md', name: 'guide.md' },
             { path: '/docs/reference.md', name: 'reference.md' }

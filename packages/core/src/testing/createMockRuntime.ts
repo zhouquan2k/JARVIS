@@ -26,12 +26,16 @@ export interface CreateMockRuntimeOptions {
 function buildMockProviders(runtimeMode: RuntimeMode): ProviderConfig[] {
     return APP_CONFIG.providers
         .filter((provider) => provider.supportedRuntimeModes.includes(runtimeMode))
-        .map((provider) => ({
-            ...provider,
-            name: provider.name.includes('(Mock)') ? provider.name : `${provider.name} (Mock)`,
-            supportedRuntimeModes: [runtimeMode],
-            models: ensurePreferredDefaultModel(provider).map((model) => ({ ...model }))
-        }));
+        .map((provider) => {
+            const models = ensurePreferredDefaultModel(provider).map((model) => ({ ...model }));
+            return {
+                ...provider,
+                name: provider.name.includes('(Mock)') ? provider.name : `${provider.name} (Mock)`,
+                supportedRuntimeModes: [runtimeMode],
+                models,
+                defaultModel: resolveMockDefaultModel(provider, models)
+            };
+        });
 }
 
 function normalizeModelToken(value: string): string {
@@ -40,6 +44,23 @@ function normalizeModelToken(value: string): string {
 
 function toMockModelId(providerId: string, preferredDefaultModel: string): string {
     return `${providerId}-${normalizeModelToken(preferredDefaultModel) || 'preferred-default'}`;
+}
+
+function resolveMockDefaultModel(provider: ProviderConfig, models: ModelConfig[]): string {
+    const preferredDefaultModel = provider.preferredDefaultModel?.trim();
+    if (!preferredDefaultModel) {
+        return provider.defaultModel;
+    }
+
+    const normalizedPreferred = normalizeModelToken(preferredDefaultModel);
+    const matchedModel = models.find((model) => {
+        return model.id === preferredDefaultModel
+            || model.name === preferredDefaultModel
+            || normalizeModelToken(model.id) === normalizedPreferred
+            || normalizeModelToken(model.name) === normalizedPreferred;
+    });
+
+    return matchedModel?.id || provider.defaultModel;
 }
 
 function ensurePreferredDefaultModel(provider: ProviderConfig): ModelConfig[] {

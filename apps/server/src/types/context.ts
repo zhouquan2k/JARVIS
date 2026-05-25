@@ -5,6 +5,7 @@ export type {
     Conversation,
     ContextDocument,
     ContextNode,
+    Task,
     ProjectDocumentEntry,
     ContextSearchMatch,
     ContextSearchRequest,

@@ -1,25 +1,31 @@
 import { ipcMain } from 'electron';
 import { stat } from 'node:fs/promises';
 import path from 'node:path';
-import { FileSystemContextProvider } from '@packages/node';
+import { FileSystemContextProvider, GoogleCalendarSyncService } from '@packages/node';
 import {
     HttpContextProvider,
     type ConversationQuery,
-    type IConversationQueryProvider,
     type ContextSearchRequest,
+    type IConversationQueryProvider,
     type IContextProvider,
+    type Task,
     type WriteContextDocumentInput
 } from '@packages/core/src';
 import {
+    DESKTOP_CONTEXT_CREATE_TASK_CHANNEL,
     DESKTOP_CONTEXT_CREATE_NODE_CHANNEL,
+    DESKTOP_CONTEXT_DELETE_TASK_CHANNEL,
     DESKTOP_CONTEXT_DELETE_NODE_CHANNEL,
     DESKTOP_CONTEXT_GET_CONVERSATIONS_CHANNEL,
     DESKTOP_CONTEXT_GET_CONTEXT_CHANNEL,
+    DESKTOP_CONTEXT_GET_TASKS_CHANNEL,
     DESKTOP_CONTEXT_GET_PROJECT_DOCUMENTS_CHANNEL,
     DESKTOP_CONTEXT_INITIALIZE_CHANNEL,
     DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL,
     DESKTOP_CONTEXT_RENAME_NODE_CHANNEL,
     DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL,
+    DESKTOP_CONTEXT_SET_TASK_COMPLETED_CHANNEL,
+    DESKTOP_CONTEXT_UPDATE_TASK_CHANNEL,
     DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL
 } from '../shared/contextBridge';
 
@@ -75,7 +81,11 @@ function createDesktopMainContextProvider(options: {
     console.warn('[desktop-context] falling back to local file context provider');
     return new FileSystemContextProvider({
         rootPath: options.workspaceRoot,
-        conversationQueryProvider: options.conversationQueryProvider
+        conversationQueryProvider: options.conversationQueryProvider,
+        taskCalendarSyncService: new GoogleCalendarSyncService({
+            env: process.env,
+            fetchImpl: options.fetchImpl
+        })
     });
 }
 
@@ -96,6 +106,59 @@ export function registerContextIpc(options: RegisterContextIpcOptions = {}) {
     });
     ipc.handle(DESKTOP_CONTEXT_GET_CONVERSATIONS_CHANNEL, async (_event, query: ConversationQuery) => {
         return provider.getConversations(query);
+    });
+    ipc.handle(DESKTOP_CONTEXT_GET_TASKS_CHANNEL, async (_event, query: { documentPath?: string | null; agentKey?: string | null; completed?: boolean }) => {
+        return provider.getTaskProvider().getTasks(query.documentPath, query.agentKey, query.completed);
+    });
+    ipc.handle(DESKTOP_CONTEXT_CREATE_TASK_CHANNEL, async (_event, task: Task) => {
+        console.info('[desktop-context] create task requested', {
+            taskId: task.id,
+            title: task.title,
+            dueAt: task.dueAt
+        });
+        try {
+            const created = await provider.getTaskProvider().createTask(task);
+            console.info('[desktop-context] create task completed', {
+                taskId: created.id,
+                calendarSyncStatus: created.calendarSyncStatus,
+                calendarEventId: created.calendarEventId
+            });
+            return created;
+        } catch (error) {
+            console.error('[desktop-context] create task failed', {
+                taskId: task.id,
+                error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+        }
+    });
+    ipc.handle(DESKTOP_CONTEXT_UPDATE_TASK_CHANNEL, async (_event, task: Task) => {
+        console.info('[desktop-context] update task requested', {
+            taskId: task.id,
+            title: task.title,
+            dueAt: task.dueAt
+        });
+        try {
+            const updated = await provider.getTaskProvider().updateTask(task);
+            console.info('[desktop-context] update task completed', {
+                taskId: updated.id,
+                calendarSyncStatus: updated.calendarSyncStatus,
+                calendarEventId: updated.calendarEventId
+            });
+            return updated;
+        } catch (error) {
+            console.error('[desktop-context] update task failed', {
+                taskId: task.id,
+                error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+        }
+    });
+    ipc.handle(DESKTOP_CONTEXT_DELETE_TASK_CHANNEL, async (_event, taskId: string) => {
+        await provider.getTaskProvider().deleteTask(taskId);
+    });
+    ipc.handle(DESKTOP_CONTEXT_SET_TASK_COMPLETED_CHANNEL, async (_event, payload: { taskId: string; completed: boolean }) => {
+        return provider.getTaskProvider().setTaskCompleted(payload.taskId, payload.completed);
     });
     ipc.handle(DESKTOP_CONTEXT_GET_PROJECT_DOCUMENTS_CHANNEL, async (_event, curNode: string) => {
         return provider.getProjectDocuments(curNode);
@@ -123,6 +186,11 @@ export function registerContextIpc(options: RegisterContextIpcOptions = {}) {
         ipc.removeHandler(DESKTOP_CONTEXT_INITIALIZE_CHANNEL);
         ipc.removeHandler(DESKTOP_CONTEXT_GET_CONTEXT_CHANNEL);
         ipc.removeHandler(DESKTOP_CONTEXT_GET_CONVERSATIONS_CHANNEL);
+        ipc.removeHandler(DESKTOP_CONTEXT_GET_TASKS_CHANNEL);
+        ipc.removeHandler(DESKTOP_CONTEXT_CREATE_TASK_CHANNEL);
+        ipc.removeHandler(DESKTOP_CONTEXT_UPDATE_TASK_CHANNEL);
+        ipc.removeHandler(DESKTOP_CONTEXT_DELETE_TASK_CHANNEL);
+        ipc.removeHandler(DESKTOP_CONTEXT_SET_TASK_COMPLETED_CHANNEL);
         ipc.removeHandler(DESKTOP_CONTEXT_GET_PROJECT_DOCUMENTS_CHANNEL);
         ipc.removeHandler(DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL);
         ipc.removeHandler(DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL);

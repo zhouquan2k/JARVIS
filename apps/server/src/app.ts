@@ -1,13 +1,17 @@
 import { Hono } from 'hono';
 import { FileSystemContextProvider } from '../../../packages/node/src/context/FileSystemContextProvider.ts';
+import { GoogleCalendarSyncService } from '../../../packages/node/src/context/GoogleCalendarSyncService.ts';
 import { createDatabase, type SyncDatabase } from './db.js';
 import { resolveServerConfig, type ServerConfig } from './config.js';
+import { createCodexRouter } from './routes/codex.js';
 import { createContextRouter } from './routes/context.js';
 import { createHealthRouter } from './routes/health.js';
 import { createProviderConfigRouter } from './routes/providerConfigs.js';
 import { createSyncRouter } from './routes/sync.js';
 import { DatabaseContextProvider } from './providers/databaseContextProvider.js';
 import { SyncRepository } from './repositories/syncRepository.js';
+import { CodexAuthService } from './services/codexAuthService.js';
+import { CodexCliService } from './services/codexCliService.js';
 import { HttpContextService } from './services/httpContextService.js';
 import { SyncService } from './services/syncService.js';
 import type { ContextProvider } from './types/context.js';
@@ -23,10 +27,39 @@ function createContextProvider(config: ServerConfig, repository: SyncRepository)
         return new DatabaseContextProvider();
     }
 
+    const clientId = normalizeEnvValue(process.env.CHATPRISM_GOOGLE_CALENDAR_CLIENT_ID);
+    const clientSecret = normalizeEnvValue(process.env.CHATPRISM_GOOGLE_CALENDAR_CLIENT_SECRET);
+    const refreshToken = normalizeEnvValue(process.env.CHATPRISM_GOOGLE_CALENDAR_REFRESH_TOKEN);
+    const calendarId = normalizeEnvValue(process.env.CHATPRISM_GOOGLE_CALENDAR_ID) || 'primary';
+    const hasCalendarSyncConfig = Boolean(
+        clientId
+        && clientSecret
+        && refreshToken
+    );
+    console.info('[sync-server] creating local-file context provider', {
+        knowledgeRoot: config.knowledgeRoot,
+        calendarSyncEnabled: hasCalendarSyncConfig,
+        calendarId
+    });
+
     return new FileSystemContextProvider({
         rootPath: config.knowledgeRoot,
-        conversationQueryProvider: repository
+        conversationQueryProvider: repository,
+        taskCalendarSyncService: hasCalendarSyncConfig
+            ? new GoogleCalendarSyncService({
+                env: process.env,
+                fetchImpl: fetch
+            })
+            : null
     });
+}
+
+function normalizeEnvValue(value: string | undefined): string | undefined {
+    const trimmed = value?.trim();
+    if (!trimmed || trimmed === 'undefined') {
+        return undefined;
+    }
+    return trimmed;
 }
 
 export function createApp(options: CreateAppOptions = {}) {
@@ -36,6 +69,14 @@ export function createApp(options: CreateAppOptions = {}) {
     const contextProvider = options.contextProvider ?? createContextProvider(config, repository);
     const service = new SyncService(repository);
     const contextService = new HttpContextService(contextProvider);
+    const codexAuthService = new CodexAuthService({
+        command: config.codexCommand,
+        cwd: config.codexWorkingDirectory
+    });
+    const codexCliService = new CodexCliService({
+        command: config.codexCommand,
+        cwd: config.codexWorkingDirectory
+    });
     const app = new Hono();
 
     app.use('*', async (c, next) => {
@@ -64,6 +105,11 @@ export function createApp(options: CreateAppOptions = {}) {
     });
 
     app.route('/health', createHealthRouter());
+    app.route('/api/codex', createCodexRouter({
+        authService: codexAuthService,
+        cliService: codexCliService,
+        config
+    }));
     app.route('/api/context', createContextRouter({ service: contextService, config }));
     app.route('/api/provider-configs', createProviderConfigRouter());
     app.route('/api/sync', createSyncRouter({ service, config }));

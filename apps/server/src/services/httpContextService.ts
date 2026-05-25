@@ -1,4 +1,4 @@
-import type { Conversation, ConversationQuery } from '@packages/core';
+import type { Conversation, ConversationQuery, Task } from '@packages/core';
 import type {
     ContextDocument,
     ContextNode,
@@ -26,6 +26,26 @@ export class HttpContextService {
 
     async getConversations(query: ConversationQuery): Promise<Conversation[]> {
         return this.provider.getConversations(query);
+    }
+
+    async getTasks(documentPath?: string | null, agentKey?: string | null, completed?: boolean): Promise<Task[]> {
+        return this.provider.getTaskProvider().getTasks(documentPath, agentKey, completed);
+    }
+
+    async createTask(task: Task): Promise<Task> {
+        return this.provider.getTaskProvider().createTask(task);
+    }
+
+    async updateTask(task: Task): Promise<Task> {
+        return this.provider.getTaskProvider().updateTask(task);
+    }
+
+    async deleteTask(taskId: string): Promise<void> {
+        await this.provider.getTaskProvider().deleteTask(taskId);
+    }
+
+    async setTaskCompleted(taskId: string, completed: boolean): Promise<Task> {
+        return this.provider.getTaskProvider().setTaskCompleted(taskId, completed);
     }
 
     async getProjectDocuments(curNode: string): Promise<ProjectDocumentEntry[]> {

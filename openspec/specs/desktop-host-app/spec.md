@@ -1,4 +1,10 @@
-English | [Chinese](spec.zh-CN.md) ## ADDED Requirements ### Requirement: Desktop host MUST initialize shared stores with desktop proxy runtime
+English | [Chinese](spec.zh-CN.md)
+
+## Purpose
+Define desktop host runtime composition for chat, external history, knowledge workspace, login recovery, and top-level workspace switching.
+
+## Requirements
+### Requirement: Desktop host MUST initialize shared stores with desktop proxy runtime
 桌面host MUST 在启动时初始化普通聊天、external history导入与对比流程所需的 store，并通过 desktop runtime 注入可用 Provider、external history provider 注册表与local持久化实现。host前端 MUST 通过桌面代理运行时访问真实 provider，不得在 renderer 中直接执行网页登录请求。 #### Scenario: Host bootstraps desktop runtime on app load
 - **WHEN** 桌面host启动并完成共享工作区初始化
 - **THEN** host MUST 为 `useChatStore` 注入modelresolve器、modeldirectoryresolve器、external history provider 注册表和聊天存储实现

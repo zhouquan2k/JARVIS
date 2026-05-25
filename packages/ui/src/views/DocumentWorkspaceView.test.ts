@@ -72,7 +72,7 @@ describe('DocumentWorkspaceView', () => {
             },
             global: {
                 stubs: {
-                    AgentPane: {
+                    AgentRightPane: {
                         props: ['activeAgent', 'agentResolutionError', 'isResolvingAgent'],
                         template: `
                           <div
@@ -134,7 +134,7 @@ describe('DocumentWorkspaceView', () => {
             },
             global: {
                 stubs: {
-                    AgentPane: {
+                    AgentRightPane: {
                         template: '<div data-testid="agent-pane" />'
                     },
                     AgentView: {
@@ -170,7 +170,7 @@ describe('DocumentWorkspaceView', () => {
             },
             global: {
                 stubs: {
-                    AgentPane: {
+                    AgentRightPane: {
                         template: '<div data-testid="agent-pane" />'
                     },
                     DocumentEditorPane: {
@@ -213,7 +213,7 @@ describe('DocumentWorkspaceView', () => {
             },
             global: {
                 stubs: {
-                    AgentPane: { template: '<div data-testid="agent-pane" />' },
+                    AgentRightPane: { template: '<div data-testid="agent-pane" />' },
                     AgentView: {
                         props: ['indexDocument'],
                         template: '<div data-testid="agent-view-stub" :data-index-path="indexDocument?.path ?? \'\'" />'
@@ -257,7 +257,7 @@ describe('DocumentWorkspaceView', () => {
             },
             global: {
                 stubs: {
-                    AgentPane: {
+                    AgentRightPane: {
                         props: ['showAgentConversationList', 'activeAgentKey'],
                         template: `
                           <div
@@ -317,7 +317,7 @@ describe('DocumentWorkspaceView', () => {
             },
             global: {
                 stubs: {
-                    AgentPane: {
+                    AgentRightPane: {
                         template: '<div data-testid="agent-pane" />'
                     },
                     AgentView: {
@@ -401,7 +401,7 @@ describe('DocumentWorkspaceView', () => {
             },
             global: {
                 stubs: {
-                    AgentPane: {
+                    AgentRightPane: {
                         template: '<button data-testid="agent-pane-switch" @click="$emit(\'request-workspace-switch\', \'/chat\')" />'
                     },
                     DocumentEditorPane: {
@@ -434,7 +434,7 @@ describe('DocumentWorkspaceView', () => {
             },
             global: {
                 stubs: {
-                    AgentPane: {
+                    AgentRightPane: {
                         template: '<div data-testid="agent-pane" />'
                     },
                     DocumentEditorPane: {
@@ -480,7 +480,7 @@ describe('DocumentWorkspaceView', () => {
             },
             global: {
                 stubs: {
-                    AgentPane: {
+                    AgentRightPane: {
                         template: '<div data-testid="agent-pane" />'
                     },
                     DocumentEditorPane: {
@@ -522,7 +522,7 @@ describe('DocumentWorkspaceView', () => {
             },
             global: {
                 stubs: {
-                    AgentPane: {
+                    AgentRightPane: {
                         template: '<div data-testid="agent-pane" />'
                     },
                     AgentView: {
@@ -572,7 +572,7 @@ describe('DocumentWorkspaceView', () => {
             },
             global: {
                 stubs: {
-                    AgentPane: {
+                    AgentRightPane: {
                         props: ['openConversationRequest'],
                         template: '<div data-testid="agent-pane" :data-open-conversation-id="openConversationRequest?.conversationId ?? \'\'" />'
                     },
@@ -663,7 +663,7 @@ describe('DocumentWorkspaceView', () => {
             },
             global: {
                 stubs: {
-                    AgentPane: {
+                    AgentRightPane: {
                         props: ['activeAgent', 'agentResolutionError', 'isResolvingAgent'],
                         template: `
                           <div
@@ -754,6 +754,7 @@ describe('DocumentWorkspaceView', () => {
 
         await flushPromises();
         await wrapper.vm.$nextTick();
+        await wrapper.get('[data-testid="agent-right-pane-tab-conversations"]').trigger('click');
 
         expect(chatStore.currentConversation?.id).toBe('conversation-saved');
         expect(wrapper.get('[data-testid="agent-conversation-title"]').text()).toBe('Saved Chat');
@@ -784,7 +785,7 @@ describe('DocumentWorkspaceView', () => {
             },
             global: {
                 stubs: {
-                    AgentPane: {
+                    AgentRightPane: {
                         props: ['activeAgent', 'agentResolutionError', 'isResolvingAgent'],
                         template: `
                           <div
@@ -851,7 +852,7 @@ describe('DocumentWorkspaceView', () => {
             },
             global: {
                 stubs: {
-                    AgentPane: {
+                    AgentRightPane: {
                         template: '<div data-testid="agent-pane" />'
                     },
                     DocumentEditorPane: {

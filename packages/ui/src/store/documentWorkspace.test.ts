@@ -225,6 +225,82 @@ describe('useDocumentWorkspaceStore', () => {
         expect(store.expandedPaths).toContain('/docs');
     });
 
+    it('converts a plain directory into an agent owner by creating .agent.json', async () => {
+        const provider = createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' }
+            ],
+            documents: {}
+        });
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(provider);
+
+        await store.hydrateWorkspace();
+        await store.convertDirectoryToAgent('/docs');
+
+        const config = await provider.readDocument('/docs/.agent.json');
+        expect(JSON.parse(decodeTextDocument(config.dataBase64))).toMatchObject({
+            ...DEFAULT_SCOPED_AGENT_CONFIG,
+            name: 'docs Agent'
+        });
+        expect(store.selectedNodePath).toBe('/docs');
+        expect(store.activePath).toBeNull();
+        expect(store.isAgentOwnerSelected).toBe(true);
+        expect(store.activeAgent?.name).toBe('docs Agent');
+    });
+
+    it('reuses a leftover .agent.json.tmp when retrying directory conversion', async () => {
+        const provider = createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/docs/.agent.json.tmp', name: '.agent.json.tmp', kind: 'file', parentPath: '/docs' }
+            ],
+            documents: {
+                '/docs/.agent.json.tmp': ''
+            }
+        });
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(provider);
+
+        await store.hydrateWorkspace();
+        await store.convertDirectoryToAgent('/docs');
+
+        const config = await provider.readDocument('/docs/.agent.json');
+        expect(JSON.parse(decodeTextDocument(config.dataBase64))).toMatchObject({
+            ...DEFAULT_SCOPED_AGENT_CONFIG,
+            name: 'docs Agent'
+        });
+        await expect(provider.readDocument('/docs/.agent.json.tmp')).rejects.toThrow();
+        expect(store.isAgentOwnerSelected).toBe(true);
+        expect(store.activeAgent?.name).toBe('docs Agent');
+    });
+
+    it('treats an existing .agent.json as an already converted directory', async () => {
+        const provider = createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory', isAgentOwner: true, agentKey: '/docs/' },
+                { path: '/docs/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/docs' }
+            ],
+            documents: {
+                '/docs/.agent.json': JSON.stringify({
+                    ...DEFAULT_SCOPED_AGENT_CONFIG,
+                    name: 'Existing Docs Agent'
+                })
+            }
+        });
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(provider);
+
+        await store.hydrateWorkspace();
+        await store.convertDirectoryToAgent('/docs');
+
+        const config = await provider.readDocument('/docs/.agent.json');
+        expect(JSON.parse(decodeTextDocument(config.dataBase64))).toMatchObject({
+            name: 'Existing Docs Agent'
+        });
+        expect(store.currentError).toBeNull();
+    });
+
     it('restores a selected agent directory while opening its active document', async () => {
         const store = useDocumentWorkspaceStore();
         store.setContextProvider(createMockContextProvider({

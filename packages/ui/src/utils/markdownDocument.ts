@@ -200,7 +200,7 @@ export function createMarkdownBlockRenderConfig(mode: MarkdownViewerMode): Markd
             [CrepeFeature.ImageBlock]: true,
             [CrepeFeature.Latex]: false,
             [CrepeFeature.LinkTooltip]: false,
-            [CrepeFeature.ListItem]: false,
+            [CrepeFeature.ListItem]: true,
             [CrepeFeature.Placeholder]: mode !== 'viewer',
             [CrepeFeature.Table]: resolveMarkdownBlockRenderer(mode, 'table') === markdownTablePreviewRenderer,
             [CrepeFeature.Toolbar]: false

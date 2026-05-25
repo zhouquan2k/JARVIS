@@ -1,5 +1,5 @@
 import { Hono, type Context } from 'hono';
-import type { ConversationQuery } from '@packages/core';
+import type { ConversationQuery, Task, TaskPriority } from '@packages/core';
 import type { ServerConfig } from '../config.js';
 import { HttpContextService } from '../services/httpContextService.js';
 import type { ContextSearchRequest, CreateContextNodeInput, RenameContextNodeInput, WriteContextDocumentInput } from '../types/context.js';
@@ -76,6 +76,110 @@ function normalizeCurNode(body: Record<string, unknown>): string {
         throw new Error('curNode must not be empty.');
     }
     return value;
+}
+
+function normalizeOptionalBoolean(value: unknown, fieldName: string): boolean | undefined {
+    if (value === undefined || value === null) {
+        return undefined;
+    }
+    if (typeof value !== 'boolean') {
+        throw new Error(`${fieldName} must be a boolean.`);
+    }
+    return value;
+}
+
+function normalizeOptionalTaskScopePath(value: unknown, fieldName: string): string | null | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (value === null || value === '') {
+        return null;
+    }
+    if (typeof value !== 'string') {
+        throw new Error(`${fieldName} must be a string.`);
+    }
+    return value;
+}
+
+function normalizeTaskPriority(value: unknown): TaskPriority | null {
+    if (value === undefined || value === null || value === '') {
+        return null;
+    }
+    if (value === 'low' || value === 'medium' || value === 'high') {
+        return value;
+    }
+    throw new Error('priority must be one of low, medium, or high.');
+}
+
+function normalizeTask(body: Record<string, unknown>): Task {
+    if (typeof body.id !== 'string') {
+        throw new Error('task.id must be a string.');
+    }
+    if (typeof body.title !== 'string' || !body.title.trim()) {
+        throw new Error('task.title must not be empty.');
+    }
+    if (typeof body.notes !== 'string') {
+        throw new Error('task.notes must be a string.');
+    }
+    if (typeof body.completed !== 'boolean') {
+        throw new Error('task.completed must be a boolean.');
+    }
+    if (body.dueAt !== null && body.dueAt !== undefined && (typeof body.dueAt !== 'number' || !Number.isFinite(body.dueAt))) {
+        throw new Error('task.dueAt must be a number or null.');
+    }
+    if (typeof body.createdAt !== 'number' || !Number.isFinite(body.createdAt)) {
+        throw new Error('task.createdAt must be a number.');
+    }
+    if (typeof body.updatedAt !== 'number' || !Number.isFinite(body.updatedAt)) {
+        throw new Error('task.updatedAt must be a number.');
+    }
+    if (body.completedAt !== null && body.completedAt !== undefined && (typeof body.completedAt !== 'number' || !Number.isFinite(body.completedAt))) {
+        throw new Error('task.completedAt must be a number or null.');
+    }
+    if (body.calendarProviderId !== null && body.calendarProviderId !== undefined && typeof body.calendarProviderId !== 'string') {
+        throw new Error('task.calendarProviderId must be a string or null.');
+    }
+    if (body.calendarEventId !== null && body.calendarEventId !== undefined && typeof body.calendarEventId !== 'string') {
+        throw new Error('task.calendarEventId must be a string or null.');
+    }
+    if (body.calendarSyncStatus !== null && body.calendarSyncStatus !== undefined && body.calendarSyncStatus !== 'synced' && body.calendarSyncStatus !== 'failed') {
+        throw new Error('task.calendarSyncStatus must be synced, failed, or null.');
+    }
+    if (body.calendarLastSyncedAt !== null && body.calendarLastSyncedAt !== undefined && (typeof body.calendarLastSyncedAt !== 'number' || !Number.isFinite(body.calendarLastSyncedAt))) {
+        throw new Error('task.calendarLastSyncedAt must be a number or null.');
+    }
+    if (body.calendarLastSyncError !== null && body.calendarLastSyncError !== undefined && typeof body.calendarLastSyncError !== 'string') {
+        throw new Error('task.calendarLastSyncError must be a string or null.');
+    }
+
+    return {
+        id: body.id,
+        title: body.title,
+        notes: body.notes,
+        completed: body.completed,
+        dueAt: typeof body.dueAt === 'number' ? body.dueAt : null,
+        priority: normalizeTaskPriority(body.priority),
+        documentPath: normalizeOptionalTaskScopePath(body.documentPath, 'task.documentPath') ?? null,
+        agentKey: normalizeOptionalTaskScopePath(body.agentKey, 'task.agentKey') ?? null,
+        createdAt: body.createdAt,
+        updatedAt: body.updatedAt,
+        completedAt: typeof body.completedAt === 'number' ? body.completedAt : null,
+        calendarProviderId: typeof body.calendarProviderId === 'string' ? body.calendarProviderId : null,
+        calendarEventId: typeof body.calendarEventId === 'string' ? body.calendarEventId : null,
+        calendarSyncStatus: body.calendarSyncStatus === 'synced' || body.calendarSyncStatus === 'failed'
+            ? body.calendarSyncStatus
+            : null,
+        calendarLastSyncedAt: typeof body.calendarLastSyncedAt === 'number' ? body.calendarLastSyncedAt : null,
+        calendarLastSyncError: typeof body.calendarLastSyncError === 'string' ? body.calendarLastSyncError : null
+    };
+}
+
+function normalizeTaskEnvelope(body: Record<string, unknown>): Task {
+    if (!body.task || typeof body.task !== 'object' || Array.isArray(body.task)) {
+        throw new Error('task must be an object.');
+    }
+
+    return normalizeTask(body.task as Record<string, unknown>);
 }
 
 function normalizeWriteDocumentInput(body: Record<string, unknown>): WriteContextDocumentInput {
@@ -204,6 +308,78 @@ export function createContextRouter(options: { service: HttpContextService; conf
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to read document conversations.';
             return c.json({ error: message, code: 'CONTEXT_GET_CONVERSATIONS_FAILED' }, 400);
+        }
+    });
+
+    app.post('/get-tasks', async (c) => {
+        try {
+            const body = normalizeObjectBody(await readJsonBody(c));
+            return c.json({
+                tasks: await service.getTasks(
+                    normalizeOptionalTaskScopePath(body.documentPath, 'documentPath'),
+                    normalizeOptionalTaskScopePath(body.agentKey, 'agentKey'),
+                    normalizeOptionalBoolean(body.completed, 'completed')
+                )
+            });
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to read tasks.';
+            return c.json({ error: message, code: 'CONTEXT_GET_TASKS_FAILED' }, 400);
+        }
+    });
+
+    app.post('/create-task', async (c) => {
+        try {
+            const body = normalizeObjectBody(await readJsonBody(c));
+            return c.json({ task: await service.createTask(normalizeTaskEnvelope(body)) });
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to create task.';
+            return c.json({ error: message, code: 'CONTEXT_CREATE_TASK_FAILED' }, 400);
+        }
+    });
+
+    app.post('/update-task', async (c) => {
+        try {
+            const body = normalizeObjectBody(await readJsonBody(c));
+            return c.json({ task: await service.updateTask(normalizeTaskEnvelope(body)) });
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to update task.';
+            return c.json({ error: message, code: 'CONTEXT_UPDATE_TASK_FAILED' }, 400);
+        }
+    });
+
+    app.post('/delete-task', async (c) => {
+        try {
+            const body = normalizeObjectBody(await readJsonBody(c));
+            const taskId = body.taskId;
+            if (typeof taskId !== 'string' || !taskId.trim()) {
+                throw new Error('taskId must not be empty.');
+            }
+
+            await service.deleteTask(taskId);
+            return c.json({ ok: true });
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to delete task.';
+            return c.json({ error: message, code: 'CONTEXT_DELETE_TASK_FAILED' }, 400);
+        }
+    });
+
+    app.post('/set-task-completed', async (c) => {
+        try {
+            const body = normalizeObjectBody(await readJsonBody(c));
+            const taskId = body.taskId;
+            if (typeof taskId !== 'string' || !taskId.trim()) {
+                throw new Error('taskId must not be empty.');
+            }
+
+            const completed = normalizeOptionalBoolean(body.completed, 'completed');
+            if (typeof completed !== 'boolean') {
+                throw new Error('completed must be a boolean.');
+            }
+
+            return c.json({ task: await service.setTaskCompleted(taskId, completed) });
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to update task completion.';
+            return c.json({ error: message, code: 'CONTEXT_SET_TASK_COMPLETED_FAILED' }, 400);
         }
     });
 

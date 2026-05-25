@@ -11,3 +11,8 @@ export interface ChatGPTWebProviderOptions {
     cookieStore?: ProviderCookieStore;
     userAgent?: string;
 }
+
+export interface ChatGPTCodexProviderOptions {
+    baseUrl?: string;
+    requestClient?: ProviderRequestClient;
+}

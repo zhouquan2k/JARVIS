@@ -352,11 +352,20 @@ class DeferredHistoryProvider extends MockHistoryProvider {
 }
 
 function createConversationContextProvider(context: WorkspaceContext): IContextProvider {
+    const taskProvider = {
+        getTasks: vi.fn().mockResolvedValue([]),
+        createTask: vi.fn(),
+        updateTask: vi.fn(),
+        deleteTask: vi.fn(),
+        setTaskCompleted: vi.fn()
+    };
+
     return {
         id: 'conversation-context',
         initializeAccess: vi.fn().mockResolvedValue(undefined),
         getContext: vi.fn().mockResolvedValue(context),
         getConversations: vi.fn().mockResolvedValue([]),
+        getTaskProvider: vi.fn(() => taskProvider),
         getProjectDocuments: vi.fn().mockResolvedValue([]),
         readDocument: vi.fn(),
         writeDocument: vi.fn(),

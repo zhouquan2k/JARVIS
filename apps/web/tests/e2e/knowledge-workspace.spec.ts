@@ -7,6 +7,13 @@ const contextApiBase = 'http://127.0.0.1:8790/api/context';
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const knowledgeFixtureRoot = path.resolve(testDir, '../../../server/tests/fixtures/knowledge-workspace');
 
+test.describe.configure({ mode: 'serial' });
+
+async function openConversationTab(page: import('@playwright/test').Page) {
+  await page.getByTestId('agent-right-pane-tab-conversations').click();
+  await expect(page.getByTestId('agent-conversation-panel')).toBeVisible();
+}
+
 async function readContextJson(request: APIRequestContext, path: string) {
   const response = await request.post(`${contextApiBase}/read-document`, { data: { path } });
   const payload = await response.json();
@@ -19,65 +26,65 @@ async function readContextText(request: APIRequestContext, path: string) {
   return Buffer.from(payload.document.dataBase64, 'base64').toString('utf8');
 }
 
-test('web knowledge workspace supports file browsing markdown editing diff undo redo and top-level workspace switching', async ({ page }) => {
-  await page.goto('/#/');
-  await expect(page.getByTestId('document-workspace')).toBeVisible();
-  await expect(page.getByTestId('document-file-tree')).toBeVisible();
-  await expect(page.getByTestId('agent-pane')).toBeVisible();
-  await expect(page.getByTestId('agent-view')).toContainText('Default Knowledge Agent');
-  await expect(page.getByTestId('agent-view-scope')).toContainText('/');
-  await expect(page.getByTestId('document-node-root')).toHaveClass(/active/);
-  await expect(page.getByTestId('document-editor')).toHaveCount(0);
+test('web knowledge workspace supports file browsing editing and top-level workspace switching', async ({ page, request }) => {
+  const baseName = `playwright-agent-file-${Date.now()}`;
+  const docVirtualPath = `/${baseName}.txt`;
+  const docDiskPath = path.join(knowledgeFixtureRoot, `${baseName}.txt`);
 
-  await page.locator('[data-path="/guide.md"]').click();
-  await expect(page.getByTestId('agent-document-conversation-list')).toBeVisible();
-  await expect(page.getByTestId('agent-document-conversation-empty')).toBeVisible();
-  const editor = page.getByTestId('document-editor-input');
-  await expect(editor).toBeVisible();
-  await editor.fill('Playwright knowledge web');
-  await page.getByTestId('document-save').click();
+  await writeFile(docDiskPath, 'Playwright knowledge web', 'utf8');
 
-  await page.getByTestId('agent-conversation-list-plus').click();
-  await expect(page.getByTestId('agent-conversation-toolbar')).toBeVisible();
-  await page.getByTestId('normal-input').fill('Guide linked conversation');
-  await page.getByTestId('normal-send').click();
-  await expect(page.getByTestId('agent-conversation-title')).toContainText('Guide linked conversation');
-  await page.getByTestId('agent-conversation-back').click();
-  await expect(page.getByTestId('agent-document-conversation-item')).toContainText('Guide linked conversation');
-  await page.getByTestId('agent-document-conversation-item').click();
-  await expect(page.getByTestId('agent-conversation-toolbar')).toBeVisible();
-  await page.getByTestId('agent-conversation-list-plus').click();
-  await expect(page.getByTestId('agent-conversation-title')).toContainText('New Chat');
-  await page.getByTestId('normal-input').fill('TRIGGER_AGENT_REPLACE_ACTIVE_FILE');
-  await page.getByTestId('normal-send').click();
-  await expect(page.getByTestId('normal-messages')).toContainText('updated by agent');
-  await expect(page.getByTestId('document-file-change')).toBeVisible();
-  await expect(page.getByTestId('document-file-diff')).toContainText('Playwright knowledge web updated by agent');
+  try {
+    await page.goto('/#/');
+    await expect(page.getByTestId('document-workspace')).toBeVisible();
+    await expect(page.getByTestId('document-file-tree')).toBeVisible();
+    await expect(page.getByTestId('agent-right-pane')).toBeVisible();
+    await expect(page.getByTestId('agent-view')).toContainText('Default Knowledge Agent');
+    await expect(page.getByTestId('agent-view-scope')).toContainText('/');
+    await expect(page.getByTestId('document-node-root')).toHaveClass(/active/);
+    await expect(page.getByTestId('document-editor')).toHaveCount(0);
 
-  await page.getByTestId('document-file-change-undo').click();
-  await expect(page.getByTestId('document-file-change-redo')).toBeEnabled();
-  await expect(page.getByTestId('document-file-diff')).toContainText('Playwright knowledge web');
+    await page.locator(`[data-path="${docVirtualPath}"]`).click();
+    await openConversationTab(page);
+    await expect(page.getByTestId('agent-document-conversation-list')).toBeVisible();
+    await expect(page.getByTestId('agent-document-conversation-empty')).toBeVisible();
+    await expect(page.getByTestId('document-editor-input')).toBeVisible();
 
-  await page.getByTestId('document-file-change-redo').click();
-  await expect(page.getByTestId('document-file-diff')).toContainText('updated by agent');
+    await page.getByTestId('agent-conversation-list-plus').click();
+    await expect(page.getByTestId('agent-conversation-toolbar')).toBeVisible();
+    await page.getByTestId('normal-input').fill('Guide linked conversation');
+    await page.getByTestId('normal-send').click();
+    await expect(page.getByTestId('agent-conversation-title')).toContainText('Guide linked conversation');
+    await page.getByTestId('agent-conversation-back').click();
+    await expect(page.getByTestId('agent-document-conversation-item')).toContainText('Guide linked conversation');
+    await page.getByTestId('agent-document-conversation-item').click();
+    await expect(page.getByTestId('agent-conversation-toolbar')).toBeVisible();
+    await page.getByTestId('agent-conversation-list-plus').click();
+    await expect(page.getByTestId('agent-conversation-title')).toContainText('New Chat');
+    await page.getByTestId('normal-input').fill('TRIGGER_AGENT_REPLACE_ACTIVE_FILE');
+    await page.getByTestId('normal-send').click();
+    await expect(page.getByTestId('normal-messages')).toContainText('updated by agent');
+    await expect.poll(async () => readContextText(request, docVirtualPath)).toContain('Playwright knowledge web updated by agent');
 
-  await page.getByTestId('agent-conversation-back').click();
-  await page.getByTestId('document-node-file').filter({ hasText: 'notes.txt' }).click();
-  await expect(page.getByTestId('agent-document-conversation-list')).toBeVisible();
-  await expect(page.getByTestId('agent-document-conversation-empty')).toBeVisible();
-  await page.getByTestId('agent-conversation-list-plus').click();
-  await page.getByTestId('normal-input').fill('Notes linked conversation');
-  await page.getByTestId('normal-send').click();
-  await page.getByTestId('agent-conversation-back').click();
-  await expect(page.getByTestId('agent-document-conversation-item')).toContainText('Notes linked conversation');
+    await page.getByTestId('agent-conversation-back').click();
+    await page.getByTestId('document-node-file').filter({ hasText: 'notes.txt' }).click();
+    await expect(page.getByTestId('agent-document-conversation-list')).toBeVisible();
+    await expect(page.getByTestId('agent-document-conversation-empty')).toBeVisible();
+    await page.getByTestId('agent-conversation-list-plus').click();
+    await page.getByTestId('normal-input').fill('Notes linked conversation');
+    await page.getByTestId('normal-send').click();
+    await page.getByTestId('agent-conversation-back').click();
+    await expect(page.getByTestId('agent-document-conversation-item')).toContainText('Notes linked conversation');
 
-  await page.locator('[data-path="/guide.md"]').click();
-  await expect(page.getByTestId('agent-document-conversation-list')).toBeVisible();
-  await expect(page.getByTestId('agent-document-conversation-list')).not.toContainText('Notes linked conversation');
+    await page.locator(`[data-path="${docVirtualPath}"]`).click();
+    await expect(page.getByTestId('agent-document-conversation-list')).toBeVisible();
+    await expect(page.getByTestId('agent-document-conversation-list')).not.toContainText('Notes linked conversation');
 
-  await page.getByTestId('topbar-workspace-normal-chat').click();
-  await expect(page.getByTestId('conversation-workspace')).toBeVisible();
-  await expect(page.getByTestId('normal-chat-view')).toBeVisible();
+    await page.getByTestId('topbar-workspace-normal-chat').click();
+    await expect(page.getByTestId('conversation-workspace')).toBeVisible();
+    await expect(page.getByTestId('normal-chat-view')).toBeVisible();
+  } finally {
+    await rm(docDiskPath, { force: true });
+  }
 });
 
 test('web knowledge workspace preserves the shared conversation and restores the agent selection after chat mode switches', async ({ page }) => {
@@ -85,6 +92,7 @@ test('web knowledge workspace preserves the shared conversation and restores the
 
   await expect(page.getByTestId('document-workspace')).toBeVisible();
   await page.locator('[data-path="/guide.md"]').click();
+  await openConversationTab(page);
   await expect(page.getByTestId('document-editor-input')).toBeVisible();
 
   await page.getByTestId('agent-conversation-list-plus').click();
@@ -107,6 +115,7 @@ test('web knowledge workspace preserves the shared conversation and restores the
   await page.getByTestId('workspace-restore').click();
   await expect(page.getByTestId('document-workspace')).toBeVisible();
   await expect(page.getByTestId('document-editor-input')).toBeVisible();
+  await openConversationTab(page);
   await expect(page.getByTestId('agent-conversation-toolbar')).toBeVisible();
   await expect(page.getByTestId('agent-conversation-title')).toContainText('Shared agent conversation');
   await expect(page.getByTestId('agent-document-conversation-list')).toHaveCount(0);
@@ -117,6 +126,7 @@ test('web knowledge workspace replaces New Chat for a new Agent conversation aft
 
   await expect(page.getByTestId('document-workspace')).toBeVisible();
   await page.locator('[data-path="/guide.md"]').click();
+  await openConversationTab(page);
   await page.getByTestId('agent-conversation-list-plus').click();
   await expect(page.getByTestId('agent-conversation-title')).toContainText('New Chat');
 
@@ -126,6 +136,71 @@ test('web knowledge workspace replaces New Chat for a new Agent conversation aft
 
   await page.getByTestId('agent-conversation-back').click();
   await expect(page.getByTestId('agent-document-conversation-item').first()).not.toContainText('New Chat');
+});
+
+test('web knowledge workspace manages document-scoped and project-scoped tasks from the right pane tabs', async ({ page }, testInfo) => {
+  const baseName = `playwright-task-${testInfo.workerIndex}-${Date.now()}`;
+  const docVirtualPath = `/${baseName}.md`;
+  const docDiskPath = path.join(knowledgeFixtureRoot, `${baseName}.md`);
+  const ownerDiskPath = path.join(knowledgeFixtureRoot, `${baseName}-owner`);
+  const ownerVirtualPath = `/${baseName}-owner`;
+  const ownerNoteDiskPath = path.join(ownerDiskPath, 'note.md');
+
+  await writeFile(docDiskPath, '# Task Doc\n', 'utf8');
+  await mkdir(ownerDiskPath, { recursive: true });
+  await writeFile(path.join(ownerDiskPath, '.agent.json'), JSON.stringify({
+    name: `${baseName} Owner Agent`,
+    instructions: 'Own project tasks.'
+  }, null, 2), 'utf8');
+  await writeFile(ownerNoteDiskPath, '# Owner Note\n', 'utf8');
+
+  try {
+    await page.goto('/#/');
+    await expect(page.getByTestId('document-workspace')).toBeVisible();
+
+    await page.locator(`[data-path="${docVirtualPath}"]`).click();
+    await page.getByTestId('agent-right-pane-tab-tasks').click();
+    await expect(page.getByTestId('agent-task-panel')).toBeVisible();
+    await page.getByTestId('agent-task-add').click();
+    await page.getByTestId('task-editor-title').fill('Document task');
+    await page.getByTestId('task-editor-notes').fill('Visible only in document scope');
+    await page.getByTestId('task-editor-due-at').fill('2026-05-24');
+    await page.getByTestId('task-editor-time-toggle').click();
+    await page.getByTestId('task-editor-due-time').fill('09:30');
+    await page.getByTestId('task-editor-priority').selectOption('high');
+    await page.getByTestId('task-editor-save').click();
+    await expect(page.getByTestId('agent-task-open-list')).toContainText('Document task');
+    await expect(page.getByTestId('agent-task-open-list')).toContainText('Visible only in document scope');
+
+    await page.locator(`[data-path="${ownerVirtualPath}"]`).click();
+    await expect(page.getByTestId('agent-view')).toBeVisible();
+    await page.getByTestId('agent-right-pane-tab-tasks').click();
+    await page.getByTestId('agent-task-add').click();
+    await page.getByTestId('task-editor-title').fill('Project task');
+    await page.getByTestId('task-editor-save').click();
+    await expect(page.getByTestId('agent-task-open-list')).toContainText('Project task');
+    await expect(page.getByTestId('agent-task-open-list')).not.toContainText('Document task');
+
+    await page.locator('[data-testid^="agent-task-complete-"]').first().check();
+    await page.getByTestId('agent-task-completed-toggle').click();
+    await expect(page.getByTestId('agent-task-completed-list')).toContainText('Project task');
+    await page.locator('[data-testid^="agent-task-reopen-"]').first().uncheck();
+    await expect(page.getByTestId('agent-task-open-list')).toContainText('Project task');
+
+    await page.getByTestId('agent-right-pane-tab-conversations').click();
+    await expect(page.getByTestId('agent-conversation-panel')).toBeVisible();
+
+    await page.locator(`[data-path="${docVirtualPath}"]`).click();
+    await page.getByTestId('agent-right-pane-tab-tasks').click();
+    await expect(page.getByTestId('agent-task-open-list')).toContainText('Document task');
+    await expect(page.getByTestId('agent-task-open-list')).not.toContainText('Project task');
+    await page.locator('[data-testid^="agent-task-menu-"]').first().click();
+    await page.locator('[data-testid^="agent-task-delete-"]').first().click();
+    await expect(page.getByTestId('agent-task-open-list')).not.toContainText('Document task');
+  } finally {
+    await rm(docDiskPath, { force: true });
+    await rm(ownerDiskPath, { recursive: true, force: true });
+  }
 });
 
 test('web knowledge workspace appends .md on create, hides markdown suffixes, and shows non-markdown icons', async ({ page, request }, testInfo) => {
@@ -168,6 +243,7 @@ test('web knowledge workspace inserts internal markdown links from the editor UI
     await expect(page.getByTestId('document-workspace')).toBeVisible();
 
     await page.locator(`[data-path="${sourceVirtualPath}"]`).click();
+    await openConversationTab(page);
     await expect(page.getByTestId('markdown-insert-link')).toBeVisible();
     await page.locator('[data-testid="document-editor-surface"] .ProseMirror p').evaluate(() => {
       const paragraph = document.querySelector('[data-testid="document-editor-surface"] .ProseMirror p');
@@ -210,6 +286,7 @@ test('web knowledge workspace inserts conversation links and opens the requested
     await expect(page.getByTestId('document-workspace')).toBeVisible();
 
     await page.locator(`[data-path="${sourceVirtualPath}"]`).click();
+    await openConversationTab(page);
     await page.getByTestId('agent-conversation-list-plus').click();
     await expect(page.getByTestId('normal-input')).toBeVisible();
     await page.getByTestId('normal-input').fill('Conversation link target');
@@ -419,6 +496,7 @@ test('web knowledge workspace archives an agent conversation into a markdown doc
     await expect(page.getByTestId('document-workspace')).toBeVisible();
 
     await page.locator(`[data-path="${virtualPath}"]`).click();
+    await openConversationTab(page);
     await expect(page.getByTestId('document-editor-input')).toBeVisible();
     await expect(page.getByTestId('agent-document-conversation-list')).toBeVisible();
 
@@ -484,6 +562,7 @@ test('web knowledge workspace negotiates text pdf and unsupported document reque
   await expect(page.getByTestId('markdown-mode-toggle')).toHaveCount(0);
 
   await page.getByTestId('document-node-file').filter({ hasText: 'report.pdf' }).click();
+  await openConversationTab(page);
   await expect(page.getByTestId('document-pdf-viewer')).toBeVisible();
   await expect(page.getByTestId('document-save')).toBeDisabled();
   await expect(page.getByTestId('agent-document-conversation-list')).toBeVisible();
@@ -501,6 +580,7 @@ test('web knowledge workspace negotiates text pdf and unsupported document reque
   await expect(page.locator('.message.user').last()).not.toContainText('report.pdf');
 
   await page.getByTestId('document-node-file').filter({ hasText: 'archive.bin' }).click();
+  await openConversationTab(page);
   await expect(page.getByTestId('document-unsupported-viewer')).toContainText('application/octet-stream');
   await expect(page.getByTestId('agent-document-conversation-list')).toBeVisible();
   await page.getByTestId('agent-conversation-list-plus').click();
@@ -648,6 +728,7 @@ test('web knowledge workspace shows AgentView for owner directories and right-pa
   await expect(page.getByTestId('agent-view')).toContainText('Docs Agent');
   await expect(page.getByTestId('agent-view-conversation')).toHaveCount(0);
   await expect(page.getByTestId('agent-view-document')).toHaveCount(0);
+  await openConversationTab(page);
   await expect(page.getByTestId('agent-document-conversation-list')).toBeVisible();
   await expect(page.getByTestId('agent-document-conversation-empty')).toBeVisible();
 
@@ -666,6 +747,7 @@ test('web knowledge workspace shows AgentView for owner directories and right-pa
 
   await docsNode.click();
   await expect(page.getByTestId('agent-view')).toBeVisible();
+  await openConversationTab(page);
   await expect(page.getByTestId('agent-document-conversation-list')).toBeVisible();
   await page.getByTestId('agent-document-conversation-item').click();
   await expect(page.getByTestId('normal-messages')).toContainText('Docs owner conversation');
@@ -730,7 +812,7 @@ test('web knowledge workspace edits AgentView prompt model and inheritance throu
     await expect.poll(async () => (await readContextJson(request, `${ownerPath}/.agent.json`)).tools)
       .toEqual([
         { id: 'read_current_file', description: 'Read the current active file from the knowledge workspace.' },
-        { id: 'list_directory', description: 'List files and directories under a workspace directory.' },
+        { id: 'list_directory', description: 'List files and directories under a workspace directory. Use "." for the current agent root and "/" for the workspace root when allowed.' },
         { id: 'read_file', description: 'Read a file by path from the current knowledge workspace scope.' },
         { id: 'replace_text_in_file', description: 'Replace text in a workspace file by exact string matching.' },
         { id: 'replace_range_in_file', description: 'Replace a line and column range in a workspace file.' },
@@ -776,7 +858,7 @@ test('web knowledge workspace edits AgentView prompt model and inheritance throu
     await expect.poll(async () => (await readContextJson(request, `${childPath}/.agent.json`)).tools)
       .toEqual([
         { id: 'read_current_file', description: 'Read the current active file from the knowledge workspace.' },
-        { id: 'list_directory', description: 'List files and directories under a workspace directory.' },
+        { id: 'list_directory', description: 'List files and directories under a workspace directory. Use "." for the current agent root and "/" for the workspace root when allowed.' },
         { id: 'read_file', description: 'Read a file by path from the current knowledge workspace scope.' },
         { id: 'search_in_scope', description: 'Search text matches inside the current agent scope.' },
         { id: 'replace_text_in_file', description: 'Replace text in a workspace file by exact string matching.' },

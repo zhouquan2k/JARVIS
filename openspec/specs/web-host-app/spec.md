@@ -1,4 +1,10 @@
-English | [Chinese](spec.zh-CN.md) ## MODIFIED Requirements ### Requirement: Web host MUST initialize shared stores with sync storage provider
+English | [Chinese](spec.zh-CN.md)
+
+## Purpose
+Define web host runtime composition for sync-backed chat, knowledge workspace access, and top-level workspace switching.
+
+## Requirements
+### Requirement: Web host MUST initialize shared stores with sync storage provider
 Web host MUST 在启动时使用 `SyncStorageProvider` 作为聊天history存储实现，通过设置中的 `syncKey` 决定远端sync命名空间，并把 provider runtime、共享聊天状态和 `conversation-workspace` 所需的主题/依赖一并装配到页面入口。 #### Scenario: Web host bootstraps sync storage on page load
 - **WHEN** Web host完成启动并初始化聊天 store
 - **THEN** host MUST 为共享聊天view注入 `SyncStorageProvider`

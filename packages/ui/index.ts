@@ -8,6 +8,7 @@ export { default as AppTopBar } from './src/components/AppTopBar.vue';
 export { default as AttachmentComposer } from './src/components/AttachmentComposer.vue';
 export { default as ConversationSidebar } from './src/components/ConversationSidebar.vue';
 export { default as AgentPane } from './src/components/AgentPane.vue';
+export { default as AgentRightPane } from './src/components/AgentRightPane.vue';
 export { default as DocumentEditorPane } from './src/components/DocumentEditorPane.vue';
 export { default as DocumentFileTree } from './src/components/DocumentFileTree.vue';
 export { default as MessageAnnotationLayer } from './src/components/MessageAnnotationLayer.vue';

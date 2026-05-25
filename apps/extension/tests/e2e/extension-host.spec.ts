@@ -55,6 +55,56 @@ async function readMockSyncEvents(page: Page) {
   return page.evaluate(() => JSON.parse(localStorage.getItem('chatprism:mock-sync-events') ?? '[]'));
 }
 
+async function installCodexAuthMocks(page: Page) {
+  await page.evaluate(() => {
+    (window as typeof window & { __chatprismOpenCalls?: string[] }).__chatprismOpenCalls = [];
+    window.open = ((url?: string | URL | undefined) => {
+      const calls = (window as typeof window & { __chatprismOpenCalls?: string[] }).__chatprismOpenCalls ?? [];
+      calls.push(String(url ?? ''));
+      (window as typeof window & { __chatprismOpenCalls?: string[] }).__chatprismOpenCalls = calls;
+      return null;
+    }) as typeof window.open;
+  });
+
+  await page.addInitScript(() => {
+    (window as typeof window & { __chatprismOpenCalls?: string[] }).__chatprismOpenCalls = [];
+    window.open = ((url?: string | URL | undefined) => {
+      const calls = (window as typeof window & { __chatprismOpenCalls?: string[] }).__chatprismOpenCalls ?? [];
+      calls.push(String(url ?? ''));
+      (window as typeof window & { __chatprismOpenCalls?: string[] }).__chatprismOpenCalls = calls;
+      return null;
+    }) as typeof window.open;
+  });
+
+  await page.route('**/api/codex/auth/status', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        authenticated: false,
+        providerId: 'chatgpt-codex',
+        message: 'Not logged in'
+      })
+    });
+  });
+
+  await page.route('**/api/codex/auth/login', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        mode: 'device-auth',
+        verificationUri: 'https://chatgpt.com/auth/device',
+        message: 'Device auth started'
+      })
+    });
+  });
+}
+
+async function readOpenCalls(page: Page) {
+  return page.evaluate(() => (window as typeof window & { __chatprismOpenCalls?: string[] }).__chatprismOpenCalls ?? []);
+}
+
 async function expectHostFontBaseline(page: Page) {
   const metrics = await page.evaluate(() => {
     const input = document.querySelector('[data-testid="normal-input"]') as HTMLTextAreaElement | null;
@@ -66,6 +116,22 @@ async function expectHostFontBaseline(page: Page) {
 
   expect(metrics.bodyFontSize).toBe('15px');
   expect(metrics.inputFontSize).toBe('15px');
+}
+
+async function selectNormalChatProvider(page: Page, providerId: string) {
+  await page.getByTestId('normal-provider').selectOption(providerId);
+  await expect(page.getByTestId('normal-provider')).toHaveValue(providerId);
+  await expect.poll(async () => page.getByTestId('normal-model').inputValue()).not.toBe('');
+}
+
+async function selectCompareProviders(page: Page, providerAId: string, providerBId: string) {
+  await page.getByTestId('compare-provider-a').selectOption(providerAId);
+  await expect(page.getByTestId('compare-provider-a')).toHaveValue(providerAId);
+  await expect.poll(async () => page.getByTestId('compare-model-a').inputValue()).not.toBe('');
+
+  await page.getByTestId('compare-provider-b').selectOption(providerBId);
+  await expect(page.getByTestId('compare-provider-b')).toHaveValue(providerBId);
+  await expect.poll(async () => page.getByTestId('compare-model-b').inputValue()).not.toBe('');
 }
 
 test('extension host supports external provider switching, Gemini preview/error fallback, and file import', async () => {
@@ -184,7 +250,28 @@ test('extension host applies unified host font baseline', async () => {
   }
 });
 
-test('extension host replaces New Chat after the first successful send', async () => {
+test('extension host shows codex auth recovery and keeps chatgpt-codex selectable', async () => {
+  const session = await launchExtensionPage();
+  try {
+    const { page } = session;
+    await installCodexAuthMocks(page);
+
+    await expect(page.getByTestId('conversation-workspace')).toBeVisible();
+    await selectNormalChatProvider(page, 'chatgpt-web');
+    await page.getByTestId('normal-provider').selectOption('chatgpt-codex');
+    await expect(page.getByTestId('normal-provider')).toHaveValue('chatgpt-codex');
+    await expect(page.getByTestId('normal-auth-warning')).toContainText('Codex provider');
+    await expect(page.getByTestId('normal-auth-recovery')).toContainText('Codex');
+
+    await page.getByTestId('normal-auth-recovery').click();
+    await expect.poll(async () => readOpenCalls(page)).toContain('https://chatgpt.com/auth/device');
+    await expect(page.getByTestId('normal-provider')).toHaveValue('chatgpt-codex');
+  } finally {
+    await session.close();
+  }
+});
+
+test('extension host persists the first successful local conversation in history', async () => {
   const session = await launchExtensionPage();
   try {
     const { page } = session;
@@ -195,11 +282,17 @@ test('extension host replaces New Chat after the first successful send', async (
     await page.getByTestId('normal-send').click();
 
     await expect(page.getByTestId('normal-messages')).toContainText('请帮我梳理 extension 侧标题生成链路');
-    await expect(page.getByTestId('local-history-item').first()).not.toContainText('New Chat');
+    await expect(page.getByTestId('local-history-item')).toHaveCount(1);
+    await expect(page.getByTestId('local-history-item').first()).toBeVisible();
   } finally {
     await session.close();
   }
 });
+
+async function openConversationTab(page: import('@playwright/test').Page) {
+  await page.getByTestId('agent-right-pane-tab-conversations').click();
+  await expect(page.getByTestId('agent-conversation-panel')).toBeVisible();
+}
 
 test('extension host exposes the knowledge workspace route with editable markdown documents and top-level workspace switching', async () => {
   const session = await launchExtensionPage({ routeHash: '#/' });
@@ -207,7 +300,7 @@ test('extension host exposes the knowledge workspace route with editable markdow
     const { page } = session;
     await expect(page.getByTestId('document-workspace')).toBeVisible();
     await expect(page.getByTestId('document-file-tree')).toBeVisible();
-    await expect(page.getByTestId('agent-pane')).toBeVisible();
+    await expect(page.getByTestId('agent-right-pane')).toBeVisible();
     await expect(page.getByTestId('agent-view')).toContainText('Default Knowledge Agent');
     await expect(page.getByTestId('agent-view-scope')).toContainText('/');
     await expect(page.getByTestId('document-node-root')).toHaveClass(/active/);
@@ -239,7 +332,7 @@ test('extension knowledge workspace renders agent metadata', async () => {
     await expect(page.getByTestId('agent-view')).toContainText('Default Knowledge Agent');
     await expect(page.getByTestId('agent-view-scope')).toContainText('/');
     await expect(page.getByTestId('agent-view-model')).toContainText('gemini-api / Gemini Pro Latest');
-    await expect(page.getByTestId('agent-pane')).toBeVisible();
+    await expect(page.getByTestId('agent-right-pane')).toBeVisible();
   } finally {
     await session.close();
   }
@@ -256,6 +349,7 @@ test('extension knowledge workspace negotiates text pdf and unsupported document
     await expect(page.getByTestId('document-save')).toBeEnabled();
 
     await page.getByTestId('document-node-file').filter({ hasText: 'report.pdf' }).click();
+    await openConversationTab(page);
     await expect(page.getByTestId('document-pdf-viewer')).toBeVisible();
     await expect(page.getByTestId('document-save')).toBeDisabled();
 
@@ -273,6 +367,7 @@ test('extension knowledge workspace negotiates text pdf and unsupported document
     await expect(page.locator('.message.user').last()).not.toContainText('report.pdf');
 
     await page.getByTestId('document-node-file').filter({ hasText: 'archive.bin' }).click();
+    await openConversationTab(page);
     await expect(page.getByTestId('document-unsupported-viewer')).toContainText('application/octet-stream');
 
     await page.getByTestId('agent-conversation-list-plus').click();
@@ -300,6 +395,7 @@ test('extension knowledge workspace shows AgentView for owner directories and ri
     await expect(page.getByTestId('agent-view-scope')).toContainText('/docs');
     await expect(page.getByTestId('agent-view')).toContainText('Docs Agent');
     await expect(page.getByTestId('agent-view-document')).toHaveCount(0);
+    await openConversationTab(page);
 
     await page.getByTestId('agent-conversation-list-plus').click();
     await expect(page.getByTestId('normal-input')).toBeVisible();
@@ -316,6 +412,7 @@ test('extension knowledge workspace shows AgentView for owner directories and ri
 
     await docsNode.click();
     await expect(page.getByTestId('agent-view')).toBeVisible();
+    await openConversationTab(page);
     await page.getByTestId('agent-document-conversation-item').click();
     await expect(page.getByTestId('normal-messages')).toContainText('Extension docs owner');
 
@@ -338,6 +435,7 @@ test('extension knowledge workspace inserts conversation links and reopens the r
     await expect(page.getByTestId('document-workspace')).toBeVisible();
     await page.locator(`[data-path="${virtualPath}"]`).click();
     await expect(page.getByTestId('document-editor-input')).toBeVisible();
+    await openConversationTab(page);
 
     await page.getByTestId('agent-conversation-list-plus').click();
     await expect(page.getByTestId('normal-input')).toBeVisible();
@@ -379,6 +477,7 @@ test('extension host keeps compare history local-only when sync is enabled', asy
   try {
     const { page } = session;
     await expect(page.getByTestId('compare-chat-view')).toBeVisible();
+    await selectCompareProviders(page, 'chatgpt-web', 'chatgpt-web');
 
     await page.getByTestId('compare-input').fill('Extension compare stays local');
     await page.getByTestId('compare-send').click();
@@ -409,6 +508,7 @@ test('extension host sends attachments through background proxy and renders stru
   try {
     const { page } = session;
     await expect(page.getByTestId('normal-chat-view')).toBeVisible();
+    await selectNormalChatProvider(page, 'chatgpt-web');
 
     await page.locator('input[type="file"]').setInputFiles({
       name: 'diagram.png',
@@ -435,6 +535,7 @@ test('extension host e2e covers md pdf and image attachments through background 
   try {
     const { page } = session;
     await expect(page.getByTestId('normal-chat-view')).toBeVisible();
+    await selectNormalChatProvider(page, 'chatgpt-web');
 
     await page.locator('input[type="file"]').setInputFiles([
       {

@@ -4,7 +4,8 @@ import {
     type ExternalHistoryProviderEntry,
     type ExternalHistoryProviderId,
     type IExternalConversationProvider,
-    type ModelProviderRuntime
+    type ModelProviderRuntime,
+    resolveCodexBaseUrl
 } from '@packages/core/src';
 import { BackgroundProxyProvider } from './utils/BackgroundProxyProvider';
 import { BackgroundHistoryProxy } from './utils/BackgroundHistoryProxy';
@@ -18,7 +19,21 @@ export function createExtensionProxyRuntime(): ModelProviderRuntime {
     return createModelProviderRuntime({
         runtimeMode: 'extension',
         providerFactory(providerId) {
+            if (providerId === 'chatgpt-codex') {
+                return undefined;
+            }
             return new BackgroundProxyProvider(providerId, { channelId: createChannelId(providerId) });
+        },
+        providerOptionsResolver(providerId) {
+            if (providerId !== 'chatgpt-codex') {
+                return undefined;
+            }
+
+            return {
+                baseUrl: resolveCodexBaseUrl({
+                    env: import.meta.env as Record<string, string | undefined>
+                })
+            };
         }
     });
 }

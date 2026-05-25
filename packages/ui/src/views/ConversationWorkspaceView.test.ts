@@ -33,11 +33,20 @@ function createConversation(): Conversation {
 }
 
 function createWorkspaceContextProvider(context: WorkspaceContext): IContextProvider {
+    const taskProvider = {
+        getTasks: vi.fn().mockResolvedValue([]),
+        createTask: vi.fn(),
+        updateTask: vi.fn(),
+        deleteTask: vi.fn(),
+        setTaskCompleted: vi.fn()
+    };
+
     return {
         id: 'workspace-context',
         initializeAccess: vi.fn().mockResolvedValue(undefined),
         getContext: vi.fn().mockResolvedValue(context),
         getConversations: vi.fn(),
+        getTaskProvider: vi.fn(() => taskProvider),
         getProjectDocuments: vi.fn().mockResolvedValue([]),
         readDocument: vi.fn(),
         writeDocument: vi.fn(),
@@ -53,11 +62,19 @@ function createDeferredContextProvider() {
     const contextPromise = new Promise<WorkspaceContext>((resolve) => {
         resolveContext = resolve;
     });
+    const taskProvider = {
+        getTasks: vi.fn().mockResolvedValue([]),
+        createTask: vi.fn(),
+        updateTask: vi.fn(),
+        deleteTask: vi.fn(),
+        setTaskCompleted: vi.fn()
+    };
     const provider = {
         id: 'workspace-context',
         initializeAccess: vi.fn().mockResolvedValue(undefined),
         getContext: vi.fn().mockReturnValue(contextPromise),
         getConversations: vi.fn(),
+        getTaskProvider: vi.fn(() => taskProvider),
         getProjectDocuments: vi.fn().mockResolvedValue([]),
         readDocument: vi.fn(),
         writeDocument: vi.fn(),

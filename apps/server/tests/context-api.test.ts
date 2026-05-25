@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { encodeBase64, encodeTextDocument } from '@packages/core/src';
+import { encodeBase64, encodeTextDocument, type Task } from '@packages/core/src';
 import { createApp } from '../src/app.js';
 import type { ServerConfig } from '../src/config.js';
 import type { ContextProvider } from '../src/types/context.js';
@@ -15,18 +15,35 @@ function createConfig(overrides: Partial<ServerConfig> = {}): ServerConfig {
         corsAllowlist: ['https://chatprism.test'],
         knowledgeRoot: undefined,
         contextBackend: 'local-file',
+        codexCommand: 'codex',
+        codexWorkingDirectory: process.cwd(),
         ...overrides
     };
 }
 
 describe('context api', () => {
     const tempRoots: string[] = [];
+    const originalEnv = {
+        CHATPRISM_GOOGLE_CALENDAR_CLIENT_ID: process.env.CHATPRISM_GOOGLE_CALENDAR_CLIENT_ID,
+        CHATPRISM_GOOGLE_CALENDAR_CLIENT_SECRET: process.env.CHATPRISM_GOOGLE_CALENDAR_CLIENT_SECRET,
+        CHATPRISM_GOOGLE_CALENDAR_REFRESH_TOKEN: process.env.CHATPRISM_GOOGLE_CALENDAR_REFRESH_TOKEN,
+        CHATPRISM_GOOGLE_CALENDAR_ID: process.env.CHATPRISM_GOOGLE_CALENDAR_ID,
+        CHATPRISM_GOOGLE_OAUTH_TOKEN_URL: process.env.CHATPRISM_GOOGLE_OAUTH_TOKEN_URL,
+        CHATPRISM_GOOGLE_CALENDAR_API_BASE_URL: process.env.CHATPRISM_GOOGLE_CALENDAR_API_BASE_URL
+    };
 
     afterEach(async () => {
         await Promise.all(tempRoots.map(async (root) => {
             await import('node:fs/promises').then(({ rm }) => rm(root, { recursive: true, force: true }));
         }));
         tempRoots.length = 0;
+        restoreEnv('CHATPRISM_GOOGLE_CALENDAR_CLIENT_ID', originalEnv.CHATPRISM_GOOGLE_CALENDAR_CLIENT_ID);
+        restoreEnv('CHATPRISM_GOOGLE_CALENDAR_CLIENT_SECRET', originalEnv.CHATPRISM_GOOGLE_CALENDAR_CLIENT_SECRET);
+        restoreEnv('CHATPRISM_GOOGLE_CALENDAR_REFRESH_TOKEN', originalEnv.CHATPRISM_GOOGLE_CALENDAR_REFRESH_TOKEN);
+        restoreEnv('CHATPRISM_GOOGLE_CALENDAR_ID', originalEnv.CHATPRISM_GOOGLE_CALENDAR_ID);
+        restoreEnv('CHATPRISM_GOOGLE_OAUTH_TOKEN_URL', originalEnv.CHATPRISM_GOOGLE_OAUTH_TOKEN_URL);
+        restoreEnv('CHATPRISM_GOOGLE_CALENDAR_API_BASE_URL', originalEnv.CHATPRISM_GOOGLE_CALENDAR_API_BASE_URL);
+        vi.unstubAllGlobals();
     });
 
     it('supports initialize list read write and create semantics through /api/context', async () => {
@@ -152,6 +169,49 @@ describe('context api', () => {
         });
         expect(listDocumentConversationsResponse.status).toBe(200);
         await expect(listDocumentConversationsResponse.json()).resolves.toEqual({ conversations: [] });
+
+        const createTaskResponse = await app.request('/api/context/create-task', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                task: {
+                    id: 'temp-task',
+                    title: 'Review welcome doc',
+                    notes: '',
+                    completed: false,
+                    dueAt: null,
+                    priority: 'medium',
+                    documentPath: '/welcome-renamed.md',
+                    agentKey: '/notes/',
+                    createdAt: 0,
+                    updatedAt: 0,
+                    completedAt: null,
+                    calendarProviderId: null,
+                    calendarEventId: null,
+                    calendarSyncStatus: null,
+                    calendarLastSyncedAt: null,
+                    calendarLastSyncError: null
+                }
+            })
+        });
+        expect(createTaskResponse.status).toBe(200);
+        const createdTaskJson = await createTaskResponse.json() as { task: Task };
+        expect(createdTaskJson.task.id).toContain('task-');
+        expect(createdTaskJson.task.agentKey).toBe('/notes/');
+        expect(createdTaskJson.task.documentPath).toBe('/welcome-renamed.md');
+
+        const listTasksResponse = await app.request('/api/context/get-tasks', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                documentPath: '/welcome-renamed.md',
+                completed: false
+            })
+        });
+        expect(listTasksResponse.status).toBe(200);
+        await expect(listTasksResponse.json()).resolves.toEqual({
+            tasks: [expect.objectContaining({ id: createdTaskJson.task.id, title: 'Review welcome doc' })]
+        });
     });
 
     it('reads pdf documents through /api/context/read-document with binary payload and read-only metadata', async () => {
@@ -196,6 +256,30 @@ describe('context api', () => {
                 initializeAccess: vi.fn(async () => {}),
                 getContext: vi.fn(async () => ({ nodes: [], agentConfigs: {} })),
                 getConversations: vi.fn(async () => []),
+                getTaskProvider: vi.fn(() => ({
+                    getTasks: vi.fn(async (): Promise<Task[]> => []),
+                    createTask: vi.fn(async (task: Task): Promise<Task> => task),
+                    updateTask: vi.fn(async (task: Task): Promise<Task> => task),
+                    deleteTask: vi.fn(async () => undefined),
+                    setTaskCompleted: vi.fn(async (taskId: string, completed: boolean): Promise<Task> => ({
+                        id: taskId,
+                        title: 'Task',
+                        notes: '',
+                        completed,
+                        dueAt: null,
+                        priority: null,
+                        documentPath: null,
+                        agentKey: '/',
+                        createdAt: 1,
+                        updatedAt: 2,
+                        completedAt: completed ? 2 : null,
+                        calendarProviderId: null,
+                        calendarEventId: null,
+                        calendarSyncStatus: null,
+                        calendarLastSyncedAt: null,
+                        calendarLastSyncError: null
+                    }))
+                })),
                 getProjectDocuments: vi.fn(async () => []),
                 readDocument: vi.fn(),
                 writeDocument: vi.fn(async () => {
@@ -309,6 +393,162 @@ describe('context api', () => {
         });
     });
 
+    it('syncs timed tasks through the server /api/context path when Google Calendar config is present', async () => {
+        const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-context-'));
+        tempRoots.push(rootPath);
+        await writeFile(path.join(rootPath, 'welcome.md'), '# Welcome\n');
+
+        process.env.CHATPRISM_GOOGLE_CALENDAR_CLIENT_ID = 'client-id';
+        process.env.CHATPRISM_GOOGLE_CALENDAR_CLIENT_SECRET = 'client-secret';
+        process.env.CHATPRISM_GOOGLE_CALENDAR_REFRESH_TOKEN = 'refresh-token';
+        process.env.CHATPRISM_GOOGLE_CALENDAR_ID = 'primary';
+        process.env.CHATPRISM_GOOGLE_OAUTH_TOKEN_URL = 'https://oauth.example.test/token';
+        process.env.CHATPRISM_GOOGLE_CALENDAR_API_BASE_URL = 'https://calendar.example.test/v3';
+
+        const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+            const url = String(input);
+            if (url === 'https://oauth.example.test/token') {
+                return new Response(JSON.stringify({
+                    access_token: 'token-1',
+                    expires_in: 3600
+                }), { status: 200 });
+            }
+
+            if (url === 'https://calendar.example.test/v3/calendars/primary/events') {
+                return new Response(JSON.stringify({ id: 'event-1' }), { status: 200 });
+            }
+
+            throw new Error(`unexpected request: ${url}`);
+        });
+        vi.stubGlobal('fetch', fetchImpl);
+
+        const app = createApp({
+            config: createConfig({
+                isDevelopment: true,
+                knowledgeRoot: rootPath
+            })
+        });
+
+        const dueAt = new Date('2026-05-24T09:00:00-04:00').getTime();
+        const createTaskResponse = await app.request('/api/context/create-task', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                task: {
+                    id: 'temp-task',
+                    title: 'Review welcome doc',
+                    notes: 'Bring agenda',
+                    completed: false,
+                    dueAt,
+                    priority: 'medium',
+                    documentPath: '/welcome.md',
+                    agentKey: null,
+                    createdAt: 0,
+                    updatedAt: 0,
+                    completedAt: null,
+                    calendarProviderId: null,
+                    calendarEventId: null,
+                    calendarSyncStatus: null,
+                    calendarLastSyncedAt: null,
+                    calendarLastSyncError: null
+                }
+            })
+        });
+
+        expect(createTaskResponse.status).toBe(200);
+        await expect(createTaskResponse.json()).resolves.toEqual({
+            task: expect.objectContaining({
+                calendarProviderId: 'google-calendar',
+                calendarEventId: 'event-1',
+                calendarSyncStatus: 'synced',
+                calendarLastSyncedAt: expect.any(Number),
+                calendarLastSyncError: null
+            })
+        });
+        expect(fetchImpl).toHaveBeenCalledWith('https://oauth.example.test/token', expect.anything());
+        expect(fetchImpl).toHaveBeenCalledWith('https://calendar.example.test/v3/calendars/primary/events', expect.anything());
+    });
+
+    it('deletes synced calendar events through the server /api/context path', async () => {
+        const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-context-'));
+        tempRoots.push(rootPath);
+        await writeFile(path.join(rootPath, 'welcome.md'), '# Welcome\n');
+
+        process.env.CHATPRISM_GOOGLE_CALENDAR_CLIENT_ID = 'client-id';
+        process.env.CHATPRISM_GOOGLE_CALENDAR_CLIENT_SECRET = 'client-secret';
+        process.env.CHATPRISM_GOOGLE_CALENDAR_REFRESH_TOKEN = 'refresh-token';
+        process.env.CHATPRISM_GOOGLE_CALENDAR_ID = 'primary';
+        process.env.CHATPRISM_GOOGLE_OAUTH_TOKEN_URL = 'https://oauth.example.test/token';
+        process.env.CHATPRISM_GOOGLE_CALENDAR_API_BASE_URL = 'https://calendar.example.test/v3';
+
+        const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+            const url = String(input);
+            if (url === 'https://oauth.example.test/token') {
+                return new Response(JSON.stringify({
+                    access_token: 'token-1',
+                    expires_in: 3600
+                }), { status: 200 });
+            }
+
+            if (url === 'https://calendar.example.test/v3/calendars/primary/events') {
+                return new Response(JSON.stringify({ id: 'event-1' }), { status: 200 });
+            }
+
+            if (url === 'https://calendar.example.test/v3/calendars/primary/events/event-1') {
+                return new Response(null, { status: 204 });
+            }
+
+            throw new Error(`unexpected request: ${url}`);
+        });
+        vi.stubGlobal('fetch', fetchImpl);
+
+        const app = createApp({
+            config: createConfig({
+                isDevelopment: true,
+                knowledgeRoot: rootPath
+            })
+        });
+
+        const dueAt = new Date('2026-05-24T09:00:00-04:00').getTime();
+        const createTaskResponse = await app.request('/api/context/create-task', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                task: {
+                    id: 'temp-task',
+                    title: 'Review welcome doc',
+                    notes: '',
+                    completed: false,
+                    dueAt,
+                    priority: 'medium',
+                    documentPath: '/welcome.md',
+                    agentKey: null,
+                    createdAt: 0,
+                    updatedAt: 0,
+                    completedAt: null,
+                    calendarProviderId: null,
+                    calendarEventId: null,
+                    calendarSyncStatus: null,
+                    calendarLastSyncedAt: null,
+                    calendarLastSyncError: null
+                }
+            })
+        });
+        const createdTaskJson = await createTaskResponse.json() as { task: Task };
+
+        const deleteTaskResponse = await app.request('/api/context/delete-task', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ taskId: createdTaskJson.task.id })
+        });
+
+        expect(deleteTaskResponse.status).toBe(200);
+        await expect(deleteTaskResponse.json()).resolves.toEqual({ ok: true });
+        expect(fetchImpl).toHaveBeenCalledWith('https://calendar.example.test/v3/calendars/primary/events/event-1', expect.objectContaining({
+            method: 'DELETE'
+        }));
+    });
+
     it('keeps the route swappable through an injected context provider', async () => {
         const provider: ContextProvider = {
             id: 'fake-context',
@@ -325,6 +565,30 @@ describe('context api', () => {
                 messages: [],
                 updatedAt: 100
             }]),
+            getTaskProvider: vi.fn(() => ({
+                getTasks: vi.fn(async (): Promise<Task[]> => []),
+                createTask: vi.fn(async (task: Task): Promise<Task> => task),
+                updateTask: vi.fn(async (task: Task): Promise<Task> => task),
+                deleteTask: vi.fn(async () => undefined),
+                setTaskCompleted: vi.fn(async (taskId: string, completed: boolean): Promise<Task> => ({
+                    id: taskId,
+                    title: 'Task',
+                    notes: '',
+                    completed,
+                    dueAt: null,
+                    priority: null,
+                    documentPath: null,
+                    agentKey: '/',
+                    createdAt: 1,
+                    updatedAt: 2,
+                    completedAt: completed ? 2 : null,
+                    calendarProviderId: null,
+                    calendarEventId: null,
+                    calendarSyncStatus: null,
+                    calendarLastSyncedAt: null,
+                    calendarLastSyncError: null
+                }))
+            })),
             getProjectDocuments: vi.fn(async () => [{ path: '/virtual.md', name: 'virtual.md' }]),
             readDocument: vi.fn(async (filePath: string) => ({
                 path: filePath,
@@ -385,3 +649,11 @@ describe('context api', () => {
         expect(provider.getConversations).toHaveBeenCalledWith({ documentPath: '/virtual.md' });
     });
 });
+
+function restoreEnv(key: string, value: string | undefined): void {
+    if (value === undefined) {
+        delete process.env[key];
+        return;
+    }
+    process.env[key] = value;
+}

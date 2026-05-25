@@ -1,7 +1,8 @@
 import { APP_CONFIG, type ModelConfig, type ProviderConfig, type ProviderModelCatalog } from '../../config';
 import { IModelProvider } from '../interfaces/IModelProvider';
+import { ChatGPTCodexProvider } from '../providers/model/ChatGPTCodexProvider';
 import { ChatGPTWebProvider } from '../providers/model/ChatGPTWebProvider';
-import type { ChatGPTWebProviderOptions } from '../providers/model/providerHostTypes';
+import type { ChatGPTCodexProviderOptions, ChatGPTWebProviderOptions } from '../providers/model/providerHostTypes';
 import { GeminiApiProvider } from '../providers/model/GeminiApiProvider';
 import type {
     ModelProviderFactory,
@@ -12,6 +13,9 @@ import type {
 type ProviderFactory = (options: ModelProviderRuntimeOptions) => IModelProvider;
 
 const DEFAULT_FACTORIES: Record<string, ProviderFactory> = {
+    'chatgpt-codex': (options) => new ChatGPTCodexProvider(
+        options.providerOptionsResolver?.('chatgpt-codex', options) as ChatGPTCodexProviderOptions | undefined
+    ),
     'chatgpt-web': (options) => new ChatGPTWebProvider(
         options.providerOptionsResolver?.('chatgpt-web', options) as ChatGPTWebProviderOptions | undefined
     ),

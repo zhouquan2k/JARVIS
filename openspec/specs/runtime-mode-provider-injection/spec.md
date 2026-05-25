@@ -1,6 +1,9 @@
 English | [Chinese](spec.zh-CN.md)
 
-## MODIFIED Requirements
+## Purpose
+Define how model runtime providers are filtered and instantiated across supported host runtime modes.
+
+## Requirements
 
 ### Requirement: Filter providers by runtime mode
 The system MUST filter providers by runtime mode (`runtimeMode`) and expose only the providers that can run in the current mode. The `web`, `extension`, and `desktop` runtime modes MUST all be subject to this filtering. The runtime contract carrying this behavior MUST be consolidated under the name `ModelProviderRuntime`.
@@ -19,9 +22,14 @@ The system MUST return `IModelProvider` instances by `providerId` through a unif
 - **AND** updates and abort behavior for each request chain MUST be independently controllable
 
 ### Requirement: Host injects credentials and execution dependencies through runtime initialization
-The host MUST inject credentials or execution dependency resolution strategies during model runtime initialization, and the runtime MUST pass through the required dependencies when creating concrete provider instances. For extension and desktop hosts, the UI layer MUST invoke the host-side execution path through a proxy model runtime and MUST not directly couple to sensitive credentials, cookies, or controlled-page reading logic.
+The host MUST inject credentials or execution dependency resolution strategies during model runtime initialization, and the runtime MUST pass through the required dependencies when creating concrete provider instances. For extension and desktop hosts, providers that require host-only secrets or controlled pages MUST continue to use proxy-backed execution paths; providers whose sensitive execution path has already been consolidated behind the local provider server MAY be constructed directly in `web`, `extension`, and `desktop` without an extra host proxy layer.
 
 #### Scenario: Proxy hosts keep runtime injection semantics after rename
-- **WHEN** the web, extension, or desktop host migrates from the old naming to `ModelProviderRuntime`
-- **THEN** the host frontend MUST continue to obtain provider instances through proxy or factory injection
-- **AND** the real sensitive dependency reading and execution path MUST remain on the controlled host side
+- **WHEN** the web, extension, or desktop host initializes `ModelProviderRuntime`
+- **THEN** the host frontend MUST continue to obtain provider instances through runtime factory or option injection
+- **AND** providers that still depend on host-only cookies, controlled pages, or background bridges MUST keep those dependencies off the renderer side
+
+#### Scenario: Server-backed providers can be created directly in every supported host
+- **WHEN** a provider's sensitive auth and execution path has been consolidated behind the local provider server
+- **THEN** `ModelProviderRuntime` MAY create that provider directly in `web`, `extension`, and `desktop`
+- **AND** the runtime MUST still preserve per-provider fresh-instance behavior for concurrent requests

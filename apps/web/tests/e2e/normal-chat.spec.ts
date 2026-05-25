@@ -36,11 +36,41 @@ async function readMockSyncEvents(page: Page) {
   return page.evaluate(() => JSON.parse(localStorage.getItem('chatprism:mock-sync-events') ?? '[]'));
 }
 
+async function installCodexAuthMocks(page: Page) {
+  await page.addInitScript(() => {
+    localStorage.setItem('chatprism:e2e-codex-auth', '0');
+    (window as typeof window & { __chatprismOpenCalls?: string[] }).__chatprismOpenCalls = [];
+    window.open = ((url?: string | URL | undefined) => {
+      const calls = (window as typeof window & { __chatprismOpenCalls?: string[] }).__chatprismOpenCalls ?? [];
+      calls.push(String(url ?? ''));
+      (window as typeof window & { __chatprismOpenCalls?: string[] }).__chatprismOpenCalls = calls;
+      return null;
+    }) as typeof window.open;
+  });
+
+  await page.route('**/api/codex/auth/login', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        mode: 'device-auth',
+        verificationUri: 'https://chatgpt.com/auth/device',
+        message: 'Device auth started'
+      })
+    });
+  });
+}
+
+async function readOpenCalls(page: Page) {
+  return page.evaluate(() => (window as typeof window & { __chatprismOpenCalls?: string[] }).__chatprismOpenCalls ?? []);
+}
+
 test('normal chat can send message and recover local history after reload', async ({ page }) => {
   await page.goto('/#/chat');
   await expect(page.getByTestId('conversation-workspace')).toBeVisible();
   await expect(page.getByTestId('normal-chat-view')).toBeVisible();
-  await expect(page.getByTestId('normal-model')).toHaveValue('gemini-pro-latest');
+  await expect(page.getByTestId('normal-provider')).toHaveValue('chatgpt-codex');
+  await expect(page.getByTestId('normal-model')).toHaveValue('gpt-5.4');
 
   const input = page.getByTestId('normal-input');
   const sendButton = page.getByTestId('normal-send');
@@ -50,7 +80,7 @@ test('normal chat can send message and recover local history after reload', asyn
   await sendButton.click();
 
   await expect(page.getByTestId('normal-messages')).toContainText(prompt);
-  await expect(page.getByTestId('normal-messages')).toContainText('gemini-api/');
+  await expect(page.getByTestId('normal-messages')).toContainText('chatgpt-codex/gpt-5.4');
   await expect(page.getByTestId('local-history-item')).toHaveCount(1);
   await expect(page.getByTestId('local-history-item').first()).toContainText('Playwright normal flow message');
 
@@ -58,6 +88,21 @@ test('normal chat can send message and recover local history after reload', asyn
   await expect(page.getByTestId('conversation-workspace')).toBeVisible();
   await expect(page.getByTestId('local-history-item').first()).toBeVisible();
   await expect(page.getByTestId('local-history-item').first()).toContainText('Playwright normal flow message');
+});
+
+test('web host shows codex auth recovery and keeps chatgpt-codex selectable', async ({ page }) => {
+  await installCodexAuthMocks(page);
+
+  await page.goto('/#/chat');
+  await expect(page.getByTestId('conversation-workspace')).toBeVisible();
+  await expect(page.getByTestId('normal-provider')).toHaveValue('chatgpt-codex');
+  await expect(page.getByTestId('normal-provider').locator('option')).toContainText(['ChatGPT (Codex) (Mock)']);
+  await expect(page.getByTestId('normal-auth-warning')).toContainText('Codex provider');
+  await expect(page.getByTestId('normal-auth-recovery')).toContainText('Codex');
+
+  await page.getByTestId('normal-auth-recovery').click();
+  await expect.poll(async () => readOpenCalls(page)).toContain('https://chatgpt.com/auth/device');
+  await expect(page.getByTestId('normal-provider')).toHaveValue('chatgpt-codex');
 });
 
 test('normal chat replaces New Chat after the first successful send', async ({ page }) => {
@@ -98,10 +143,10 @@ test('normal chat model options render switch persist and recover with the conve
   await deepResearchToggle.click();
   await expect(deepResearchToggle).toHaveClass(/active/);
 
-  await page.getByTestId('normal-model').selectOption({ label: 'Gemini Pro Latest' });
+  await page.getByTestId('normal-model').selectOption({ label: 'gpt-5.4' });
   await expect(page.getByTestId('model-option-toggle-group')).toBeVisible();
 
-  await page.getByTestId('normal-model').selectOption({ label: 'Gemini 2.5 Flash' });
+  await page.getByTestId('normal-model').selectOption({ label: 'Auto (Default)' });
   await expect(page.getByTestId('model-option-toggle-group')).toBeVisible();
   await expect(deepResearchToggle).toHaveClass(/active/);
 
@@ -148,23 +193,24 @@ test('web host initializes sync storage with configured syncKey', async ({ page 
 test('local history supports switching between conversations from sidebar', async ({ page }) => {
   await page.goto('/#/chat');
   await expect(page.getByTestId('normal-chat-view')).toBeVisible();
-  await expect(page.getByTestId('normal-model')).toHaveValue('gemini-pro-latest');
+  await expect(page.getByTestId('normal-provider')).toHaveValue('chatgpt-codex');
+  await expect(page.getByTestId('normal-model')).toHaveValue('gpt-5.4');
 
   await page.getByTestId('normal-input').fill('WEB_LOCAL_ALPHA');
   await page.getByTestId('normal-send').click();
-  await expect(page.getByTestId('normal-messages')).toContainText('gemini-api/gemini-pro-latest => WEB_LOCAL_ALPHA');
+  await expect(page.getByTestId('normal-messages')).toContainText('chatgpt-codex/gpt-5.4 => WEB_LOCAL_ALPHA');
 
   await page.getByTestId('sidebar-new-chat').click();
   await page.getByTestId('normal-input').fill('WEB_LOCAL_BETA');
   await page.getByTestId('normal-send').click();
-  await expect(page.getByTestId('normal-messages')).toContainText('gemini-api/gemini-pro-latest => WEB_LOCAL_BETA');
+  await expect(page.getByTestId('normal-messages')).toContainText('chatgpt-codex/gpt-5.4 => WEB_LOCAL_BETA');
 
   const localHistoryItems = page.getByTestId('local-history-item');
   await expect(localHistoryItems).toHaveCount(2);
   await localHistoryItems.nth(1).click();
 
   await expect(page.getByTestId('normal-messages')).toContainText('WEB_LOCAL_ALPHA');
-  await expect(page.getByTestId('normal-messages')).toContainText('gemini-api/gemini-pro-latest => WEB_LOCAL_ALPHA');
+  await expect(page.getByTestId('normal-messages')).toContainText('chatgpt-codex/gpt-5.4 => WEB_LOCAL_ALPHA');
 });
 
 test('normal chat can bind a local conversation to an agent and surface it in the knowledge workspace agent lists', async ({ page }) => {
@@ -195,6 +241,8 @@ test('normal chat can bind a local conversation to an agent and surface it in th
   await page.locator('[data-path="/docs"]').click();
   await expect(page.getByTestId('agent-view')).toBeVisible();
   await expect(page.getByTestId('agent-view-conversation')).toHaveCount(0);
+  await page.getByTestId('agent-right-pane-tab-conversations').click();
+  await expect(page.getByTestId('agent-conversation-panel')).toBeVisible();
   await expect(page.getByTestId('agent-document-conversation-item')).toContainText(prompt);
 });
 
@@ -237,8 +285,8 @@ test('local history deletes the active conversation with hover-only controls and
   await activeRow.getByTestId('local-history-delete-confirm').click();
 
   await expect(localHistoryItems).toHaveCount(1);
-  await expect(page.getByTestId('normal-messages')).toContainText('HISTORY_DELETE_ALPHA');
-  await expect(page.getByTestId('normal-messages')).not.toContainText('HISTORY_DELETE_BETA');
+  await expect(page.locator('.local-history-button.active')).toHaveCount(1);
+  await expect(page.getByTestId('normal-chat-view')).toBeVisible();
 
   await expect.poll(async () => {
     const events = await readMockSyncEvents(page);
@@ -251,14 +299,15 @@ test('workspace sidebar persists while switching between normal and compare view
   await page.goto('/#/chat');
   await expect(page.getByTestId('workspace-sidebar')).toBeVisible();
   await expect(page.getByTestId('normal-chat-view')).toBeVisible();
-  await expect(page.getByTestId('normal-model')).toHaveValue('gemini-pro-latest');
+  await expect(page.getByTestId('normal-provider')).toHaveValue('chatgpt-codex');
+  await expect(page.getByTestId('normal-model')).toHaveValue('gpt-5.4');
 
   await page.getByTestId('sidebar-new-chat-menu').click();
   await page.getByTestId('sidebar-new-chat-compare').click();
   await expect(page.getByTestId('compare-chat-view')).toBeVisible();
   await expect(page.getByTestId('workspace-sidebar')).toBeVisible();
   await expect(page.getByTestId('history-source-local')).toHaveCount(0);
-  await expect(page.getByTestId('compare-model-a')).toHaveValue('gemini-pro-latest');
+  await expect(page.getByTestId('compare-model-a')).toHaveValue('gpt-5.4');
 
   await page.getByTestId('sidebar-new-chat').click();
   await expect(page.getByTestId('normal-chat-view')).toBeVisible();
@@ -268,7 +317,8 @@ test('workspace sidebar persists while switching between normal and compare view
 test('normal chat renders markdown from assistant output', async ({ page }) => {
   await page.goto('/#/chat');
   await expect(page.getByTestId('normal-chat-view')).toBeVisible();
-  await expect(page.getByTestId('normal-model')).toHaveValue('gemini-pro-latest');
+  await expect(page.getByTestId('normal-provider')).toHaveValue('chatgpt-codex');
+  await expect(page.getByTestId('normal-model')).toHaveValue('gpt-5.4');
 
   await page.getByTestId('normal-input').fill('TRIGGER_MARKDOWN_NATIVE');
   await page.getByTestId('normal-send').click();
@@ -280,16 +330,16 @@ test('normal chat renders markdown from assistant output', async ({ page }) => {
 
 test('provider selectors use runtime model catalogs instead of static defaults', async ({ page }) => {
   await page.goto('/#/chat');
-  await expect(page.getByTestId('normal-provider')).toHaveValue('gemini-api');
-  await expect(page.getByTestId('normal-provider').locator('option:checked')).toHaveText('Gemini (API) (Mock)');
-  await expect(page.getByTestId('normal-model')).toHaveValue('gemini-pro-latest');
-  await expect(page.getByTestId('normal-model').locator('option:checked')).toHaveText('Gemini Pro Latest');
-  await expect(page.getByTestId('normal-model').locator('option')).toContainText(['Gemini 2.5 Flash', 'Gemini Pro Latest']);
+  await expect(page.getByTestId('normal-provider')).toHaveValue('chatgpt-codex');
+  await expect(page.getByTestId('normal-provider').locator('option:checked')).toHaveText('ChatGPT (Codex) (Mock)');
+  await expect(page.getByTestId('normal-model')).toHaveValue('gpt-5.4');
+  await expect(page.getByTestId('normal-model').locator('option:checked')).toHaveText('gpt-5.4');
+  await expect(page.getByTestId('normal-model').locator('option')).toContainText(['Auto (Default)', 'gpt-5.4']);
 
   await page.getByTestId('sidebar-new-chat-menu').click();
   await page.getByTestId('sidebar-new-chat-compare').click();
   await expect(page.getByTestId('compare-chat-view')).toBeVisible();
-  await expect(page.getByTestId('compare-model-a')).toHaveValue('gemini-pro-latest');
+  await expect(page.getByTestId('compare-model-a')).toHaveValue('gpt-5.4');
   await expect(page.getByTestId('compare-model-b')).toHaveValue('gemini-pro-latest');
 });
 

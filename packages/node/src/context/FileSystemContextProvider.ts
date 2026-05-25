@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { Conversation } from '../../../core/src/interfaces/Conversation.ts';
 import type { ConversationQuery, IConversationQueryProvider } from '../../../core/src/interfaces/IConversationPersistProvider.ts';
+import type { ITaskProvider } from '../../../core/src/interfaces/ITaskProvider.ts';
 import {
     DEFAULT_SCOPED_AGENT_CONFIG,
     type AgentConfig,
@@ -22,6 +23,8 @@ import {
     createResolvedAgentConfig,
     resolveChildAgentConfig
 } from '../coreRuntime.ts';
+import type { ITaskCalendarSyncService } from './ITaskCalendarSyncService.ts';
+import { FileSystemTaskProvider } from './FileSystemTaskProvider.ts';
 
 const DEFAULT_WORKSPACE_AGENT_KEY = '/' as const;
 const TEXT_ENCODER = new TextEncoder();
@@ -55,6 +58,7 @@ interface SearchableScopedFile {
 export interface FileSystemContextProviderOptions {
     rootPath?: string;
     conversationQueryProvider?: IConversationQueryProvider | null;
+    taskCalendarSyncService?: ITaskCalendarSyncService | null;
 }
 
 type AgentBinding = AgentToolBinding | AgentSkillBinding;
@@ -439,6 +443,34 @@ function findContextNodeByPath(nodes: ContextNode[], targetPath: string): Contex
     return null;
 }
 
+function buildHiddenContextNode(input: {
+    targetPath: string;
+    name: string;
+    kind: 'file' | 'directory';
+    parentPath?: string;
+    updatedAt: number;
+    agentKey: string;
+}): ContextNode {
+    return {
+        path: input.targetPath,
+        name: input.name,
+        kind: input.kind,
+        parentPath: input.parentPath,
+        hasChildren: input.kind === 'directory' ? false : undefined,
+        updatedAt: input.updatedAt,
+        isAgentOwner: false,
+        agentKey: input.agentKey
+    };
+}
+
+function getParentAgentKeyFromContext(context: WorkspaceContext, parentPath?: string): string {
+    if (!parentPath || parentPath === '/') {
+        return DEFAULT_WORKSPACE_AGENT_KEY;
+    }
+
+    return findContextNodeByPath(context.nodes, parentPath)?.agentKey ?? DEFAULT_WORKSPACE_AGENT_KEY;
+}
+
 function resolveEffectiveAgentBinding(
     parent: EffectiveAgentBinding,
     scopePath: string,
@@ -457,10 +489,15 @@ export class FileSystemContextProvider implements IContextProvider {
     readonly id = 'local-file-context';
     private readonly rootPath?: string;
     private readonly conversationQueryProvider: IConversationQueryProvider | null;
+    private readonly taskProvider: ITaskProvider;
 
     constructor(options: FileSystemContextProviderOptions = {}) {
         this.rootPath = options.rootPath?.trim() || undefined;
         this.conversationQueryProvider = options.conversationQueryProvider ?? null;
+        this.taskProvider = new FileSystemTaskProvider({
+            resolveRootDirectory: () => this.resolveRootDirectory(),
+            calendarSyncService: options.taskCalendarSyncService ?? null
+        });
     }
 
     async initializeAccess(): Promise<void> {
@@ -505,6 +542,10 @@ export class FileSystemContextProvider implements IContextProvider {
             ...query,
             documentPath: normalizedDocumentPath
         });
+    }
+
+    getTaskProvider(): ITaskProvider {
+        return this.taskProvider;
     }
 
     async getProjectDocuments(curNode: string): Promise<ProjectDocumentEntry[]> {
@@ -605,6 +646,9 @@ export class FileSystemContextProvider implements IContextProvider {
         const parentPath = normalizeVirtualPath(input.parentPath);
         const targetPath = toVirtualPath(parentPath, input.name);
         const targetRealPath = await this.resolveRealPath(targetPath, { expectExisting: false });
+        const hiddenParentAgentKey = input.name.startsWith('.')
+            ? getParentAgentKeyFromContext(await this.getContext(), parentPath)
+            : null;
 
         if (await exists(targetRealPath)) {
             throw new Error(`Node already exists: ${targetPath}`);
@@ -618,6 +662,18 @@ export class FileSystemContextProvider implements IContextProvider {
             await fs.mkdir(targetRealPath);
         } else {
             await fs.writeFile(targetRealPath, '', 'utf8');
+        }
+
+        const stats = await fs.stat(targetRealPath);
+        if (input.name.startsWith('.')) {
+            return buildHiddenContextNode({
+                targetPath,
+                name: input.name,
+                kind: input.kind,
+                parentPath,
+                updatedAt: stats.mtimeMs,
+                agentKey: hiddenParentAgentKey ?? DEFAULT_WORKSPACE_AGENT_KEY
+            });
         }
 
         const context = await this.getContext();
@@ -657,12 +713,26 @@ export class FileSystemContextProvider implements IContextProvider {
         const parentPath = path.posix.dirname(normalizedPath) === '/' ? undefined : path.posix.dirname(normalizedPath);
         const targetPath = toVirtualPath(parentPath, input.name);
         const targetRealPath = await this.resolveRealPath(targetPath, { expectExisting: false });
+        const hiddenParentAgentKey = input.name.startsWith('.')
+            ? getParentAgentKeyFromContext(await this.getContext(), parentPath)
+            : null;
 
         if (await exists(targetRealPath)) {
             throw new Error(`Node already exists: ${targetPath}`);
         }
 
         await fs.rename(sourceRealPath, targetRealPath);
+        const stats = await fs.stat(targetRealPath);
+        if (input.name.startsWith('.')) {
+            return buildHiddenContextNode({
+                targetPath,
+                name: input.name,
+                kind: stats.isDirectory() ? 'directory' : 'file',
+                parentPath,
+                updatedAt: stats.mtimeMs,
+                agentKey: hiddenParentAgentKey ?? DEFAULT_WORKSPACE_AGENT_KEY
+            });
+        }
         const context = await this.getContext();
         const renamedNode = findContextNodeByPath(context.nodes, targetPath);
         if (!renamedNode) {
@@ -904,6 +974,7 @@ export class FileSystemContextProvider implements IContextProvider {
 
         return resolveEffectiveAgentBinding(inheritedAgent, scopePath, configPath, config);
     }
+
 
     private async resolveMountedDirectoryBindings(rootDirectory: string): Promise<MountedDirectoryBinding[]> {
         const entries = await fs.readdir(rootDirectory, { withFileTypes: true });

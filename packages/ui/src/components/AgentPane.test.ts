@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { nextTick } from 'vue';
-import type { Conversation, IContextProvider, IConversationPersistProvider, IModelProvider } from '@packages/core/src';
+import type { Conversation, IContextProvider, IConversationPersistProvider, IModelProvider, Task } from '@packages/core/src';
 import { encodeTextDocument } from '@packages/core/src';
 import type { ProviderConfig } from '@packages/core/config';
 import AgentPane from './AgentPane.vue';
@@ -76,6 +76,31 @@ class PaneTestStorageProvider implements IConversationPersistProvider {
 }
 
 function createPaneContextProvider(conversations: Conversation[] = []): IContextProvider {
+    const taskProvider = {
+        getTasks: vi.fn(async (): Promise<Task[]> => []),
+        createTask: vi.fn(async (task: Task): Promise<Task> => task),
+        updateTask: vi.fn(async (task: Task): Promise<Task> => task),
+        deleteTask: vi.fn(async () => undefined),
+        setTaskCompleted: vi.fn(async (taskId: string, completed: boolean): Promise<Task> => ({
+            id: taskId,
+            title: 'Task',
+            notes: '',
+            completed,
+            dueAt: null,
+            priority: null,
+            documentPath: null,
+            agentKey: '/',
+            createdAt: 1,
+            updatedAt: 2,
+            completedAt: completed ? 2 : null,
+            calendarProviderId: null,
+            calendarEventId: null,
+            calendarSyncStatus: null,
+            calendarLastSyncedAt: null,
+            calendarLastSyncError: null
+        }))
+    };
+
     return {
         id: 'workspace-context',
         initializeAccess: async () => undefined,
@@ -83,6 +108,7 @@ function createPaneContextProvider(conversations: Conversation[] = []): IContext
         getConversations: vi.fn(async (query: { documentPath?: string }) => conversations.filter((conversation) => (
             query.documentPath ? conversation.documentPaths?.includes(query.documentPath) : true
         ))),
+        getTaskProvider: () => taskProvider,
         getProjectDocuments: vi.fn(async () => []),
         readDocument: async (path: string) => ({ path, mimeType: 'text/markdown', dataBase64: encodeTextDocument('') }),
         writeDocument: async () => ({}),
@@ -116,7 +142,7 @@ const paneProviderCatalog: ProviderConfig[] = [
 ];
 
 describe('AgentPane', () => {
-    it('renders the document conversation list with the shared toolbar for document selections', () => {
+    it('renders the document conversation list with the shared toolbar for document selections', async () => {
         setActivePinia(createPinia());
         const wrapper = mount(AgentPane, {
             props: {
@@ -141,6 +167,8 @@ describe('AgentPane', () => {
             }
         });
 
+        await wrapper.get('[data-testid="agent-right-pane-tab-conversations"]').trigger('click');
+        await nextTick();
         expect(wrapper.get('[data-testid="agent-pane"]').exists()).toBe(true);
         expect(wrapper.get('[data-testid="agent-document-conversation-list"]').exists()).toBe(true);
         expect(wrapper.get('[data-testid="agent-conversation-toolbar"]').exists()).toBe(true);
@@ -404,6 +432,7 @@ describe('AgentPane', () => {
         });
 
         await nextTick();
+        await wrapper.get('[data-testid="agent-right-pane-tab-conversations"]').trigger('click');
         expect(wrapper.get('[data-testid="agent-document-conversation-item"]').text()).toContain('guide.md - Guide discussion');
         expect(wrapper.get('[data-testid="agent-document-conversation-item"]').attributes('title')).toBe('guide.md - Guide discussion');
         await wrapper.get('[data-testid="agent-document-conversation-item"]').trigger('click');
@@ -464,6 +493,7 @@ describe('AgentPane', () => {
         });
 
         await nextTick();
+        await wrapper.get('[data-testid="agent-right-pane-tab-conversations"]').trigger('click');
 
         expect(wrapper.get('[data-testid="agent-document-conversation-list"]').exists()).toBe(true);
         expect(wrapper.get('[data-testid="agent-conversation-toolbar"]').exists()).toBe(true);
@@ -515,6 +545,7 @@ describe('AgentPane', () => {
         });
 
         await nextTick();
+        await wrapper.get('[data-testid="agent-right-pane-tab-conversations"]').trigger('click');
         await wrapper.get('[data-testid="agent-document-conversation-item"]').trigger('click');
         await flushPromises();
 
@@ -566,6 +597,7 @@ describe('AgentPane', () => {
         });
 
         await nextTick();
+        await wrapper.get('[data-testid="agent-right-pane-tab-conversations"]').trigger('click');
         await wrapper.get('[data-testid="agent-document-conversation-item"]').trigger('click');
         await flushPromises();
 
@@ -628,7 +660,7 @@ describe('AgentPane', () => {
         wrapper.unmount();
     });
 
-    it('passes the restore conversation id to the conversation panel', () => {
+    it('passes the restore conversation id to the conversation panel', async () => {
         setActivePinia(createPinia());
         const wrapper = mount(AgentPane, {
             props: {
@@ -662,6 +694,8 @@ describe('AgentPane', () => {
             }
         });
 
+        await wrapper.get('[data-testid="agent-right-pane-tab-conversations"]').trigger('click');
+        await nextTick();
         expect(wrapper.get('[data-testid="agent-conversation-panel-stub"]').attributes('data-restore-conversation-id')).toBe('conversation-1');
     });
 
@@ -697,6 +731,7 @@ describe('AgentPane', () => {
             }
         });
 
+        await wrapper.get('[data-testid="agent-right-pane-tab-conversations"]').trigger('click');
         await wrapper.get('[data-testid="agent-conversation-panel-stub"]').trigger('click');
 
         expect(wrapper.emitted('request-workspace-switch')).toEqual([['/chat']]);
@@ -739,6 +774,8 @@ describe('AgentPane', () => {
             }
         });
 
+        await wrapper.get('[data-testid="agent-right-pane-tab-conversations"]').trigger('click');
+        await nextTick();
         expect(wrapper.get('[data-testid="agent-conversation-panel-stub"]').attributes('data-open-conversation-id')).toBe('conversation-1');
     });
 });

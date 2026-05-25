@@ -14,6 +14,7 @@
           @open="onOpenNode"
           @toggle-expand="documentStore.toggleExpanded"
           @create="documentStore.createNode"
+          @convert-to-agent="documentStore.convertDirectoryToAgent"
           @delete="documentStore.deleteNode"
           @rename="documentStore.renameNode"
           @refresh="documentStore.refreshTree"
@@ -97,7 +98,7 @@
         :class="{ 'grid-pane--collapsed': documentStore.middlePaneMode === 'maximized' }"
       >
         <slot name="assistant-pane">
-        <AgentPane
+        <AgentRightPane
           @request-workspace-switch="requestWorkspaceSwitch"
           :active-agent="documentStore.activeAgent"
           :active-agent-key="documentStore.activeAgentKey"
@@ -128,7 +129,7 @@ import {
   type IContextProvider
 } from '@packages/core/src';
 import AgentView from '../components/AgentView.vue';
-import AgentPane from '../components/AgentPane.vue';
+import AgentRightPane from '../components/AgentRightPane.vue';
 import DocumentEditorPane from '../components/DocumentEditorPane.vue';
 import DocumentFileTree from '../components/DocumentFileTree.vue';
 import { useChatStore } from '../store/chat';

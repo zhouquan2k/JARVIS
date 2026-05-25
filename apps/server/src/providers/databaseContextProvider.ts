@@ -7,6 +7,7 @@ import type {
     ContextProvider,
     CreateContextNodeInput,
     RenameContextNodeInput,
+    Task,
     WorkspaceContext,
     WriteContextDocumentInput,
     WriteContextDocumentResult
@@ -18,6 +19,23 @@ function notImplemented(): never {
 
 export class DatabaseContextProvider implements ContextProvider {
     readonly id = 'database-context';
+    private readonly taskProvider = {
+        async getTasks(): Promise<Task[]> {
+            return [];
+        },
+        async createTask(_task: Task): Promise<Task> {
+            notImplemented();
+        },
+        async updateTask(_task: Task): Promise<Task> {
+            notImplemented();
+        },
+        async deleteTask(_taskId: string): Promise<void> {
+            notImplemented();
+        },
+        async setTaskCompleted(_taskId: string, _completed: boolean): Promise<Task> {
+            notImplemented();
+        }
+    };
 
     async initializeAccess(): Promise<void> {
         notImplemented();
@@ -29,6 +47,10 @@ export class DatabaseContextProvider implements ContextProvider {
 
     async getConversations(_query: { documentPath?: string }): Promise<Conversation[]> {
         return [];
+    }
+
+    getTaskProvider() {
+        return this.taskProvider;
     }
 
     async getProjectDocuments(_curNode: string): Promise<Array<{ path: string; name: string }>> {

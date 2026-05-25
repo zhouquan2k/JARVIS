@@ -18,6 +18,8 @@ describe('DocumentFileTree', () => {
         expect(wrapper.get('[data-testid="document-new-file"]').attributes('aria-label')).toBe('New file');
         expect(wrapper.get('[data-testid="document-refresh-tree"]').attributes('title')).toBe('Refresh file tree');
         expect(wrapper.get('[data-testid="document-refresh-tree"]').attributes('aria-label')).toBe('Refresh file tree');
+        expect(wrapper.get('[data-testid="document-convert-directory-to-agent"]').attributes('title')).toBe('Convert to Agent/Project');
+        expect(wrapper.get('[data-testid="document-convert-directory-to-agent"]').attributes('aria-label')).toBe('Convert to Agent/Project');
         expect(wrapper.get('[data-testid="document-delete-node"]').attributes('title')).toBe('Delete selected node');
         expect(wrapper.get('[data-testid="document-delete-node"]').attributes('aria-label')).toBe('Delete selected node');
         expect(wrapper.get('[data-testid="document-new-directory"]').attributes('title')).toBe('New directory');
@@ -33,6 +35,29 @@ describe('DocumentFileTree', () => {
         expect(document.body.textContent).toContain('New directory');
         await wrapper.get('[data-testid="document-new-directory"]').trigger('blur');
         expect(document.body.textContent).not.toContain('New directory');
+    });
+
+    it('emits convert-to-agent only for a selected non-agent directory', async () => {
+        const wrapper = mount(DocumentFileTree, {
+            props: {
+                nodes: [
+                    { path: '/docs', name: 'docs', kind: 'directory', agentKey: '/' },
+                    { path: '/agent', name: 'agent', kind: 'directory', isAgentOwner: true, agentKey: '/agent/' }
+                ],
+                expandedPaths: ['/'],
+                activePath: '/docs',
+                currentError: null
+            }
+        });
+
+        expect(wrapper.get('[data-testid="document-convert-directory-to-agent"]').attributes('disabled')).toBeUndefined();
+        await wrapper.get('[data-testid="document-convert-directory-to-agent"]').trigger('click');
+        expect(wrapper.emitted('convert-to-agent')).toEqual([
+            ['/docs']
+        ]);
+
+        await wrapper.setProps({ activePath: '/agent' });
+        expect(wrapper.get('[data-testid="document-convert-directory-to-agent"]').attributes('disabled')).toBeDefined();
     });
 
     it('creates pending nodes inline and emits create events with the resolved parent path', async () => {

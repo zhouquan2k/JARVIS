@@ -3,10 +3,49 @@ import type {
     ContextSearchRequest,
     CreateContextNodeInput,
     IContextProvider,
+    Task,
     WriteContextDocumentInput
 } from '@packages/core/src';
 
 export function createDesktopContextProvider(): IContextProvider {
+    const taskProvider = {
+        getTasks: async (documentPath?: string | null, agentKey?: string | null, completed?: boolean) => {
+            if (!window.chatprismDesktop) {
+                throw new Error('Desktop context bridge is unavailable');
+            }
+
+            return window.chatprismDesktop.getTasks({ documentPath, agentKey, completed });
+        },
+        createTask: async (task: Task) => {
+            if (!window.chatprismDesktop) {
+                throw new Error('Desktop context bridge is unavailable');
+            }
+
+            return window.chatprismDesktop.createTask(task);
+        },
+        updateTask: async (task: Task) => {
+            if (!window.chatprismDesktop) {
+                throw new Error('Desktop context bridge is unavailable');
+            }
+
+            return window.chatprismDesktop.updateTask(task);
+        },
+        deleteTask: async (taskId: string) => {
+            if (!window.chatprismDesktop) {
+                throw new Error('Desktop context bridge is unavailable');
+            }
+
+            await window.chatprismDesktop.deleteTask(taskId);
+        },
+        setTaskCompleted: async (taskId: string, completed: boolean) => {
+            if (!window.chatprismDesktop) {
+                throw new Error('Desktop context bridge is unavailable');
+            }
+
+            return window.chatprismDesktop.setTaskCompleted(taskId, completed);
+        }
+    };
+
     return {
         id: 'desktop-context',
         async initializeAccess() {
@@ -25,6 +64,9 @@ export function createDesktopContextProvider(): IContextProvider {
             }
 
             return window.chatprismDesktop.getConversations(query);
+        },
+        getTaskProvider() {
+            return taskProvider;
         },
         async getProjectDocuments(curNode: string) {
             if (!window.chatprismDesktop) {

@@ -2,16 +2,21 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { decodeTextDocument, encodeBase64, encodeTextDocument } from '@packages/core/src';
+import { decodeTextDocument, encodeBase64, encodeTextDocument, type Task } from '@packages/core/src';
 import {
+    DESKTOP_CONTEXT_CREATE_TASK_CHANNEL,
     DESKTOP_CONTEXT_CREATE_NODE_CHANNEL,
+    DESKTOP_CONTEXT_DELETE_TASK_CHANNEL,
     DESKTOP_CONTEXT_DELETE_NODE_CHANNEL,
     DESKTOP_CONTEXT_GET_CONTEXT_CHANNEL,
+    DESKTOP_CONTEXT_GET_TASKS_CHANNEL,
     DESKTOP_CONTEXT_GET_PROJECT_DOCUMENTS_CHANNEL,
     DESKTOP_CONTEXT_INITIALIZE_CHANNEL,
     DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL,
     DESKTOP_CONTEXT_RENAME_NODE_CHANNEL,
     DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL,
+    DESKTOP_CONTEXT_SET_TASK_COMPLETED_CHANNEL,
+    DESKTOP_CONTEXT_UPDATE_TASK_CHANNEL,
     DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL
 } from '../shared/contextBridge';
 import { registerContextIpc, resolveDesktopWorkspaceRoot } from './contextIpc';
@@ -69,6 +74,9 @@ describe('contextIpc', () => {
         const dispose = registerContextIpc({ ipc, workspaceRoot });
         const initializeHandler = getHandler(ipc, DESKTOP_CONTEXT_INITIALIZE_CHANNEL);
         const getContextHandler = getHandler(ipc, DESKTOP_CONTEXT_GET_CONTEXT_CHANNEL);
+        const getTasksHandler = getHandler(ipc, DESKTOP_CONTEXT_GET_TASKS_CHANNEL);
+        const createTaskHandler = getHandler(ipc, DESKTOP_CONTEXT_CREATE_TASK_CHANNEL);
+        const setTaskCompletedHandler = getHandler(ipc, DESKTOP_CONTEXT_SET_TASK_COMPLETED_CHANNEL);
         const getProjectDocumentsHandler = getHandler(ipc, DESKTOP_CONTEXT_GET_PROJECT_DOCUMENTS_CHANNEL);
         const readDocumentHandler = getHandler(ipc, DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL);
         const searchInScopeHandler = getHandler(ipc, DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL);
@@ -111,9 +119,40 @@ describe('contextIpc', () => {
         const updatedDocument = await readDocumentHandler?.({}, '/notes/today.md') as { dataBase64: string };
         expect(decodeTextDocument(updatedDocument.dataBase64)).toBe('# Updated\n');
 
+        const createdTask = await createTaskHandler?.({}, {
+            id: 'temp-task',
+            title: 'Desktop follow-up',
+            notes: '',
+            completed: false,
+            dueAt: null,
+            priority: null,
+            documentPath: '/notes/today.md',
+            agentKey: null,
+            createdAt: 0,
+            updatedAt: 0,
+            completedAt: null,
+            calendarProviderId: null,
+            calendarEventId: null,
+            calendarSyncStatus: null,
+            calendarLastSyncedAt: null,
+            calendarLastSyncError: null
+        }) as { id: string; documentPath: string | null; completed: boolean };
+        expect(createdTask.id).toContain('task-');
+        await expect(getTasksHandler?.({}, { documentPath: '/notes/today.md', completed: false })).resolves.toEqual([
+            expect.objectContaining({ id: createdTask.id, documentPath: '/notes/today.md' })
+        ]);
+        await expect(setTaskCompletedHandler?.({}, { taskId: createdTask.id, completed: true })).resolves.toEqual(
+            expect.objectContaining({ id: createdTask.id, completed: true })
+        );
+
         dispose();
         expect(ipc.removeHandler).toHaveBeenCalledWith(DESKTOP_CONTEXT_INITIALIZE_CHANNEL);
         expect(ipc.removeHandler).toHaveBeenCalledWith(DESKTOP_CONTEXT_GET_CONTEXT_CHANNEL);
+        expect(ipc.removeHandler).toHaveBeenCalledWith(DESKTOP_CONTEXT_GET_TASKS_CHANNEL);
+        expect(ipc.removeHandler).toHaveBeenCalledWith(DESKTOP_CONTEXT_CREATE_TASK_CHANNEL);
+        expect(ipc.removeHandler).toHaveBeenCalledWith(DESKTOP_CONTEXT_UPDATE_TASK_CHANNEL);
+        expect(ipc.removeHandler).toHaveBeenCalledWith(DESKTOP_CONTEXT_DELETE_TASK_CHANNEL);
+        expect(ipc.removeHandler).toHaveBeenCalledWith(DESKTOP_CONTEXT_SET_TASK_COMPLETED_CHANNEL);
         expect(ipc.removeHandler).toHaveBeenCalledWith(DESKTOP_CONTEXT_GET_PROJECT_DOCUMENTS_CHANNEL);
         expect(ipc.removeHandler).toHaveBeenCalledWith(DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL);
         expect(ipc.removeHandler).toHaveBeenCalledWith(DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL);
@@ -121,6 +160,89 @@ describe('contextIpc', () => {
         expect(ipc.removeHandler).toHaveBeenCalledWith(DESKTOP_CONTEXT_CREATE_NODE_CHANNEL);
         expect(ipc.removeHandler).toHaveBeenCalledWith(DESKTOP_CONTEXT_DELETE_NODE_CHANNEL);
         expect(ipc.removeHandler).toHaveBeenCalledWith(DESKTOP_CONTEXT_RENAME_NODE_CHANNEL);
+    });
+
+    it('syncs timed tasks through the desktop IPC path and preserves the calendar event id on update', async () => {
+        const workspaceRoot = await mkdtemp(join(tmpdir(), 'chatprism-context-sync-'));
+        tempDirs.push(workspaceRoot);
+        await mkdir(join(workspaceRoot, 'notes'), { recursive: true });
+        await writeFile(join(workspaceRoot, 'notes', 'today.md'), '# Today\n', 'utf8');
+
+        const originalEnv = {
+            CHATPRISM_GOOGLE_CALENDAR_CLIENT_ID: process.env.CHATPRISM_GOOGLE_CALENDAR_CLIENT_ID,
+            CHATPRISM_GOOGLE_CALENDAR_CLIENT_SECRET: process.env.CHATPRISM_GOOGLE_CALENDAR_CLIENT_SECRET,
+            CHATPRISM_GOOGLE_CALENDAR_REFRESH_TOKEN: process.env.CHATPRISM_GOOGLE_CALENDAR_REFRESH_TOKEN,
+            CHATPRISM_GOOGLE_OAUTH_TOKEN_URL: process.env.CHATPRISM_GOOGLE_OAUTH_TOKEN_URL,
+            CHATPRISM_GOOGLE_CALENDAR_API_BASE_URL: process.env.CHATPRISM_GOOGLE_CALENDAR_API_BASE_URL
+        };
+        process.env.CHATPRISM_GOOGLE_CALENDAR_CLIENT_ID = 'client-id';
+        process.env.CHATPRISM_GOOGLE_CALENDAR_CLIENT_SECRET = 'client-secret';
+        process.env.CHATPRISM_GOOGLE_CALENDAR_REFRESH_TOKEN = 'refresh-token';
+        process.env.CHATPRISM_GOOGLE_OAUTH_TOKEN_URL = 'https://oauth.example.test/token';
+        process.env.CHATPRISM_GOOGLE_CALENDAR_API_BASE_URL = 'https://calendar.example.test/v3';
+
+        const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+            const url = String(input);
+            if (url === 'https://oauth.example.test/token') {
+                return new Response(JSON.stringify({
+                    access_token: 'token-1',
+                    expires_in: 3600
+                }), { status: 200 });
+            }
+
+            if (url.endsWith('/calendars/primary/events')) {
+                return new Response(JSON.stringify({ id: 'event-1' }), { status: 200 });
+            }
+
+            if (url.endsWith('/calendars/primary/events/event-1')) {
+                return new Response(JSON.stringify({ id: 'event-1' }), { status: 200 });
+            }
+
+            throw new Error(`unexpected request: ${url}`);
+        });
+
+        try {
+            const ipc = createIpcMock();
+            registerContextIpc({ ipc, workspaceRoot, fetchImpl });
+            const createTaskHandler = getHandler(ipc, DESKTOP_CONTEXT_CREATE_TASK_CHANNEL);
+            const updateTaskHandler = getHandler(ipc, DESKTOP_CONTEXT_UPDATE_TASK_CHANNEL);
+            const dueAt = new Date('2026-05-24T09:00:00-04:00').getTime();
+
+            const created = await createTaskHandler?.({}, {
+                id: 'temp-task',
+                title: 'Desktop follow-up',
+                notes: 'Bring agenda',
+                completed: false,
+                dueAt,
+                priority: 'high',
+                documentPath: '/notes/today.md',
+                agentKey: null,
+                createdAt: 0,
+                updatedAt: 0,
+                completedAt: null,
+                calendarProviderId: null,
+                calendarEventId: null,
+                calendarSyncStatus: null,
+                calendarLastSyncedAt: null,
+                calendarLastSyncError: null
+            }) as Task;
+            expect(created.calendarEventId).toBe('event-1');
+            expect(created.calendarSyncStatus).toBe('synced');
+
+            const updated = await updateTaskHandler?.({}, {
+                ...created,
+                notes: 'Updated notes'
+            }) as Task;
+            expect(updated.calendarEventId).toBe('event-1');
+            expect(updated.calendarSyncStatus).toBe('synced');
+            expect(fetchImpl).toHaveBeenCalledWith('https://calendar.example.test/v3/calendars/primary/events/event-1', expect.anything());
+        } finally {
+            process.env.CHATPRISM_GOOGLE_CALENDAR_CLIENT_ID = originalEnv.CHATPRISM_GOOGLE_CALENDAR_CLIENT_ID;
+            process.env.CHATPRISM_GOOGLE_CALENDAR_CLIENT_SECRET = originalEnv.CHATPRISM_GOOGLE_CALENDAR_CLIENT_SECRET;
+            process.env.CHATPRISM_GOOGLE_CALENDAR_REFRESH_TOKEN = originalEnv.CHATPRISM_GOOGLE_CALENDAR_REFRESH_TOKEN;
+            process.env.CHATPRISM_GOOGLE_OAUTH_TOKEN_URL = originalEnv.CHATPRISM_GOOGLE_OAUTH_TOKEN_URL;
+            process.env.CHATPRISM_GOOGLE_CALENDAR_API_BASE_URL = originalEnv.CHATPRISM_GOOGLE_CALENDAR_API_BASE_URL;
+        }
     });
 
     it('rejects node creation attempts that escape the workspace root', async () => {
@@ -133,7 +255,7 @@ describe('contextIpc', () => {
 
         await expect(
             createNodeHandler?.({}, { parentPath: undefined, name: '../escape.md', kind: 'file' })
-        ).rejects.toThrow('节点名称不合法');
+        ).rejects.toThrow('Node name is invalid.');
     });
 
     it('deletes files through the desktop IPC handler', async () => {

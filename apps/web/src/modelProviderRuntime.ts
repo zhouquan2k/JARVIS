@@ -3,7 +3,8 @@ import {
   createModelProviderRuntime,
   type ExternalHistoryProviderEntry,
   type ExternalHistoryProviderId,
-  type IExternalConversationProvider
+  type IExternalConversationProvider,
+  resolveCodexBaseUrl
 } from '@packages/core/src';
 import { createMockRuntime } from './testing/createMockRuntime';
 import { createMockHistoryProvider } from './testing/createMockHistoryProvider';
@@ -16,6 +17,17 @@ export const modelProviderRuntime = useMockRuntime
       runtimeMode: 'web',
       credentials: {
         geminiApiKey: import.meta.env.VITE_LLM_API_KEY
+      },
+      providerOptionsResolver(providerId) {
+        if (providerId !== 'chatgpt-codex') {
+          return undefined;
+        }
+
+        return {
+          baseUrl: resolveCodexBaseUrl({
+            env: import.meta.env as Record<string, string | undefined>
+          })
+        };
       }
     });
 

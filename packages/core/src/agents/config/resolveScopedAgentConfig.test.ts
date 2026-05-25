@@ -339,6 +339,42 @@ describe('resolveScopedAgentConfig', () => {
             async getConversations() {
                 return [];
             },
+            getTaskProvider() {
+                return {
+                    async getTasks() {
+                        return [];
+                    },
+                    async createTask(task) {
+                        return task;
+                    },
+                    async updateTask(task) {
+                        return task;
+                    },
+                    async deleteTask() {
+                        return undefined;
+                    },
+                    async setTaskCompleted(taskId, completed) {
+                        return {
+                            id: taskId,
+                            title: 'Task',
+                            notes: '',
+                            completed,
+                            dueAt: null,
+                            priority: null,
+                            documentPath: null,
+                            agentKey: null,
+                            createdAt: 1,
+                            updatedAt: 2,
+                            completedAt: completed ? 2 : null,
+                            calendarProviderId: null,
+                            calendarEventId: null,
+                            calendarSyncStatus: null,
+                            calendarLastSyncedAt: null,
+                            calendarLastSyncError: null
+                        };
+                    }
+                };
+            },
             async getProjectDocuments() {
                 return [];
             },

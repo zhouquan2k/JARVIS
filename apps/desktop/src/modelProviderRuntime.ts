@@ -4,7 +4,8 @@ import {
     type ExternalHistoryProviderEntry,
     type ExternalHistoryProviderId,
     type IExternalConversationProvider,
-    type ModelProviderRuntime
+    type ModelProviderRuntime,
+    resolveCodexBaseUrl
 } from '@packages/core/src';
 import { DesktopHistoryProxy } from './utils/DesktopHistoryProxy';
 import { DesktopProxyProvider } from './utils/DesktopProxyProvider';
@@ -18,7 +19,21 @@ export function createDesktopProxyRuntime(): ModelProviderRuntime {
     return createModelProviderRuntime({
         runtimeMode: 'desktop',
         providerFactory(providerId) {
+            if (providerId === 'chatgpt-codex') {
+                return undefined;
+            }
             return new DesktopProxyProvider(providerId, { channelId: createChannelId(providerId) });
+        },
+        providerOptionsResolver(providerId) {
+            if (providerId !== 'chatgpt-codex') {
+                return undefined;
+            }
+
+            return {
+                baseUrl: resolveCodexBaseUrl({
+                    env: import.meta.env as Record<string, string | undefined>
+                })
+            };
         }
     });
 }

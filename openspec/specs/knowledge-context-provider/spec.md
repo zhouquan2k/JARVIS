@@ -77,3 +77,16 @@ knowledge file provider MUST provide统一的conversation只读querycapability�
 - **WHEN** 某个具体 Provider 通过local文件、数据库或其他后端维护knowledge workspace上下文
 - **THEN** 它 MUST 在不改变 `IContextProvider` 统一契约的前提下实现该conversationquerycapability
 - **AND** 上层 UI MUST 无需感知其底层conversation存储来源
+
+### Requirement: Knowledge context provider MUST expose task-provider resolution through the shared context contract
+The system MUST expose task-domain operations through `IContextProvider.getTaskProvider()` rather than flattening task CRUD methods directly into the general context-provider contract.
+
+#### Scenario: Resolve task operations through a local or remote context provider
+- **WHEN** workspace UI code needs task operations for the current scope
+- **THEN** it MUST obtain them through `IContextProvider.getTaskProvider()`
+- **AND** the returned object MUST implement the shared `ITaskProvider` contract
+
+#### Scenario: Preserve conversation and document lookup behavior while adding task access
+- **WHEN** the task contract is added to the workspace context architecture
+- **THEN** existing document, node, and conversation access behaviors MUST remain available as separate capabilities
+- **AND** task mutation operations MUST NOT replace or alter those existing contracts

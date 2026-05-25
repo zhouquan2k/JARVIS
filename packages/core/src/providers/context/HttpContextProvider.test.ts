@@ -35,6 +35,77 @@ describe('HttpContextProvider', () => {
         ]);
     });
 
+    it('forwards task operations through the task provider facade', async () => {
+        const fetchImpl = async (input: RequestInfo | URL) => {
+            const url = String(input);
+            if (url.endsWith('/get-tasks')) {
+                return new Response(JSON.stringify({
+                    tasks: [{
+                        id: 'task-1',
+                        title: 'Follow up',
+                        notes: '',
+                        completed: false,
+                        dueAt: null,
+                        priority: 'high',
+                        documentPath: '/docs/guide.md',
+                        agentKey: null,
+                        createdAt: 1,
+                        updatedAt: 1,
+                        completedAt: null,
+                        calendarProviderId: null,
+                        calendarEventId: null,
+                        calendarSyncStatus: null,
+                        calendarLastSyncedAt: null,
+                        calendarLastSyncError: null
+                    }]
+                }), { status: 200 });
+            }
+
+            if (url.endsWith('/set-task-completed')) {
+                return new Response(JSON.stringify({
+                    task: {
+                        id: 'task-1',
+                        title: 'Follow up',
+                        notes: '',
+                        completed: true,
+                        dueAt: null,
+                        priority: 'high',
+                        documentPath: '/docs/guide.md',
+                        agentKey: null,
+                        createdAt: 1,
+                        updatedAt: 2,
+                        completedAt: 2,
+                        calendarProviderId: 'google-calendar',
+                        calendarEventId: 'event-1',
+                        calendarSyncStatus: 'synced',
+                        calendarLastSyncedAt: 2,
+                        calendarLastSyncError: null
+                    }
+                }), { status: 200 });
+            }
+
+            throw new Error(`unexpected request: ${url}`);
+        };
+        const provider = new HttpContextProvider({
+            baseUrl: 'http://context.test/api/context',
+            fetchImpl
+        });
+        const taskProvider = provider.getTaskProvider();
+
+        await expect(taskProvider.getTasks('/docs/guide.md', null, false)).resolves.toEqual([
+            expect.objectContaining({ id: 'task-1', priority: 'high' })
+        ]);
+        await expect(taskProvider.setTaskCompleted('task-1', true)).resolves.toEqual(
+            expect.objectContaining({
+                id: 'task-1',
+                completed: true,
+                completedAt: 2,
+                calendarProviderId: 'google-calendar',
+                calendarEventId: 'event-1'
+            })
+        );
+    });
+
     it('normalizes non-2xx errors into HttpApiError', async () => {
         const provider = new HttpContextProvider({
             baseUrl: 'http://context.test/api/context',
