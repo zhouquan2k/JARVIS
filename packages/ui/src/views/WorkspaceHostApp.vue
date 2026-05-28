@@ -35,6 +35,10 @@
         :context-provider="props.contextProvider"
         @request-workspace-switch="onNavigateWorkspace"
       />
+      <AllTasksWorkspaceView
+        v-else-if="isAllTasksMode"
+        :context-provider="props.contextProvider"
+      />
       <ConversationWorkspaceView
         v-else
         :is-compare-mode="isCompareMode"
@@ -63,6 +67,7 @@ import AppTopBar from '../components/AppTopBar.vue';
 import { useChatStore } from '../store/chat';
 import { useCompareStore } from '../store/compare';
 import { useDocumentWorkspaceStore } from '../store/documentWorkspace';
+import AllTasksWorkspaceView from './AllTasksWorkspaceView.vue';
 import ConversationWorkspaceView from './ConversationWorkspaceView.vue';
 import DocumentWorkspaceView from './DocumentWorkspaceView.vue';
 import { PRIMARY_WORKSPACE_ROUTES, type ChatRoutePath } from '../routes';
@@ -100,6 +105,7 @@ const documentStore = useDocumentWorkspaceStore();
 const compareStore = useCompareStore();
 const isCompareMode = computed(() => props.currentRoutePath === '/compare');
 const isKnowledgeMode = computed(() => props.currentRoutePath === '/');
+const isAllTasksMode = computed(() => props.currentRoutePath === '/all-tasks');
 const activeWorkspacePath = computed<ChatRoutePath>(() => props.currentRoutePath === '/compare' ? '/chat' : props.currentRoutePath);
 
 function syncWorkspaceMode(path: ChatRoutePath): void {

@@ -51,7 +51,7 @@ export class GoogleCalendarSyncService implements ITaskCalendarSyncService {
     async syncTask(task: Task): Promise<TaskCalendarSyncResult> {
         const dueAt = task.dueAt;
         if (typeof dueAt !== 'number' || !Number.isFinite(dueAt)) {
-            throw new Error('Timed task sync requires a concrete dueAt value.');
+            throw new Error('Calendar sync requires a dueAt value.');
         }
 
         const config = this.getConfig();
@@ -63,10 +63,11 @@ export class GoogleCalendarSyncService implements ITaskCalendarSyncService {
             eventMode: task.calendarEventId ? 'update' : 'create'
         });
         const accessToken = await this.getAccessToken(config);
-        const reminderMinutes = computeReminderMinutes(dueAt);
+        const calendarDueAt = resolveCalendarDueAt(dueAt);
+        const reminderMinutes = computeReminderMinutes(calendarDueAt);
         const timeZone = resolveLocalTimeZone();
-        const startDate = new Date(dueAt);
-        const endDate = new Date(dueAt + 60_000);
+        const startDate = new Date(calendarDueAt);
+        const endDate = new Date(calendarDueAt + 60_000);
         const payload = {
             summary: task.title,
             description: task.notes,
@@ -284,6 +285,20 @@ export function computeReminderMinutes(dueAt: number): number[] {
     addReminderMinutes(reminders, dueDate, oneHourBefore);
 
     return Array.from(reminders).sort((left, right) => right - left);
+}
+
+export function resolveCalendarDueAt(dueAt: number): number {
+    const dueDate = new Date(dueAt);
+    if (dueDate.getHours() === 0
+        && dueDate.getMinutes() === 0
+        && dueDate.getSeconds() === 0
+        && dueDate.getMilliseconds() === 0) {
+        const adjusted = new Date(dueAt);
+        adjusted.setHours(9, 0, 0, 0);
+        return adjusted.getTime();
+    }
+
+    return dueAt;
 }
 
 function addReminderMinutes(reminders: Set<number>, dueDate: Date, reminderDate: Date): void {

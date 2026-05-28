@@ -1,0 +1,794 @@
+<template>
+  <section ref="panelRoot" class="task-list-panel" data-testid="task-list-panel">
+    <div class="task-list-panel__actions">
+      <button
+        v-if="canCreateTask"
+        type="button"
+        class="task-list-panel__add"
+        data-testid="agent-task-add"
+        :aria-label="t('shared.addTask')"
+        :title="t('shared.addTask')"
+        @click="startCreateTask"
+      >
+        <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+          <path d="M10 4.25a.75.75 0 0 1 .75.75v4.25H15a.75.75 0 0 1 0 1.5h-4.25V15a.75.75 0 0 1-1.5 0v-4.25H5a.75.75 0 0 1 0-1.5h4.25V5a.75.75 0 0 1 .75-.75Z" fill="currentColor" />
+        </svg>
+      </button>
+    </div>
+
+    <TaskEditorInline
+      v-if="editingTask"
+      :task="editingTask"
+      @save="saveTask"
+      @cancel="cancelEdit"
+    />
+
+    <p v-if="loading" class="task-list-panel__message" data-testid="agent-task-loading">
+      {{ t('shared.loadingTasks') }}
+    </p>
+    <p v-else-if="error" class="task-list-panel__message task-list-panel__message--error" data-testid="agent-task-error">
+      {{ error }}
+    </p>
+
+    <template v-else>
+      <div class="task-list-panel__list" data-testid="agent-task-open-list">
+        <template v-if="groupByDate && openTaskGroups.length > 0">
+          <section
+            v-for="group in openTaskGroups"
+            :key="group.dateKey"
+            class="task-list-panel__group"
+            :data-testid="`task-group-${group.dateKey}`"
+          >
+            <header class="task-list-panel__group-title" :data-testid="`task-group-title-${group.dateKey}`">
+              {{ group.label }}
+            </header>
+            <article
+              v-for="task in group.tasks"
+              :key="task.id"
+              class="task-list-panel__item"
+              :class="{ 'task-list-panel__item--with-meta': Boolean(task.dueAt) }"
+              :data-testid="`agent-task-item-${task.id}`"
+            >
+              <TaskListRow
+                :task="task"
+                :show-priority="true"
+                :show-edit="true"
+                :open-menu-task-id="openMenuTaskId"
+                @toggle-completed="toggleTask"
+                @start-edit="startEditTaskFromRow"
+                @open-edit="openEditFromMenu"
+                @delete-task="deleteTaskFromMenu"
+                @toggle-menu="toggleMenu"
+              />
+            </article>
+          </section>
+        </template>
+
+        <template v-else>
+          <article
+            v-for="task in visibleOpenTasks"
+            :key="task.id"
+            class="task-list-panel__item"
+            :class="{ 'task-list-panel__item--with-meta': Boolean(task.dueAt) }"
+            :data-testid="`agent-task-item-${task.id}`"
+          >
+            <TaskListRow
+              :task="task"
+              :show-priority="true"
+              :show-edit="true"
+              :open-menu-task-id="openMenuTaskId"
+              @toggle-completed="toggleTask"
+              @start-edit="startEditTaskFromRow"
+              @open-edit="openEditFromMenu"
+              @delete-task="deleteTaskFromMenu"
+              @toggle-menu="toggleMenu"
+            />
+          </article>
+        </template>
+
+        <p v-if="visibleOpenTasks.length === 0" class="task-list-panel__message" data-testid="agent-task-empty">
+          {{ t('shared.noTasks') }}
+        </p>
+      </div>
+
+      <section class="task-list-panel__completed">
+        <button
+          type="button"
+          class="task-list-panel__completed-toggle"
+          data-testid="agent-task-completed-toggle"
+          :aria-expanded="!completedCollapsed"
+          @click="completedCollapsed = !completedCollapsed"
+        >
+          <span>{{ t('shared.completedTasks', { count: completedTasks.length }) }}</span>
+          <svg
+            class="task-list-panel__completed-chevron"
+            :class="{ 'task-list-panel__completed-chevron--expanded': !completedCollapsed }"
+            viewBox="0 0 20 20"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <path d="m6 8 4 4 4-4" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" />
+          </svg>
+        </button>
+        <div v-if="!completedCollapsed" class="task-list-panel__list" data-testid="agent-task-completed-list">
+          <article
+            v-for="task in visibleCompletedTasks"
+            :key="task.id"
+            class="task-list-panel__item task-list-panel__item--completed"
+            :class="{ 'task-list-panel__item--with-meta': Boolean(task.dueAt) }"
+          >
+            <TaskListRow
+              :task="task"
+              :show-priority="false"
+              :show-edit="false"
+              :open-menu-task-id="openMenuTaskId"
+              @toggle-completed="toggleTask"
+              @delete-task="deleteTaskFromMenu"
+              @toggle-menu="toggleMenu"
+            />
+          </article>
+        </div>
+      </section>
+    </template>
+  </section>
+</template>
+
+<script setup lang="ts">
+import { Fragment, computed, defineComponent, h, onBeforeUnmount, onMounted, ref, watch, type PropType } from 'vue';
+import type { IContextProvider, Task, TaskPriority, TaskQueryTag } from '@packages/core/src';
+import { useWorkspaceI18n } from '../i18n';
+import TaskEditorInline from './TaskEditorInline.vue';
+
+type TaskDateGroup = {
+  dateKey: string;
+  label: string;
+  tasks: Task[];
+};
+
+const TaskListRow = defineComponent({
+  name: 'TaskListRow',
+  props: {
+    task: {
+      type: Object as () => Task,
+      required: true
+    },
+    showPriority: {
+      type: Boolean,
+      required: true
+    },
+    showEdit: {
+      type: Boolean,
+      required: true
+    },
+    openMenuTaskId: {
+      type: String as PropType<string | null>,
+      default: null
+    }
+  },
+  emits: ['toggle-completed', 'start-edit', 'open-edit', 'delete-task', 'toggle-menu'],
+  setup(rowProps, { emit }) {
+    const { t } = useWorkspaceI18n();
+
+    return () => h(Fragment, [
+      h('label', { class: 'task-list-panel__check' }, [
+        h('input', {
+          type: 'checkbox',
+          checked: rowProps.task.completed,
+          'data-testid': rowProps.task.completed ? `agent-task-reopen-${rowProps.task.id}` : `agent-task-complete-${rowProps.task.id}`,
+          onChange: () => emit('toggle-completed', rowProps.task, !rowProps.task.completed)
+        }),
+        h('span')
+      ]),
+      h('div', {
+        class: 'task-list-panel__content',
+        'data-testid': `agent-task-content-${rowProps.task.id}`,
+        onDblclick: rowProps.task.completed ? undefined : () => emit('start-edit', rowProps.task)
+      }, [
+        h('div', { class: 'task-list-panel__title-row' }, [
+          h('div', { class: 'task-list-panel__title-main' }, [
+            rowProps.task.calendarSyncStatus
+              ? h('span', {
+                class: ['task-list-panel__sync-status', `task-list-panel__sync-status--${rowProps.task.calendarSyncStatus}`],
+                'data-testid': `agent-task-sync-status-${rowProps.task.id}`,
+                'aria-hidden': 'true'
+              })
+              : null,
+            h('strong', rowProps.task.title)
+          ]),
+          rowProps.showPriority && rowProps.task.priority
+            ? h('span', { class: 'task-list-panel__priority', 'data-priority': rowProps.task.priority }, formatPriority(rowProps.task.priority, t))
+            : null
+        ]),
+        rowProps.task.notes ? h('p', { class: 'task-list-panel__notes' }, rowProps.task.notes) : null
+      ]),
+      rowProps.task.dueAt ? h('p', {
+        class: 'task-list-panel__meta',
+        'data-testid': `agent-task-due-at-${rowProps.task.id}`
+      }, formatDueAt(rowProps.task.dueAt)) : null,
+      h('div', { class: 'task-list-panel__row-actions' }, [
+        h('button', {
+          type: 'button',
+          class: 'task-list-panel__menu-trigger',
+          'data-testid': rowProps.task.completed ? `agent-task-completed-menu-${rowProps.task.id}` : `agent-task-menu-${rowProps.task.id}`,
+          'aria-label': t('shared.moreActions'),
+          onClick: () => emit('toggle-menu', rowProps.task.id)
+        }, [
+          h('svg', { viewBox: '0 0 20 20', 'aria-hidden': 'true', focusable: 'false' }, [
+            h('circle', { cx: '4', cy: '10', r: '1.5', fill: 'currentColor' }),
+            h('circle', { cx: '10', cy: '10', r: '1.5', fill: 'currentColor' }),
+            h('circle', { cx: '16', cy: '10', r: '1.5', fill: 'currentColor' })
+          ])
+        ]),
+        rowProps.openMenuTaskId === rowProps.task.id
+          ? h('div', {
+            class: 'task-list-panel__menu',
+            'data-testid': `agent-task-menu-panel-${rowProps.task.id}`
+          }, [
+            rowProps.showEdit
+              ? h('button', {
+                type: 'button',
+                'data-testid': `agent-task-edit-${rowProps.task.id}`,
+                onClick: () => emit('open-edit', rowProps.task)
+              }, t('shared.editTask'))
+              : null,
+            h('button', {
+              type: 'button',
+              'data-testid': rowProps.task.completed ? `agent-task-delete-completed-${rowProps.task.id}` : `agent-task-delete-${rowProps.task.id}`,
+              onClick: () => emit('delete-task', rowProps.task.id)
+            }, t('shared.deleteTask'))
+          ].filter(Boolean))
+          : null
+      ])
+    ]);
+  }
+});
+
+const props = withDefaults(defineProps<{
+  contextProvider?: IContextProvider | null;
+  documentPath?: string | null;
+  agentKey?: string | null;
+  tag?: TaskQueryTag | null;
+  groupByDate?: boolean;
+}>(), {
+  contextProvider: null,
+  documentPath: null,
+  agentKey: null,
+  tag: 'all',
+  groupByDate: false
+});
+
+const { t } = useWorkspaceI18n();
+const loading = ref(false);
+const error = ref<string | null>(null);
+const tasks = ref<Task[]>([]);
+const editingTask = ref<Task | null>(null);
+const completedCollapsed = ref(true);
+const openMenuTaskId = ref<string | null>(null);
+const panelRoot = ref<HTMLElement | null>(null);
+
+const normalizedDocumentPath = computed(() => normalizeScopeValue(props.documentPath));
+const normalizedAgentKey = computed(() => normalizeScopeValue(props.agentKey));
+const editingTaskId = computed(() => editingTask.value?.id ?? null);
+const openTasks = computed(() => sortTasksByDueAt(tasks.value.filter((task) => !task.completed)));
+const completedTasks = computed(() => sortTasksByDueAt(tasks.value.filter((task) => task.completed)));
+const visibleOpenTasks = computed(() => openTasks.value.filter((task) => task.id !== editingTaskId.value));
+const visibleCompletedTasks = computed(() => completedTasks.value.filter((task) => task.id !== editingTaskId.value));
+const canCreateTask = computed(() => true);
+const openTaskGroups = computed(() => props.groupByDate ? buildDateGroups(visibleOpenTasks.value) : []);
+
+watch(
+  () => [props.contextProvider ?? null, normalizedDocumentPath.value, normalizedAgentKey.value, props.tag ?? 'all'] as const,
+  () => {
+    void loadTasks();
+  },
+  { immediate: true }
+);
+
+onMounted(() => {
+  document.addEventListener('pointerdown', handleDocumentPointerDown);
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', handleDocumentPointerDown);
+});
+
+async function loadTasks(): Promise<void> {
+  const provider = props.contextProvider;
+  if (!provider) {
+    tasks.value = [];
+    error.value = null;
+    return;
+  }
+
+  loading.value = true;
+  error.value = null;
+  try {
+    const taskProvider = provider.getTaskProvider();
+    const [open, completed] = await Promise.all([
+      taskProvider.getTasks(normalizedDocumentPath.value, normalizedAgentKey.value, false, props.tag),
+      taskProvider.getTasks(normalizedDocumentPath.value, normalizedAgentKey.value, true, props.tag)
+    ]);
+    tasks.value = [...open, ...completed];
+  } catch (loadError) {
+    tasks.value = [];
+    error.value = loadError instanceof Error ? loadError.message : t('shared.loadingTasksFailed');
+  } finally {
+    loading.value = false;
+  }
+}
+
+function createDraftTask(): Task {
+  return {
+    id: 'draft-task',
+    title: '',
+    notes: '',
+    completed: false,
+    dueAt: null,
+    priority: null,
+    documentPath: normalizedDocumentPath.value,
+    agentKey: normalizedAgentKey.value,
+    createdAt: 0,
+    updatedAt: 0,
+    completedAt: null,
+    calendarProviderId: null,
+    calendarEventId: null,
+    calendarSyncStatus: null,
+    calendarLastSyncedAt: null,
+    calendarLastSyncError: null
+  };
+}
+
+function startCreateTask(): void {
+  editingTask.value = createDraftTask();
+}
+
+function startEditTask(task: Task): void {
+  editingTask.value = { ...task };
+}
+
+function startEditTaskFromRow(task: Task): void {
+  openMenuTaskId.value = null;
+  startEditTask(task);
+}
+
+function openEditFromMenu(task: Task): void {
+  openMenuTaskId.value = null;
+  startEditTask(task);
+}
+
+function cancelEdit(): void {
+  editingTask.value = null;
+}
+
+async function saveTask(task: Task): Promise<void> {
+  const provider = props.contextProvider;
+  if (!provider) {
+    return;
+  }
+
+  const taskProvider = provider.getTaskProvider();
+  if (task.id === 'draft-task') {
+    await taskProvider.createTask(task);
+  } else {
+    await taskProvider.updateTask(task);
+  }
+
+  editingTask.value = null;
+  await loadTasks();
+}
+
+async function deleteTaskFromMenu(taskId: string): Promise<void> {
+  const provider = props.contextProvider;
+  if (!provider) {
+    return;
+  }
+
+  openMenuTaskId.value = null;
+  await provider.getTaskProvider().deleteTask(taskId);
+  await loadTasks();
+}
+
+async function toggleTask(task: Task, completed: boolean): Promise<void> {
+  const provider = props.contextProvider;
+  if (!provider) {
+    return;
+  }
+
+  await provider.getTaskProvider().setTaskCompleted(task.id, completed);
+  await loadTasks();
+}
+
+function toggleMenu(taskId: string): void {
+  openMenuTaskId.value = openMenuTaskId.value === taskId ? null : taskId;
+}
+
+function handleDocumentPointerDown(event: PointerEvent): void {
+  if (!openMenuTaskId.value) {
+    return;
+  }
+
+  const root = panelRoot.value;
+  const target = event.target;
+  if (!(target instanceof Node) || !root) {
+    openMenuTaskId.value = null;
+    return;
+  }
+
+  const clickedInsidePanel = root.contains(target);
+  if (!clickedInsidePanel) {
+    openMenuTaskId.value = null;
+    return;
+  }
+
+  const clickedInsideMenu = target instanceof Element && target.closest('.task-list-panel__menu, .task-list-panel__menu-trigger');
+  if (!clickedInsideMenu) {
+    openMenuTaskId.value = null;
+  }
+}
+
+function normalizeScopeValue(value?: string | null): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
+function buildDateGroups(sourceTasks: Task[]): TaskDateGroup[] {
+  const groups = new Map<string, TaskDateGroup>();
+  const sortedTasks = sortTasksByDueAt(sourceTasks);
+
+  for (const task of sortedTasks) {
+    const key = getDateKey(task.dueAt);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.tasks.push(task);
+      continue;
+    }
+
+    groups.set(key, {
+      dateKey: key,
+      label: formatTaskGroupLabel(key),
+      tasks: [task]
+    });
+  }
+
+  return [...groups.values()];
+}
+
+function sortTasksByDueAt(sourceTasks: Task[]): Task[] {
+  return [...sourceTasks].sort((left, right) => {
+    const leftHasDueAt = left.dueAt !== null;
+    const rightHasDueAt = right.dueAt !== null;
+
+    if (leftHasDueAt && rightHasDueAt) {
+      if (left.dueAt !== right.dueAt) {
+        return left.dueAt - right.dueAt;
+      }
+      return right.updatedAt - left.updatedAt;
+    }
+
+    if (leftHasDueAt !== rightHasDueAt) {
+      return leftHasDueAt ? -1 : 1;
+    }
+
+    return right.updatedAt - left.updatedAt;
+  });
+}
+
+function getDateKey(dueAt: number | null): string {
+  if (dueAt === null) {
+    return 'unscheduled';
+  }
+
+  const dueDate = new Date(dueAt);
+  const year = dueDate.getFullYear();
+  const month = String(dueDate.getMonth() + 1).padStart(2, '0');
+  const day = String(dueDate.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function formatTaskGroupLabel(dateKey: string): string {
+  if (dateKey === 'unscheduled') {
+    return t('shared.noTasks');
+  }
+
+  const [year, month, day] = dateKey.split('-').map((value) => Number(value));
+  const currentDate = new Date();
+  const targetDate = new Date(year, month - 1, day);
+  const isToday = targetDate.getFullYear() === currentDate.getFullYear()
+    && targetDate.getMonth() === currentDate.getMonth()
+    && targetDate.getDate() === currentDate.getDate();
+
+  if (isToday) {
+    return `${t('shared.today')} · ${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}`;
+  }
+
+  return `${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}/${year}`;
+}
+
+function formatPriority(priority: TaskPriority, translate: ReturnType<typeof useWorkspaceI18n>['t']): string {
+  if (priority === 'high') return translate('shared.taskPriorityHigh');
+  if (priority === 'medium') return translate('shared.taskPriorityMedium');
+  return translate('shared.taskPriorityLow');
+}
+
+function formatDueAt(value: number): string {
+  const dueDate = new Date(value);
+  const month = String(dueDate.getMonth() + 1).padStart(2, '0');
+  const day = String(dueDate.getDate()).padStart(2, '0');
+  const dateLabel = `${month}/${day}`;
+  if (dueDate.getHours() === 0 && dueDate.getMinutes() === 0) {
+    return dateLabel;
+  }
+
+  const hours = String(dueDate.getHours()).padStart(2, '0');
+  const minutes = String(dueDate.getMinutes()).padStart(2, '0');
+  return `${dateLabel} ${hours}:${minutes}`;
+}
+</script>
+
+<style scoped>
+.task-list-panel {
+  display: grid;
+  gap: 14px;
+  color: rgba(226, 232, 240, 0.96);
+}
+
+.task-list-panel__actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.task-list-panel__add,
+.task-list-panel__completed-toggle,
+.task-list-panel__row-actions button {
+  border: 0;
+  cursor: pointer;
+}
+
+.task-list-panel__add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(226, 232, 240, 0.86);
+}
+
+.task-list-panel__add:hover,
+.task-list-panel__add:focus-visible {
+  background: rgba(255, 255, 255, 0.06);
+  color: #f8fafc;
+}
+
+.task-list-panel__add svg {
+  width: 18px;
+  height: 18px;
+}
+
+.task-list-panel__list,
+.task-list-panel__group {
+  display: grid;
+  gap: 10px;
+}
+
+.task-list-panel__group + .task-list-panel__group {
+  margin-top: 6px;
+}
+
+.task-list-panel__group-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(191, 219, 254, 0.74);
+}
+
+.task-list-panel__item {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  align-items: start;
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.task-list-panel__item--with-meta {
+  padding-bottom: 30px;
+}
+
+.task-list-panel__item--completed {
+  opacity: 0.72;
+  border-color: transparent;
+}
+
+:deep(.task-list-panel__check) input {
+  margin-top: 4px;
+}
+
+:deep(.task-list-panel__content) {
+  grid-column: 2;
+  grid-row: 1;
+  position: relative;
+  min-width: 0;
+}
+
+:deep(.task-list-panel__title-row) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+:deep(.task-list-panel__title-main) {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+:deep(.task-list-panel__sync-status) {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.55);
+}
+
+:deep(.task-list-panel__sync-status--synced) {
+  background: #22c55e;
+}
+
+:deep(.task-list-panel__sync-status--failed) {
+  background: #ef4444;
+}
+
+.task-list-panel__notes,
+.task-list-panel__meta,
+.task-list-panel__message {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: rgba(191, 219, 254, 0.78);
+}
+
+:deep(.task-list-panel__notes) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:deep(.task-list-panel__meta) {
+  grid-column: 2 / 4;
+  grid-row: 1;
+  position: absolute;
+  inset-inline-end: 12px;
+  bottom: 10px;
+  margin: 0;
+  text-align: right;
+}
+
+.task-list-panel__message--error {
+  color: #fda4af;
+}
+
+:deep(.task-list-panel__priority[data-priority='high']) {
+  color: #fb7185;
+}
+
+:deep(.task-list-panel__priority[data-priority='medium']) {
+  color: #f59e0b;
+}
+
+:deep(.task-list-panel__priority[data-priority='low']) {
+  color: #2dd4bf;
+}
+
+:deep(.task-list-panel__row-actions) {
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: end;
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+}
+
+.task-list-panel__completed-toggle {
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: rgba(30, 41, 59, 0.9);
+  color: rgba(226, 232, 240, 0.92);
+}
+
+.task-list-panel__completed-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border-radius: 0;
+  background: transparent;
+  color: rgba(226, 232, 240, 0.88);
+}
+
+.task-list-panel__completed-toggle:hover,
+.task-list-panel__completed-toggle:focus-visible {
+  color: #f8fafc;
+}
+
+.task-list-panel__completed-chevron {
+  width: 16px;
+  height: 16px;
+  color: rgba(148, 163, 184, 0.9);
+  transition: transform 120ms ease;
+}
+
+.task-list-panel__completed-chevron--expanded {
+  transform: rotate(180deg);
+}
+
+:deep(.task-list-panel__menu-trigger) {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  min-height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 6px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: rgba(226, 232, 240, 0.78) !important;
+  font: inherit;
+}
+
+:deep(.task-list-panel__menu-trigger:hover),
+:deep(.task-list-panel__menu-trigger:focus-visible) {
+  background: rgba(255, 255, 255, 0.045) !important;
+  color: rgba(248, 250, 252, 0.9) !important;
+}
+
+:deep(.task-list-panel__menu-trigger svg) {
+  width: 15px;
+  height: 15px;
+}
+
+:deep(.task-list-panel__menu) {
+  position: absolute;
+  top: 26px;
+  right: 0;
+  z-index: 2;
+  display: grid;
+  gap: 2px;
+  min-width: 72px;
+  padding: 4px;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.96);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  box-shadow: 0 8px 18px rgba(2, 6, 23, 0.28);
+}
+
+:deep(.task-list-panel__menu button) {
+  appearance: none;
+  min-height: auto;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 7px;
+  box-shadow: none;
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.2;
+  background: transparent;
+  color: rgba(226, 232, 240, 0.92);
+  font: inherit;
+}
+
+:deep(.task-list-panel__menu button:hover),
+:deep(.task-list-panel__menu button:focus-visible) {
+  background: rgba(255, 255, 255, 0.06);
+}
+</style>

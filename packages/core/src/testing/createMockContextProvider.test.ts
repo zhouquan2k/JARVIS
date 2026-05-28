@@ -126,6 +126,66 @@ describe('createMockContextProvider.getContext', () => {
         ]);
     });
 
+    it('supports global queries and today/planned tags', async () => {
+        const now = new Date();
+        const provider = createMockContextProvider({
+            nodes: [],
+            documents: {},
+            tasks: [
+                {
+                    id: 'task-today',
+                    title: 'Today task',
+                    notes: '',
+                    completed: false,
+                    dueAt: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 18, 0, 0, 0).getTime(),
+                    priority: null,
+                    documentPath: '/workspace/guide.md',
+                    agentKey: null,
+                    createdAt: 1,
+                    updatedAt: 2,
+                    completedAt: null,
+                    calendarProviderId: null,
+                    calendarEventId: null,
+                    calendarSyncStatus: null,
+                    calendarLastSyncedAt: null,
+                    calendarLastSyncError: null
+                },
+                {
+                    id: 'task-planned',
+                    title: 'Planned task',
+                    notes: '',
+                    completed: false,
+                    dueAt: new Date(now.getFullYear(), now.getMonth(), now.getDate() + 3, 9, 0, 0, 0).getTime(),
+                    priority: null,
+                    documentPath: null,
+                    agentKey: '/workspace/',
+                    createdAt: 3,
+                    updatedAt: 4,
+                    completedAt: null,
+                    calendarProviderId: null,
+                    calendarEventId: null,
+                    calendarSyncStatus: null,
+                    calendarLastSyncedAt: null,
+                    calendarLastSyncError: null
+                }
+            ]
+        });
+
+        const taskProvider = provider.getTaskProvider();
+
+        await expect(taskProvider.getTasks(null, null, false, 'all')).resolves.toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: 'task-today' }),
+            expect.objectContaining({ id: 'task-planned' })
+        ]));
+        await expect(taskProvider.getTasks(null, null, false, 'today')).resolves.toEqual([
+            expect.objectContaining({ id: 'task-today' })
+        ]);
+        await expect(taskProvider.getTasks(null, null, false, 'planned')).resolves.toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: 'task-today' }),
+            expect.objectContaining({ id: 'task-planned' })
+        ]));
+    });
+
     it('normalizes task system fields when creating and updating tasks', async () => {
         const provider = createMockContextProvider({
             nodes: [],

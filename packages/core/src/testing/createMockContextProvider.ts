@@ -2,7 +2,7 @@ import { DEFAULT_SCOPED_AGENT_CONFIG, resolveScopedAgentConfig } from '../agents
 import type { Conversation } from '../interfaces/Conversation';
 import type { ConversationQuery } from '../interfaces/IConversationPersistProvider';
 import { DEFAULT_WORKSPACE_AGENT_KEY } from '../interfaces/IContextProvider';
-import type { Task } from '../interfaces/ITaskProvider';
+import type { Task, TaskQueryTag } from '../interfaces/ITaskProvider';
 import type {
     ContextDocument,
     ContextNode,
@@ -11,6 +11,7 @@ import type {
     ContextSearchRequest,
     CreateContextNodeInput,
     IContextProvider,
+    MoveContextNodeInput,
     RenameContextNodeInput,
     WorkspaceContext,
     WriteContextDocumentInput,
@@ -113,6 +114,35 @@ function ensureNode(snapshot: StoredWorkspaceSnapshot, path: string): StoredCont
     return matched;
 }
 
+function remapNodeSubtree(snapshot: StoredWorkspaceSnapshot, fromPath: string, toPath: string): void {
+    const descendants = snapshot.nodes
+        .filter((candidate) => candidate.path === fromPath || candidate.path.startsWith(`${fromPath}/`))
+        .sort((left, right) => left.path.length - right.path.length);
+
+    descendants.forEach((candidate) => {
+        const suffix = candidate.path.slice(fromPath.length);
+        candidate.path = `${toPath}${suffix}`;
+        candidate.name = candidate.path.split('/').pop() || candidate.name;
+        if (candidate.parentPath) {
+            candidate.parentPath = normalizePath(candidate.parentPath === fromPath
+                ? toPath
+                : candidate.parentPath.replace(fromPath, toPath));
+        }
+        candidate.updatedAt = Date.now();
+    });
+
+    Object.entries(snapshot.documents).forEach(([documentPath, value]) => {
+        if (documentPath === fromPath || documentPath.startsWith(`${fromPath}/`)) {
+            const suffix = documentPath.slice(fromPath.length);
+            const nextPath = `${toPath}${suffix}`;
+            snapshot.documents[nextPath] = typeof value === 'string'
+                ? value
+                : { ...value, path: nextPath };
+            delete snapshot.documents[documentPath];
+        }
+    });
+}
+
 function readStoredDocument(snapshot: StoredWorkspaceSnapshot, path: string): ContextDocument {
     const stored = snapshot.documents[path];
     if (typeof stored === 'string') {
@@ -186,19 +216,31 @@ export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): I
     let taskSequence = (currentSnapshot.tasks?.length ?? 0) + 1;
 
     const taskProvider = {
-        async getTasks(documentPath?: string | null, agentKey?: string | null, completed?: boolean): Promise<Task[]> {
+        async getTasks(
+            documentPath?: string | null,
+            agentKey?: string | null,
+            completed?: boolean,
+            tag?: TaskQueryTag | null
+        ): Promise<Task[]> {
             const scope = normalizeTaskScope(documentPath, agentKey);
+            const now = Date.now();
             return (currentSnapshot.tasks ?? [])
                 .filter((task) => {
                     if (scope.documentPath !== null) {
                         if (task.documentPath !== scope.documentPath) {
                             return false;
                         }
-                    } else if ((scope.agentKey ?? null) !== (task.agentKey ?? null)) {
-                        return false;
+                    } else if (scope.agentKey !== null) {
+                        if ((scope.agentKey ?? null) !== (task.agentKey ?? null) || task.documentPath !== null) {
+                            return false;
+                        }
                     }
 
                     if (typeof completed === 'boolean' && task.completed !== completed) {
+                        return false;
+                    }
+
+                    if (!matchesTaskTag(task, tag, now)) {
                         return false;
                     }
 
@@ -529,32 +571,7 @@ export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): I
                 throw new Error(`Node already exists: ${targetPath}`);
             }
 
-            const descendants = currentSnapshot.nodes
-                .filter((candidate) => candidate.path === normalizedPath || candidate.path.startsWith(`${normalizedPath}/`))
-                .sort((left, right) => left.path.length - right.path.length);
-
-            descendants.forEach((candidate) => {
-                const suffix = candidate.path.slice(normalizedPath.length);
-                candidate.path = `${targetPath}${suffix}`;
-                candidate.name = candidate.path.split('/').pop() || candidate.name;
-                if (candidate.parentPath) {
-                    candidate.parentPath = normalizePath(candidate.parentPath === normalizedPath
-                        ? targetPath
-                        : candidate.parentPath.replace(normalizedPath, targetPath));
-                }
-                candidate.updatedAt = Date.now();
-            });
-
-            Object.entries(currentSnapshot.documents).forEach(([documentPath, value]) => {
-                if (documentPath === normalizedPath || documentPath.startsWith(`${normalizedPath}/`)) {
-                    const suffix = documentPath.slice(normalizedPath.length);
-                    const nextPath = `${targetPath}${suffix}`;
-                    currentSnapshot.documents[nextPath] = typeof value === 'string'
-                        ? value
-                        : { ...value, path: nextPath };
-                    delete currentSnapshot.documents[documentPath];
-                }
-            });
+            remapNodeSubtree(currentSnapshot, normalizedPath, targetPath);
 
             const resolved = await resolveScopedAgentConfig(provider, targetPath, DEFAULT_SCOPED_AGENT_CONFIG);
             return {
@@ -564,6 +581,58 @@ export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): I
                 parentPath,
                 hasChildren: node.kind === 'directory' ? nodeHasChildren(currentSnapshot.nodes, targetPath) : false,
                 updatedAt: node.updatedAt,
+                isAgentOwner: false,
+                agentKey: resolved.scopePath.endsWith('/') ? resolved.scopePath : `${resolved.scopePath}/`
+            };
+        },
+        async moveNode(input: MoveContextNodeInput): Promise<ContextNode> {
+            const normalizedPath = normalizePath(input.path);
+            if (!normalizedPath) {
+                throw new Error('Moving the root directory is not allowed.');
+            }
+
+            const node = ensureNode(currentSnapshot, normalizedPath);
+            const targetParentPath = normalizePath(input.targetParentPath);
+            if (targetParentPath) {
+                const targetParentNode = ensureNode(currentSnapshot, targetParentPath);
+                if (targetParentNode.kind !== 'directory') {
+                    throw new Error(`Target parent is not a directory: ${targetParentPath}`);
+                }
+            }
+
+            if (targetParentPath === normalizedPath || targetParentPath?.startsWith(`${normalizedPath}/`)) {
+                throw new Error('Cannot move a node into itself or its descendant.');
+            }
+
+            const targetPath = getChildPath(targetParentPath, node.name);
+            if (targetPath === normalizedPath) {
+                const resolvedUnchanged = await resolveScopedAgentConfig(provider, targetPath, DEFAULT_SCOPED_AGENT_CONFIG);
+                return {
+                    path: targetPath,
+                    name: node.name,
+                    kind: node.kind,
+                    parentPath: targetParentPath,
+                    hasChildren: node.kind === 'directory' ? nodeHasChildren(currentSnapshot.nodes, targetPath) : false,
+                    updatedAt: node.updatedAt,
+                    isAgentOwner: false,
+                    agentKey: resolvedUnchanged.scopePath.endsWith('/') ? resolvedUnchanged.scopePath : `${resolvedUnchanged.scopePath}/`
+                };
+            }
+            if (currentSnapshot.nodes.some((candidate) => candidate.path === targetPath && candidate.path !== normalizedPath)) {
+                throw new Error(`Node already exists: ${targetPath}`);
+            }
+
+            remapNodeSubtree(currentSnapshot, normalizedPath, targetPath);
+
+            const movedNode = ensureNode(currentSnapshot, targetPath);
+            const resolved = await resolveScopedAgentConfig(provider, targetPath, DEFAULT_SCOPED_AGENT_CONFIG);
+            return {
+                path: targetPath,
+                name: movedNode.name,
+                kind: movedNode.kind,
+                parentPath: targetParentPath,
+                hasChildren: movedNode.kind === 'directory' ? nodeHasChildren(currentSnapshot.nodes, targetPath) : false,
+                updatedAt: movedNode.updatedAt,
                 isAgentOwner: false,
                 agentKey: resolved.scopePath.endsWith('/') ? resolved.scopePath : `${resolved.scopePath}/`
             };
@@ -591,4 +660,24 @@ export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): I
     };
 
     return provider;
+}
+
+function matchesTaskTag(task: Task, tag: TaskQueryTag | null | undefined, now: number): boolean {
+    if (!tag || tag === 'all') {
+        return true;
+    }
+
+    if (task.dueAt === null) {
+        return false;
+    }
+
+    if (tag === 'planned') {
+        return task.dueAt > now;
+    }
+
+    const dueDate = new Date(task.dueAt);
+    const currentDate = new Date(now);
+    return dueDate.getFullYear() === currentDate.getFullYear()
+        && dueDate.getMonth() === currentDate.getMonth()
+        && dueDate.getDate() === currentDate.getDate();
 }

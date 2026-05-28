@@ -166,6 +166,7 @@
       :model-value="indexDraftContent"
       :linkable-markdown-documents="linkableMarkdownDocuments"
       :linkable-conversations="linkableConversations"
+      :linkable-reference-resources="linkableReferenceResources"
       :is-saving="indexIsSaving"
       :is-dirty="indexIsDirty"
       :latest-file-change="null"
@@ -211,6 +212,7 @@ const props = withDefaults(defineProps<{
   indexPaneMode?: 'empty' | 'viewer' | 'unsupported';
   linkableMarkdownDocuments?: ContextNode[];
   linkableConversations?: LinkableConversationEntry[];
+  linkableReferenceResources?: ContextNode[];
   indexIsSaving?: boolean;
   indexIsDirty?: boolean;
   providers: ProviderConfig[];
@@ -224,6 +226,7 @@ const props = withDefaults(defineProps<{
   indexPaneMode: 'empty',
   linkableMarkdownDocuments: () => [],
   linkableConversations: () => [],
+  linkableReferenceResources: () => [],
   indexIsSaving: false,
   indexIsDirty: false,
   modelLoadStates: () => ({})

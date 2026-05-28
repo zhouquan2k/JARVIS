@@ -209,6 +209,31 @@ describe('useDocumentWorkspaceStore', () => {
         expect(result.markdown).toBe('![](references/Pasted%20image%2020260508083456%202.png)');
     });
 
+    it('returns linkable reference resources from the active document references directory', async () => {
+        const provider = createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' },
+                { path: '/docs/references', name: 'references', kind: 'directory', parentPath: '/docs' },
+                { path: '/docs/references/spec.pdf', name: 'spec.pdf', kind: 'file', parentPath: '/docs/references' },
+                { path: '/docs/references/diagram.png', name: 'diagram.png', kind: 'file', parentPath: '/docs/references' },
+                { path: '/other/references/ignore.pdf', name: 'ignore.pdf', kind: 'file', parentPath: '/other/references' }
+            ],
+            documents: {
+                '/docs/guide.md': '# Guide'
+            }
+        });
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(provider);
+
+        await store.hydrateWorkspace();
+
+        expect(store.getLinkableReferenceResources('/docs/guide.md').map((node) => node.path)).toEqual([
+            '/docs/references/diagram.png',
+            '/docs/references/spec.pdf'
+        ]);
+    });
+
     it('creates directories and selects them after refreshing the tree', async () => {
         const store = useDocumentWorkspaceStore();
         store.setContextProvider(createMockContextProvider());
@@ -640,6 +665,29 @@ describe('useDocumentWorkspaceStore', () => {
         expect(store.activePath).toBe('/workspace/guide-renamed.md');
         expect(store.selectedNodePath).toBe('/workspace/guide-renamed.md');
         expect(store.activeDocument?.path).toBe('/workspace/guide-renamed.md');
+    });
+
+    it('moves the active file and keeps it open on the new path', async () => {
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(createMockContextProvider({
+            nodes: [
+                { path: '/workspace', name: 'workspace', kind: 'directory' },
+                { path: '/workspace/archive', name: 'archive', kind: 'directory', parentPath: '/workspace' },
+                { path: '/workspace/guide.md', name: 'guide.md', kind: 'file', parentPath: '/workspace' }
+            ],
+            documents: {
+                '/workspace/guide.md': '# Guide'
+            }
+        }));
+
+        await store.hydrateWorkspace();
+        await store.openNode('/workspace/guide.md');
+        await store.moveNode({ path: '/workspace/guide.md', targetParentPath: '/workspace/archive' });
+
+        expect(store.nodes.some((node) => node.path === '/workspace/archive/guide.md')).toBe(true);
+        expect(store.activePath).toBe('/workspace/archive/guide.md');
+        expect(store.selectedNodePath).toBe('/workspace/archive/guide.md');
+        expect(store.activeDocument?.path).toBe('/workspace/archive/guide.md');
     });
 
     it('clears the current file context when selecting a directory', async () => {

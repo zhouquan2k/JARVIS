@@ -1,3 +1,4 @@
+import type { TaskQueryTag } from '@packages/core';
 import type {
     Conversation,
     ContextDocument,
@@ -6,6 +7,7 @@ import type {
     ContextSearchRequest,
     ContextProvider,
     CreateContextNodeInput,
+    MoveContextNodeInput,
     RenameContextNodeInput,
     Task,
     WorkspaceContext,
@@ -20,7 +22,12 @@ function notImplemented(): never {
 export class DatabaseContextProvider implements ContextProvider {
     readonly id = 'database-context';
     private readonly taskProvider = {
-        async getTasks(): Promise<Task[]> {
+        async getTasks(
+            _documentPath?: string | null,
+            _agentKey?: string | null,
+            _completed?: boolean,
+            _tag?: TaskQueryTag | null
+        ): Promise<Task[]> {
             return [];
         },
         async createTask(_task: Task): Promise<Task> {
@@ -74,6 +81,10 @@ export class DatabaseContextProvider implements ContextProvider {
     }
 
     async renameNode(_input: RenameContextNodeInput): Promise<ContextNode> {
+        notImplemented();
+    }
+
+    async moveNode(_input: MoveContextNodeInput): Promise<ContextNode> {
         notImplemented();
     }
 

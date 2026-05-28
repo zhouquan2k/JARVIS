@@ -1,10 +1,10 @@
-export type ChatRoutePath = '/' | '/knowledge' | '/chat' | '/compare';
+export type ChatRoutePath = '/' | '/knowledge' | '/chat' | '/compare' | '/all-tasks';
 
 export interface ChatRoute {
   path: ChatRoutePath;
-  name: 'normal-chat' | 'knowledge-workspace' | 'compare-chat';
+  name: 'normal-chat' | 'knowledge-workspace' | 'compare-chat' | 'all-tasks';
   label: string;
-  labelKey?: 'routes.knowledgeWorkspace' | 'routes.normalChat' | 'routes.compareChat';
+  labelKey?: 'routes.knowledgeWorkspace' | 'routes.normalChat' | 'routes.compareChat' | 'routes.allTasks';
 }
 
 export const CHAT_ROUTES: ChatRoute[] = [
@@ -25,9 +25,15 @@ export const CHAT_ROUTES: ChatRoute[] = [
     name: 'compare-chat',
     label: 'Compare Chat',
     labelKey: 'routes.compareChat'
+  },
+  {
+    path: '/all-tasks',
+    name: 'all-tasks',
+    label: 'All Tasks',
+    labelKey: 'routes.allTasks'
   }
 ];
 
 export const PRIMARY_WORKSPACE_ROUTES: ChatRoute[] = CHAT_ROUTES.filter((route) => {
-  return route.path === '/' || route.path === '/chat';
+  return route.path === '/' || route.path === '/chat' || route.path === '/all-tasks';
 });

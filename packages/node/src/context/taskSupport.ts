@@ -17,7 +17,6 @@ export function normalizeTaskScope(documentPath?: string | null, agentKey?: stri
         ? normalizeVirtualTaskPath(documentPath) ?? null
         : null;
     const normalizedAgentKey = agentKey?.trim() ? agentKey.trim() : null;
-
     return {
         documentPath: normalizedDocumentPath,
         agentKey: normalizedAgentKey
@@ -48,12 +47,7 @@ export function hasSpecificDueTime(dueAt: number | null): boolean {
     if (dueAt === null || !Number.isFinite(dueAt)) {
         return false;
     }
-
-    const dueDate = new Date(dueAt);
-    return dueDate.getHours() !== 0
-        || dueDate.getMinutes() !== 0
-        || dueDate.getSeconds() !== 0
-        || dueDate.getMilliseconds() !== 0;
+    return true;
 }
 
 function normalizeVirtualTaskPath(value: string): string | undefined {

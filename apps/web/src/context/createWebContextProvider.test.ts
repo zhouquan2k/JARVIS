@@ -89,6 +89,12 @@ describe('createWebContextProvider', () => {
           node: { path: '/notes/renamed.md', name: 'renamed.md', kind: 'file', parentPath: '/notes', agentKey: '/' }
         }), { status: 200 });
       }
+      if (url.endsWith('/move-node')) {
+        expect(body).toEqual({ path: '/notes/renamed.md', targetParentPath: '/archive' });
+        return new Response(JSON.stringify({
+          node: { path: '/archive/renamed.md', name: 'renamed.md', kind: 'file', parentPath: '/archive', agentKey: '/' }
+        }), { status: 200 });
+      }
       if (url.endsWith('/search-in-scope')) {
         expect(body).toEqual({ query: 'Today', scopePath: '/notes', maxResults: 3 });
         return new Response(JSON.stringify({
@@ -146,6 +152,16 @@ describe('createWebContextProvider', () => {
       parentPath: '/notes',
       agentKey: '/'
     });
+    await expect(provider.moveNode({
+      path: '/notes/renamed.md',
+      targetParentPath: '/archive'
+    })).resolves.toEqual({
+      path: '/archive/renamed.md',
+      name: 'renamed.md',
+      kind: 'file',
+      parentPath: '/archive',
+      agentKey: '/'
+    });
     await expect(provider.searchInScope({
       query: 'Today',
       scopePath: '/notes',
@@ -153,7 +169,7 @@ describe('createWebContextProvider', () => {
     })).resolves.toEqual([
       { path: '/notes/today.md', line: 1, column: 3, preview: '# Today' }
     ]);
-    expect(fetchImpl).toHaveBeenCalledTimes(9);
+    expect(fetchImpl).toHaveBeenCalledTimes(10);
   });
 
   it('surfaces server-side context errors', async () => {

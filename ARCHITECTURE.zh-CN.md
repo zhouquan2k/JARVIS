@@ -54,6 +54,33 @@ ChatPrism 处于终端用户、外部 AI 提供方和用户知识资料库之间
 - 同步服务是远程上下文和数据同步的后端边界。
 - 知识资料库即使部署在本地，也仍然被视为外部依赖。
 
+## Markdown 文档编辑策略
+
+markdown viewer（Milkdown / ProseMirror）编辑的是结构化文档树，而文档的
+真值仍是磁盘上的原始 markdown 字符串。任何"viewer 光标 → 源码字符偏移"
+的映射在原理上都不稳定——Milkdown 是 WYSIWYG 编辑器，本身不维护
+"文档树 ↔ 原始字节流"的源映射。
+
+### 决策
+
+viewer 模式下的插入操作（文档工具栏触发的链接 / 会话引用 / 资源嵌入）
+通过 Milkdown 的 parser 解析为节点，作为原生 ProseMirror transaction
+派发；新的 markdown 源由 Milkdown 的 serializer 整篇重新生成。不再尝试
+任何"viewer → 源码"的坐标换算。
+
+### 影响
+
+- 插入位置在任意块类型上都准确，包括空段落与 raw HTML 邻位。
+- 打开文档后的首次插入可能规范化格式（强调标记风格、列表符号、连续空行
+  合并等），产生较大的初始 git diff。后续编辑稳定，因为 serializer 输出
+  是确定性的。
+- edit 模式（纯 textarea）继续在源字符串上直接 splice，在需要字节级
+  真值时保留这条路径。
+- 这是 `packages/ui` 内部决策，不影响同步服务契约或跨宿主接口。
+
+viewer 模式插入入口位于 `packages/ui/src/utils/markdownDocument.ts` 的
+`insertMarkdownAtViewerSelection`。
+
 ## 外部依赖链路
 
 - Web、Extension、Desktop 通过共享运行时契约调用外部模型提供方。
@@ -64,5 +91,4 @@ ChatPrism 处于终端用户、外部 AI 提供方和用户知识资料库之间
 
 - 仓库概览：[README.zh-CN.md](README.zh-CN.md)
 - C4 DSL 主设计源：[docs/zh/workspace.zh-CN.dsl](docs/zh/workspace.zh-CN.dsl)
-- 文档范围说明：[docs/zh/overall.zh-CN.md](docs/zh/overall.zh-CN.md)
 - Context Provider 说明：[docs/zh/context-provider.zh-CN.md](docs/zh/context-provider.zh-CN.md)

@@ -63,6 +63,13 @@ function createProvider(): ContextProvider {
             kind: 'file',
             agentKey: '/'
         })),
+        moveNode: vi.fn(async (input) => ({
+            path: `${input.targetParentPath ?? ''}/${input.path.split('/').pop() ?? ''}`.replace(/^$/, '/'),
+            name: input.path.split('/').pop() ?? '',
+            kind: 'file',
+            parentPath: input.targetParentPath,
+            agentKey: '/'
+        })),
         searchInScope: vi.fn(async () => [{ path: '/welcome.md', line: 1, column: 3, preview: '# hello' }])
     };
 }
@@ -84,7 +91,7 @@ describe('http context service', () => {
                 documentPaths: ['/welcome.md']
             })
         ]);
-        await expect(service.getTasks('/welcome.md', null, false)).resolves.toEqual([]);
+        await expect(service.getTasks('/welcome.md', null, false, 'today')).resolves.toEqual([]);
         await expect(service.getProjectDocuments('/')).resolves.toEqual([
             { path: '/welcome.md', name: 'welcome.md' }
         ]);
@@ -114,6 +121,13 @@ describe('http context service', () => {
             path: '/notes/renamed.md',
             name: 'renamed.md'
         });
+        await expect(service.moveNode({
+            path: '/notes/renamed.md',
+            targetParentPath: '/archive'
+        })).resolves.toMatchObject({
+            path: '/archive/renamed.md',
+            name: 'renamed.md'
+        });
         await expect(service.searchInScope({
             query: 'hello',
             scopePath: '/',
@@ -124,7 +138,7 @@ describe('http context service', () => {
         expect(provider.initializeAccess).toHaveBeenCalledTimes(1);
         expect(provider.getContext).toHaveBeenCalledTimes(1);
         expect(provider.getConversations).toHaveBeenCalledWith({ documentPath: '/welcome.md' });
-        expect(taskProvider.getTasks).toHaveBeenCalledWith('/welcome.md', null, false);
+        expect(taskProvider.getTasks).toHaveBeenCalledWith('/welcome.md', null, false, 'today');
         expect(provider.getProjectDocuments).toHaveBeenCalledWith('/');
         expect(provider.readDocument).toHaveBeenCalledWith('/welcome.md');
         expect(provider.writeDocument).toHaveBeenCalledWith({
@@ -141,6 +155,10 @@ describe('http context service', () => {
         expect(provider.renameNode).toHaveBeenCalledWith({
             path: '/notes/draft.md',
             name: 'renamed.md'
+        });
+        expect(provider.moveNode).toHaveBeenCalledWith({
+            path: '/notes/renamed.md',
+            targetParentPath: '/archive'
         });
         expect(provider.searchInScope).toHaveBeenCalledWith({
             query: 'hello',

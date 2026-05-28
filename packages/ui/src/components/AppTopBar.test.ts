@@ -18,11 +18,13 @@ describe('AppTopBar', () => {
 
         const knowledgeButton = wrapper.get('[data-testid="topbar-workspace-knowledge-workspace"]');
         const chatButton = wrapper.get('[data-testid="topbar-workspace-normal-chat"]');
+        const allTasksButton = wrapper.get('[data-testid="topbar-workspace-all-tasks"]');
 
         expect(wrapper.get('.brand-title').text()).toBe('JARVIS');
         expect(wrapper.get('.brand-icon').attributes('src')).toBe('/jarvis.png');
         expect(knowledgeButton.attributes('aria-pressed')).toBe('true');
         expect(chatButton.attributes('aria-pressed')).toBe('false');
+        expect(allTasksButton.attributes('aria-pressed')).toBe('false');
 
         await chatButton.trigger('click');
         expect(wrapper.emitted('navigate-workspace')).toEqual([[ '/chat' ]]);

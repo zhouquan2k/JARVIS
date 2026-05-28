@@ -9,6 +9,9 @@ function normalizeHash(hash: string): ChatRoutePath {
   if (normalized === '/chat') {
     return '/chat';
   }
+  if (normalized === '/all-tasks') {
+    return '/all-tasks';
+  }
   if (normalized === '/knowledge') {
     return '/';
   }

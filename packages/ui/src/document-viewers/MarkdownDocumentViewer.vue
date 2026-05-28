@@ -91,10 +91,13 @@ import {
   getMarkdownEditorSearchMatchCount,
   destroyMarkdownEditor,
   findResizableMarkdownImageSource,
+  insertMarkdownAtViewerSelection,
   insertPastedMarkdownImage,
   normalizeMarkdownViewerContent,
   readMarkdownDocument,
   replaceMarkdownDocument,
+  resolveEmptyBlockAnchorFallback,
+  resolveEmptyBlockMarkdownOffset,
   resolveMarkdownSourceSelection,
   rewriteMarkdownImageRatio,
   scrollToMarkdownEditorSearchMatch,
@@ -154,6 +157,7 @@ let activeEditorMode: MarkdownViewerMode | null = null;
 let lastMarkdownSelection: { start: number; end: number } | null = null;
 let pendingMarkdownSelectionFromViewer: { start: number; end: number } | null = null;
 let preferRememberedMarkdownSelection = false;
+let pendingViewerScrollTop: number | null = null;
 let viewerPasteAbortController: AbortController | null = null;
 let isNavigatingAwayFromViewer = false;
 let lastViewerNavigationTarget: { kind: 'document'; path: string } | { kind: 'conversation'; conversationId: string } | null = null;
@@ -252,6 +256,9 @@ watch(() => [
     if (activeEditorMode === 'viewer' && currentMarkdown !== props.modelValue) {
       emit('update:modelValue', currentMarkdown);
     }
+    if (activeEditorMode === 'viewer' && desiredMode === 'edit') {
+      pendingViewerScrollTop = captureViewerScrollTop();
+    }
     await teardownEditor();
     activeEditorMode = desiredMode;
     if (desiredMode === 'edit') {
@@ -263,6 +270,7 @@ watch(() => [
     }
     await nextTick();
     await ensureEditor(currentMarkdown);
+    restoreViewerScrollTop();
     return;
   }
 
@@ -734,8 +742,41 @@ defineExpose({
   getSearchMatchCount,
   scrollToSearchMatch,
   insertMarkdownLink,
-  insertMarkdownConversationLink
+  insertMarkdownConversationLink,
+  insertMarkdownSnippet,
+  insertMarkdownInViewer
 });
+
+function insertMarkdownInViewer(markdown: string): boolean {
+  if (!editor) {
+    console.warn('[markdown-viewer] insertMarkdownInViewer: no milkdown editor');
+    return false;
+  }
+  return insertMarkdownAtViewerSelection(editor, markdown);
+}
+
+function getViewerScrollContainer(): HTMLElement | null {
+  return editorRoot.value?.closest('.editor-scroll-shell') as HTMLElement | null;
+}
+
+function captureViewerScrollTop(): number | null {
+  const container = getViewerScrollContainer();
+  return container ? container.scrollTop : null;
+}
+
+function restoreViewerScrollTop() {
+  if (pendingViewerScrollTop === null) {
+    return;
+  }
+  const target = pendingViewerScrollTop;
+  pendingViewerScrollTop = null;
+  requestAnimationFrame(() => {
+    const container = getViewerScrollContainer();
+    if (container) {
+      container.scrollTop = target;
+    }
+  });
+}
 
 function prepareMarkdownSelectionFromViewer(): boolean {
   if (!editorRoot.value || !isMarkdownDocument.value || props.markdownViewerMode !== 'viewer') {
@@ -744,18 +785,51 @@ function prepareMarkdownSelectionFromViewer(): boolean {
   }
 
   const snapshot = captureRenderableMarkdownSelection(editorRoot.value);
+  console.log('[insert-debug] prepare snapshot=', snapshot);
   if (!snapshot) {
     pendingMarkdownSelectionFromViewer = null;
     return false;
   }
 
-  const resolved = resolveMarkdownSourceSelection(props.modelValue, snapshot);
+  let resolved: { start: number; end: number } | null = null;
+  if (snapshot.blockText === '' && typeof snapshot.blockIndex === 'number') {
+    if (editor) {
+      resolved = resolveEmptyBlockMarkdownOffset(editor, props.modelValue, snapshot.blockIndex);
+      console.log('[insert-debug] empty-block mdast offset=', resolved);
+    }
+    if (!resolved) {
+      resolved = resolveEmptyBlockAnchorFallback(editorRoot.value, snapshot, props.modelValue);
+      console.log('[insert-debug] empty-block anchor fallback offset=', resolved);
+    }
+  } else {
+    resolved = resolveMarkdownSourceSelection(props.modelValue, snapshot);
+    console.log('[insert-debug] text-block resolved=', resolved);
+  }
+
   pendingMarkdownSelectionFromViewer = resolved;
   return !!resolved;
 }
 
 function insertMarkdownLink(input: { label: string; href: string }): boolean {
+  return insertMarkdownSnippet({
+    buildReplacement: (selectedText) => {
+      const label = selectedText || input.label;
+      return `[${label}](${input.href})`;
+    }
+  });
+}
+
+function insertMarkdownSnippet(input: {
+  markdown?: string;
+  buildReplacement?: (selectedText: string) => string;
+}): boolean {
   if (!isMarkdownEditMode.value || !markdownSourceRef.value) {
+    console.log('[insert-debug] insertMarkdownSnippet SKIPPED', {
+      activePath: props.activePath,
+      mode: props.markdownViewerMode,
+      isMarkdownEditMode: isMarkdownEditMode.value,
+      hasTextarea: !!markdownSourceRef.value
+    });
     return false;
   }
 
@@ -778,9 +852,31 @@ function insertMarkdownLink(input: { label: string; href: string }): boolean {
     ? (textarea.selectionEnd ?? selectionStart)
     : selectionStart;
   const selectedText = textarea.value.slice(selectionStart, selectionEnd);
-  const label = selectedText || input.label;
-  const replacement = `[${label}](${input.href})`;
+  const replacement = input.buildReplacement
+    ? input.buildReplacement(selectedText)
+    : (input.markdown ?? '');
   const nextValue = `${textarea.value.slice(0, selectionStart)}${replacement}${textarea.value.slice(selectionEnd)}`;
+  console.log('[insert-debug] insertMarkdownSnippet APPLY', {
+    activePath: props.activePath,
+    mode: props.markdownViewerMode,
+    textareaValueLength: textarea.value.length,
+    textareaValuePreview: textarea.value.slice(0, 80),
+    propsModelValueLength: props.modelValue.length,
+    textareaMatchesModelValue: textarea.value === props.modelValue,
+    hasFocus,
+    preferRememberedMarkdownSelection,
+    hasLastMarkdownSelection: !!lastMarkdownSelection,
+    hasPendingViewerSelection: !!pendingSelection,
+    useRememberedSelection,
+    selectionStart,
+    selectionEnd,
+    selectedText,
+    replacementLength: replacement.length,
+    replacementPreview: replacement.slice(0, 120),
+    nextValueLength: nextValue.length,
+    nextValueChanged: nextValue !== textarea.value,
+    nextValuePreview: nextValue.slice(0, 120)
+  });
 
   lastKnownMarkdown = nextValue;
   lastMarkdownSelection = {
@@ -1076,8 +1172,6 @@ function requiresMarkdownDocumentPathRebind(content: string): boolean {
 
 .editor-input :deep(.milkdown .ProseMirror .milkdown-list-item-block .children > .content-dom > p) {
   margin: 0;
-  display: flex;
-  align-items: center;
   min-height: 1.75em;
 }
 

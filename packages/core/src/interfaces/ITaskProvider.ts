@@ -1,5 +1,6 @@
 export type TaskPriority = 'low' | 'medium' | 'high';
 export type TaskCalendarSyncStatus = 'synced' | 'failed' | null;
+export type TaskQueryTag = 'all' | 'today' | 'planned';
 
 export interface Task {
     id: string;
@@ -24,7 +25,8 @@ export interface ITaskProvider {
     getTasks(
         documentPath?: string | null,
         agentKey?: string | null,
-        completed?: boolean
+        completed?: boolean,
+        tag?: TaskQueryTag | null
     ): Promise<Task[]>;
     createTask(task: Task): Promise<Task>;
     updateTask(task: Task): Promise<Task>;

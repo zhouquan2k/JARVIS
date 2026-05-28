@@ -1,4 +1,4 @@
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Agent task management MUST expose a task tab in the Agent right panel
 The system MUST expose a `tasks` tab alongside the existing conversation tab in the Agent right-side workspace. Selecting the task tab MUST render task-management content in the same right panel without replacing the middle document pane.
@@ -14,17 +14,22 @@ The system MUST expose a `tasks` tab alongside the existing conversation tab in 
 - **AND** adding the task tab MUST NOT remove conversation list or detail capabilities
 
 ### Requirement: Agent task management MUST scope task lists to the current selection only
-The task tab MUST resolve tasks from exactly one scope at a time. When the current selection is a document, the task tab MUST show only tasks bound to that document. When the current selection is a project/agent-owner scope with no active document, the task tab MUST show only tasks bound directly to that project scope.
+The task tab MUST resolve tasks from exactly one active selection at a time. A task MAY belong to both a document and a project/agent scope simultaneously. When the current selection is a document, the task tab MUST show only tasks bound to that document path within the current agent context. When the current selection is a project/agent-owner scope with no active document, the task tab MUST show all tasks bound to that project scope, including tasks that are also bound to documents in the same scope.
 
 #### Scenario: Show only document tasks for an active document
 - **WHEN** the current workspace selection has an active document path
 - **THEN** the task tab MUST query and render only tasks associated with that document path
-- **AND** it MUST NOT mix in project-scoped tasks or tasks from other documents
+- **AND** it MUST NOT mix in tasks from other documents or other agent scopes
+
+#### Scenario: Allow a task to belong to both the active document and the active project scope
+- **WHEN** the system creates or returns a task whose `documentPath` and `agentKey` are both set
+- **THEN** the task tab for that document MUST be allowed to render the task
+- **AND** the task tab for that project scope MUST also be allowed to render the same task
 
 #### Scenario: Show only project tasks for an active project scope
 - **WHEN** the current workspace selection is an agent-owner/project scope and no document is active
-- **THEN** the task tab MUST query and render only tasks associated directly with that project scope
-- **AND** it MUST NOT mix in document-scoped tasks from the same project
+- **THEN** the task tab MUST query and render tasks associated with that project scope regardless of whether they also carry a document path
+- **AND** it MUST NOT mix in tasks from child agent scopes or unrelated agent scopes
 
 ### Requirement: Agent task management MUST support inline task creation and editing
 The task tab MUST let the user create and edit tasks through an inline editor inside the right panel. The editor MUST support task title, notes, due date-time, and priority fields.
@@ -65,6 +70,24 @@ The task tab MUST visibly display due date-time information for tasks that have 
 - **THEN** the rendered list row MUST show date-time information for that task
 - **AND** the user MUST NOT need to enter edit mode to know that the task has a concrete time
 
+#### Scenario: Sort dated tasks before undated tasks
+- **WHEN** the task list contains a mix of tasks with and without `dueAt`
+- **THEN** tasks with `dueAt` MUST be ordered by ascending due time
+- **AND** tasks without `dueAt` MUST appear after all dated tasks
+
+### Requirement: Agent task management MUST treat the today shortcut as due-today plus overdue unfinished work
+The all-tasks `today` shortcut MUST include unfinished tasks whose due time falls on the current day and unfinished tasks whose due time has already passed before today ends. The `planned` shortcut MUST remain reserved for future tasks only.
+
+#### Scenario: Include overdue unfinished tasks in today
+- **WHEN** an unfinished task has a `dueAt` earlier than the current time or on an earlier date
+- **THEN** the all-tasks `today` shortcut MUST still include that task
+- **AND** the task MUST NOT be forced into the `planned` shortcut
+
+#### Scenario: Exclude future tasks from today
+- **WHEN** an unfinished task has a `dueAt` later than the end of the current day
+- **THEN** the all-tasks `today` shortcut MUST NOT include that task
+- **AND** the task MAY appear in the `planned` shortcut instead
+
 ### Requirement: Agent task management MUST synchronize timed tasks to Google Calendar on desktop
 When the desktop host saves a task that has a concrete date-time, the system MUST synchronize that task to Google Calendar without adding a separate calendar-specific UI flow. The synchronized event MUST use the task title, copy the raw task notes into the event description, and apply the fixed reminder policy.
 
@@ -78,9 +101,16 @@ When the desktop host saves a task that has a concrete date-time, the system MUS
 - **THEN** the system MUST update the existing Google Calendar event rather than creating a second event
 - **AND** the synchronized event MUST reflect the latest saved task values
 
-#### Scenario: Do not synchronize tasks that do not have a concrete time
-- **WHEN** a task has no `dueAt` value or only a date-level value without a concrete time
-- **THEN** the system MUST NOT create or update a Google Calendar event for that task
+#### Scenario: Synchronize on update after a task was originally created without calendar sync
+- **WHEN** a task was created without a concrete due time and therefore has no calendar event yet
+- **AND** the desktop host later edits that task so `dueAt` becomes a concrete date-time
+- **THEN** the system MUST attempt calendar synchronization during that update
+- **AND** the returned task MUST expose the resulting synchronization state in the task list
+
+#### Scenario: Default date-only tasks to 09:00 during synchronization
+- **WHEN** a task has a `dueAt` date without a concrete time
+- **THEN** the system MUST still create or update a Google Calendar event for that task
+- **AND** the synchronized event MUST use 09:00 local time for the task start
 
 ### Requirement: Agent task management MUST apply deterministic reminder rules for synchronized timed tasks
 Synchronized desktop task events MUST use exactly the configured reminder policy derived from the task time.

@@ -105,12 +105,23 @@
         :key="item.node.path"
         type="button"
         class="tree-row"
-        :class="{ active: item.node.path === activePath, directory: item.node.kind === 'directory' }"
+        :class="{
+          active: item.node.path === activePath,
+          directory: item.node.kind === 'directory',
+          'tree-row--dragging': dragState.draggedPath === item.node.path,
+          'tree-row--drop-target': dragState.dropTargetPath === item.node.path && canDropOnNode(item.node)
+        }"
         :data-testid="item.isRoot ? 'document-node-root' : `document-node-${item.node.kind}`"
         :data-path="item.node.path"
         :style="{ paddingLeft: `${12 + item.depth * 18}px` }"
+        :draggable="!item.isInlineEditing && !item.isRoot"
         @click="onNodeClick(item.node)"
         @dblclick="beginRename(item.node)"
+        @dragstart="onDragStart(item.node, $event)"
+        @dragover="onDragOver(item.node, $event)"
+        @dragleave="onDragLeave(item.node)"
+        @drop="onDrop(item.node, $event)"
+        @dragend="clearDragState"
       >
         <span class="tree-toggle" @click.stop="onToggleClick(item.node)">
           <template v-if="!item.isInlineEditing && item.node.kind === 'directory'">
@@ -184,6 +195,7 @@ const emit = defineEmits<{
   (event: 'convert-to-agent', path: string): void;
   (event: 'delete', path: string): void;
   (event: 'rename', input: { path: string; name: string }): void;
+  (event: 'move', input: { path: string; targetParentPath?: string }): void;
   (event: 'refresh'): void;
 }>();
 
@@ -232,6 +244,13 @@ const tooltipState = reactive({
   top: 0,
   left: 0,
   visible: false
+});
+const dragState = reactive<{
+  draggedPath: string | null;
+  dropTargetPath: string | null;
+}>({
+  draggedPath: null,
+  dropTargetPath: null
 });
 
 const childrenByParent = computed(() => {
@@ -308,6 +327,80 @@ function onToggleClick(node: ContextNode) {
   if (node.kind === 'directory') {
     emit('toggle-expand', node.path);
   }
+}
+
+function clearDragState() {
+  dragState.draggedPath = null;
+  dragState.dropTargetPath = null;
+}
+
+function canDropOnNode(node: ContextNode): boolean {
+  if (!dragState.draggedPath || node.kind !== 'directory') {
+    return false;
+  }
+
+  if (dragState.draggedPath === node.path) {
+    return false;
+  }
+
+  if (node.path.startsWith(`${dragState.draggedPath}/`)) {
+    return false;
+  }
+
+  const draggedNode = props.nodes.find((candidate) => candidate.path === dragState.draggedPath);
+  const currentParentPath = draggedNode?.parentPath;
+  const targetParentPath = node.path === '/' ? undefined : node.path;
+  if ((currentParentPath ?? undefined) === targetParentPath) {
+    return false;
+  }
+
+  return true;
+}
+
+function onDragStart(node: ContextNode, event: DragEvent) {
+  if (node.path === '/' || inlineEdit.active) {
+    event.preventDefault();
+    return;
+  }
+
+  dragState.draggedPath = node.path;
+  dragState.dropTargetPath = null;
+  event.dataTransfer?.setData('text/plain', node.path);
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move';
+  }
+}
+
+function onDragOver(node: ContextNode, event: DragEvent) {
+  if (!canDropOnNode(node)) {
+    return;
+  }
+
+  event.preventDefault();
+  dragState.dropTargetPath = node.path;
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'move';
+  }
+}
+
+function onDragLeave(node: ContextNode) {
+  if (dragState.dropTargetPath === node.path) {
+    dragState.dropTargetPath = null;
+  }
+}
+
+function onDrop(node: ContextNode, event: DragEvent) {
+  if (!canDropOnNode(node) || !dragState.draggedPath) {
+    clearDragState();
+    return;
+  }
+
+  event.preventDefault();
+  emit('move', {
+    path: dragState.draggedPath,
+    targetParentPath: node.path === '/' ? undefined : node.path
+  });
+  clearDragState();
 }
 
 function resolveCreationParentPath(): string | undefined {
@@ -660,6 +753,15 @@ function resolveNodeIcon(node: ContextNode) {
   align-items: center;
   gap: 6px;
   min-width: 0;
+}
+
+.tree-row--dragging {
+  opacity: 0.45;
+}
+
+.tree-row--drop-target {
+  background: rgba(56, 189, 248, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.35);
 }
 
 .tree-agent-icon {

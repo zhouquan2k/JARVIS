@@ -562,6 +562,26 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
                 .sort((left, right) => left.path.localeCompare(right.path, 'zh-Hans-CN'));
         },
 
+        getLinkableReferenceResources(path: string | null): ContextNode[] {
+            if (!path) {
+                return [];
+            }
+
+            const lastSlashIndex = path.lastIndexOf('/');
+            const documentDirectory = lastSlashIndex <= 0 ? '/' : path.slice(0, lastSlashIndex);
+            const referencesDirectoryPath = documentDirectory === '/'
+                ? '/references'
+                : `${documentDirectory}/references`;
+            const referencesDirectory = this.findNodeByPath(referencesDirectoryPath);
+            if (!referencesDirectory || referencesDirectory.kind !== 'directory') {
+                return [];
+            }
+
+            return flattenAllNodes(referencesDirectory.children ?? [])
+                .filter((node) => node.kind === 'file')
+                .sort((left, right) => left.path.localeCompare(right.path, 'zh-Hans-CN'));
+        },
+
         syncActiveFileChange(path?: string | null) {
             const targetPath = path ?? this.activePath;
             if (!targetPath) {
@@ -1135,14 +1155,26 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
 
         updateActiveDocument(content: string) {
             if (!this.activePath || !this.activeViewerCapabilities?.edit) {
+                console.log('[insert-debug] store.updateActiveDocument BLOCKED', {
+                    activePath: this.activePath,
+                    canEdit: this.activeViewerCapabilities?.edit,
+                    contentLength: content.length
+                });
                 return;
             }
 
+            const previousDraftLength = this.draftContent.length;
             this.draftContent = content;
             this.dirtyPaths = {
                 ...this.dirtyPaths,
                 [this.activePath]: getEditableDocumentText(this.activeDocument) !== content
             };
+            console.log('[insert-debug] store.updateActiveDocument APPLIED', {
+                activePath: this.activePath,
+                previousDraftLength,
+                nextDraftLength: this.draftContent.length,
+                preview: content.slice(0, 80)
+            });
             scheduleAutoSave(this);
         },
 
@@ -1435,6 +1467,60 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             clearActiveDocumentState(this);
             this.syncActiveFileChange(null);
             this.syncActiveAgent(nextSelectedPath || '/');
+        },
+
+        async moveNode(input: { path: string; targetParentPath?: string }) {
+            if (!this.contextProvider || !input.path || input.path === '/') {
+                return;
+            }
+
+            await this.flushAgentIndexDocument();
+            await this.flushActiveDocument();
+            const movedNode = await this.contextProvider.moveNode(input);
+
+            const previousActivePath = this.activePath;
+            const previousSelectedPath = this.selectedNodePath;
+            const nextActivePath = remapPath(previousActivePath, input.path, movedNode.path);
+            const nextSelectedPath = remapPath(previousSelectedPath, input.path, movedNode.path);
+
+            this.dirtyPaths = Object.fromEntries(
+                Object.entries(this.dirtyPaths).map(([path, dirty]) => [remapPath(path, input.path, movedNode.path) || path, dirty])
+            );
+
+            const visibleRecord = previousActivePath ? this.fileChangeService.getVisibleRecord(previousActivePath) : null;
+            if (visibleRecord && previousActivePath && nextActivePath && nextActivePath !== previousActivePath) {
+                this.fileChangeService.clear(previousActivePath);
+                this.fileChangeService.recordChange({
+                    path: nextActivePath,
+                    beforeContent: visibleRecord.beforeContent,
+                    afterContent: visibleRecord.afterContent
+                });
+            }
+
+            await this.refreshTree();
+
+            const targetParentPath = input.targetParentPath && input.targetParentPath !== '/'
+                ? input.targetParentPath
+                : '/';
+            if (!this.expandedPaths.includes(targetParentPath)) {
+                this.expandedPaths = ensureRootExpanded([...this.expandedPaths, targetParentPath]);
+            }
+
+            this.selectedNodePath = nextSelectedPath;
+
+            if (nextActivePath && this.nodes.some((node) => node.path === nextActivePath)) {
+                await this.openNode(nextActivePath);
+                return;
+            }
+
+            if (nextSelectedPath && this.nodes.some((node) => node.path === nextSelectedPath)) {
+                await this.openNode(nextSelectedPath);
+                return;
+            }
+
+            clearActiveDocumentState(this);
+            this.syncActiveFileChange(null);
+            this.syncActiveAgent(resolveExistingPath(nextSelectedPath || targetParentPath, this.nodes) || '/');
         },
 
         async undoActiveFileChange() {

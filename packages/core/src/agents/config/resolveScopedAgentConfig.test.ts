@@ -408,6 +408,9 @@ describe('resolveScopedAgentConfig', () => {
             async renameNode() {
                 throw new Error('Not implemented');
             },
+            async moveNode() {
+                throw new Error('Not implemented');
+            },
             async searchInScope() {
                 return [];
             }

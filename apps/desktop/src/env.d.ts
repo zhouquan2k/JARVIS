@@ -10,7 +10,9 @@ import type {
     ContextSearchMatch,
     ContextSearchRequest,
     CreateContextNodeInput,
+    MoveContextNodeInput,
     WorkspaceContext,
+    TaskQueryTag,
     WriteContextDocumentInput,
     WriteContextDocumentResult
 } from '@packages/core/src';
@@ -29,7 +31,7 @@ declare global {
             initializeContextAccess(): Promise<void>;
             getContext(): Promise<WorkspaceContext>;
             getConversations(query: ConversationQuery): Promise<Conversation[]>;
-            getTasks(query: { documentPath?: string | null; agentKey?: string | null; completed?: boolean }): Promise<Task[]>;
+            getTasks(query: { documentPath?: string | null; agentKey?: string | null; completed?: boolean; tag?: TaskQueryTag | null }): Promise<Task[]>;
             createTask(task: Task): Promise<Task>;
             updateTask(task: Task): Promise<Task>;
             deleteTask(taskId: string): Promise<void>;
@@ -40,6 +42,7 @@ declare global {
             createContextNode(input: CreateContextNodeInput): Promise<ContextNode>;
             deleteContextNode(path: string): Promise<void>;
             renameContextNode(input: { path: string; name: string }): Promise<ContextNode>;
+            moveContextNode(input: MoveContextNodeInput): Promise<ContextNode>;
             searchContextInScope(request: ContextSearchRequest): Promise<ContextSearchMatch[]>;
             sendProxyRequest(request: ProxyRequest): void;
             onProxyResponse(listener: (response: ProxyResponse) => void): () => void;

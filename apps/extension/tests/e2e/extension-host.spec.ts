@@ -459,7 +459,8 @@ test('extension knowledge workspace inserts conversation links and reopens the r
       selection?.removeAllRanges();
       selection?.addRange(range);
     });
-    await page.getByTestId('markdown-insert-conversation-link').click();
+    await page.getByTestId('markdown-insert-link').click();
+    await page.getByTestId('markdown-link-tab-conversation').click();
     await page.locator('[data-testid^="markdown-conversation-link-option-"]').first().click();
     await expect(page.getByTestId('markdown-mode-toggle')).toHaveAttribute('aria-pressed', 'true');
     await page.getByRole('link', { name: 'notes' }).click();

@@ -12,4 +12,5 @@ export const DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL = 'chatprism:context:write-d
 export const DESKTOP_CONTEXT_CREATE_NODE_CHANNEL = 'chatprism:context:create-node';
 export const DESKTOP_CONTEXT_DELETE_NODE_CHANNEL = 'chatprism:context:delete-node';
 export const DESKTOP_CONTEXT_RENAME_NODE_CHANNEL = 'chatprism:context:rename-node';
+export const DESKTOP_CONTEXT_MOVE_NODE_CHANNEL = 'chatprism:context:move-node';
 export const DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL = 'chatprism:context:search-in-scope';

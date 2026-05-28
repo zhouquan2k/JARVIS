@@ -13,7 +13,7 @@
             :title="t('shared.insertMarkdownLink')"
             :aria-label="t('shared.insertMarkdownLink')"
             :aria-expanded="isLinkPickerOpen ? 'true' : 'false'"
-            :disabled="!canInsertMarkdownLink"
+            :disabled="!canInsertAnyLink"
             @mousedown.prevent
             @click="toggleLinkPicker"
           >
@@ -24,47 +24,101 @@
             class="editor-link-menu"
             data-testid="markdown-link-picker"
           >
-            <button
-              v-for="node in props.linkableMarkdownDocuments"
-              :key="node.path"
-              type="button"
-              class="editor-link-option"
-              :data-testid="`markdown-link-option-${node.path}`"
-              @click="insertMarkdownLink(node.path)"
+            <div class="editor-link-tabs" role="tablist" :aria-label="t('shared.insertMarkdownLink')">
+              <button
+                type="button"
+                class="editor-link-tab"
+                :class="{ 'editor-link-tab--active': activeLinkPickerTab === 'document' }"
+                data-testid="markdown-link-tab-document"
+                role="tab"
+                :aria-selected="activeLinkPickerTab === 'document' ? 'true' : 'false'"
+                @mousedown.prevent
+                @click="setLinkPickerTab('document')"
+              >
+                {{ t('shared.markdownLinkTabDocuments') }}
+              </button>
+              <button
+                type="button"
+                class="editor-link-tab"
+                :class="{ 'editor-link-tab--active': activeLinkPickerTab === 'conversation' }"
+                data-testid="markdown-link-tab-conversation"
+                role="tab"
+                :aria-selected="activeLinkPickerTab === 'conversation' ? 'true' : 'false'"
+                @mousedown.prevent
+                @click="setLinkPickerTab('conversation')"
+              >
+                {{ t('shared.markdownLinkTabConversations') }}
+              </button>
+              <button
+                type="button"
+                class="editor-link-tab"
+                :class="{ 'editor-link-tab--active': activeLinkPickerTab === 'resource' }"
+                data-testid="markdown-link-tab-resource"
+                role="tab"
+                :aria-selected="activeLinkPickerTab === 'resource' ? 'true' : 'false'"
+                @mousedown.prevent
+                @click="setLinkPickerTab('resource')"
+              >
+                {{ t('shared.markdownLinkTabResources') }}
+              </button>
+            </div>
+            <p
+              v-if="linkInsertionPointMissing"
+              class="editor-link-hint"
+              data-testid="markdown-link-insertion-point-hint"
+              role="status"
             >
-              {{ getContextNodeDisplayName(node.name) }}
-            </button>
-          </div>
-        </div>
-        <div v-if="showMarkdownConversationPicker" class="editor-link-picker">
-          <button
-            type="button"
-            class="save-button save-button--link-picker"
-            data-testid="markdown-insert-conversation-link"
-            :title="t('shared.insertMarkdownConversationLink')"
-            :aria-label="t('shared.insertMarkdownConversationLink')"
-            :aria-expanded="isConversationPickerOpen ? 'true' : 'false'"
-            :disabled="!canInsertConversationLink"
-            @mousedown.prevent
-            @click="toggleConversationPicker"
-          >
-            <MessageSquareQuote class="save-icon" :size="18" aria-hidden="true" />
-          </button>
-          <div
-            v-if="isConversationPickerOpen"
-            class="editor-link-menu"
-            data-testid="markdown-conversation-link-picker"
-          >
-            <button
-              v-for="conversation in props.linkableConversations"
-              :key="conversation.conversationId"
-              type="button"
-              class="editor-link-option"
-              :data-testid="`markdown-conversation-link-option-${conversation.conversationId}`"
-              @click="insertConversationLink(conversation.conversationId)"
-            >
-              {{ conversation.title }}
-            </button>
+              {{ t('shared.markdownLinkInsertionPointRequired') }}
+            </p>
+            <div v-if="activeLinkPickerTab === 'document'" data-testid="markdown-link-panel-document">
+              <button
+                v-for="node in props.linkableMarkdownDocuments"
+                :key="node.path"
+                type="button"
+                class="editor-link-option"
+                :data-testid="`markdown-link-option-${node.path}`"
+                @mousedown.prevent
+                @click="insertMarkdownLink(node.path)"
+              >
+                {{ getContextNodeDisplayName(node.name) }}
+              </button>
+              <p v-if="props.linkableMarkdownDocuments.length === 0" class="editor-link-empty" data-testid="markdown-link-empty-document">
+                {{ t('shared.noMarkdownLinkTargets') }}
+              </p>
+            </div>
+            <div v-else-if="activeLinkPickerTab === 'conversation'" data-testid="markdown-link-panel-conversation">
+              <button
+                v-for="conversation in props.linkableConversations"
+                :key="conversation.conversationId"
+                type="button"
+                class="editor-link-option"
+                :data-testid="`markdown-conversation-link-option-${conversation.conversationId}`"
+                @mousedown.prevent
+                @click="insertConversationLink(conversation.conversationId)"
+              >
+                <MessageSquareQuote class="editor-link-option-icon" :size="14" aria-hidden="true" />
+                {{ conversation.title }}
+              </button>
+              <p v-if="props.linkableConversations.length === 0" class="editor-link-empty" data-testid="markdown-link-empty-conversation">
+                {{ t('shared.noMarkdownLinkTargets') }}
+              </p>
+            </div>
+            <div v-else data-testid="markdown-link-panel-resource">
+              <button
+                v-for="resource in props.linkableReferenceResources"
+                :key="resource.path"
+                type="button"
+                class="editor-link-option"
+                :data-testid="`markdown-resource-link-option-${resource.path}`"
+                @mousedown.prevent
+                @click="insertResourceLink(resource.path)"
+              >
+                {{ getContextNodeDisplayName(resource.name) }}
+              </button>
+              <p v-if="props.linkableReferenceResources.length === 0" class="editor-link-empty" data-testid="markdown-link-empty-resource">
+                {{ t('shared.noMarkdownLinkTargets') }}
+              </p>
+            </div>
           </div>
         </div>
         <button
@@ -199,7 +253,7 @@ import { Eye, Link2, Maximize2, MessageSquareQuote, Minimize2, PencilLine, Save 
 import type { ContextDocument, ContextNode } from '@packages/core/src';
 import { useWorkspaceI18n } from '../i18n';
 import { resolveDocumentViewer } from '../document-viewers';
-import { buildRelativeMarkdownLinkPath, type MarkdownConversationLinkTarget, type MarkdownViewerMode } from '../utils/markdownDocument';
+import { buildMarkdownConversationLinkHref, buildMarkdownResourceInsertion, buildRelativeMarkdownLinkPath, type MarkdownConversationLinkTarget, type MarkdownViewerMode } from '../utils/markdownDocument';
 import type { FileChangeRecord, LineDiffEntry } from '../services/FileChangeService';
 import type { DocumentViewerSearchHandle } from '../document-viewers/types';
 import { getContextNodeDisplayName } from '../utils/contextNodePresentation';
@@ -214,6 +268,7 @@ const props = withDefaults(defineProps<{
   modelValue: string;
   linkableMarkdownDocuments?: ContextNode[];
   linkableConversations?: LinkableConversationEntry[];
+  linkableReferenceResources?: ContextNode[];
   isSaving: boolean;
   isDirty?: boolean;
   persistMarkdownImage?: (input: {
@@ -231,6 +286,7 @@ const props = withDefaults(defineProps<{
   isDirty: false,
   linkableMarkdownDocuments: () => [],
   linkableConversations: () => [],
+  linkableReferenceResources: () => [],
   middlePaneZoom: 1
 });
 const { t } = useWorkspaceI18n();
@@ -298,12 +354,15 @@ const markdownViewerMode = ref<MarkdownViewerMode>('viewer');
 const markdownViewerRef = ref<(Partial<DocumentViewerSearchHandle> & {
   insertMarkdownLink?: (input: { label: string; href: string }) => boolean;
   insertMarkdownConversationLink?: (input: { label: string; conversationId: string }) => boolean;
+  insertMarkdownSnippet?: (input: { markdown?: string; buildReplacement?: (selectedText: string) => string }) => boolean;
+  insertMarkdownInViewer?: (markdown: string) => boolean;
   prepareMarkdownSelectionFromViewer?: () => boolean;
 }) | null>(null);
 const searchInputRef = ref<HTMLInputElement | null>(null);
 const isSearchOpen = ref(false);
 const isLinkPickerOpen = ref(false);
-const isConversationPickerOpen = ref(false);
+const activeLinkPickerTab = ref<'document' | 'conversation' | 'resource'>('document');
+const linkInsertionPointMissing = ref(false);
 const searchQuery = ref('');
 const activeSearchMatchIndex = ref(0);
 const searchMatchCount = ref(0);
@@ -318,9 +377,6 @@ const supportsViewerSearch = computed(() => props.activeDocument?.mimeType === '
 const showMarkdownLinkPicker = computed(() => {
   return isMarkdownDocument.value;
 });
-const showMarkdownConversationPicker = computed(() => {
-  return isMarkdownDocument.value;
-});
 const canInsertMarkdownLink = computed(() => {
   return isMarkdownDocument.value
     && props.linkableMarkdownDocuments.length > 0
@@ -330,6 +386,14 @@ const canInsertConversationLink = computed(() => {
   return isMarkdownDocument.value
     && props.linkableConversations.length > 0
     && !!props.activePath;
+});
+const canInsertReferenceResourceLink = computed(() => {
+  return isMarkdownDocument.value
+    && props.linkableReferenceResources.length > 0
+    && !!props.activePath;
+});
+const canInsertAnyLink = computed(() => {
+  return canInsertMarkdownLink.value || canInsertConversationLink.value || canInsertReferenceResourceLink.value;
 });
 const searchMatchCurrent = computed(() => searchMatchCount.value === 0 ? 0 : activeSearchMatchIndex.value + 1);
 const tooltipState = reactive({
@@ -346,7 +410,8 @@ watch(
       markdownViewerMode.value = 'viewer';
     }
     isLinkPickerOpen.value = false;
-    isConversationPickerOpen.value = false;
+    activeLinkPickerTab.value = 'document';
+    linkInsertionPointMissing.value = false;
     closeViewerSearch();
   },
   { immediate: true }
@@ -356,7 +421,8 @@ watch(
   () => props.activePath,
   () => {
     isLinkPickerOpen.value = false;
-    isConversationPickerOpen.value = false;
+    activeLinkPickerTab.value = 'document';
+    linkInsertionPointMissing.value = false;
   }
 );
 
@@ -453,24 +519,36 @@ function goToPreviousSearchMatch() {
 }
 
 function toggleLinkPicker() {
-  if (!canInsertMarkdownLink.value) {
+  if (!canInsertAnyLink.value) {
     return;
+  }
+  if (!isLinkPickerOpen.value) {
+    if (canInsertMarkdownLink.value) {
+      activeLinkPickerTab.value = 'document';
+    } else if (canInsertConversationLink.value) {
+      activeLinkPickerTab.value = 'conversation';
+    } else {
+      activeLinkPickerTab.value = 'resource';
+    }
+    linkInsertionPointMissing.value = false;
   }
   isLinkPickerOpen.value = !isLinkPickerOpen.value;
-  if (isLinkPickerOpen.value) {
-    isConversationPickerOpen.value = false;
-  }
 }
 
-function toggleConversationPicker() {
-  if (!canInsertConversationLink.value) {
-    return;
-  }
+function setLinkPickerTab(tab: 'document' | 'conversation' | 'resource') {
+  activeLinkPickerTab.value = tab;
+  linkInsertionPointMissing.value = false;
+}
 
-  isConversationPickerOpen.value = !isConversationPickerOpen.value;
-  if (isConversationPickerOpen.value) {
-    isLinkPickerOpen.value = false;
+function ensureInsertionPoint(returnToViewer: boolean): boolean {
+  if (!returnToViewer) {
+    linkInsertionPointMissing.value = false;
+    return true;
   }
+  const prepared = markdownViewerRef.value?.prepareMarkdownSelectionFromViewer?.() === true;
+  console.log('[insert-debug] prepareMarkdownSelectionFromViewer result', { prepared });
+  linkInsertionPointMissing.value = !prepared;
+  return prepared;
 }
 
 function insertMarkdownLink(targetPath: string) {
@@ -484,32 +562,9 @@ function insertMarkdownLink(targetPath: string) {
   }
 
   const href = buildRelativeMarkdownLinkPath(props.activePath, targetPath);
-  const returnToViewer = markdownViewerMode.value === 'viewer';
-  if (returnToViewer) {
-    markdownViewerRef.value?.prepareMarkdownSelectionFromViewer?.();
-  }
-  const insert = () => {
-    markdownViewerRef.value?.insertMarkdownLink?.({
-      label: getContextNodeDisplayName(node.name),
-      href
-    });
-    isLinkPickerOpen.value = false;
-    if (returnToViewer) {
-      nextTick(() => {
-        markdownViewerMode.value = 'viewer';
-      });
-    }
-  };
-
-  if (markdownViewerMode.value === 'edit') {
-    insert();
-    return;
-  }
-
-  markdownViewerMode.value = 'edit';
-  nextTick(() => {
-    nextTick(insert);
-  });
+  const label = getContextNodeDisplayName(node.name);
+  const snippet = `[${label}](${href})`;
+  insertMarkdownSnippetIntoDocument(snippet, () => markdownViewerRef.value?.insertMarkdownLink?.({ label, href }));
 }
 
 function insertConversationLink(conversationId: string) {
@@ -518,31 +573,121 @@ function insertConversationLink(conversationId: string) {
     return;
   }
 
-  const returnToViewer = markdownViewerMode.value === 'viewer';
-  if (returnToViewer) {
-    markdownViewerRef.value?.prepareMarkdownSelectionFromViewer?.();
-  }
-  const insert = () => {
-    markdownViewerRef.value?.insertMarkdownConversationLink?.({
+  const snippet = `[${conversation.title}](${buildMarkdownConversationLinkHref(conversation.conversationId)})`;
+  insertMarkdownSnippetIntoDocument(
+    snippet,
+    () => markdownViewerRef.value?.insertMarkdownConversationLink?.({
       label: conversation.title,
       conversationId: conversation.conversationId
-    });
-    isConversationPickerOpen.value = false;
-    if (returnToViewer) {
-      nextTick(() => {
-        markdownViewerMode.value = 'viewer';
-      });
-    }
-  };
+    })
+  );
+}
 
-  if (markdownViewerMode.value === 'edit') {
-    insert();
+function insertResourceLink(targetPath: string) {
+  if (!props.activePath) {
     return;
   }
 
-  markdownViewerMode.value = 'edit';
-  nextTick(() => {
-    nextTick(insert);
+  const resource = props.linkableReferenceResources.find((candidate) => candidate.path === targetPath);
+  if (!resource) {
+    return;
+  }
+
+  const insertion = buildMarkdownResourceInsertion(props.activePath, targetPath);
+  insertMarkdownSnippetIntoDocument(
+    insertion.markdown,
+    () => markdownViewerRef.value?.insertMarkdownSnippet?.({ markdown: insertion.markdown })
+  );
+}
+
+function insertMarkdownSnippetIntoDocument(snippet: string, editModeAction: () => boolean | undefined) {
+  const inViewer = markdownViewerMode.value === 'viewer';
+  console.log('[insert-debug] insertMarkdownSnippetIntoDocument', {
+    activeTab: activeLinkPickerTab.value,
+    inViewer,
+    snippetPreview: snippet.slice(0, 80)
+  });
+
+  if (inViewer && markdownViewerRef.value?.insertMarkdownInViewer) {
+    const inserted = markdownViewerRef.value.insertMarkdownInViewer(snippet) === true;
+    console.log('[insert-debug] viewer-native insertion result', { inserted });
+    if (inserted) {
+      linkInsertionPointMissing.value = false;
+      isLinkPickerOpen.value = false;
+      return;
+    }
+  }
+
+  linkInsertionPointMissing.value = false;
+  void runMarkdownInsertion(editModeAction, { returnToViewer: inViewer });
+}
+
+async function runMarkdownInsertion(
+  action: () => boolean | undefined,
+  options: { returnToViewer: boolean }
+) {
+  const previousModelValue = props.modelValue;
+  console.log('[insert-debug] runMarkdownInsertion BEGIN', {
+    activeTab: activeLinkPickerTab.value,
+    markdownViewerMode: markdownViewerMode.value,
+    returnToViewer: options.returnToViewer,
+    previousModelValueLength: previousModelValue.length
+  });
+  if (markdownViewerMode.value !== 'edit') {
+    markdownViewerMode.value = 'edit';
+  }
+
+  const maxAttempts = 10;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    await nextTick();
+    const inserted = action() === true;
+    console.log('[insert-debug] runMarkdownInsertion attempt', {
+      attempt,
+      inserted,
+      markdownViewerMode: markdownViewerMode.value,
+      modelValueLengthAfter: props.modelValue.length,
+      modelValueChanged: props.modelValue !== previousModelValue
+    });
+    if (!inserted) {
+      continue;
+    }
+
+    for (let syncAttempt = 0; syncAttempt < maxAttempts; syncAttempt += 1) {
+      await nextTick();
+      const changed = props.modelValue !== previousModelValue;
+      console.log('[insert-debug] runMarkdownInsertion sync attempt', {
+        syncAttempt,
+        changed,
+        modelValueLength: props.modelValue.length,
+        previousModelValueLength: previousModelValue.length
+      });
+      if (changed) {
+        break;
+      }
+      if (syncAttempt === maxAttempts - 1) {
+        console.warn('[document-editor] markdown insertion did not propagate to parent modelValue in time.', {
+          activePath: props.activePath,
+          activeTab: activeLinkPickerTab.value
+        });
+      }
+    }
+
+    isLinkPickerOpen.value = false;
+    if (options.returnToViewer) {
+      await nextTick();
+      markdownViewerMode.value = 'viewer';
+    }
+    console.log('[insert-debug] runMarkdownInsertion END (success path)', {
+      finalModelValueLength: props.modelValue.length,
+      finalModelValuePreview: props.modelValue.slice(0, 80),
+      markdownViewerMode: markdownViewerMode.value
+    });
+    return;
+  }
+
+  console.warn('[document-editor] markdown insertion skipped because edit mode was not ready in time.', {
+    activePath: props.activePath,
+    activeTab: activeLinkPickerTab.value
   });
 }
 
@@ -677,9 +822,11 @@ function hideTooltip() {
   right: 0;
   z-index: 10;
   display: flex;
-  min-width: 180px;
-  max-height: 220px;
+  min-width: 260px;
+  max-width: 320px;
+  max-height: 260px;
   flex-direction: column;
+  gap: 8px;
   overflow: auto;
   padding: 6px;
   border: 1px solid rgba(148, 163, 184, 0.22);
@@ -688,7 +835,33 @@ function hideTooltip() {
   box-shadow: 0 14px 28px rgba(0, 0, 0, 0.28);
 }
 
+.editor-link-tabs {
+  display: flex;
+  gap: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.editor-link-tab {
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 10px;
+  color: #cbd5e1;
+  background: rgba(30, 41, 59, 0.72);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.editor-link-tab--active {
+  color: #e0f2fe;
+  background: rgba(14, 165, 233, 0.18);
+}
+
 .editor-link-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   border: 0;
   border-radius: 8px;
   padding: 8px 10px;
@@ -701,6 +874,27 @@ function hideTooltip() {
 .editor-link-option:hover,
 .editor-link-option:focus-visible {
   background: rgba(255, 255, 255, 0.08);
+}
+
+.editor-link-option-icon {
+  flex-shrink: 0;
+}
+
+.editor-link-empty {
+  margin: 0;
+  padding: 10px 8px;
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.editor-link-hint {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(248, 113, 113, 0.12);
+  color: #fca5a5;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .editor-content {

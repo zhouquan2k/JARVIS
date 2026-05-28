@@ -16,6 +16,7 @@ import {
     type ContextSearchRequest,
     type CreateContextNodeInput,
     type IContextProvider,
+    type MoveContextNodeInput,
     type ResolvedAgentConfig,
     type WorkspaceContext,
     type WriteContextDocumentInput,
@@ -740,6 +741,53 @@ export class FileSystemContextProvider implements IContextProvider {
         }
 
         return renamedNode;
+    }
+
+    async moveNode(input: MoveContextNodeInput): Promise<ContextNode> {
+        const normalizedPath = normalizeVirtualPath(input.path, { allowRoot: false });
+        if (!normalizedPath || normalizedPath === '/') {
+            throw new Error('Moving the root directory is not allowed.');
+        }
+
+        const targetParentPath = normalizeVirtualPath(input.targetParentPath);
+        if (targetParentPath === normalizedPath || targetParentPath?.startsWith(`${normalizedPath}/`)) {
+            throw new Error('Cannot move a node into itself or its descendant.');
+        }
+
+        const sourceRealPath = await this.resolveRealPath(normalizedPath, { expectExisting: true });
+        const sourceStats = await fs.stat(sourceRealPath);
+        if (targetParentPath) {
+            await this.resolveRealPath(targetParentPath, { expectExisting: true, expectDirectory: true });
+        }
+
+        const targetPath = toVirtualPath(targetParentPath, path.posix.basename(normalizedPath));
+        if (targetPath === normalizedPath) {
+            const context = await this.getContext();
+            const unchangedNode = findContextNodeByPath(context.nodes, normalizedPath);
+            if (!unchangedNode) {
+                throw new Error(`Unable to find the node in context after move: ${normalizedPath}`);
+            }
+            return unchangedNode;
+        }
+
+        const targetRealPath = await this.resolveRealPath(targetPath, { expectExisting: false });
+        if (await exists(targetRealPath)) {
+            throw new Error(`Node already exists: ${targetPath}`);
+        }
+
+        await fs.rename(sourceRealPath, targetRealPath);
+        const stats = await fs.stat(targetRealPath);
+        const movedPath = sourceStats.isDirectory() ? targetPath : targetPath;
+        const context = await this.getContext();
+        const movedNode = findContextNodeByPath(context.nodes, movedPath);
+        if (!movedNode) {
+            throw new Error(`Unable to find the node in context after move: ${movedPath}`);
+        }
+
+        return {
+            ...movedNode,
+            updatedAt: stats.mtimeMs
+        };
     }
 
     async searchInScope(request: ContextSearchRequest): Promise<ContextSearchMatch[]> {

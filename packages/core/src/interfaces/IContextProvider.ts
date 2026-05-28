@@ -54,6 +54,11 @@ export interface RenameContextNodeInput {
     name: string;
 }
 
+export interface MoveContextNodeInput {
+    path: string;
+    targetParentPath?: string;
+}
+
 export interface ContextSearchRequest {
     query: string;
     scopePath?: string;
@@ -84,5 +89,6 @@ export interface IContextProvider {
     createNode(input: CreateContextNodeInput): Promise<ContextNode>;
     deleteNode(path: string): Promise<void>;
     renameNode(input: RenameContextNodeInput): Promise<ContextNode>;
+    moveNode(input: MoveContextNodeInput): Promise<ContextNode>;
     searchInScope(request: ContextSearchRequest): Promise<ContextSearchMatch[]>;
 }

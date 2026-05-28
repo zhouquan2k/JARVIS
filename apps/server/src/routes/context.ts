@@ -1,8 +1,8 @@
 import { Hono, type Context } from 'hono';
-import type { ConversationQuery, Task, TaskPriority } from '@packages/core';
+import type { ConversationQuery, Task, TaskPriority, TaskQueryTag } from '@packages/core';
 import type { ServerConfig } from '../config.js';
 import { HttpContextService } from '../services/httpContextService.js';
-import type { ContextSearchRequest, CreateContextNodeInput, RenameContextNodeInput, WriteContextDocumentInput } from '../types/context.js';
+import type { ContextSearchRequest, CreateContextNodeInput, MoveContextNodeInput, RenameContextNodeInput, WriteContextDocumentInput } from '../types/context.js';
 
 const ALLOW_HEADERS = 'content-type';
 const ALLOW_METHODS = 'GET, POST, OPTIONS';
@@ -99,6 +99,19 @@ function normalizeOptionalTaskScopePath(value: unknown, fieldName: string): stri
         throw new Error(`${fieldName} must be a string.`);
     }
     return value;
+}
+
+function normalizeTaskQueryTag(value: unknown): TaskQueryTag | null | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (value === null || value === '') {
+        return null;
+    }
+    if (value === 'all' || value === 'today' || value === 'planned') {
+        return value;
+    }
+    throw new Error('tag must be one of all, today, planned, or null.');
 }
 
 function normalizeTaskPriority(value: unknown): TaskPriority | null {
@@ -229,6 +242,18 @@ function normalizeRenameNodeInput(body: Record<string, unknown>): RenameContextN
     };
 }
 
+function normalizeMoveNodeInput(body: Record<string, unknown>): MoveContextNodeInput {
+    const targetParentPath = body.targetParentPath;
+    if (targetParentPath !== undefined && targetParentPath !== null && targetParentPath !== '' && typeof targetParentPath !== 'string') {
+        throw new Error('targetParentPath must be a string.');
+    }
+
+    return {
+        path: normalizeRequiredPath(body),
+        targetParentPath: typeof targetParentPath === 'string' ? targetParentPath : undefined
+    };
+}
+
 function normalizeSearchRequest(body: Record<string, unknown>): ContextSearchRequest {
     if (typeof body.query !== 'string' || !body.query.trim()) {
         throw new Error('query must not be empty.');
@@ -318,7 +343,8 @@ export function createContextRouter(options: { service: HttpContextService; conf
                 tasks: await service.getTasks(
                     normalizeOptionalTaskScopePath(body.documentPath, 'documentPath'),
                     normalizeOptionalTaskScopePath(body.agentKey, 'agentKey'),
-                    normalizeOptionalBoolean(body.completed, 'completed')
+                    normalizeOptionalBoolean(body.completed, 'completed'),
+                    normalizeTaskQueryTag(body.tag)
                 )
             });
         } catch (error) {
@@ -469,6 +495,16 @@ export function createContextRouter(options: { service: HttpContextService; conf
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to rename node.';
             return c.json({ error: message, code: 'CONTEXT_RENAME_NODE_FAILED' }, 400);
+        }
+    });
+
+    app.post('/move-node', async (c) => {
+        try {
+            const body = normalizeObjectBody(await readJsonBody(c));
+            return c.json({ node: await service.moveNode(normalizeMoveNodeInput(body)) });
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to move node.';
+            return c.json({ error: message, code: 'CONTEXT_MOVE_NODE_FAILED' }, 400);
         }
     });
 

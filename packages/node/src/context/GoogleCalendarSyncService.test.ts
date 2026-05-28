@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Task } from '../../../core/src/interfaces/ITaskProvider.ts';
-import { GoogleCalendarSyncService, computeReminderMinutes } from './GoogleCalendarSyncService.ts';
+import { GoogleCalendarSyncService, computeReminderMinutes, resolveCalendarDueAt } from './GoogleCalendarSyncService.ts';
 
 function createTimedTask(overrides: Partial<Task> = {}): Task {
     return {
@@ -33,6 +33,15 @@ describe('computeReminderMinutes', () => {
     it('deduplicates overlapping reminders', () => {
         const dueAt = new Date('2026-05-24T09:00:00-04:00').getTime();
         expect(computeReminderMinutes(dueAt)).toEqual([720, 60]);
+    });
+});
+
+describe('resolveCalendarDueAt', () => {
+    it('defaults date-only dueAt values to 09:00 local time', () => {
+        const dueAt = new Date('2026-05-24T00:00:00').getTime();
+        const resolved = new Date(resolveCalendarDueAt(dueAt));
+        expect(resolved.getHours()).toBe(9);
+        expect(resolved.getMinutes()).toBe(0);
     });
 });
 
@@ -85,6 +94,48 @@ describe('GoogleCalendarSyncService', () => {
             syncedAt: 1_000
         });
         expect(fetchImpl).toHaveBeenCalledTimes(2);
+    });
+
+    it('defaults date-only tasks to 09:00 when syncing a calendar event', async () => {
+        const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+            const url = String(input);
+            if (url === 'https://oauth.example.test/token') {
+                return new Response(JSON.stringify({
+                    access_token: 'token-1',
+                    expires_in: 3600
+                }), { status: 200 });
+            }
+
+            const payload = JSON.parse(String(init?.body)) as {
+                start: { dateTime: string };
+                end: { dateTime: string };
+            };
+            expect(new Date(payload.start.dateTime).getHours()).toBe(9);
+            expect(new Date(payload.start.dateTime).getMinutes()).toBe(0);
+            expect(new Date(payload.end.dateTime).getHours()).toBe(9);
+            expect(new Date(payload.end.dateTime).getMinutes()).toBe(1);
+            return new Response(JSON.stringify({ id: 'event-1' }), { status: 200 });
+        });
+
+        const service = new GoogleCalendarSyncService({
+            env: {
+                CHATPRISM_GOOGLE_CALENDAR_CLIENT_ID: 'client-id',
+                CHATPRISM_GOOGLE_CALENDAR_CLIENT_SECRET: 'client-secret',
+                CHATPRISM_GOOGLE_CALENDAR_REFRESH_TOKEN: 'refresh-token',
+                CHATPRISM_GOOGLE_OAUTH_TOKEN_URL: 'https://oauth.example.test/token',
+                CHATPRISM_GOOGLE_CALENDAR_API_BASE_URL: 'https://calendar.example.test/v3'
+            },
+            fetchImpl,
+            now: () => 1_000
+        });
+
+        await expect(service.syncTask(createTimedTask({
+            dueAt: new Date('2026-05-24T00:00:00').getTime()
+        }))).resolves.toEqual({
+            providerId: 'google-calendar',
+            eventId: 'event-1',
+            syncedAt: 1_000
+        });
     });
 
     it('updates an existing calendar event', async () => {

@@ -36,9 +36,11 @@ describe('HttpContextProvider', () => {
     });
 
     it('forwards task operations through the task provider facade', async () => {
-        const fetchImpl = async (input: RequestInfo | URL) => {
+        const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit) => {
             const url = String(input);
             if (url.endsWith('/get-tasks')) {
+                const payload = JSON.parse(String(init?.body ?? '{}')) as { tag?: string | null };
+                expect(payload.tag).toBe('planned');
                 return new Response(JSON.stringify({
                     tasks: [{
                         id: 'task-1',
@@ -92,7 +94,7 @@ describe('HttpContextProvider', () => {
         });
         const taskProvider = provider.getTaskProvider();
 
-        await expect(taskProvider.getTasks('/docs/guide.md', null, false)).resolves.toEqual([
+        await expect(taskProvider.getTasks('/docs/guide.md', null, false, 'planned')).resolves.toEqual([
             expect.objectContaining({ id: 'task-1', priority: 'high' })
         ]);
         await expect(taskProvider.setTaskCompleted('task-1', true)).resolves.toEqual(
@@ -124,5 +126,39 @@ describe('HttpContextProvider', () => {
             code: 'CONTEXT_READ_DOCUMENT_FAILED',
             source: 'context'
         } satisfies Partial<HttpApiError>);
+    });
+
+    it('forwards move node requests', async () => {
+        const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit) => {
+            expect(String(input)).toBe('http://context.test/api/context/move-node');
+            expect(JSON.parse(String(init?.body ?? '{}'))).toEqual({
+                path: '/docs/guide.md',
+                targetParentPath: '/archive'
+            });
+            return new Response(JSON.stringify({
+                node: {
+                    path: '/archive/guide.md',
+                    name: 'guide.md',
+                    kind: 'file',
+                    parentPath: '/archive',
+                    agentKey: '/'
+                }
+            }), { status: 200 });
+        };
+        const provider = new HttpContextProvider({
+            baseUrl: 'http://context.test/api/context',
+            fetchImpl
+        });
+
+        await expect(provider.moveNode({
+            path: '/docs/guide.md',
+            targetParentPath: '/archive'
+        })).resolves.toEqual({
+            path: '/archive/guide.md',
+            name: 'guide.md',
+            kind: 'file',
+            parentPath: '/archive',
+            agentKey: '/'
+        });
     });
 });

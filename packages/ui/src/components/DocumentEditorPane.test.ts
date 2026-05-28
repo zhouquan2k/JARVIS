@@ -2,6 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { enableAutoUnmount, mount } from '@vue/test-utils';
+import { defineComponent, nextTick, ref } from 'vue';
 
 enableAutoUnmount(afterEach);
 import { encodeTextDocument } from '@packages/core/src';
@@ -12,14 +13,36 @@ const buildRelativeMarkdownLinkPath = vi.fn((from: string, to: string) => {
     return to.startsWith(fromDirectory) ? to.slice(fromDirectory.length) : to;
 });
 const buildMarkdownConversationLinkHref = vi.fn((conversationId: string) => `chatprism://conversation/${conversationId}`);
-const captureRenderableMarkdownSelection = vi.fn(() => null);
+const buildMarkdownResourceInsertion = vi.fn((from: string, to: string) => {
+    const href = buildRelativeMarkdownLinkPath(from, to);
+    if (to.endsWith('.png')) {
+        return {
+            markdown: `![](${href})`,
+            preferBlock: false
+        };
+    }
+    if (to.endsWith('.pdf')) {
+        return {
+            markdown: ['','', '```cp-pdf-embed', `{"label":"spec.pdf","candidates":["${href}"],"showLink":false}`, '```', '', ''].join('\n'),
+            preferBlock: true
+        };
+    }
+    return {
+        markdown: `[file](${href})`,
+        preferBlock: false
+    };
+});
+const captureRenderableMarkdownSelection = vi.fn<(root: HTMLElement) => { blockText: string; start: number; end: number; selectedText: string; blockIndex?: number } | null>(() => null);
+const resolveEmptyBlockMarkdownOffset = vi.fn(() => null);
+const resolveEmptyBlockAnchorFallback = vi.fn(() => null);
+const insertMarkdownAtViewerSelection = vi.fn(() => false);
 const findResizableMarkdownImageSource = vi.fn(() => null);
 const insertPastedMarkdownImage = vi.fn((markdown: string, selection: { start: number; end: number }, imageMarkdown: string) => (
     `${markdown.slice(0, selection.start)}${imageMarkdown}${markdown.slice(selection.end)}`
 ));
 const replaceMarkdownDocument = vi.fn();
 const readMarkdownDocument = vi.fn();
-const resolveMarkdownSourceSelection = vi.fn(() => null);
+const resolveMarkdownSourceSelection = vi.fn<(markdown: string, snapshot: unknown) => { start: number; end: number } | null>(() => null);
 const rewriteMarkdownImageRatio = vi.fn((markdown: string) => markdown);
 const destroyMarkdownEditor = vi.fn();
 const normalizeMarkdownViewerContent = vi.fn((content: string) => content.replace(
@@ -60,13 +83,17 @@ const revokeObjectURL = vi.fn();
 
 vi.mock('../utils/markdownDocument', () => ({
     buildMarkdownConversationLinkHref,
+    buildMarkdownResourceInsertion,
     buildRelativeMarkdownLinkPath,
     captureRenderableMarkdownSelection,
     createMarkdownEditor,
     findResizableMarkdownImageSource,
+    insertMarkdownAtViewerSelection,
     insertPastedMarkdownImage,
     replaceMarkdownDocument,
     readMarkdownDocument,
+    resolveEmptyBlockAnchorFallback,
+    resolveEmptyBlockMarkdownOffset,
     resolveMarkdownSourceSelection,
     rewriteMarkdownImageRatio,
     destroyMarkdownEditor,
@@ -90,11 +117,61 @@ describe('DocumentEditorPane', () => {
         scrollToMarkdownEditorSearchMatch.mockClear();
         createObjectURL.mockClear();
         revokeObjectURL.mockClear();
+        captureRenderableMarkdownSelection.mockReset();
+        captureRenderableMarkdownSelection.mockReturnValue({
+            blockText: 'mock-block',
+            start: 0,
+            end: 0,
+            selectedText: ''
+        });
+        resolveMarkdownSourceSelection.mockReset();
+        resolveMarkdownSourceSelection.mockImplementation((markdown: string) => ({
+            start: markdown.length,
+            end: markdown.length
+        }));
+        createMarkdownEditor.mockResolvedValue({ content: 'mock-editor' });
         vi.stubGlobal('URL', {
             createObjectURL,
             revokeObjectURL
         });
     });
+
+    async function mountDocumentEditorWithModelSync(
+        input: Record<string, unknown>
+    ) {
+        const { default: DocumentEditorPane } = await import('./DocumentEditorPane.vue');
+        const Harness = defineComponent({
+            components: { DocumentEditorPane },
+            setup() {
+                const modelValue = ref(String(input.modelValue ?? ''));
+                const updateHistory = ref<string[]>([]);
+                const paneProps = {
+                    ...input
+                };
+                const applyUpdate = async (value: string) => {
+                    updateHistory.value.push(value);
+                    await nextTick();
+                    modelValue.value = value;
+                };
+
+                return {
+                    applyUpdate,
+                    modelValue,
+                    paneProps,
+                    updateHistory
+                };
+            },
+            template: `
+              <DocumentEditorPane
+                v-bind="paneProps"
+                :model-value="modelValue"
+                @update:model-value="applyUpdate"
+              />
+            `
+        });
+
+        return mount(Harness);
+    }
 
     it('shows the active agent name in the middle pane title area', async () => {
         const { default: DocumentEditorPane } = await import('./DocumentEditorPane.vue');
@@ -126,29 +203,26 @@ describe('DocumentEditorPane', () => {
     });
 
     it('inserts a relative markdown link from the chooser and wraps the current selection', async () => {
-        const { default: DocumentEditorPane } = await import('./DocumentEditorPane.vue');
-        const wrapper = mount(DocumentEditorPane, {
-            props: {
-                activePath: '/docs/guide.md',
-                activeDocument: {
-                    path: '/docs/guide.md',
-                    mimeType: 'text/markdown',
-                    dataBase64: encodeTextDocument('Read this'),
-                    canWrite: true
-                },
-                activeViewerId: 'text',
-                activePaneMode: 'viewer',
-                modelValue: 'Read this',
-                linkableMarkdownDocuments: [
-                    { path: '/docs/reference.md', name: 'reference.md', kind: 'file', parentPath: '/docs' }
-                ],
-                isSaving: false,
-                isDirty: false,
-                latestFileChange: null,
-                diffEntries: [],
-                canUndo: false,
-                canRedo: false
-            }
+        const wrapper = await mountDocumentEditorWithModelSync({
+            activePath: '/docs/guide.md',
+            activeDocument: {
+                path: '/docs/guide.md',
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('Read this'),
+                canWrite: true
+            },
+            activeViewerId: 'text',
+            activePaneMode: 'viewer',
+            modelValue: 'Read this',
+            linkableMarkdownDocuments: [
+                { path: '/docs/reference.md', name: 'reference.md', kind: 'file', parentPath: '/docs' }
+            ],
+            isSaving: false,
+            isDirty: false,
+            latestFileChange: null,
+            diffEntries: [],
+            canUndo: false,
+            canRedo: false
         });
 
         await wrapper.get('[data-testid="markdown-insert-link"]').trigger('click');
@@ -157,52 +231,212 @@ describe('DocumentEditorPane', () => {
         await wrapper.vm.$nextTick();
         await wrapper.vm.$nextTick();
 
-        expect(wrapper.get('[data-testid="markdown-insert-link"]').attributes('aria-label')).toBe('Insert document link');
+        expect(wrapper.get('[data-testid="markdown-insert-link"]').attributes('aria-label')).toBe('Insert link');
         expect(wrapper.get('[data-testid="markdown-insert-link"]').html()).toContain('lucide-link-2');
-        expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['Read this[reference](reference.md)']);
+        expect(wrapper.vm.modelValue).toBe('Read this[reference](reference.md)');
+        expect(wrapper.vm.updateHistory.at(-1)).toBe('Read this[reference](reference.md)');
         expect(wrapper.get('[data-testid="markdown-mode-toggle"]').attributes('aria-pressed')).toBe('true');
         expect(wrapper.find('[data-testid="document-editor-input"]').exists()).toBe(false);
         expect(wrapper.find('[data-testid="markdown-link-picker"]').exists()).toBe(false);
     });
 
     it('inserts a conversation markdown link from the chooser', async () => {
-        const { default: DocumentEditorPane } = await import('./DocumentEditorPane.vue');
-        const wrapper = mount(DocumentEditorPane, {
-            props: {
-                activePath: '/docs/guide.md',
-                activeDocument: {
-                    path: '/docs/guide.md',
-                    mimeType: 'text/markdown',
-                    dataBase64: encodeTextDocument('See discussion'),
-                    canWrite: true
-                },
-                activeViewerId: 'text',
-                activePaneMode: 'viewer',
-                modelValue: 'See discussion',
-                linkableConversations: [
-                    { conversationId: 'conversation-1', title: 'Plan review' }
-                ],
-                isSaving: false,
-                isDirty: false,
-                latestFileChange: null,
-                diffEntries: [],
-                canUndo: false,
-                canRedo: false
-            }
+        const wrapper = await mountDocumentEditorWithModelSync({
+            activePath: '/docs/guide.md',
+            activeDocument: {
+                path: '/docs/guide.md',
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('See discussion'),
+                canWrite: true
+            },
+            activeViewerId: 'text',
+            activePaneMode: 'viewer',
+            modelValue: 'See discussion',
+            linkableConversations: [
+                { conversationId: 'conversation-1', title: 'Plan review' }
+            ],
+            isSaving: false,
+            isDirty: false,
+            latestFileChange: null,
+            diffEntries: [],
+            canUndo: false,
+            canRedo: false
         });
 
-        await wrapper.get('[data-testid="markdown-insert-conversation-link"]').trigger('click');
+        await wrapper.get('[data-testid="markdown-insert-link"]').trigger('click');
+        await wrapper.get('[data-testid="markdown-link-tab-conversation"]').trigger('click');
         await wrapper.get('[data-testid="markdown-conversation-link-option-conversation-1"]').trigger('click');
         await wrapper.vm.$nextTick();
         await wrapper.vm.$nextTick();
         await wrapper.vm.$nextTick();
 
-        expect(wrapper.get('[data-testid="markdown-insert-conversation-link"]').attributes('aria-label')).toBe('Insert conversation link');
-        expect(wrapper.get('[data-testid="markdown-insert-conversation-link"]').html()).toContain('lucide-message-square-quote');
-        expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([
-            'See discussion[Plan review](chatprism://conversation/conversation-1)'
-        ]);
-        expect(wrapper.find('[data-testid="markdown-conversation-link-picker"]').exists()).toBe(false);
+        expect(wrapper.get('[data-testid="markdown-insert-link"]').attributes('aria-label')).toBe('Insert link');
+        expect(wrapper.vm.modelValue).toBe('See discussion[Plan review](chatprism://conversation/conversation-1)');
+        expect(wrapper.find('[data-testid="markdown-link-picker"]').exists()).toBe(false);
+    });
+
+    it('inserts an embedded pdf resource from the chooser', async () => {
+        const wrapper = await mountDocumentEditorWithModelSync({
+            activePath: '/docs/guide.md',
+            activeDocument: {
+                path: '/docs/guide.md',
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('Open attachment'),
+                canWrite: true
+            },
+            activeViewerId: 'text',
+            activePaneMode: 'viewer',
+            modelValue: 'Open attachment',
+            linkableReferenceResources: [
+                { path: '/docs/references/spec.pdf', name: 'spec.pdf', kind: 'file', parentPath: '/docs/references' }
+            ],
+            isSaving: false,
+            isDirty: false,
+            latestFileChange: null,
+            diffEntries: [],
+            canUndo: false,
+            canRedo: false
+        });
+
+        await wrapper.get('[data-testid="markdown-insert-link"]').trigger('click');
+        await wrapper.get('[data-testid="markdown-link-tab-resource"]').trigger('click');
+        await wrapper.get('[data-testid="markdown-resource-link-option-/docs/references/spec.pdf"]').trigger('click');
+        await wrapper.vm.$nextTick();
+        await wrapper.vm.$nextTick();
+        await wrapper.vm.$nextTick();
+
+        expect(wrapper.vm.modelValue).toBe(
+            ['Open attachment', '', '```cp-pdf-embed', '{"label":"spec.pdf","candidates":["references/spec.pdf"],"showLink":false}', '```', '', ''].join('\n')
+        );
+        expect(wrapper.find('[data-testid="markdown-link-picker"]').exists()).toBe(false);
+    });
+
+    it('inserts an embedded image resource from the chooser', async () => {
+        const wrapper = await mountDocumentEditorWithModelSync({
+            activePath: '/docs/guide.md',
+            activeDocument: {
+                path: '/docs/guide.md',
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('See image'),
+                canWrite: true
+            },
+            activeViewerId: 'text',
+            activePaneMode: 'viewer',
+            modelValue: 'See image',
+            linkableReferenceResources: [
+                { path: '/docs/references/diagram.png', name: 'diagram.png', kind: 'file', parentPath: '/docs/references' }
+            ],
+            isSaving: false,
+            isDirty: false,
+            latestFileChange: null,
+            diffEntries: [],
+            canUndo: false,
+            canRedo: false
+        });
+
+        await wrapper.get('[data-testid="markdown-insert-link"]').trigger('click');
+        await wrapper.get('[data-testid="markdown-link-tab-resource"]').trigger('click');
+        await wrapper.get('[data-testid="markdown-resource-link-option-/docs/references/diagram.png"]').trigger('click');
+        await wrapper.vm.$nextTick();
+        await wrapper.vm.$nextTick();
+        await wrapper.vm.$nextTick();
+
+        expect(wrapper.vm.modelValue).toBe('See image![](references/diagram.png)');
+    });
+
+    it('retries markdown insertion until edit mode is ready', async () => {
+        let onChange: ((markdown: string) => void) | undefined;
+        createMarkdownEditor.mockImplementation(async (options: { onChange: (markdown: string) => void }) => {
+            onChange = options.onChange;
+            return { content: 'Retry me' };
+        });
+        readMarkdownDocument.mockImplementation((value: { content: string }) => value.content);
+
+        const wrapper = await mountDocumentEditorWithModelSync({
+            activePath: '/docs/guide.md',
+            activeDocument: {
+                path: '/docs/guide.md',
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('Retry me'),
+                canWrite: true
+            },
+            activeViewerId: 'text',
+            activePaneMode: 'viewer',
+            modelValue: 'Retry me',
+            linkableMarkdownDocuments: [
+                { path: '/docs/reference.md', name: 'reference.md', kind: 'file', parentPath: '/docs' }
+            ],
+            isSaving: false,
+            isDirty: false,
+            latestFileChange: null,
+            diffEntries: [],
+            canUndo: false,
+            canRedo: false
+        });
+
+        await wrapper.get('[data-testid="markdown-insert-link"]').trigger('click');
+        await wrapper.get('[data-testid="markdown-link-option-/docs/reference.md"]').trigger('click');
+        onChange?.('Retry me[reference](reference.md)');
+        await wrapper.vm.$nextTick();
+        await wrapper.vm.$nextTick();
+        await wrapper.vm.$nextTick();
+
+        expect(wrapper.vm.updateHistory).toContain('Retry me[reference](reference.md)');
+        expect(wrapper.find('[data-testid="markdown-link-picker"]').exists()).toBe(false);
+    });
+
+    it('waits for parent modelValue acknowledgement before returning to viewer mode', async () => {
+        let onChange: ((markdown: string) => void) | undefined;
+        createMarkdownEditor.mockImplementation(async (options: { onChange: (markdown: string) => void }) => {
+            onChange = options.onChange;
+            return { content: 'Parent sync' };
+        });
+        readMarkdownDocument.mockImplementation((value: { content: string }) => value.content);
+
+        const { default: DocumentEditorPane } = await import('./DocumentEditorPane.vue');
+        const Harness = defineComponent({
+            components: { DocumentEditorPane },
+            setup() {
+                const modelValue = ref('Parent sync');
+                const applyUpdate = async (value: string) => {
+                    await nextTick();
+                    modelValue.value = value;
+                };
+
+                return {
+                    modelValue,
+                    applyUpdate
+                };
+            },
+            template: `
+              <DocumentEditorPane
+                active-path="/docs/guide.md"
+                :active-document="{ path: '/docs/guide.md', mimeType: 'text/markdown', dataBase64: 'UGFyZW50IHN5bmM=', canWrite: true }"
+                active-viewer-id="text"
+                active-pane-mode="viewer"
+                :model-value="modelValue"
+                :linkable-markdown-documents="[{ path: '/docs/reference.md', name: 'reference.md', kind: 'file', parentPath: '/docs' }]"
+                :is-saving="false"
+                :latest-file-change="null"
+                :diff-entries="[]"
+                :can-undo="false"
+                :can-redo="false"
+                @update:model-value="applyUpdate"
+              />
+            `
+        });
+
+        const wrapper = mount(Harness);
+        await wrapper.get('[data-testid="markdown-insert-link"]').trigger('click');
+        await wrapper.get('[data-testid="markdown-link-option-/docs/reference.md"]').trigger('click');
+        onChange?.('Parent sync[reference](reference.md)');
+        await wrapper.vm.$nextTick();
+
+        expect(wrapper.get('[data-testid="markdown-mode-toggle"]').attributes('aria-pressed')).toBe('false');
+        await wrapper.vm.$nextTick();
+        await wrapper.vm.$nextTick();
+
+        expect(wrapper.get('[data-testid="markdown-mode-toggle"]').attributes('aria-pressed')).toBe('true');
     });
 
     it('creates a Milkdown-backed editor and emits markdown updates', async () => {

@@ -17,6 +17,7 @@
           @convert-to-agent="documentStore.convertDirectoryToAgent"
           @delete="documentStore.deleteNode"
           @rename="documentStore.renameNode"
+          @move="documentStore.moveNode"
           @refresh="documentStore.refreshTree"
         />
       </div>
@@ -50,6 +51,7 @@
               :model-load-states="chatStore.providerModelStates"
               :linkable-markdown-documents="agentIndexLinkableMarkdownDocuments"
               :linkable-conversations="agentIndexLinkableConversations"
+              :linkable-reference-resources="agentIndexLinkableReferenceResources"
               @load-provider-models="chatStore.ensureProviderModelsLoaded"
               @save-agent-config="saveSelectedAgentConfig"
               @update-index-content="documentStore.updateAgentIndexDocument"
@@ -67,6 +69,7 @@
               :model-value="draftContent"
               :linkable-markdown-documents="activeLinkableMarkdownDocuments"
               :linkable-conversations="activeLinkableConversations"
+              :linkable-reference-resources="activeLinkableReferenceResources"
               :is-saving="documentStore.isSaving"
               :is-dirty="activeDocumentIsDirty"
               :persist-markdown-image="documentStore.persistPastedMarkdownImage"
@@ -169,8 +172,14 @@ const activeDocumentIsDirty = computed(() => {
 const activeLinkableMarkdownDocuments = computed(() => {
   return documentStore.getLinkableMarkdownDocuments(documentStore.activePath);
 });
+const activeLinkableReferenceResources = computed(() => {
+  return documentStore.getLinkableReferenceResources(documentStore.activePath);
+});
 const agentIndexLinkableMarkdownDocuments = computed(() => {
   return documentStore.getLinkableMarkdownDocuments(documentStore.agentIndexPath);
+});
+const agentIndexLinkableReferenceResources = computed(() => {
+  return documentStore.getLinkableReferenceResources(documentStore.agentIndexPath);
 });
 const activeLinkableConversations = computed(() => buildLinkableConversations(documentStore.activeAgentKey));
 const agentIndexLinkableConversations = computed(() => buildLinkableConversations(documentStore.activeAgentKey));
@@ -377,6 +386,11 @@ watch(
 let cleanupResize: (() => void) | null = null;
 
 function onDraftChange(markdown: string) {
+  console.log('[insert-debug] DocumentWorkspaceView.onDraftChange', {
+    length: markdown.length,
+    preview: markdown.slice(0, 80),
+    activePath: documentStore.activePath
+  });
   documentStore.updateActiveDocument(markdown);
 }
 

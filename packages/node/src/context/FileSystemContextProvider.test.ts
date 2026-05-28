@@ -360,7 +360,7 @@ describe('FileSystemContextProvider', () => {
         expect(storedTaskFile).toContain(projectTask.id);
     });
 
-    it('does not include child-agent tasks when listing top-level agent tasks', async () => {
+    it('includes same-agent document tasks but not child-agent tasks when listing top-level agent tasks', async () => {
         const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-node-agent-scope-'));
         tempRoots.push(rootPath);
         await mkdir(path.join(rootPath, 'workspace', 'child'), { recursive: true });
@@ -370,6 +370,24 @@ describe('FileSystemContextProvider', () => {
         const provider = new FileSystemContextProvider({ rootPath });
         const taskProvider = provider.getTaskProvider();
 
+        await taskProvider.createTask({
+            id: 'top-project',
+            title: 'Top project task',
+            notes: '',
+            completed: false,
+            dueAt: null,
+            priority: null,
+            documentPath: null,
+            agentKey: '/workspace/',
+            createdAt: 0,
+            updatedAt: 0,
+            completedAt: null,
+            calendarProviderId: null,
+            calendarEventId: null,
+            calendarSyncStatus: null,
+            calendarLastSyncedAt: null,
+            calendarLastSyncError: null
+        });
         await taskProvider.createTask({
             id: 'top-doc',
             title: 'Top document task',
@@ -407,9 +425,14 @@ describe('FileSystemContextProvider', () => {
             calendarLastSyncError: null
         });
 
-        await expect(taskProvider.getTasks(null, '/workspace/', false)).resolves.toEqual([
-            expect.objectContaining({ title: 'Top document task', agentKey: '/workspace/' })
-        ]);
+        const topLevelTasks = await taskProvider.getTasks(null, '/workspace/', false);
+        expect(topLevelTasks).toEqual(expect.arrayContaining([
+            expect.objectContaining({ title: 'Top document task', agentKey: '/workspace/', documentPath: '/workspace/guide.md' }),
+            expect.objectContaining({ title: 'Top project task', agentKey: '/workspace/', documentPath: null })
+        ]));
+        expect(topLevelTasks).not.toEqual(expect.arrayContaining([
+            expect.objectContaining({ title: 'Child document task' })
+        ]));
     });
 
     it('rejects mixed-content mount roots', async () => {
@@ -492,5 +515,31 @@ describe('FileSystemContextProvider', () => {
 
         const persisted = await readFile(path.join(rootPath, 'references', 'diagram.png'));
         expect(Array.from(persisted)).toEqual([137, 80, 78, 71]);
+    });
+
+    it('moves files into another directory and rejects descendant targets', async () => {
+        const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-node-move-'));
+        tempRoots.push(rootPath);
+
+        await mkdir(path.join(rootPath, 'docs', 'archive'), { recursive: true });
+        await writeFile(path.join(rootPath, 'docs', 'guide.md'), '# Guide\n');
+        const provider = new FileSystemContextProvider({ rootPath });
+
+        const movedNode = await provider.moveNode({
+            path: '/docs/guide.md',
+            targetParentPath: '/docs/archive'
+        });
+
+        expect(movedNode).toMatchObject({
+            path: '/docs/archive/guide.md',
+            name: 'guide.md',
+            kind: 'file',
+            parentPath: '/docs/archive'
+        });
+        await expect(readFile(path.join(rootPath, 'docs', 'archive', 'guide.md'), 'utf8')).resolves.toContain('# Guide');
+        await expect(provider.moveNode({
+            path: '/docs',
+            targetParentPath: '/docs/archive'
+        })).rejects.toThrow('Cannot move a node into itself or its descendant.');
     });
 });

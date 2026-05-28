@@ -319,8 +319,6 @@ test('desktop host syncs timed tasks to Google Calendar without changing the tas
         await page.getByTestId('task-editor-title').fill('Calendar task');
         await page.getByTestId('task-editor-notes').fill('Desktop sync notes');
         await page.getByTestId('task-editor-due-at').fill('2026-05-24');
-        await page.getByTestId('task-editor-time-toggle').click();
-        await page.getByTestId('task-editor-due-time').fill('09:00');
         await page.getByTestId('task-editor-save').click();
         await expect(page.getByTestId('agent-task-open-list')).toContainText('Calendar task');
 
@@ -335,6 +333,16 @@ test('desktop host syncs timed tasks to Google Calendar without changing the tas
             calendarEventId: 'event-1',
             calendarSyncStatus: 'synced'
         });
+        await expect.poll(async () => {
+            const createRequest = fakeCalendar.requests.find((request) => (
+                request.method === 'POST' && request.url.endsWith('/calendar/v3/calendars/primary/events')
+            ));
+            if (!createRequest) {
+                return null;
+            }
+            const payload = JSON.parse(createRequest.body) as { start: { dateTime: string } };
+            return new Date(payload.start.dateTime).getHours();
+        }).toBe(9);
 
         await page.locator('[data-testid^="agent-task-content-task-"]').first().dblclick();
         await page.getByTestId('task-editor-notes').fill('Updated desktop sync notes');

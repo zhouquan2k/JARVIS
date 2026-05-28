@@ -5,7 +5,8 @@ export const zhCNMessages = {
     routes: {
         knowledgeWorkspace: '工作区',
         normalChat: '对话',
-        compareChat: '对比聊天'
+        compareChat: '对比聊天',
+        allTasks: '任务'
     },
     topBar: {
         compareMode: '对比聊天',
@@ -97,8 +98,13 @@ export const zhCNMessages = {
         markdownModeSwitch: 'Markdown 模式切换',
         markdownViewerMode: '渲染',
         markdownEditMode: '源码',
-        insertMarkdownLink: '插入文档链接',
+        insertMarkdownLink: '插入链接',
         insertMarkdownConversationLink: '插入会话链接',
+        markdownLinkTabDocuments: '文档',
+        markdownLinkTabConversations: '对话',
+        markdownLinkTabResources: '资源',
+        noMarkdownLinkTargets: '当前标签下没有可插入的链接项。',
+        markdownLinkInsertionPointRequired: '请先在文档中点击一个位置作为插入点。',
         importConversationTitle: '导入会话 {index}',
         noImportableConversationJson: '未识别到可导入的会话 JSON。',
         compareInputPlaceholder: '输入内容，按 Enter 换行，Ctrl/Cmd + Enter 开始对比',
@@ -253,6 +259,7 @@ export const zhCNMessages = {
         loadingTasksFailed: '加载任务失败。',
         noTasks: '当前没有任务。',
         completedTasks: '已完成（{count}）',
+        planned: '计划中',
         editTask: '编辑',
         deleteTask: '删除',
         moreActions: '更多操作',
@@ -262,7 +269,9 @@ export const zhCNMessages = {
         taskDueAt: '日期',
         taskTime: '时间',
         today: '今天',
+        todayTasksHint: '查看今天到期及已过期未完成的任务',
         tomorrow: '明天',
+        plannedTasksHint: '按日期查看未来任务',
         taskPriority: '优先级',
         taskPriorityNone: '无',
         taskPriorityLow: '低',

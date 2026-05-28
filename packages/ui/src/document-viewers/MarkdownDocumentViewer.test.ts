@@ -20,6 +20,9 @@ const getMarkdownEditorSearchMatchCount = vi.fn(() => 0);
 const scrollToMarkdownEditorSearchMatch = vi.fn();
 const captureRenderableMarkdownSelection = vi.fn();
 const resolveMarkdownSourceSelection = vi.fn();
+const resolveEmptyBlockMarkdownOffset = vi.fn(() => null);
+const resolveEmptyBlockAnchorFallback = vi.fn(() => null);
+const insertMarkdownAtViewerSelection = vi.fn(() => false);
 const rewriteMarkdownImageRatio = vi.fn();
 
 vi.mock('../utils/markdownDocument', () => ({
@@ -27,10 +30,13 @@ vi.mock('../utils/markdownDocument', () => ({
     createMarkdownEditor,
     destroyMarkdownEditor,
     findResizableMarkdownImageSource,
+    insertMarkdownAtViewerSelection,
     insertPastedMarkdownImage,
     normalizeMarkdownViewerContent,
     readMarkdownDocument,
     replaceMarkdownDocument,
+    resolveEmptyBlockAnchorFallback,
+    resolveEmptyBlockMarkdownOffset,
     resolveMarkdownSourceSelection,
     rewriteMarkdownImageRatio,
     setMarkdownEditorSearchQuery,
@@ -182,6 +188,7 @@ describe('MarkdownDocumentViewer', () => {
     });
 
     it('prepares a markdown source selection from a render selection snapshot in viewer mode', async () => {
+        createMarkdownEditor.mockResolvedValue({ content: 'Intro target' });
         captureRenderableMarkdownSelection.mockReturnValue({
             blockText: 'Intro target',
             start: 6,

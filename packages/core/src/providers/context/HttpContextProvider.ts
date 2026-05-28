@@ -1,7 +1,7 @@
 import { DEFAULT_SYNC_BASE_URL, resolveSyncBaseUrl } from '../../../config';
 import type { Conversation } from '../../interfaces/Conversation';
 import type { ConversationQuery } from '../../interfaces/IConversationPersistProvider';
-import type { ITaskProvider, Task } from '../../interfaces/ITaskProvider';
+import type { ITaskProvider, Task, TaskQueryTag } from '../../interfaces/ITaskProvider';
 import type {
     ContextDocument,
     ContextNode,
@@ -10,6 +10,7 @@ import type {
     ContextSearchRequest,
     CreateContextNodeInput,
     IContextProvider,
+    MoveContextNodeInput,
     RenameContextNodeInput,
     WriteContextDocumentResult,
     WorkspaceContext,
@@ -74,8 +75,13 @@ export class HttpContextProvider implements IContextProvider {
             source: 'context'
         });
         this.taskProvider = {
-            getTasks: async (documentPath?: string | null, agentKey?: string | null, completed?: boolean) => {
-                const response = await this.post('/get-tasks', { documentPath, agentKey, completed });
+            getTasks: async (
+                documentPath?: string | null,
+                agentKey?: string | null,
+                completed?: boolean,
+                tag?: TaskQueryTag | null
+            ) => {
+                const response = await this.post('/get-tasks', { documentPath, agentKey, completed, tag });
                 return (response as { tasks: Task[] }).tasks;
             },
             createTask: async (task: Task) => {
@@ -144,6 +150,11 @@ export class HttpContextProvider implements IContextProvider {
 
     async renameNode(input: RenameContextNodeInput): Promise<ContextNode> {
         const response = await this.post('/rename-node', { ...input });
+        return (response as { node: ContextNode }).node;
+    }
+
+    async moveNode(input: MoveContextNodeInput): Promise<ContextNode> {
+        const response = await this.post('/move-node', { ...input });
         return (response as { node: ContextNode }).node;
     }
 

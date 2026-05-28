@@ -1,4 +1,4 @@
-import type { Conversation, ConversationQuery, Task } from '@packages/core';
+import type { Conversation, ConversationQuery, Task, TaskQueryTag } from '@packages/core';
 import type {
     ContextDocument,
     ContextNode,
@@ -7,6 +7,7 @@ import type {
     ContextSearchRequest,
     ContextProvider,
     CreateContextNodeInput,
+    MoveContextNodeInput,
     RenameContextNodeInput,
     WorkspaceContext,
     WriteContextDocumentInput,
@@ -28,8 +29,13 @@ export class HttpContextService {
         return this.provider.getConversations(query);
     }
 
-    async getTasks(documentPath?: string | null, agentKey?: string | null, completed?: boolean): Promise<Task[]> {
-        return this.provider.getTaskProvider().getTasks(documentPath, agentKey, completed);
+    async getTasks(
+        documentPath?: string | null,
+        agentKey?: string | null,
+        completed?: boolean,
+        tag?: TaskQueryTag | null
+    ): Promise<Task[]> {
+        return this.provider.getTaskProvider().getTasks(documentPath, agentKey, completed, tag);
     }
 
     async createTask(task: Task): Promise<Task> {
@@ -70,6 +76,10 @@ export class HttpContextService {
 
     async renameNode(input: RenameContextNodeInput): Promise<ContextNode> {
         return this.provider.renameNode(input);
+    }
+
+    async moveNode(input: MoveContextNodeInput): Promise<ContextNode> {
+        return this.provider.moveNode(input);
     }
 
     async searchInScope(request: ContextSearchRequest): Promise<ContextSearchMatch[]> {

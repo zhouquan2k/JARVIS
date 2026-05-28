@@ -21,6 +21,7 @@ import {
     DESKTOP_CONTEXT_GET_TASKS_CHANNEL,
     DESKTOP_CONTEXT_GET_PROJECT_DOCUMENTS_CHANNEL,
     DESKTOP_CONTEXT_INITIALIZE_CHANNEL,
+    DESKTOP_CONTEXT_MOVE_NODE_CHANNEL,
     DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL,
     DESKTOP_CONTEXT_RENAME_NODE_CHANNEL,
     DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL,
@@ -107,9 +108,15 @@ export function registerContextIpc(options: RegisterContextIpcOptions = {}) {
     ipc.handle(DESKTOP_CONTEXT_GET_CONVERSATIONS_CHANNEL, async (_event, query: ConversationQuery) => {
         return provider.getConversations(query);
     });
-    ipc.handle(DESKTOP_CONTEXT_GET_TASKS_CHANNEL, async (_event, query: { documentPath?: string | null; agentKey?: string | null; completed?: boolean }) => {
-        return provider.getTaskProvider().getTasks(query.documentPath, query.agentKey, query.completed);
-    });
+    ipc.handle(
+        DESKTOP_CONTEXT_GET_TASKS_CHANNEL,
+        async (
+            _event,
+            query: { documentPath?: string | null; agentKey?: string | null; completed?: boolean; tag?: 'all' | 'today' | 'planned' | null }
+        ) => {
+            return provider.getTaskProvider().getTasks(query.documentPath, query.agentKey, query.completed, query.tag);
+        }
+    );
     ipc.handle(DESKTOP_CONTEXT_CREATE_TASK_CHANNEL, async (_event, task: Task) => {
         console.info('[desktop-context] create task requested', {
             taskId: task.id,
@@ -178,6 +185,9 @@ export function registerContextIpc(options: RegisterContextIpcOptions = {}) {
     ipc.handle(DESKTOP_CONTEXT_RENAME_NODE_CHANNEL, async (_event, input: { path: string; name: string }) => {
         return provider.renameNode(input);
     });
+    ipc.handle(DESKTOP_CONTEXT_MOVE_NODE_CHANNEL, async (_event, input: { path: string; targetParentPath?: string }) => {
+        return provider.moveNode(input);
+    });
     ipc.handle(DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL, async (_event, request: ContextSearchRequest) => {
         return provider.searchInScope(request);
     });
@@ -198,5 +208,6 @@ export function registerContextIpc(options: RegisterContextIpcOptions = {}) {
         ipc.removeHandler(DESKTOP_CONTEXT_CREATE_NODE_CHANNEL);
         ipc.removeHandler(DESKTOP_CONTEXT_DELETE_NODE_CHANNEL);
         ipc.removeHandler(DESKTOP_CONTEXT_RENAME_NODE_CHANNEL);
+        ipc.removeHandler(DESKTOP_CONTEXT_MOVE_NODE_CHANNEL);
     };
 }

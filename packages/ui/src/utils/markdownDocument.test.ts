@@ -390,6 +390,31 @@ describe('markdownDocument', () => {
         expect(resolveMarkdownConversationLinkTarget('./guide.md')).toBeNull();
     });
 
+    it('builds resource insertion markdown by reusing image and pdf rules', async () => {
+        const { buildMarkdownResourceInsertion } = await import('./markdownDocument');
+
+        expect(buildMarkdownResourceInsertion('/notes/current.md', '/notes/references/diagram.png')).toEqual({
+            markdown: '![](references/diagram.png)',
+            preferBlock: false
+        });
+        expect(buildMarkdownResourceInsertion('/notes/current.md', '/notes/references/guide.pdf')).toEqual({
+            markdown: [
+                '',
+                '',
+                '```cp-pdf-embed',
+                '{"label":"guide.pdf","candidates":["references/guide.pdf"],"showLink":false}',
+                '```',
+                '',
+                ''
+            ].join('\n'),
+            preferBlock: true
+        });
+        expect(buildMarkdownResourceInsertion('/notes/current.md', '/notes/references/archive.zip')).toEqual({
+            markdown: '[archive.zip](references/archive.zip)',
+            preferBlock: false
+        });
+    });
+
     it('opens viewer links without relying on contenteditable default navigation', async () => {
         const { createMarkdownEditor, destroyMarkdownEditor } = await import('./markdownDocument');
         const root = document.createElement('div');
@@ -533,6 +558,50 @@ describe('markdownDocument', () => {
             start: 6,
             end: 12
         });
+    });
+
+    it('captures empty block selections with their top-level block index', async () => {
+        const { captureRenderableMarkdownSelection } = await import('./markdownDocument');
+        const root = document.createElement('div');
+        root.innerHTML = '<div class="milkdown"><div class="ProseMirror"><p>First</p><p><br></p><p>Third</p></div></div>';
+        document.body.append(root);
+
+        const emptyP = root.querySelectorAll('p')[1] as HTMLElement;
+        expect(emptyP).toBeTruthy();
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.setStart(emptyP, 0);
+        range.setEnd(emptyP, 0);
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+
+        const snapshot = captureRenderableMarkdownSelection(root);
+        expect(snapshot).toEqual({
+            blockText: '',
+            start: 0,
+            end: 0,
+            selectedText: '',
+            blockIndex: 1
+        });
+    });
+
+    it('falls back to anchor-based offset for empty blocks when mdast is unavailable', async () => {
+        const { resolveEmptyBlockAnchorFallback } = await import('./markdownDocument');
+        const root = document.createElement('div');
+        root.innerHTML = '<div class="milkdown"><div class="ProseMirror"><p>First</p><p><br></p><p>Third</p></div></div>';
+        document.body.append(root);
+
+        const markdown = 'First\n\nThird\n';
+        const result = resolveEmptyBlockAnchorFallback(
+            root,
+            { blockText: '', start: 0, end: 0, selectedText: '', blockIndex: 1 },
+            markdown
+        );
+
+        expect(result).not.toBeNull();
+        expect(result!.start).toBe(result!.end);
+        expect(result!.start).toBeGreaterThan(markdown.indexOf('First'));
+        expect(result!.start).toBeLessThanOrEqual(markdown.indexOf('Third'));
     });
 
     it('finds a unique local markdown image source and rewrites the ratio in Crepe markdown image form', async () => {

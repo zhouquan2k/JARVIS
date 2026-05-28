@@ -159,6 +159,67 @@ describe('DocumentFileTree', () => {
         ]);
     });
 
+    it('emits move when a node is dropped onto a different directory', async () => {
+        const wrapper = mount(DocumentFileTree, {
+            props: {
+                nodes: [
+                    { path: '/docs', name: 'docs', kind: 'directory' },
+                    { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' },
+                    { path: '/archive', name: 'archive', kind: 'directory' }
+                ],
+                expandedPaths: ['/', '/docs'],
+                activePath: '/docs/guide.md',
+                currentError: null
+            }
+        });
+
+        const dataTransfer = {
+            setData: () => {},
+            effectAllowed: 'move',
+            dropEffect: 'move'
+        };
+        await wrapper.get('[data-path="/docs/guide.md"]').trigger('dragstart', { dataTransfer });
+        await wrapper.get('[data-path="/archive"]').trigger('dragover', {
+            dataTransfer,
+            preventDefault: () => {}
+        });
+        await wrapper.get('[data-path="/archive"]').trigger('drop', {
+            dataTransfer,
+            preventDefault: () => {}
+        });
+
+        expect(wrapper.emitted('move')).toEqual([
+            [{ path: '/docs/guide.md', targetParentPath: '/archive' }]
+        ]);
+    });
+
+    it('does not emit move when dropping onto the same parent directory', async () => {
+        const wrapper = mount(DocumentFileTree, {
+            props: {
+                nodes: [
+                    { path: '/docs', name: 'docs', kind: 'directory' },
+                    { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' }
+                ],
+                expandedPaths: ['/', '/docs'],
+                activePath: '/docs/guide.md',
+                currentError: null
+            }
+        });
+
+        const dataTransfer = {
+            setData: () => {},
+            effectAllowed: 'move',
+            dropEffect: 'move'
+        };
+        await wrapper.get('[data-path="/docs/guide.md"]').trigger('dragstart', { dataTransfer });
+        await wrapper.get('[data-path="/docs"]').trigger('drop', {
+            dataTransfer,
+            preventDefault: () => {}
+        });
+
+        expect(wrapper.emitted('move')).toBeUndefined();
+    });
+
     it('hides markdown suffixes while keeping non-markdown file labels and icons', async () => {
         const wrapper = mount(DocumentFileTree, {
             props: {

@@ -166,6 +166,11 @@ The system MUST define a shared `Task` model that is independent from the `Conve
 - **THEN** the task MUST carry that scope in `agentKey`
 - **AND** the task MUST NOT be required to carry a document path at the same time
 
+#### Scenario: Represent a task that belongs to both document and project scopes
+- **WHEN** the system creates or returns a task associated with both a document and a project/agent scope
+- **THEN** the task MUST be allowed to carry both `documentPath` and `agentKey`
+- **AND** callers MUST NOT be forced to choose only one of those scope fields
+
 #### Scenario: Represent calendar synchronization state on a task
 - **WHEN** the system creates or returns a task that can participate in calendar synchronization
 - **THEN** the task MUST carry calendar synchronization state as part of the shared `Task` object
@@ -188,8 +193,13 @@ The system MUST define a shared `Task` model that is independent from the `Conve
 
 #### Scenario: Query tasks by one active scope
 - **WHEN** caller code requests `getTasks(documentPath, agentKey, completed)`
-- **THEN** the contract MUST support resolving document-scoped tasks or project-scoped tasks for the active selection
+- **THEN** the contract MUST support resolving document-scoped tasks, project-scoped tasks, or tasks that belong to both scopes for the active selection
 - **AND** callers MUST NOT be forced to use a separate query-object type
+
+#### Scenario: Resolve today-tag task queries with overdue unfinished tasks
+- **WHEN** caller code requests `getTasks(documentPath, agentKey, completed, 'today')`
+- **THEN** the contract MUST be allowed to return unfinished tasks due earlier today and unfinished overdue tasks from prior dates
+- **AND** it MUST NOT require callers to issue a second overdue-specific query
 
 #### Scenario: Normalize system-managed fields during create
 - **WHEN** caller code creates a task and omits or provides provisional values for `id`, `createdAt`, `updatedAt`, or `completedAt`
@@ -205,6 +215,11 @@ The system MUST define a shared `Task` model that is independent from the `Conve
 - **WHEN** a provider creates or updates a task that qualifies for calendar synchronization
 - **THEN** the provider MAY invoke an internal calendar-sync service during the same task lifecycle
 - **AND** the resulting task MUST return updated calendar synchronization state through the same `Task` object
+
+#### Scenario: Synchronize date-only tasks with a default calendar time
+- **WHEN** a provider creates or updates a task whose `dueAt` carries only a date-level value
+- **THEN** the provider MUST still be allowed to synchronize that task through the calendar-sync service
+- **AND** the provider MAY normalize the external calendar event time to a deterministic default such as 09:00 local time
 
 #### Scenario: Preserve task mutations when external sync fails
 - **WHEN** a provider-managed calendar synchronization attempt fails during task create or update

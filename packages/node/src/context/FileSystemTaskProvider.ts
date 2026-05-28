@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { ITaskProvider, Task } from '../../../core/src/interfaces/ITaskProvider.ts';
+import type { ITaskProvider, Task, TaskQueryTag } from '../../../core/src/interfaces/ITaskProvider.ts';
 import type { ITaskCalendarSyncService } from './ITaskCalendarSyncService.ts';
 import {
     TASK_STORAGE_DIRECTORY,
@@ -26,22 +26,35 @@ export class FileSystemTaskProvider implements ITaskProvider {
         this.calendarSyncService = options.calendarSyncService ?? null;
     }
 
-    async getTasks(documentPath?: string | null, agentKey?: string | null, completed?: boolean): Promise<Task[]> {
+    async getTasks(
+        documentPath?: string | null,
+        agentKey?: string | null,
+        completed?: boolean,
+        tag?: TaskQueryTag | null
+    ): Promise<Task[]> {
         const storedTasks = await this.readTaskIndex();
         const scope = normalizeTaskScope(documentPath, agentKey);
+        const now = Date.now();
 
         return storedTasks
             .filter((task) => {
                 if (scope.documentPath !== null) {
-                    return task.documentPath === scope.documentPath
-                        && (typeof completed === 'boolean' ? task.completed === completed : true);
+                    if (task.documentPath !== scope.documentPath) {
+                        return false;
+                    }
                 }
 
-                if ((scope.agentKey ?? null) !== (task.agentKey ?? null)) {
-                    return false;
+                if (scope.agentKey !== null) {
+                    if ((scope.agentKey ?? null) !== (task.agentKey ?? null)) {
+                        return false;
+                    }
                 }
 
                 if (typeof completed === 'boolean' && task.completed !== completed) {
+                    return false;
+                }
+
+                if (!matchesTaskTag(task, tag, now)) {
                     return false;
                 }
 
@@ -241,6 +254,32 @@ export class FileSystemTaskProvider implements ITaskProvider {
         const rootDirectory = await this.resolveRootDirectory();
         return path.join(rootDirectory, TASK_STORAGE_DIRECTORY, TASK_STORAGE_FILE);
     }
+}
+
+function matchesTaskTag(task: Task, tag: TaskQueryTag | null | undefined, now: number): boolean {
+    if (!tag || tag === 'all') {
+        return true;
+    }
+
+    if (task.dueAt === null) {
+        return false;
+    }
+
+    if (tag === 'planned') {
+        return task.dueAt > now;
+    }
+
+    const currentDate = new Date(now);
+    const endOfToday = new Date(
+        currentDate.getFullYear(),
+        currentDate.getMonth(),
+        currentDate.getDate(),
+        23,
+        59,
+        59,
+        999
+    ).getTime();
+    return task.dueAt <= endOfToday;
 }
 
 async function exists(targetPath: string): Promise<boolean> {

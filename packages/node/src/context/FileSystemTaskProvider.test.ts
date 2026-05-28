@@ -66,6 +66,26 @@ describe('FileSystemTaskProvider', () => {
         expect(created.calendarEventId).toBeNull();
     });
 
+    it('syncs date-only tasks on create and persists sync metadata', async () => {
+        const syncService = {
+            syncTask: vi.fn(async () => ({
+                providerId: 'google-calendar',
+                eventId: 'event-date-only',
+                syncedAt: 500
+            })),
+            deleteTask: vi.fn(async () => undefined)
+        } satisfies ITaskCalendarSyncService;
+        const { provider } = await createProvider(syncService);
+
+        const created = await provider.createTask(createTask({
+            dueAt: new Date('2026-05-24T00:00:00').getTime()
+        }));
+
+        expect(syncService.syncTask).toHaveBeenCalledTimes(1);
+        expect(created.calendarEventId).toBe('event-date-only');
+        expect(created.calendarSyncStatus).toBe('synced');
+    });
+
     it('syncs timed tasks on create and persists sync metadata', async () => {
         const syncService = {
             syncTask: vi.fn(async () => ({
@@ -118,6 +138,35 @@ describe('FileSystemTaskProvider', () => {
         expect(updated.calendarEventId).toBe('event-1');
         expect(updated.calendarSyncStatus).toBe('synced');
         expect(updated.calendarLastSyncedAt).toBe(900);
+    });
+
+    it('syncs a task on update when it was created without calendar sync', async () => {
+        const syncService = {
+            syncTask: vi.fn(async (task: Task) => ({
+                providerId: 'google-calendar',
+                eventId: task.calendarEventId ?? 'event-created',
+                syncedAt: 900
+            })),
+            deleteTask: vi.fn(async () => undefined)
+        } satisfies ITaskCalendarSyncService;
+        const { provider, rootPath } = await createProvider(syncService);
+
+        const created = await provider.createTask(createTask({
+            dueAt: null
+        }));
+        const updated = await provider.updateTask({
+            ...created,
+            dueAt: new Date('2026-05-24T09:00:00-04:00').getTime()
+        });
+
+        expect(syncService.syncTask).toHaveBeenCalledTimes(1);
+        expect(updated.calendarEventId).toBe('event-created');
+        expect(updated.calendarSyncStatus).toBe('synced');
+        expect(updated.calendarLastSyncedAt).toBe(900);
+
+        const stored = await readFile(path.join(rootPath, '.chatprism', 'tasks.json'), 'utf8');
+        expect(stored).toContain('"calendarEventId": "event-created"');
+        expect(stored).toContain('"calendarSyncStatus": "synced"');
     });
 
     it('persists failed sync state without rolling back the task save', async () => {
@@ -191,5 +240,83 @@ describe('FileSystemTaskProvider', () => {
 
         expect(syncService.deleteTask).toHaveBeenCalledTimes(1);
         await expect(provider.getTasks('/workspace/guide.md', null, false)).resolves.toEqual([]);
+    });
+
+    it('supports document, agent, and global scopes with tag-based filtering', async () => {
+        const { provider } = await createProvider();
+        const now = new Date();
+        const todayDueAt = new Date(
+            now.getFullYear(),
+            now.getMonth(),
+            now.getDate(),
+            Math.min(now.getHours() + 1, 23),
+            30,
+            0,
+            0
+        ).getTime();
+        const futureDueAt = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 2, 9, 0, 0, 0).getTime();
+        const pastDueAt = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 9, 0, 0, 0).getTime();
+
+        const docTask = await provider.createTask(createTask({
+            title: 'Document task',
+            documentPath: '/workspace/guide.md',
+            agentKey: '/workspace/',
+            dueAt: todayDueAt
+        }));
+        const projectTask = await provider.createTask(createTask({
+            title: 'Project task',
+            documentPath: null,
+            agentKey: '/workspace/',
+            dueAt: futureDueAt
+        }));
+        const overdueTask = await provider.createTask(createTask({
+            title: 'Overdue task',
+            documentPath: null,
+            agentKey: '/other/',
+            dueAt: pastDueAt
+        }));
+
+        await expect(provider.getTasks('/workspace/guide.md', '/workspace/', false, 'all')).resolves.toEqual([
+            expect.objectContaining({ id: docTask.id, title: 'Document task' })
+        ]);
+        await expect(provider.getTasks(null, '/workspace/', false, 'all')).resolves.toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: docTask.id, title: 'Document task' }),
+            expect.objectContaining({ id: projectTask.id, title: 'Project task' })
+        ]));
+        await expect(provider.getTasks(null, null, false, 'all')).resolves.toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: docTask.id }),
+            expect.objectContaining({ id: projectTask.id }),
+            expect.objectContaining({ id: overdueTask.id })
+        ]));
+        await expect(provider.getTasks(null, null, false, 'today')).resolves.toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: docTask.id, title: 'Document task' }),
+            expect.objectContaining({ id: overdueTask.id, title: 'Overdue task' })
+        ]));
+        await expect(provider.getTasks(null, null, false, 'planned')).resolves.toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: docTask.id }),
+            expect.objectContaining({ id: projectTask.id })
+        ]));
+        await expect(provider.getTasks(null, null, false, 'planned')).resolves.not.toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: overdueTask.id })
+        ]));
+    });
+
+    it('supports tasks that belong to both a document and an agent scope', async () => {
+        const { provider } = await createProvider();
+        const created = await provider.createTask(createTask({
+            title: 'Scoped task',
+            documentPath: '/workspace/guide.md',
+            agentKey: '/workspace/'
+        }));
+
+        await expect(provider.getTasks('/workspace/guide.md', null, false, 'all')).resolves.toEqual([
+            expect.objectContaining({ id: created.id, title: 'Scoped task' })
+        ]);
+        await expect(provider.getTasks(null, '/workspace/', false, 'all')).resolves.toEqual([
+            expect.objectContaining({ id: created.id, title: 'Scoped task' })
+        ]);
+        await expect(provider.getTasks('/workspace/guide.md', '/workspace/', false, 'all')).resolves.toEqual([
+            expect.objectContaining({ id: created.id, title: 'Scoped task' })
+        ]);
     });
 });

@@ -188,6 +188,36 @@ describe('WorkspaceHostApp', () => {
         expect(navigateTo).toHaveBeenCalledWith('/');
     });
 
+    it('renders the all-tasks workspace for the dedicated route', async () => {
+        setActivePinia(createPinia());
+        const navigateTo = vi.fn();
+        const wrapper = mount(WorkspaceHostApp, {
+            props: {
+                currentRoutePath: '/all-tasks',
+                navigateTo,
+                contextProvider: { id: 'ctx' }
+            },
+            global: {
+                stubs: {
+                    AllTasksWorkspaceView: {
+                        props: ['contextProvider'],
+                        template: '<div data-testid="all-tasks-workspace-stub" :data-context-id="contextProvider?.id || \'\'" />'
+                    },
+                    ConversationWorkspaceView: {
+                        template: '<div data-testid="conversation-workspace-stub" />'
+                    },
+                    DocumentWorkspaceView: {
+                        template: '<div data-testid="document-workspace-stub" />'
+                    }
+                }
+            }
+        });
+
+        expect(wrapper.get('[data-testid="all-tasks-workspace-stub"]').attributes('data-context-id')).toBe('ctx');
+        expect(wrapper.find('[data-testid="conversation-workspace-stub"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid="document-workspace-stub"]').exists()).toBe(false);
+    });
+
     it('shows top bar node history controls in knowledge mode and forwards navigation to the document store', async () => {
         setActivePinia(createPinia());
         const navigateTo = vi.fn();

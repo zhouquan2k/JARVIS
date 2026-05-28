@@ -155,6 +155,21 @@ describe('context api', () => {
             })
         });
 
+        const moveNodeResponse = await app.request('/api/context/move-node', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ path: '/welcome-renamed.md', targetParentPath: '/notes' })
+        });
+        expect(moveNodeResponse.status).toBe(200);
+        await expect(moveNodeResponse.json()).resolves.toMatchObject({
+            node: expect.objectContaining({
+                path: '/notes/welcome-renamed.md',
+                name: 'welcome-renamed.md',
+                kind: 'file',
+                parentPath: '/notes'
+            })
+        });
+
         const refreshedContextResponse = await app.request('/api/context/get-context', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -205,13 +220,27 @@ describe('context api', () => {
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({
                 documentPath: '/welcome-renamed.md',
-                completed: false
+                completed: false,
+                tag: 'all'
             })
         });
         expect(listTasksResponse.status).toBe(200);
         await expect(listTasksResponse.json()).resolves.toEqual({
             tasks: [expect.objectContaining({ id: createdTaskJson.task.id, title: 'Review welcome doc' })]
         });
+
+        const globalListResponse = await app.request('/api/context/get-tasks', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                documentPath: null,
+                agentKey: null,
+                completed: false,
+                tag: 'today'
+            })
+        });
+        expect(globalListResponse.status).toBe(200);
+        await expect(globalListResponse.json()).resolves.toEqual({ tasks: [] });
     });
 
     it('reads pdf documents through /api/context/read-document with binary payload and read-only metadata', async () => {

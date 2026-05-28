@@ -8,6 +8,7 @@ export type {
     ContextSearchRequest,
     CreateContextNodeInput,
     IContextProvider,
+    MoveContextNodeInput,
     WorkspaceContext,
     WriteContextDocumentInput,
     WriteContextDocumentResult

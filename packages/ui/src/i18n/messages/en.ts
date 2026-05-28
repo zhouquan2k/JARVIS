@@ -5,7 +5,8 @@ export const enMessages = {
     routes: {
         knowledgeWorkspace: 'Workspace',
         normalChat: 'Chat',
-        compareChat: 'Compare Chat'
+        compareChat: 'Compare Chat',
+        allTasks: 'Tasks'
     },
     topBar: {
         compareMode: 'Compare Chat',
@@ -97,8 +98,13 @@ export const enMessages = {
         markdownModeSwitch: 'Markdown mode switch',
         markdownViewerMode: 'Render',
         markdownEditMode: 'Source',
-        insertMarkdownLink: 'Insert document link',
+        insertMarkdownLink: 'Insert link',
         insertMarkdownConversationLink: 'Insert conversation link',
+        markdownLinkTabDocuments: 'Documents',
+        markdownLinkTabConversations: 'Conversations',
+        markdownLinkTabResources: 'Resources',
+        noMarkdownLinkTargets: 'No link targets available in this tab.',
+        markdownLinkInsertionPointRequired: 'Click a position in the document first to choose where to insert.',
         importConversationTitle: 'Imported conversation {index}',
         noImportableConversationJson: 'No importable conversation JSON was detected.',
         compareInputPlaceholder: 'Enter text, press Enter for a new line, Ctrl/Cmd + Enter to start comparison',
@@ -253,6 +259,7 @@ export const enMessages = {
         loadingTasksFailed: 'Failed to load tasks.',
         noTasks: 'No tasks yet.',
         completedTasks: 'Completed ({count})',
+        planned: 'Planned',
         editTask: 'Edit',
         deleteTask: 'Delete',
         moreActions: 'More actions',
@@ -262,7 +269,9 @@ export const enMessages = {
         taskDueAt: 'Due',
         taskTime: 'Time',
         today: 'Today',
+        todayTasksHint: 'Tasks due today and overdue unfinished tasks',
         tomorrow: 'Tomorrow',
+        plannedTasksHint: 'Future tasks grouped by date',
         taskPriority: 'Priority',
         taskPriorityNone: 'None',
         taskPriorityLow: 'Low',

@@ -12,6 +12,7 @@ import {
     DESKTOP_CONTEXT_GET_TASKS_CHANNEL,
     DESKTOP_CONTEXT_GET_PROJECT_DOCUMENTS_CHANNEL,
     DESKTOP_CONTEXT_INITIALIZE_CHANNEL,
+    DESKTOP_CONTEXT_MOVE_NODE_CHANNEL,
     DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL,
     DESKTOP_CONTEXT_RENAME_NODE_CHANNEL,
     DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL,
@@ -160,6 +161,7 @@ describe('contextIpc', () => {
         expect(ipc.removeHandler).toHaveBeenCalledWith(DESKTOP_CONTEXT_CREATE_NODE_CHANNEL);
         expect(ipc.removeHandler).toHaveBeenCalledWith(DESKTOP_CONTEXT_DELETE_NODE_CHANNEL);
         expect(ipc.removeHandler).toHaveBeenCalledWith(DESKTOP_CONTEXT_RENAME_NODE_CHANNEL);
+        expect(ipc.removeHandler).toHaveBeenCalledWith(DESKTOP_CONTEXT_MOVE_NODE_CHANNEL);
     });
 
     it('syncs timed tasks through the desktop IPC path and preserves the calendar event id on update', async () => {
@@ -245,6 +247,152 @@ describe('contextIpc', () => {
         }
     });
 
+    it('syncs a previously unsynced task when a later desktop update adds a concrete due time', async () => {
+        const workspaceRoot = await mkdtemp(join(tmpdir(), 'chatprism-context-sync-on-update-'));
+        tempDirs.push(workspaceRoot);
+        await mkdir(join(workspaceRoot, 'notes'), { recursive: true });
+        await writeFile(join(workspaceRoot, 'notes', 'today.md'), '# Today\n', 'utf8');
+
+        const originalEnv = {
+            CHATPRISM_GOOGLE_CALENDAR_CLIENT_ID: process.env.CHATPRISM_GOOGLE_CALENDAR_CLIENT_ID,
+            CHATPRISM_GOOGLE_CALENDAR_CLIENT_SECRET: process.env.CHATPRISM_GOOGLE_CALENDAR_CLIENT_SECRET,
+            CHATPRISM_GOOGLE_CALENDAR_REFRESH_TOKEN: process.env.CHATPRISM_GOOGLE_CALENDAR_REFRESH_TOKEN,
+            CHATPRISM_GOOGLE_OAUTH_TOKEN_URL: process.env.CHATPRISM_GOOGLE_OAUTH_TOKEN_URL,
+            CHATPRISM_GOOGLE_CALENDAR_API_BASE_URL: process.env.CHATPRISM_GOOGLE_CALENDAR_API_BASE_URL
+        };
+        process.env.CHATPRISM_GOOGLE_CALENDAR_CLIENT_ID = 'client-id';
+        process.env.CHATPRISM_GOOGLE_CALENDAR_CLIENT_SECRET = 'client-secret';
+        process.env.CHATPRISM_GOOGLE_CALENDAR_REFRESH_TOKEN = 'refresh-token';
+        process.env.CHATPRISM_GOOGLE_OAUTH_TOKEN_URL = 'https://oauth.example.test/token';
+        process.env.CHATPRISM_GOOGLE_CALENDAR_API_BASE_URL = 'https://calendar.example.test/v3';
+
+        const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+            const url = String(input);
+            if (url === 'https://oauth.example.test/token') {
+                return new Response(JSON.stringify({
+                    access_token: 'token-1',
+                    expires_in: 3600
+                }), { status: 200 });
+            }
+
+            if (url.endsWith('/calendars/primary/events')) {
+                return new Response(JSON.stringify({ id: 'event-1' }), { status: 200 });
+            }
+
+            throw new Error(`unexpected request: ${url}`);
+        });
+
+        try {
+            const ipc = createIpcMock();
+            registerContextIpc({ ipc, workspaceRoot, fetchImpl });
+            const createTaskHandler = getHandler(ipc, DESKTOP_CONTEXT_CREATE_TASK_CHANNEL);
+            const updateTaskHandler = getHandler(ipc, DESKTOP_CONTEXT_UPDATE_TASK_CHANNEL);
+
+            const created = await createTaskHandler?.({}, {
+                id: 'temp-task',
+                title: 'Desktop follow-up',
+                notes: 'Bring agenda',
+                completed: false,
+                dueAt: null,
+                priority: 'high',
+                documentPath: '/notes/today.md',
+                agentKey: null,
+                createdAt: 0,
+                updatedAt: 0,
+                completedAt: null,
+                calendarProviderId: null,
+                calendarEventId: null,
+                calendarSyncStatus: null,
+                calendarLastSyncedAt: null,
+                calendarLastSyncError: null
+            }) as Task;
+            expect(created.calendarEventId).toBeNull();
+            expect(created.calendarSyncStatus).toBeNull();
+
+            const updated = await updateTaskHandler?.({}, {
+                ...created,
+                dueAt: new Date('2026-05-24T09:00:00-04:00').getTime()
+            }) as Task;
+            expect(updated.calendarEventId).toBe('event-1');
+            expect(updated.calendarSyncStatus).toBe('synced');
+            expect(fetchImpl).toHaveBeenCalledWith('https://calendar.example.test/v3/calendars/primary/events', expect.anything());
+        } finally {
+            process.env.CHATPRISM_GOOGLE_CALENDAR_CLIENT_ID = originalEnv.CHATPRISM_GOOGLE_CALENDAR_CLIENT_ID;
+            process.env.CHATPRISM_GOOGLE_CALENDAR_CLIENT_SECRET = originalEnv.CHATPRISM_GOOGLE_CALENDAR_CLIENT_SECRET;
+            process.env.CHATPRISM_GOOGLE_CALENDAR_REFRESH_TOKEN = originalEnv.CHATPRISM_GOOGLE_CALENDAR_REFRESH_TOKEN;
+            process.env.CHATPRISM_GOOGLE_OAUTH_TOKEN_URL = originalEnv.CHATPRISM_GOOGLE_OAUTH_TOKEN_URL;
+            process.env.CHATPRISM_GOOGLE_CALENDAR_API_BASE_URL = originalEnv.CHATPRISM_GOOGLE_CALENDAR_API_BASE_URL;
+        }
+    });
+
+    it('syncs a date-only task through the desktop IPC path using a default 09:00 calendar time', async () => {
+        const workspaceRoot = await mkdtemp(join(tmpdir(), 'chatprism-context-date-only-sync-'));
+        tempDirs.push(workspaceRoot);
+        await mkdir(join(workspaceRoot, 'notes'), { recursive: true });
+        await writeFile(join(workspaceRoot, 'notes', 'today.md'), '# Today\n', 'utf8');
+
+        const originalEnv = {
+            CHATPRISM_GOOGLE_CALENDAR_CLIENT_ID: process.env.CHATPRISM_GOOGLE_CALENDAR_CLIENT_ID,
+            CHATPRISM_GOOGLE_CALENDAR_CLIENT_SECRET: process.env.CHATPRISM_GOOGLE_CALENDAR_CLIENT_SECRET,
+            CHATPRISM_GOOGLE_CALENDAR_REFRESH_TOKEN: process.env.CHATPRISM_GOOGLE_CALENDAR_REFRESH_TOKEN,
+            CHATPRISM_GOOGLE_OAUTH_TOKEN_URL: process.env.CHATPRISM_GOOGLE_OAUTH_TOKEN_URL,
+            CHATPRISM_GOOGLE_CALENDAR_API_BASE_URL: process.env.CHATPRISM_GOOGLE_CALENDAR_API_BASE_URL
+        };
+        process.env.CHATPRISM_GOOGLE_CALENDAR_CLIENT_ID = 'client-id';
+        process.env.CHATPRISM_GOOGLE_CALENDAR_CLIENT_SECRET = 'client-secret';
+        process.env.CHATPRISM_GOOGLE_CALENDAR_REFRESH_TOKEN = 'refresh-token';
+        process.env.CHATPRISM_GOOGLE_OAUTH_TOKEN_URL = 'https://oauth.example.test/token';
+        process.env.CHATPRISM_GOOGLE_CALENDAR_API_BASE_URL = 'https://calendar.example.test/v3';
+
+        const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+            const url = String(input);
+            if (url === 'https://oauth.example.test/token') {
+                return new Response(JSON.stringify({
+                    access_token: 'token-1',
+                    expires_in: 3600
+                }), { status: 200 });
+            }
+
+            const payload = JSON.parse(String(init?.body)) as { start: { dateTime: string } };
+            expect(new Date(payload.start.dateTime).getHours()).toBe(9);
+            expect(new Date(payload.start.dateTime).getMinutes()).toBe(0);
+            return new Response(JSON.stringify({ id: 'event-1' }), { status: 200 });
+        });
+
+        try {
+            const ipc = createIpcMock();
+            registerContextIpc({ ipc, workspaceRoot, fetchImpl });
+            const createTaskHandler = getHandler(ipc, DESKTOP_CONTEXT_CREATE_TASK_CHANNEL);
+
+            const created = await createTaskHandler?.({}, {
+                id: 'temp-task',
+                title: 'Desktop date-only follow-up',
+                notes: 'Bring agenda',
+                completed: false,
+                dueAt: new Date('2026-05-24T00:00:00').getTime(),
+                priority: 'high',
+                documentPath: '/notes/today.md',
+                agentKey: null,
+                createdAt: 0,
+                updatedAt: 0,
+                completedAt: null,
+                calendarProviderId: null,
+                calendarEventId: null,
+                calendarSyncStatus: null,
+                calendarLastSyncedAt: null,
+                calendarLastSyncError: null
+            }) as Task;
+            expect(created.calendarEventId).toBe('event-1');
+            expect(created.calendarSyncStatus).toBe('synced');
+        } finally {
+            process.env.CHATPRISM_GOOGLE_CALENDAR_CLIENT_ID = originalEnv.CHATPRISM_GOOGLE_CALENDAR_CLIENT_ID;
+            process.env.CHATPRISM_GOOGLE_CALENDAR_CLIENT_SECRET = originalEnv.CHATPRISM_GOOGLE_CALENDAR_CLIENT_SECRET;
+            process.env.CHATPRISM_GOOGLE_CALENDAR_REFRESH_TOKEN = originalEnv.CHATPRISM_GOOGLE_CALENDAR_REFRESH_TOKEN;
+            process.env.CHATPRISM_GOOGLE_OAUTH_TOKEN_URL = originalEnv.CHATPRISM_GOOGLE_OAUTH_TOKEN_URL;
+            process.env.CHATPRISM_GOOGLE_CALENDAR_API_BASE_URL = originalEnv.CHATPRISM_GOOGLE_CALENDAR_API_BASE_URL;
+        }
+    });
+
     it('rejects node creation attempts that escape the workspace root', async () => {
         const workspaceRoot = await mkdtemp(join(tmpdir(), 'chatprism-context-boundary-'));
         tempDirs.push(workspaceRoot);
@@ -290,6 +438,28 @@ describe('contextIpc', () => {
         });
         const context = await getContextHandler?.({}) as { nodes: Array<{ path: string }> };
         expect(context.nodes.some((node) => node.path === '/renamed.md')).toBe(true);
+    });
+
+    it('moves files through the desktop IPC handler', async () => {
+        const workspaceRoot = await mkdtemp(join(tmpdir(), 'chatprism-context-move-'));
+        tempDirs.push(workspaceRoot);
+        await mkdir(join(workspaceRoot, 'archive'), { recursive: true });
+        await writeFile(join(workspaceRoot, 'draft.md'), '# draft\n', 'utf8');
+
+        const ipc = createIpcMock();
+        registerContextIpc({ ipc, workspaceRoot });
+        const moveNodeHandler = getHandler(ipc, DESKTOP_CONTEXT_MOVE_NODE_CHANNEL);
+        const getContextHandler = getHandler(ipc, DESKTOP_CONTEXT_GET_CONTEXT_CHANNEL);
+
+        await expect(moveNodeHandler?.({}, { path: '/draft.md', targetParentPath: '/archive' })).resolves.toMatchObject({
+            path: '/archive/draft.md',
+            name: 'draft.md',
+            kind: 'file',
+            parentPath: '/archive'
+        });
+        const context = await getContextHandler?.({}) as { nodes: Array<{ path: string; children?: Array<{ path: string }> }> };
+        const archiveNode = context.nodes.find((node) => node.path === '/archive');
+        expect(archiveNode?.children?.some((node) => node.path === '/archive/draft.md')).toBe(true);
     });
 
     it('reads pdf documents as binary context payloads', async () => {

@@ -10,6 +10,7 @@ export type {
     ContextSearchMatch,
     ContextSearchRequest,
     CreateContextNodeInput,
+    MoveContextNodeInput,
     RenameContextNodeInput,
     ResolvedAgentConfig,
     WorkspaceContext,

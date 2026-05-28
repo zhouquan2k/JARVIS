@@ -26,6 +26,19 @@ async function readContextText(request: APIRequestContext, path: string) {
   return Buffer.from(payload.document.dataBase64, 'base64').toString('utf8');
 }
 
+function formatTaskDateInput(value: Date) {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function formatTaskTimeInput(value: Date) {
+  const hours = String(value.getHours()).padStart(2, '0');
+  const minutes = String(value.getMinutes()).padStart(2, '0');
+  return `${hours}:${minutes}`;
+}
+
 test('web knowledge workspace supports file browsing editing and top-level workspace switching', async ({ page, request }) => {
   const baseName = `playwright-agent-file-${Date.now()}`;
   const docVirtualPath = `/${baseName}.txt`;
@@ -203,6 +216,66 @@ test('web knowledge workspace manages document-scoped and project-scoped tasks f
   }
 });
 
+test('web all-tasks workspace switches between today and planned global filters', async ({ page }, testInfo) => {
+  const baseName = `playwright-all-tasks-${testInfo.workerIndex}-${Date.now()}`;
+  const docVirtualPath = `/${baseName}.md`;
+  const docDiskPath = path.join(knowledgeFixtureRoot, `${baseName}.md`);
+  const ownerDiskPath = path.join(knowledgeFixtureRoot, `${baseName}-owner`);
+  const ownerVirtualPath = `/${baseName}-owner`;
+  const laterToday = new Date(Date.now() + 2 * 60 * 60 * 1000);
+  const futureDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+
+  await writeFile(docDiskPath, '# Global Tasks Doc\n', 'utf8');
+  await mkdir(ownerDiskPath, { recursive: true });
+  await writeFile(path.join(ownerDiskPath, '.agent.json'), JSON.stringify({
+    name: `${baseName} Global Owner`,
+    instructions: 'Own all-task test data.'
+  }, null, 2), 'utf8');
+
+  try {
+    await page.goto('/#/');
+    await expect(page.getByTestId('document-workspace')).toBeVisible();
+
+    await page.locator(`[data-path="${docVirtualPath}"]`).click();
+    await page.getByTestId('agent-right-pane-tab-tasks').click();
+    await page.getByTestId('agent-task-add').click();
+    await page.getByTestId('task-editor-title').fill('Today document task');
+    await page.getByTestId('task-editor-due-at').fill(formatTaskDateInput(laterToday));
+    await page.getByTestId('task-editor-time-toggle').click();
+    await page.getByTestId('task-editor-due-time').fill(formatTaskTimeInput(laterToday));
+    await page.getByTestId('task-editor-save').click();
+    await expect(page.getByTestId('agent-task-open-list')).toContainText('Today document task');
+
+    await page.locator(`[data-path="${ownerVirtualPath}"]`).click();
+    await page.getByTestId('agent-right-pane-tab-tasks').click();
+    await page.getByTestId('agent-task-add').click();
+    await page.getByTestId('task-editor-title').fill('Planned project task');
+    await page.getByTestId('task-editor-due-at').fill(formatTaskDateInput(futureDate));
+    await page.getByTestId('task-editor-time-toggle').click();
+    await page.getByTestId('task-editor-due-time').fill('09:00');
+    await page.getByTestId('task-editor-save').click();
+    await expect(page.getByTestId('agent-task-open-list')).toContainText('Planned project task');
+
+    await page.getByTestId('topbar-workspace-all-tasks').click();
+    await expect(page.getByTestId('all-tasks-workspace')).toBeVisible();
+    await expect(page.getByTestId('task-list-panel')).toBeVisible();
+
+    await page.getByTestId('all-tasks-shortcut-today').click();
+    await expect(page.getByTestId('agent-task-open-list')).toContainText('Today document task');
+    await expect(page.getByTestId('agent-task-open-list')).not.toContainText('Planned project task');
+
+    await page.getByTestId('all-tasks-shortcut-planned').click();
+    await expect(page.getByTestId('agent-task-open-list')).toContainText('Today document task');
+    await expect(page.getByTestId('agent-task-open-list')).toContainText('Planned project task');
+
+    const futureKey = `${futureDate.getFullYear()}-${String(futureDate.getMonth() + 1).padStart(2, '0')}-${String(futureDate.getDate()).padStart(2, '0')}`;
+    await expect(page.getByTestId(`task-group-title-${futureKey}`)).toBeVisible();
+  } finally {
+    await rm(docDiskPath, { force: true });
+    await rm(ownerDiskPath, { recursive: true, force: true });
+  }
+});
+
 test('web knowledge workspace appends .md on create, hides markdown suffixes, and shows non-markdown icons', async ({ page, request }, testInfo) => {
   const baseName = `playwright-tree-${testInfo.workerIndex}-${Date.now()}`;
   const virtualPath = `/${baseName}.md`;
@@ -309,7 +382,8 @@ test('web knowledge workspace inserts conversation links and opens the requested
       selection?.removeAllRanges();
       selection?.addRange(range);
     });
-    await page.getByTestId('markdown-insert-conversation-link').click();
+    await page.getByTestId('markdown-insert-link').click();
+    await page.getByTestId('markdown-link-tab-conversation').click();
     await page.locator('[data-testid^="markdown-conversation-link-option-"]').first().click();
     await expect(page.getByTestId('markdown-mode-toggle')).toHaveAttribute('aria-pressed', 'true');
     await page.getByTestId('document-save').click();
@@ -324,6 +398,106 @@ test('web knowledge workspace inserts conversation links and opens the requested
     await expect(page.locator(`[data-path="${sourceVirtualPath}"]`)).toHaveClass(/active/);
   } finally {
     await rm(sourceDiskPath, { force: true });
+  }
+});
+
+test('web knowledge workspace embeds pdf resources from the unified link menu', async ({ page, request }, testInfo) => {
+  const baseName = `playwright-resource-pdf-${testInfo.workerIndex}-${Date.now()}`;
+  const sourceVirtualPath = `/${baseName}.md`;
+  const sourceDiskPath = path.join(knowledgeFixtureRoot, `${baseName}.md`);
+  const referencesDir = path.join(knowledgeFixtureRoot, 'references');
+  const resourceFileName = `${baseName}.pdf`;
+  const resourceVirtualPath = `/references/${resourceFileName}`;
+  const resourceDiskPath = path.join(referencesDir, resourceFileName);
+
+  await mkdir(referencesDir, { recursive: true });
+  await writeFile(sourceDiskPath, 'Open spec', 'utf8');
+  await writeFile(resourceDiskPath, '%PDF-1.4\n%', 'utf8');
+
+  try {
+    await page.goto('/#/');
+    await expect(page.getByTestId('document-workspace')).toBeVisible();
+
+    await page.locator(`[data-path="${sourceVirtualPath}"]`).click();
+    await openConversationTab(page);
+    await page.locator('[data-testid="document-editor-surface"] .ProseMirror p').evaluate(() => {
+      const paragraph = document.querySelector('[data-testid="document-editor-surface"] .ProseMirror p');
+      const textNode = paragraph?.firstChild;
+      if (!textNode) {
+        return;
+      }
+
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.setStart(textNode, 5);
+      range.setEnd(textNode, 9);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    });
+    await page.getByTestId('markdown-insert-link').click();
+    await page.getByTestId('markdown-link-tab-resource').click();
+    await page.getByTestId(`markdown-resource-link-option-${resourceVirtualPath}`).click();
+    await expect(page.getByTestId('markdown-mode-toggle')).toHaveAttribute('aria-pressed', 'true');
+    await page.getByTestId('document-save').click();
+
+    await expect.poll(async () => readContextText(request, sourceVirtualPath)).toContain('```cp-pdf-embed');
+    await expect(page.locator('[data-testid="document-editor-surface"] .markdown-pdf-embed object')).toHaveCount(1);
+  } finally {
+    await rm(sourceDiskPath, { force: true });
+    await rm(resourceDiskPath, { force: true });
+  }
+});
+
+test('web knowledge workspace embeds image resources from the unified link menu', async ({ page, request }, testInfo) => {
+  const baseName = `playwright-resource-image-${testInfo.workerIndex}-${Date.now()}`;
+  const sourceVirtualPath = `/${baseName}.md`;
+  const sourceDiskPath = path.join(knowledgeFixtureRoot, `${baseName}.md`);
+  const referencesDir = path.join(knowledgeFixtureRoot, 'references');
+  const resourceFileName = `${baseName}.png`;
+  const resourceVirtualPath = `/references/${resourceFileName}`;
+  const resourceDiskPath = path.join(referencesDir, resourceFileName);
+  const pngBytes = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Z0n8AAAAASUVORK5CYII=',
+    'base64'
+  );
+
+  await mkdir(referencesDir, { recursive: true });
+  await writeFile(sourceDiskPath, 'See image', 'utf8');
+  await writeFile(resourceDiskPath, pngBytes);
+
+  try {
+    await page.goto('/#/');
+    await expect(page.getByTestId('document-workspace')).toBeVisible();
+
+    await page.locator(`[data-path="${sourceVirtualPath}"]`).click();
+    await openConversationTab(page);
+    await page.locator('[data-testid="document-editor-surface"] .ProseMirror p').evaluate(() => {
+      const paragraph = document.querySelector('[data-testid="document-editor-surface"] .ProseMirror p');
+      const textNode = paragraph?.firstChild;
+      if (!textNode) {
+        return;
+      }
+
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.setStart(textNode, 4);
+      range.setEnd(textNode, 9);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    });
+    await page.getByTestId('markdown-insert-link').click();
+    await page.getByTestId('markdown-link-tab-resource').click();
+    await page.getByTestId(`markdown-resource-link-option-${resourceVirtualPath}`).click();
+    await expect(page.getByTestId('markdown-mode-toggle')).toHaveAttribute('aria-pressed', 'true');
+    await page.getByTestId('document-save').click();
+
+    await expect.poll(async () => readContextText(request, sourceVirtualPath)).toBe(
+      `See ![](references/${resourceFileName})`
+    );
+    await expect(page.locator(`[data-testid="document-editor-surface"] img[src*="document-asset?path=%2Freferences%2F${resourceFileName}"]`)).toHaveCount(1);
+  } finally {
+    await rm(sourceDiskPath, { force: true });
+    await rm(resourceDiskPath, { force: true });
   }
 });
 

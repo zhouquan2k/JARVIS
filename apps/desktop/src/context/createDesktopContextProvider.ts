@@ -3,18 +3,25 @@ import type {
     ContextSearchRequest,
     CreateContextNodeInput,
     IContextProvider,
+    MoveContextNodeInput,
     Task,
+    TaskQueryTag,
     WriteContextDocumentInput
 } from '@packages/core/src';
 
 export function createDesktopContextProvider(): IContextProvider {
     const taskProvider = {
-        getTasks: async (documentPath?: string | null, agentKey?: string | null, completed?: boolean) => {
+        getTasks: async (
+            documentPath?: string | null,
+            agentKey?: string | null,
+            completed?: boolean,
+            tag?: TaskQueryTag | null
+        ) => {
             if (!window.chatprismDesktop) {
                 throw new Error('Desktop context bridge is unavailable');
             }
 
-            return window.chatprismDesktop.getTasks({ documentPath, agentKey, completed });
+            return window.chatprismDesktop.getTasks({ documentPath, agentKey, completed, tag });
         },
         createTask: async (task: Task) => {
             if (!window.chatprismDesktop) {
@@ -109,6 +116,13 @@ export function createDesktopContextProvider(): IContextProvider {
             }
 
             return window.chatprismDesktop.renameContextNode(input);
+        },
+        async moveNode(input: MoveContextNodeInput) {
+            if (!window.chatprismDesktop) {
+                throw new Error('Desktop context bridge is unavailable');
+            }
+
+            return window.chatprismDesktop.moveContextNode(input);
         },
         async searchInScope(request: ContextSearchRequest) {
             if (!window.chatprismDesktop) {
