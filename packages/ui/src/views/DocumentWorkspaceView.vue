@@ -17,8 +17,21 @@
           @convert-to-agent="documentStore.convertDirectoryToAgent"
           @delete="documentStore.deleteNode"
           @rename="documentStore.renameNode"
-          @move="documentStore.moveNode"
+          @move="onMoveNode"
           @refresh="documentStore.refreshTree"
+        />
+        <MoveConfirmDialog
+          v-if="showMoveConfirm && pendingMoveInput"
+          :node-name="pendingNodeName"
+          :destination-path="pendingDestPath"
+          :has-outgoing-links="pendingHasLinks"
+          @confirm="onMoveConfirm"
+          @cancel="onMoveCancel"
+        />
+        <MoveErrorDialog
+          v-if="showMoveError"
+          :reason="moveErrorReason"
+          @dismiss="showMoveError = false"
         />
       </div>
       <div
@@ -126,7 +139,9 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import {
   DEFAULT_WORKSPACE_AGENT_KEY,
   createBuiltinWorkspaceToolDefinitions,
+  decodeTextDocument,
   encodeTextDocument,
+  isTextDocumentMimeType,
   type AgentInheritanceMode,
   type ContextNode,
   type IContextProvider
@@ -135,10 +150,12 @@ import AgentView from '../components/AgentView.vue';
 import AgentRightPane from '../components/AgentRightPane.vue';
 import DocumentEditorPane from '../components/DocumentEditorPane.vue';
 import DocumentFileTree from '../components/DocumentFileTree.vue';
+import MoveConfirmDialog from '../components/MoveConfirmDialog.vue';
+import MoveErrorDialog from '../components/MoveErrorDialog.vue';
 import { useChatStore } from '../store/chat';
 import { useDocumentWorkspaceStore } from '../store/documentWorkspace';
 import type { ChatRoutePath } from '../routes';
-import type { MarkdownConversationLinkTarget } from '../utils/markdownDocument';
+import { rewriteOutgoingLinks, type MarkdownConversationLinkTarget } from '../utils/markdownDocument';
 import type { OpenConversationRequest } from '../types/conversationLink';
 import { buildLinkableConversationEntries } from '../utils/conversationLink';
 
@@ -185,6 +202,13 @@ const activeLinkableConversations = computed(() => buildLinkableConversations(do
 const agentIndexLinkableConversations = computed(() => buildLinkableConversations(documentStore.activeAgentKey));
 const isWorkspaceSelectionReady = ref(false);
 const openConversationRequest = ref<OpenConversationRequest | null>(null);
+const showMoveConfirm = ref(false);
+const showMoveError = ref(false);
+const moveErrorReason = ref<'cross-agent' | 'references-dir'>('cross-agent');
+const pendingMoveInput = ref<{ path: string; targetParentPath?: string } | null>(null);
+const pendingNodeName = ref('');
+const pendingDestPath = ref('');
+const pendingHasLinks = ref(false);
 const selectedOwnerNode = computed<ContextNode | null>(() => {
   if (documentStore.selectedNodePath === '/' && documentStore.activeAgent) {
     return {
@@ -225,6 +249,60 @@ const activeAssistantDocument = computed(() => {
     dataBase64: encodeTextDocument(documentStore.draftContent)
   };
 });
+
+async function onMoveNode(input: { path: string; targetParentPath?: string }) {
+  const movedNode = documentStore.findNodeByPath(input.path);
+  const targetParentPath = input.targetParentPath ?? '/';
+
+  const nodeName = movedNode?.name ?? input.path.split('/').pop() ?? '';
+  const name = input.path.split('/').pop();
+  if (name === 'references' && movedNode?.kind === 'directory') {
+    moveErrorReason.value = 'references-dir';
+    showMoveError.value = true;
+    return;
+  }
+
+  const targetNode = targetParentPath !== '/' ? documentStore.findNodeByPath(targetParentPath) : null;
+  if (movedNode?.agentKey && targetNode?.agentKey && movedNode.agentKey !== targetNode.agentKey) {
+    moveErrorReason.value = 'cross-agent';
+    showMoveError.value = true;
+    return;
+  }
+
+  let hasLinks = false;
+  if (movedNode?.kind === 'file' && (input.path.endsWith('.md') || input.path.endsWith('.markdown'))) {
+    try {
+      const doc = await props.contextProvider.readDocument(input.path);
+      if (isTextDocumentMimeType(doc.mimeType)) {
+        const content = decodeTextDocument(doc.dataBase64);
+        const fromDir = input.path.slice(0, Math.max(0, input.path.lastIndexOf('/'))) || '/';
+        hasLinks = content !== rewriteOutgoingLinks(content, fromDir, targetParentPath);
+      }
+    } catch {
+      // ignore — proceed without warning
+    }
+  }
+
+  pendingMoveInput.value = input;
+  pendingNodeName.value = nodeName;
+  pendingDestPath.value = targetParentPath;
+  pendingHasLinks.value = hasLinks;
+  showMoveConfirm.value = true;
+}
+
+async function onMoveConfirm() {
+  showMoveConfirm.value = false;
+  if (!pendingMoveInput.value) {
+    return;
+  }
+  await documentStore.moveNode(pendingMoveInput.value);
+  pendingMoveInput.value = null;
+}
+
+function onMoveCancel() {
+  showMoveConfirm.value = false;
+  pendingMoveInput.value = null;
+}
 
 function requestWorkspaceSwitch(path: ChatRoutePath): void {
   if (path === '/chat' && documentStore.activeAgent) {
@@ -386,11 +464,6 @@ watch(
 let cleanupResize: (() => void) | null = null;
 
 function onDraftChange(markdown: string) {
-  console.log('[insert-debug] DocumentWorkspaceView.onDraftChange', {
-    length: markdown.length,
-    preview: markdown.slice(0, 80),
-    activePath: documentStore.activePath
-  });
   documentStore.updateActiveDocument(markdown);
 }
 

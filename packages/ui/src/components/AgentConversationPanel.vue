@@ -210,12 +210,40 @@ const toolbarTitle = computed(() => {
 const hasCurrentConversation = computed(() => !!chatStore.currentConversation);
 const documentScopedConversations = computed(() => {
   const scopedAgentKey = activeAgentKey.value;
-  const merged = [...documentConversations.value];
+  const activeDocId = props.activeDocument?.documentId;
+  const mergedIds = new Set<string>();
+  const merged: typeof documentConversations.value = [];
+
+  const addIfNew = (conversation: (typeof merged)[number]) => {
+    if (!mergedIds.has(conversation.id)) {
+      mergedIds.add(conversation.id);
+      merged.push(conversation);
+    }
+  };
+
+  for (const conversation of documentConversations.value) {
+    addIfNew(conversation);
+  }
+
+  // Include matching conversations from the local store so that
+  // conversations created in the current session (not yet synced to the
+  // server) are still visible after a page reload or document rename.
+  if (activeDocId || activeDocumentPath.value) {
+    for (const conversation of chatStore.conversations) {
+      const matchesPath = conversation.documentPaths?.includes(activeDocumentPath.value);
+      const matchesId = activeDocId && conversation.documentIds?.includes(activeDocId);
+      if (matchesPath || matchesId) {
+        addIfNew(conversation);
+      }
+    }
+  }
+
   const currentConversation = chatStore.currentConversation;
   if (
     currentConversation
-    && !merged.some((conversation) => conversation.id === currentConversation.id)
-    && currentConversation.documentPaths?.includes(activeDocumentPath.value)
+    && !mergedIds.has(currentConversation.id)
+    && (currentConversation.documentPaths?.includes(activeDocumentPath.value)
+      || (activeDocId && currentConversation.documentIds?.includes(activeDocId)))
     && (!scopedAgentKey || currentConversation.agentKey === scopedAgentKey)
   ) {
     merged.unshift(currentConversation);
@@ -227,7 +255,9 @@ const documentScopedConversations = computed(() => {
         return false;
       }
 
-      if (!conversation.documentPaths?.includes(activeDocumentPath.value)) {
+      const matchesPath = conversation.documentPaths?.includes(activeDocumentPath.value);
+      const matchesId = activeDocId && conversation.documentIds?.includes(activeDocId);
+      if (!matchesPath && !matchesId) {
         return false;
       }
 
@@ -249,6 +279,8 @@ const listConversations = computed(() => {
 const listEmptyMessage = computed(() => {
   return isDocumentSelection.value ? t('shared.currentDocumentUnavailable') : t('shared.currentAgentUnavailable');
 });
+
+defineExpose({ listConversationCount: computed(() => listConversations.value.length) });
 const currentProjectNodePath = computed(() => {
   return props.selectedNodePath?.trim()
     || props.activePath?.trim()
@@ -293,7 +325,8 @@ async function loadDocumentConversations(path: string): Promise<void> {
   isLoading.value = true;
   currentError.value = null;
   try {
-    const conversations = await provider.getConversations({ documentPath: path });
+    const documentId = props.activeDocument?.documentId;
+    const conversations = await provider.getConversations({ documentPath: path, documentId });
     if (loadToken !== documentConversationLoadToken || path !== activeDocumentPath.value) {
       return;
     }
@@ -541,6 +574,17 @@ watch(
     }
   },
   { immediate: true }
+);
+
+// When documentId becomes available (async readDocument completing after initial render),
+// reload conversations so ID-based lookup can find conversations linked via stable document ID.
+watch(
+  () => props.activeDocument?.documentId ?? null,
+  (documentId, prevDocumentId) => {
+    if (documentId && documentId !== prevDocumentId && panelMode.value === 'list' && activeDocumentPath.value) {
+      void loadDocumentConversations(activeDocumentPath.value);
+    }
+  }
 );
 </script>
 

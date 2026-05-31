@@ -9,7 +9,7 @@ import { useCompareStore } from '../store/compare';
 import { useDocumentWorkspaceStore } from '../store/documentWorkspace';
 
 describe('WorkspaceHostApp', () => {
-    it('saves the Agent view state and collapses the sidebar before entering chat mode', async () => {
+    it('saves the Agent view state and expands the sidebar before entering chat mode from the top bar', async () => {
         setActivePinia(createPinia());
         const chatStore = useChatStore();
         const documentStore = useDocumentWorkspaceStore();
@@ -49,7 +49,7 @@ describe('WorkspaceHostApp', () => {
             global: {
                 stubs: {
                     AppTopBar: {
-                        template: '<button data-testid="go-chat" @click="$emit(\'navigate-workspace\', \'/chat\')">go</button>'
+                        template: '<button data-testid="go-chat" @click="$emit(\'navigate-workspace\', \'/chat\', { revealSidebar: true })">go</button>'
                     },
                     ConversationWorkspaceView: {
                         props: ['contextProvider'],
@@ -74,7 +74,7 @@ describe('WorkspaceHostApp', () => {
         expect(chatStore.workspaceAgentContext?.name).toBe('Docs Agent');
         expect(chatStore.workspaceMode).toBe('conversation');
         expect(chatStore.currentConversation?.id).toBe('conversation-1');
-        expect(chatStore.sidebarCollapsed).toBe(true);
+        expect(chatStore.sidebarCollapsed).toBe(false);
         expect(navigateTo).toHaveBeenCalledWith('/chat');
 
         await wrapper.setProps({ currentRoutePath: '/chat' });
@@ -98,7 +98,7 @@ describe('WorkspaceHostApp', () => {
             global: {
                 stubs: {
                     AppTopBar: {
-                        template: '<button data-testid="go-chat" @click="$emit(\'navigate-workspace\', \'/chat\')">go</button>'
+                        template: '<button data-testid="go-chat" @click="$emit(\'navigate-workspace\', \'/chat\', { revealSidebar: true })">go</button>'
                     },
                     ConversationWorkspaceView: {
                         props: ['contextProvider'],
@@ -120,6 +120,7 @@ describe('WorkspaceHostApp', () => {
     it('navigates to chat mode from the knowledge workspace switch button', async () => {
         setActivePinia(createPinia());
         const navigateTo = vi.fn();
+        const chatStore = useChatStore();
         const wrapper = mount(WorkspaceHostApp, {
             props: {
                 currentRoutePath: '/',
@@ -144,6 +145,7 @@ describe('WorkspaceHostApp', () => {
         await wrapper.get('[data-testid="workspace-switch"]').trigger('click');
         await flushPromises();
 
+        expect(chatStore.sidebarCollapsed).toBe(true);
         expect(navigateTo).toHaveBeenCalledWith('/chat');
     });
 
@@ -185,6 +187,55 @@ describe('WorkspaceHostApp', () => {
 
         expect(chatStore.workspaceAgentContext?.name).toBe('Docs Agent');
         expect(chatStore.workspaceMode).toBe('agent');
+        expect(navigateTo).toHaveBeenCalledWith('/');
+    });
+
+    it('updates the saved agent conversation to the current chat before restoring the knowledge workspace', async () => {
+        setActivePinia(createPinia());
+        const navigateTo = vi.fn();
+        const chatStore = useChatStore();
+        chatStore.saveAgentViewStatus({
+            selectedNodePath: '/docs',
+            activePath: '/docs/guide.md',
+            activeConversationId: 'conversation-1'
+        });
+        chatStore.currentConversation = {
+            id: 'conversation-2',
+            title: 'Current Chat',
+            origin: 'local',
+            updatedAt: Date.now(),
+            messages: []
+        };
+
+        const wrapper = mount(WorkspaceHostApp, {
+            props: {
+                currentRoutePath: '/chat',
+                navigateTo,
+                contextProvider: { id: 'ctx' }
+            },
+            global: {
+                stubs: {
+                    AppTopBar: {
+                        template: '<div data-testid="topbar-stub" />'
+                    },
+                    DocumentWorkspaceView: {
+                        template: '<div data-testid="document-workspace-stub" />'
+                    },
+                    ConversationWorkspaceView: {
+                        template: '<button data-testid="workspace-restore" @click="$emit(\'request-workspace-switch\', \'/\')" />'
+                    }
+                }
+            }
+        });
+
+        await wrapper.get('[data-testid="workspace-restore"]').trigger('click');
+        await flushPromises();
+
+        expect(chatStore.restoreAgentViewStatus()).toEqual({
+            selectedNodePath: '/docs',
+            activePath: '/docs/guide.md',
+            activeConversationId: 'conversation-2'
+        });
         expect(navigateTo).toHaveBeenCalledWith('/');
     });
 

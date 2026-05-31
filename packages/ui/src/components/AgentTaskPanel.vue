@@ -2,8 +2,10 @@
   <section class="agent-task-panel" data-testid="agent-task-panel">
     <TaskListPanel
       v-if="scope"
+      ref="taskListRef"
       :context-provider="props.contextProvider"
       :document-path="scope.documentPath"
+      :document-id="scope.documentId"
       :agent-key="scope.agentKey"
       tag="all"
     />
@@ -14,7 +16,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import type { IContextProvider } from '@packages/core/src';
 import { useWorkspaceI18n } from '../i18n';
 import TaskListPanel from './TaskListPanel.vue';
@@ -23,11 +25,14 @@ const props = defineProps<{
   activeAgentKey?: string | null;
   activePath?: string | null;
   selectedNodePath?: string | null;
-  activeDocument?: { path: string } | null;
+  activeDocument?: { path: string; documentId?: string } | null;
   contextProvider?: IContextProvider | null;
 }>();
 
 const { t } = useWorkspaceI18n();
+const taskListRef = ref<InstanceType<typeof TaskListPanel> | null>(null);
+
+defineExpose({ openTaskCount: computed(() => taskListRef.value?.openTaskCount ?? 0) });
 
 const activeDocumentPath = computed(() => props.activeDocument?.path?.trim() || '');
 const activeAgentKey = computed(() => props.activeAgentKey?.trim() || '');
@@ -35,6 +40,7 @@ const scope = computed(() => {
   if (activeDocumentPath.value) {
     return {
       documentPath: activeDocumentPath.value,
+      documentId: props.activeDocument?.documentId ?? undefined,
       agentKey: activeAgentKey.value || null
     };
   }
@@ -42,6 +48,7 @@ const scope = computed(() => {
   if (activeAgentKey.value) {
     return {
       documentPath: null,
+      documentId: undefined,
       agentKey: activeAgentKey.value
     };
   }

@@ -1,9 +1,26 @@
 import { spawn } from 'node:child_process';
 
+type SpawnOptions = {
+    cwd: string;
+    env: NodeJS.ProcessEnv;
+    stdio: ['ignore', 'pipe', 'pipe'];
+};
+
+type SpawnedProcess = {
+    stdout: NodeJS.ReadableStream;
+    stderr: NodeJS.ReadableStream;
+    on(event: 'error', listener: (error: Error) => void): SpawnedProcess;
+    on(event: 'close', listener: (code: number | null) => void): SpawnedProcess;
+};
+
+const defaultSpawnImpl = (command: string, args: readonly string[], options: SpawnOptions): SpawnedProcess => {
+    return spawn(command, [...args], options) as unknown as SpawnedProcess;
+};
+
 export interface CodexAuthServiceOptions {
     command?: string;
     cwd?: string;
-    spawnImpl?: typeof spawn;
+    spawnImpl?: (command: string, args: readonly string[], options: SpawnOptions) => SpawnedProcess;
 }
 
 export interface CodexAuthStatusResult {
@@ -31,7 +48,7 @@ function parseUserCode(output: string): string | undefined {
 }
 
 async function runCommand(
-    spawnImpl: typeof spawn,
+    spawnImpl: (command: string, args: readonly string[], options: SpawnOptions) => SpawnedProcess,
     command: string,
     args: string[],
     cwd: string
@@ -52,7 +69,7 @@ async function runCommand(
             stderr += String(chunk);
         });
         child.on('error', reject);
-        child.on('close', (code) => {
+        child.on('close', (code: number | null) => {
             resolve({ code, stdout, stderr });
         });
     });
@@ -61,12 +78,12 @@ async function runCommand(
 export class CodexAuthService {
     private readonly command: string;
     private readonly cwd: string;
-    private readonly spawnImpl: typeof spawn;
+    private readonly spawnImpl: (command: string, args: readonly string[], options: SpawnOptions) => SpawnedProcess;
 
     constructor(options: CodexAuthServiceOptions = {}) {
         this.command = options.command?.trim() || 'codex';
         this.cwd = options.cwd?.trim() || process.cwd();
-        this.spawnImpl = options.spawnImpl ?? spawn;
+        this.spawnImpl = options.spawnImpl ?? defaultSpawnImpl;
     }
 
     async getAuthStatus(): Promise<CodexAuthStatusResult> {

@@ -152,6 +152,7 @@ const activeSearchMatchIndex = ref(0);
 let editor: MarkdownEditor | null = null;
 let creationToken = 0;
 let isApplyingExternalSync = false;
+let externalSyncToken = 0;
 let lastKnownMarkdown = '';
 let activeEditorMode: MarkdownViewerMode | null = null;
 let lastMarkdownSelection: { start: number; end: number } | null = null;
@@ -163,6 +164,83 @@ let isNavigatingAwayFromViewer = false;
 let lastViewerNavigationTarget: { kind: 'document'; path: string } | { kind: 'conversation'; conversationId: string } | null = null;
 const MARKDOWN_IMAGE_DEBUG_STORAGE_KEY = 'chatprism:debug-markdown-image';
 const MARKDOWN_VIEWER_DEBUG_STORAGE_KEY = 'chatprism:debug-markdown-viewer';
+
+function stripLeadingFrontmatter(content: string): string {
+  if (!content.startsWith('---')) {
+    return content;
+  }
+
+  const end = content.indexOf('\n---', 3);
+  if (end < 0) {
+    return content;
+  }
+
+  const rest = content.slice(end + 4);
+  return rest.startsWith('\n') ? rest.slice(1) : rest;
+}
+
+function isEditorBootstrapEcho(markdown: string, sourceContent: string, renderedContent: string): boolean {
+  return markdown === sourceContent
+    || markdown === renderedContent
+    || markdown === stripLeadingFrontmatter(sourceContent)
+    || markdown === stripLeadingFrontmatter(renderedContent);
+}
+
+function beginExternalSync(reason: string, payload: Record<string, unknown> = {}): number {
+  externalSyncToken += 1;
+  isApplyingExternalSync = true;
+  const token = externalSyncToken;
+  logMarkdownViewerDebug('external-sync-begin', {
+    token,
+    reason,
+    activePath: props.activePath,
+    documentPath: props.activeDocument?.path ?? props.activePath,
+    ...payload
+  });
+  return token;
+}
+
+function finishExternalSync(token: number, reason: string, payload: Record<string, unknown> = {}): void {
+  if (token !== externalSyncToken) {
+    logMarkdownViewerDebug('external-sync-finish-skipped', {
+      token,
+      activeToken: externalSyncToken,
+      reason,
+      activePath: props.activePath,
+      documentPath: props.activeDocument?.path ?? props.activePath,
+      ...payload
+    });
+    return;
+  }
+
+  isApplyingExternalSync = false;
+  logMarkdownViewerDebug('external-sync-finish', {
+    token,
+    reason,
+    activePath: props.activePath,
+    documentPath: props.activeDocument?.path ?? props.activePath,
+    ...payload
+  });
+}
+
+function resetEditorSyncState(reason: string, payload: Record<string, unknown> = {}): void {
+  const previousToken = externalSyncToken;
+  const previousApplyingState = isApplyingExternalSync;
+  externalSyncToken += 1;
+  isApplyingExternalSync = false;
+  pendingMarkdownSelectionFromViewer = null;
+  preferRememberedMarkdownSelection = false;
+  logMarkdownViewerDebug('external-sync-reset', {
+    reason,
+    previousToken,
+    nextToken: externalSyncToken,
+    previousApplyingState,
+    activePath: props.activePath,
+    documentPath: props.activeDocument?.path ?? props.activePath,
+    lastKnownPreview: lastKnownMarkdown.slice(0, 240),
+    ...payload
+  });
+}
 
 function logMarkdownImageViewerDebug(event: string, payload: Record<string, unknown>) {
   if (!isMarkdownImageDebugEnabled()) {
@@ -238,7 +316,27 @@ watch(() => [
   const previousPath = previousValue?.[0] ?? null;
   const previousDocumentPath = previousValue?.[1] ?? null;
   const previousMimeType = previousValue?.[2] ?? null;
+  const switchedDocument = !!(
+    previousPath
+    && activePath
+    && (activePath !== previousPath || documentPath !== previousDocumentPath)
+  );
+  if (
+    switchedDocument
+  ) {
+    resetEditorSyncState('document-switch', {
+      previousPath,
+      nextPath: activePath,
+      previousDocumentPath,
+      nextDocumentPath: documentPath
+    });
+    await teardownEditor();
+  }
   if (!activePath) {
+    resetEditorSyncState('no-active-path', {
+      previousPath,
+      previousDocumentPath
+    });
     await teardownEditor();
     return;
   }
@@ -371,6 +469,7 @@ async function ensureEditor(content: string) {
   const renderedContent = isMarkdownDocument.value && props.markdownViewerMode === 'viewer'
     ? normalizeMarkdownViewerContent(content)
     : content;
+  let bootstrappingEditor = true;
   logMarkdownViewerDebug('ensure-editor-start', {
     token,
     mode: props.markdownViewerMode,
@@ -384,57 +483,94 @@ async function ensureEditor(content: string) {
     sourcePreview: content.slice(0, 240),
     renderedPreview: renderedContent.slice(0, 240)
   });
-  const instance = await createMarkdownEditor({
-    root: editorRoot.value,
-    content: renderedContent,
-    mode: isMarkdownDocument.value ? props.markdownViewerMode : 'edit',
-    documentPath: props.activeDocument?.path ?? props.activePath,
-    onOpenDocumentLink(path) {
-      isNavigatingAwayFromViewer = true;
-      lastViewerNavigationTarget = {
-        kind: 'document',
-        path
-      };
-      logMarkdownViewerDebug('open-document-link', {
-        token,
-        fromPath: props.activeDocument?.path ?? props.activePath,
-        toPath: path,
-        mode: props.markdownViewerMode
-      });
-      emit('open-document-link', path);
-    },
-    onOpenConversationLink(target) {
-      isNavigatingAwayFromViewer = true;
-      lastViewerNavigationTarget = {
-        kind: 'conversation',
-        conversationId: target.conversationId
-      };
-      logMarkdownViewerDebug('open-conversation-link', {
-        token,
-        fromPath: props.activeDocument?.path ?? props.activePath,
-        conversationId: target.conversationId,
-        mode: props.markdownViewerMode
-      });
-      emit('open-conversation-link', target);
-    },
-    onResizeMarkdownImage(payload) {
-      applyViewerImageRatio(payload);
-    },
-    getMarkdownSource: () => props.modelValue,
-    onChange(markdown) {
-      lastKnownMarkdown = markdown;
-      if (isApplyingExternalSync || !props.activePath) {
-        return;
-      }
+  let instance: MarkdownEditor;
+  try {
+    instance = await createMarkdownEditor({
+      root: editorRoot.value,
+      content: renderedContent,
+      mode: isMarkdownDocument.value ? props.markdownViewerMode : 'edit',
+      documentPath: props.activeDocument?.path ?? props.activePath,
+      onOpenDocumentLink(path) {
+        isNavigatingAwayFromViewer = true;
+        lastViewerNavigationTarget = {
+          kind: 'document',
+          path
+        };
+        logMarkdownViewerDebug('open-document-link', {
+          token,
+          fromPath: props.activeDocument?.path ?? props.activePath,
+          toPath: path,
+          mode: props.markdownViewerMode
+        });
+        emit('open-document-link', path);
+      },
+      onOpenConversationLink(target) {
+        isNavigatingAwayFromViewer = true;
+        lastViewerNavigationTarget = {
+          kind: 'conversation',
+          conversationId: target.conversationId
+        };
+        logMarkdownViewerDebug('open-conversation-link', {
+          token,
+          fromPath: props.activeDocument?.path ?? props.activePath,
+          conversationId: target.conversationId,
+          mode: props.markdownViewerMode
+        });
+        emit('open-conversation-link', target);
+      },
+      onResizeMarkdownImage(payload) {
+        applyViewerImageRatio(payload);
+      },
+      getMarkdownSource: () => props.modelValue,
+      onChange(markdown) {
+        if (bootstrappingEditor && isEditorBootstrapEcho(markdown, content, renderedContent)) {
+          logMarkdownViewerDebug('editor-change-suppressed', {
+            reason: 'bootstrap-echo',
+            activePath: props.activePath,
+            documentPath: props.activeDocument?.path ?? props.activePath,
+            markdownPreview: markdown.slice(0, 240)
+          });
+          return;
+        }
 
-      if (isMarkdownDocument.value && props.markdownViewerMode === 'viewer'
-          && markdown === normalizeMarkdownViewerContent(props.modelValue)) {
-        return;
-      }
+        if (isApplyingExternalSync || !props.activePath) {
+          logMarkdownViewerDebug('editor-change-suppressed', {
+            reason: isApplyingExternalSync ? 'external-sync-active' : 'no-active-path',
+            activePath: props.activePath,
+            documentPath: props.activeDocument?.path ?? props.activePath,
+            markdownPreview: markdown.slice(0, 240),
+            lastKnownPreview: lastKnownMarkdown.slice(0, 240),
+            externalSyncToken
+          });
+          lastKnownMarkdown = markdown;
+          return;
+        }
 
-      emit('update:modelValue', markdown);
-    }
-  });
+        if (isMarkdownDocument.value && props.markdownViewerMode === 'viewer'
+            && markdown === normalizeMarkdownViewerContent(props.modelValue)) {
+          logMarkdownViewerDebug('editor-change-suppressed', {
+            reason: 'viewer-normalization-match',
+            activePath: props.activePath,
+            documentPath: props.activeDocument?.path ?? props.activePath,
+            markdownPreview: markdown.slice(0, 240),
+            modelPreview: props.modelValue.slice(0, 240)
+          });
+          return;
+        }
+
+        lastKnownMarkdown = markdown;
+        logMarkdownViewerDebug('editor-change-emitted', {
+          activePath: props.activePath,
+          documentPath: props.activeDocument?.path ?? props.activePath,
+          markdownPreview: markdown.slice(0, 240),
+          modelPreview: props.modelValue.slice(0, 240)
+        });
+        emit('update:modelValue', markdown);
+      }
+    });
+  } finally {
+    bootstrappingEditor = false;
+  }
 
   if (token !== creationToken || !props.activePath) {
     logMarkdownViewerDebug('ensure-editor-abort', {
@@ -465,7 +601,10 @@ function syncEditorContent(content: string) {
     return;
   }
 
-  isApplyingExternalSync = true;
+  const syncToken = beginExternalSync('sync-editor-content', {
+    contentPreview: content.slice(0, 240),
+    lastKnownPreview: lastKnownMarkdown.slice(0, 240)
+  });
   const renderedContent = isMarkdownDocument.value && props.markdownViewerMode === 'viewer'
     ? normalizeMarkdownViewerContent(content)
     : content;
@@ -476,13 +615,19 @@ function syncEditorContent(content: string) {
     renderedPreview: renderedContent.slice(0, 240),
     lastKnownPreview: lastKnownMarkdown.slice(0, 240)
   });
-  replaceMarkdownDocument(editor, renderedContent);
-  lastKnownMarkdown = content;
-  applyReadonlyCodeBlockLabels(renderedContent);
-  applySearchHighlights();
-  queueMicrotask(() => {
-    isApplyingExternalSync = false;
-  });
+  try {
+    replaceMarkdownDocument(editor, renderedContent);
+    lastKnownMarkdown = content;
+    applyReadonlyCodeBlockLabels(renderedContent);
+    applySearchHighlights();
+  } finally {
+    queueMicrotask(() => {
+      finishExternalSync(syncToken, 'sync-editor-content-complete', {
+        contentPreview: content.slice(0, 240),
+        renderedPreview: renderedContent.slice(0, 240)
+      });
+    });
+  }
 }
 
 function onMarkdownSourceInput(event: Event) {
@@ -491,6 +636,11 @@ function onMarkdownSourceInput(event: Event) {
     return;
   }
 
+  if (isApplyingExternalSync) {
+    resetEditorSyncState('source-input-during-external-sync', {
+      valuePreview: target.value.slice(0, 240)
+    });
+  }
   lastMarkdownSelection = {
     start: target.selectionStart ?? target.value.length,
     end: target.selectionEnd ?? target.selectionStart ?? target.value.length
@@ -503,6 +653,16 @@ function onMarkdownSourceInput(event: Event) {
 async function onMarkdownSourcePaste(event: ClipboardEvent) {
   const imageFile = findFirstPastedImage(event.clipboardData);
   const documentPath = props.activeDocument?.path ?? props.activePath;
+  logMarkdownViewerDebug('source-paste-event', {
+    documentPath,
+    hasImageFile: !!imageFile,
+    clipboardItemTypes: Array.from(event.clipboardData?.items ?? []).map((item) => ({
+      kind: item.kind,
+      type: item.type
+    })),
+    externalSyncActive: isApplyingExternalSync,
+    externalSyncToken
+  });
   if (!imageFile || !documentPath || !props.persistMarkdownImage) {
     return;
   }
@@ -597,6 +757,18 @@ function findFirstPastedImage(clipboardData: DataTransfer | null): File | null {
 async function onMarkdownViewerPaste(event: ClipboardEvent) {
   const imageFile = findFirstPastedImage(event.clipboardData);
   const documentPath = props.activeDocument?.path ?? props.activePath;
+  logMarkdownViewerDebug('viewer-paste-event', {
+    documentPath,
+    hasImageFile: !!imageFile,
+    clipboardItemTypes: Array.from(event.clipboardData?.items ?? []).map((item) => ({
+      kind: item.kind,
+      type: item.type
+    })),
+    externalSyncActive: isApplyingExternalSync,
+    externalSyncToken,
+    lastKnownPreview: lastKnownMarkdown.slice(0, 240),
+    modelPreview: props.modelValue.slice(0, 240)
+  });
   logMarkdownImageViewerDebug('viewer-paste-event', {
     documentPath,
     hasClipboardData: !!event.clipboardData,
@@ -940,6 +1112,10 @@ async function teardownEditor() {
   creationToken += 1;
   const teardownToken = creationToken;
   const currentEditor = editor;
+  resetEditorSyncState('teardown-editor', {
+    teardownToken,
+    hadEditor: !!currentEditor
+  });
   editor = null;
   activeEditorMode = null;
   lastKnownMarkdown = '';

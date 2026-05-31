@@ -36,7 +36,7 @@ describe('ChatGPTCodexProvider', () => {
         }));
     });
 
-    it('falls back to static model config when the server catalog request fails', async () => {
+    it('falls back to the static catalog when the server catalog request fails', async () => {
         const fetchMock = vi.fn().mockResolvedValue({
             ok: false,
             status: 500,
@@ -54,6 +54,14 @@ describe('ChatGPTCodexProvider', () => {
                     id: 'auto',
                     name: 'Auto (Default)',
                     nameKey: 'model.autoDefault',
+                    options: [
+                        expect.objectContaining({ key: 'web_search' }),
+                        expect.objectContaining({ key: 'deep_research' })
+                    ]
+                },
+                {
+                    id: 'gpt-5.4',
+                    name: 'gpt-5.4',
                     options: [
                         expect.objectContaining({ key: 'web_search' }),
                         expect.objectContaining({ key: 'deep_research' })

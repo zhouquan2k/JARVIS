@@ -2,6 +2,7 @@ import type { Conversation } from './Conversation';
 
 export interface ConversationQuery {
     documentPath?: string;
+    documentId?: string;
 }
 
 export interface IConversationQueryProvider {

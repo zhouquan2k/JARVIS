@@ -608,14 +608,8 @@ function insertMarkdownSnippetIntoDocument(snippet: string, editModeAction: () =
     snippetPreview: snippet.slice(0, 80)
   });
 
-  if (inViewer && markdownViewerRef.value?.insertMarkdownInViewer) {
-    const inserted = markdownViewerRef.value.insertMarkdownInViewer(snippet) === true;
-    console.log('[insert-debug] viewer-native insertion result', { inserted });
-    if (inserted) {
-      linkInsertionPointMissing.value = false;
-      isLinkPickerOpen.value = false;
-      return;
-    }
+  if (inViewer) {
+    markdownViewerRef.value?.prepareMarkdownSelectionFromViewer?.();
   }
 
   linkInsertionPointMissing.value = false;

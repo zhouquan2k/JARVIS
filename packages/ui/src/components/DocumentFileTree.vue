@@ -334,6 +334,11 @@ function clearDragState() {
   dragState.dropTargetPath = null;
 }
 
+function isReferencesDirectory(nodePath: string): boolean {
+  const name = nodePath.split('/').pop();
+  return name === 'references';
+}
+
 function canDropOnNode(node: ContextNode): boolean {
   if (!dragState.draggedPath || node.kind !== 'directory') {
     return false;
@@ -344,6 +349,10 @@ function canDropOnNode(node: ContextNode): boolean {
   }
 
   if (node.path.startsWith(`${dragState.draggedPath}/`)) {
+    return false;
+  }
+
+  if (isReferencesDirectory(dragState.draggedPath)) {
     return false;
   }
 

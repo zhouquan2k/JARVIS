@@ -10,8 +10,25 @@ import {
 export interface CodexCliServiceOptions {
     command?: string;
     cwd?: string;
-    spawnImpl?: typeof spawn;
+    spawnImpl?: (command: string, args: readonly string[], options: SpawnOptions) => SpawnedProcess;
 }
+
+type SpawnOptions = {
+    cwd: string;
+    env: NodeJS.ProcessEnv;
+    stdio: ['ignore', 'pipe', 'pipe'];
+};
+
+type SpawnedProcess = {
+    stdout: NodeJS.ReadableStream;
+    stderr: NodeJS.ReadableStream;
+    on(event: 'error', listener: (error: Error) => void): SpawnedProcess;
+    on(event: 'close', listener: (code: number | null) => void): SpawnedProcess;
+};
+
+const defaultSpawnImpl = (command: string, args: readonly string[], options: SpawnOptions): SpawnedProcess => {
+    return spawn(command, [...args], options) as unknown as SpawnedProcess;
+};
 
 export interface CodexChatRequest {
     prompt: string;
@@ -220,7 +237,7 @@ function normalizeDebugModelsCatalog(payload: CodexDebugModelsResponse): Provide
 }
 
 async function runExecStream(
-    spawnImpl: typeof spawn,
+    spawnImpl: (command: string, args: readonly string[], options: SpawnOptions) => SpawnedProcess,
     command: string,
     args: string[],
     cwd: string,
@@ -277,7 +294,7 @@ async function runExecStream(
         });
 
         child.on('error', reject);
-        child.on('close', (code) => {
+        child.on('close', (code: number | null) => {
             if (stdoutBuffer.trim()) {
                 flushLine(stdoutBuffer);
             }
@@ -301,12 +318,12 @@ async function runExecStream(
 export class CodexCliService {
     private readonly command: string;
     private readonly cwd: string;
-    private readonly spawnImpl: typeof spawn;
+    private readonly spawnImpl: (command: string, args: readonly string[], options: SpawnOptions) => SpawnedProcess;
 
     constructor(options: CodexCliServiceOptions = {}) {
         this.command = options.command?.trim() || 'codex';
         this.cwd = options.cwd?.trim() || process.cwd();
-        this.spawnImpl = options.spawnImpl ?? spawn;
+        this.spawnImpl = options.spawnImpl ?? defaultSpawnImpl;
     }
 
     private async runCommand(args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> {
@@ -326,7 +343,7 @@ export class CodexCliService {
                 stderr += String(chunk);
             });
             child.on('error', reject);
-            child.on('close', (code) => {
+            child.on('close', (code: number | null) => {
                 resolve({ code, stdout, stderr });
             });
         });

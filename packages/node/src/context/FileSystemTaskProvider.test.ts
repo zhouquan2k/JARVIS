@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { Task } from '../../../core/src/interfaces/ITaskProvider.ts';
@@ -40,6 +40,24 @@ async function createProvider(syncService?: ITaskCalendarSyncService | null) {
         provider: new FileSystemTaskProvider({
             resolveRootDirectory: async () => rootPath,
             calendarSyncService: syncService ?? null
+        })
+    };
+}
+
+async function createProviderWithResolver(
+    resolveDocumentIdForTaskPath: (documentPath: string) => Promise<string | null>,
+    syncService?: ITaskCalendarSyncService | null
+) {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-node-task-provider-'));
+    tempRoots.push(rootPath);
+    await mkdir(path.join(rootPath, 'workspace'), { recursive: true });
+
+    return {
+        rootPath,
+        provider: new FileSystemTaskProvider({
+            resolveRootDirectory: async () => rootPath,
+            calendarSyncService: syncService ?? null,
+            resolveDocumentIdForTaskPath
         })
     };
 }
@@ -318,5 +336,47 @@ describe('FileSystemTaskProvider', () => {
         await expect(provider.getTasks('/workspace/guide.md', '/workspace/', false, 'all')).resolves.toEqual([
             expect.objectContaining({ id: created.id, title: 'Scoped task' })
         ]);
+    });
+
+    it('assigns documentId when creating a markdown-scoped task without one', async () => {
+        const resolveDocumentIdForTaskPath = vi.fn(async (documentPath: string) => (
+            documentPath === '/workspace/guide.md' ? 'doc-guide' : null
+        ));
+        const { provider } = await createProviderWithResolver(resolveDocumentIdForTaskPath);
+
+        const created = await provider.createTask(createTask({
+            documentId: null,
+            documentPath: '/workspace/guide.md'
+        }));
+
+        expect(resolveDocumentIdForTaskPath).toHaveBeenCalledWith('/workspace/guide.md');
+        expect(created.documentId).toBe('doc-guide');
+    });
+
+    it('migrates stored markdown tasks that are missing documentId', async () => {
+        const resolveDocumentIdForTaskPath = vi.fn(async (documentPath: string) => (
+            documentPath === '/workspace/guide.md' ? 'doc-guide' : null
+        ));
+        const { provider, rootPath } = await createProviderWithResolver(resolveDocumentIdForTaskPath);
+
+        await provider.createTask(createTask({
+            id: 'legacy-task',
+            title: 'Legacy task',
+            documentId: undefined,
+            documentPath: '/workspace/guide.md'
+        }));
+
+        const storagePath = path.join(rootPath, '.chatprism', 'tasks.json');
+        const storedBefore = await readFile(storagePath, 'utf8');
+        expect(storedBefore).toContain('"documentId": "doc-guide"');
+
+        const rewritten = storedBefore.replace('"documentId": "doc-guide"', '"documentId": null');
+        await writeFile(storagePath, rewritten, 'utf8');
+
+        const changed = await provider.migrateMissingDocumentIds();
+
+        expect(changed).toBe(1);
+        const storedAfter = await readFile(storagePath, 'utf8');
+        expect(storedAfter).toContain('"documentId": "doc-guide"');
     });
 });

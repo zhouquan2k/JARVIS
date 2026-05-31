@@ -10,6 +10,28 @@ import { renderMermaidPreview } from './mermaidPreview';
 
 export type MarkdownEditor = Crepe;
 export type MarkdownViewerMode = 'viewer' | 'edit';
+
+// Stores the stripped YAML frontmatter for each editor instance so Milkdown
+// never sees it (preventing corruption on auto-save) while callers continue to
+// receive the full document including frontmatter.
+const editorFrontmatter = new WeakMap<Crepe, string>();
+
+function splitFrontmatter(content: string): { frontmatter: string; body: string } {
+    if (!content.startsWith('---')) {
+        return { frontmatter: '', body: content };
+    }
+    const end = content.indexOf('\n---', 3);
+    if (end < 0) {
+        return { frontmatter: '', body: content };
+    }
+    const frontmatter = content.slice(0, end + 4); // "---\n...\n---"
+    const rest = content.slice(end + 4);
+    return { frontmatter, body: rest.startsWith('\n') ? rest.slice(1) : rest };
+}
+
+function joinFrontmatter(frontmatter: string, body: string): string {
+    return frontmatter ? `${frontmatter}\n${body}` : body;
+}
 export interface RenderSelectionSnapshot {
     blockText: string;
     start: number;
@@ -122,9 +144,11 @@ export async function createMarkdownEditor(options: CreateMarkdownEditorOptions)
     const blockRenderConfig = createMarkdownBlockRenderConfig(options.mode);
     const pdfEmbedPreviewRenderer = createPdfEmbedPreviewRenderer(options.documentPath);
 
+    const { frontmatter: initialFrontmatter, body: initialBody } = splitFrontmatter(options.content);
+
     const editor = new Crepe({
         root: options.root,
-        defaultValue: options.content,
+        defaultValue: initialBody,
         features: blockRenderConfig.enabledFeatures,
         featureConfigs: {
             [CrepeFeature.CodeMirror]: {
@@ -156,7 +180,8 @@ export async function createMarkdownEditor(options: CreateMarkdownEditorOptions)
     });
     editor.on((listener) => {
         const handleMarkdownUpdated = (_ctx: unknown, markdown: string) => {
-            options.onChange(markdown);
+            const fm = editorFrontmatter.get(editor) ?? '';
+            options.onChange(joinFrontmatter(fm, markdown));
         };
 
         listener.markdownUpdated(handleMarkdownUpdated);
@@ -170,6 +195,7 @@ export async function createMarkdownEditor(options: CreateMarkdownEditorOptions)
     });
 
     await editor.create();
+    editorFrontmatter.set(editor, initialFrontmatter);
     attachEditorTestIds(options.root);
     queueMicrotask(() => {
         attachEditorTestIds(options.root);
@@ -228,11 +254,15 @@ export function detectMarkdownBlockType(language: string, _content: string): Mar
 }
 
 export function replaceMarkdownDocument(editor: MarkdownEditor, content: string) {
-    editor.editor.action(replaceAll(content, true));
+    const { frontmatter, body } = splitFrontmatter(content);
+    editorFrontmatter.set(editor, frontmatter);
+    editor.editor.action(replaceAll(body, true));
 }
 
 export function readMarkdownDocument(editor: MarkdownEditor): string {
-    return editor.getMarkdown();
+    const body = editor.getMarkdown();
+    const frontmatter = editorFrontmatter.get(editor) ?? '';
+    return joinFrontmatter(frontmatter, body);
 }
 
 export function insertMarkdownAtViewerSelection(
@@ -370,6 +400,67 @@ export function resolveMarkdownConversationLinkTarget(href: string): MarkdownCon
     }
 
     return { conversationId };
+}
+
+/**
+ * Rewrite all relative markdown links in `markdown` so they remain valid after
+ * the document is moved from `fromDir` to `toDir` (both are virtual directory
+ * paths, e.g. "/agent/docs").  Absolute URLs, data URIs, and #-anchors are
+ * left unchanged.
+ */
+export function rewriteOutgoingLinks(markdown: string, fromDir: string, toDir: string): string {
+    const normalizedFrom = fromDir.endsWith('/') ? fromDir : `${fromDir}/`;
+    const normalizedTo = toDir.endsWith('/') ? toDir : `${toDir}/`;
+    if (normalizedFrom === normalizedTo) {
+        return markdown;
+    }
+
+    const LINK_PATTERN = /(!?\[[^\]]*\])\(([^)]+)\)/g;
+    return markdown.replace(LINK_PATTERN, (match, prefix: string, rawTarget: string) => {
+        const target = rawTarget.trim();
+        if (!target || target.startsWith('#')) {
+            return match;
+        }
+        if (/^[a-z][a-z0-9+.-]*:/i.test(target)) {
+            return match;
+        }
+        const hashIndex = target.indexOf('#');
+        const pathPart = hashIndex >= 0 ? target.slice(0, hashIndex) : target;
+        const anchorPart = hashIndex >= 0 ? target.slice(hashIndex) : '';
+        const resolvedPath = resolveVirtualPath(normalizedFrom, pathPart);
+        const newRelative = computeRelativePath(normalizedTo, resolvedPath);
+        return `${prefix}(${encodeMarkdownTargetPath(newRelative)}${anchorPart})`;
+    });
+}
+
+function resolveVirtualPath(baseDir: string, relativePath: string): string {
+    const segments = baseDir.split('/').filter(Boolean);
+    for (const part of relativePath.split('/')) {
+        if (part === '..') {
+            segments.pop();
+        } else if (part !== '.') {
+            segments.push(part);
+        }
+    }
+    return `/${segments.join('/')}`;
+}
+
+function computeRelativePath(fromDir: string, toAbsolute: string): string {
+    const fromSegments = fromDir.split('/').filter(Boolean);
+    const toSegments = toAbsolute.split('/').filter(Boolean);
+    let sharedLength = 0;
+    while (
+        sharedLength < fromSegments.length
+        && sharedLength < toSegments.length
+        && fromSegments[sharedLength] === toSegments[sharedLength]
+    ) {
+        sharedLength += 1;
+    }
+    const upCount = fromSegments.length - sharedLength;
+    const ups = Array.from({ length: upCount }, () => '..');
+    const downs = toSegments.slice(sharedLength);
+    const parts = [...ups, ...downs];
+    return parts.length > 0 ? parts.join('/') : './';
 }
 
 export function buildRelativeMarkdownLinkPath(fromDocumentPath: string, toDocumentPath: string): string {

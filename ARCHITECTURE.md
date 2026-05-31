@@ -85,6 +85,60 @@ serializer. No viewer-to-source coordinate translation is attempted.
 The viewer-mode insertion entry point is `insertMarkdownAtViewerSelection`
 in `packages/ui/src/utils/markdownDocument.ts`.
 
+## Document Identity and Node Move Strategy
+
+### Overview
+
+Every markdown document carries a stable ULID written into its YAML frontmatter
+under the key `jarvis_id`. This ID is the canonical, immutable identifier for a
+document regardless of its path in the repository.
+
+### Identity Assignment
+
+- On first open, `DocumentIdentityIndex` checks whether `jarvis_id` is present
+  in the frontmatter. If absent it is generated and written back.
+- The index is in-memory only (`path → id` and `id → path` maps). There is no
+  separate persistent index file; the source of truth is always the frontmatter.
+- Frontmatter is stripped from the Milkdown editor representation via a WeakMap
+  keyed on the document instance and restored on serialisation. The user never
+  sees or edits `jarvis_id` directly.
+
+### Move / Rename Strategy (Zero-cost)
+
+When a node is moved or renamed:
+
+1. Only the in-memory `DocumentIdentityIndex` is remapped (`identityIndex.remap(oldPath, newPath)`).
+2. No database writes, no path-column rewrites. Conversations and tasks retain their original `documentIds[]` entries, which continue to match the frontmatter ULID regardless of where the file now lives.
+3. The cross-agent guard inside `moveNode` ensures that the rename is refused if another agent process holds a lock on the file, preventing identity divergence under concurrent access.
+
+### Query Routing
+
+All context lookups are **`documentId`-first**:
+
+- Server-side: `_getConversationsByDocumentId` / `_getTasksByDocumentId` are preferred when a `documentId` is supplied; `documentPath` is used only as a deprecated fallback for legacy records that predate the ULID scheme.
+- Client-side: `documentScopedConversations` in `AgentConversationPanel` accepts a conversation if `documentPaths` includes the active path **or** `documentIds` includes the active document's ULID. This dual-match guard handles the window between a move and the next async data reload, ensuring conversations continue to appear immediately after a rename.
+
+### Outgoing Link Rewrite
+
+Links written into a document by the toolbar (conversation reference, resource embed) use standard relative paths anchored to the repository root. The `references/` directory is protected and its contents are never moved by link rewrite operations.
+
+### Migration
+
+Existing documents without `jarvis_id` are migrated in a single pass triggered the first time a `contextProvider` or workspace context is set. The migration sets `jarvis_schema: 1` in frontmatter as a completion flag and is idempotent—two flags `_conversationIdsMigrated` / `_taskIdsMigrated` track whether relationship records have been back-filled with the new ULID.
+
+### Consistency with OpenSpec Design Decisions
+
+| OpenSpec Decision | Status |
+|---|---|
+| Decision 1: ID in frontmatter, not a separate persistent index | ✓ Implemented |
+| Decision 2: Cross-agent guard on move | ✓ Implemented |
+| Decision 3: Single-pass migration, no double-write | ✓ Implemented |
+| Decision 4: Standard relative paths for outgoing links, not `@/` syntax | ✓ Implemented |
+
+Two implementation details that emerged during development and are not in the OpenSpec:
+- WeakMap-based frontmatter isolation in Milkdown (keeps `jarvis_id` invisible to the editor).
+- Dual-match filter (`documentPaths` OR `documentIds`) in `documentScopedConversations` to cover the async reload race condition after a move.
+
 ## External Dependency Flow
 
 - The Web, Extension, and Desktop hosts call external model providers through shared runtime contracts.

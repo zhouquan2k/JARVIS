@@ -107,7 +107,10 @@ describe('web sync bootstrap', () => {
                 port: 8787,
                 dbPath: ':memory:',
                 isDevelopment: true,
-                corsAllowlist: []
+                corsAllowlist: [],
+                contextBackend: 'database',
+                codexCommand: 'codex',
+                codexWorkingDirectory: process.cwd()
             }
         });
         const fetchImpl = createFetchImpl(app);
@@ -218,7 +221,10 @@ describe('web sync bootstrap', () => {
                 port: 8787,
                 dbPath: ':memory:',
                 isDevelopment: true,
-                corsAllowlist: []
+                corsAllowlist: [],
+                contextBackend: 'database',
+                codexCommand: 'codex',
+                codexWorkingDirectory: process.cwd()
             }
         });
         const fetchImpl = createFetchImpl(app);
@@ -281,7 +287,10 @@ describe('web sync bootstrap', () => {
                 port: 8787,
                 dbPath: ':memory:',
                 isDevelopment: true,
-                corsAllowlist: []
+                corsAllowlist: [],
+                contextBackend: 'database',
+                codexCommand: 'codex',
+                codexWorkingDirectory: process.cwd()
             }
         });
         const fetchImpl = createFetchImpl(app);
@@ -350,7 +359,10 @@ describe('web sync bootstrap', () => {
                 port: 8787,
                 dbPath: ':memory:',
                 isDevelopment: true,
-                corsAllowlist: []
+                corsAllowlist: [],
+                contextBackend: 'database',
+                codexCommand: 'codex',
+                codexWorkingDirectory: process.cwd()
             }
         });
         const fetchImpl = createFetchImpl(app);

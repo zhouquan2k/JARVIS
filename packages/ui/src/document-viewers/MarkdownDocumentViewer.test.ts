@@ -234,7 +234,7 @@ describe('MarkdownDocumentViewer', () => {
             .insertMarkdownLink({ label: 'reference', href: 'reference.md' });
 
         expect(wrapper.emitted('update:modelValue')).toEqual([
-            ['Intro [target](reference.md)']
+            ['Intro target[reference](reference.md)']
         ]);
     });
 
@@ -419,6 +419,127 @@ describe('MarkdownDocumentViewer', () => {
         expect(persistMarkdownImage).toHaveBeenCalledTimes(1);
         expect(insertPastedMarkdownImage).toHaveBeenCalledWith('Intro target', { start: 5, end: 5 }, '![](references/Pasted%20image.png)');
         expect(wrapper.emitted('update:modelValue')?.at(0)).toEqual(['Intro![](references/Pasted%20image.png) target']);
+    });
+
+    it('suppresses bootstrap echoes for frontmatter documents but still emits later viewer edits', async () => {
+        let capturedOnChange: ((markdown: string) => void) | undefined;
+        createMarkdownEditor.mockImplementation(async (options: { onChange: (markdown: string) => void }) => {
+            capturedOnChange = options.onChange;
+            options.onChange('# Body');
+            return { content: '# Body' };
+        });
+
+        const sourceWithFrontmatter = [
+            '---',
+            'jarvis_id: doc-1',
+            '---',
+            '# Body'
+        ].join('\n');
+
+        const { default: MarkdownDocumentViewer } = await import('./MarkdownDocumentViewer.vue');
+        const wrapper = mount(MarkdownDocumentViewer, {
+            props: {
+                activePath: '/docs/frontmatter.md',
+                activeDocument: {
+                    path: '/docs/frontmatter.md',
+                    mimeType: 'text/markdown',
+                    dataBase64: '',
+                    canWrite: true
+                },
+                modelValue: sourceWithFrontmatter,
+                markdownViewerMode: 'viewer',
+                latestFileChange: null,
+                diffEntries: [],
+                canUndo: false,
+                canRedo: false,
+                middlePaneZoom: 1
+            }
+        });
+
+        await Promise.resolve();
+        await wrapper.vm.$nextTick();
+
+        expect(wrapper.emitted('update:modelValue')).toBeUndefined();
+
+        const updatedMarkdown = [
+            '---',
+            'jarvis_id: doc-1',
+            '---',
+            '# Body updated'
+        ].join('\n');
+        capturedOnChange?.(updatedMarkdown);
+        await wrapper.vm.$nextTick();
+
+        expect(wrapper.emitted('update:modelValue')).toEqual([[updatedMarkdown]]);
+    });
+
+    it('still emits viewer edits after switching away and back to the same markdown document', async () => {
+        const onChangeHandlers: Array<(markdown: string) => void> = [];
+        createMarkdownEditor.mockImplementation(async (options: { onChange: (markdown: string) => void; content: string }) => {
+            onChangeHandlers.push(options.onChange);
+            return { content: options.content };
+        });
+
+        const { default: MarkdownDocumentViewer } = await import('./MarkdownDocumentViewer.vue');
+        const wrapper = mount(MarkdownDocumentViewer, {
+            props: {
+                activePath: '/docs/a.md',
+                activeDocument: {
+                    path: '/docs/a.md',
+                    mimeType: 'text/markdown',
+                    dataBase64: '',
+                    canWrite: true
+                },
+                modelValue: '# A',
+                markdownViewerMode: 'viewer',
+                latestFileChange: null,
+                diffEntries: [],
+                canUndo: false,
+                canRedo: false,
+                middlePaneZoom: 1
+            }
+        });
+
+        await Promise.resolve();
+        await wrapper.vm.$nextTick();
+
+        await wrapper.setProps({
+            activePath: '/docs/b.md',
+            activeDocument: {
+                path: '/docs/b.md',
+                mimeType: 'text/markdown',
+                dataBase64: '',
+                canWrite: true
+            },
+            modelValue: '# B'
+        });
+
+        await Promise.resolve();
+        await Promise.resolve();
+        await wrapper.vm.$nextTick();
+
+        await wrapper.setProps({
+            activePath: '/docs/a.md',
+            activeDocument: {
+                path: '/docs/a.md',
+                mimeType: 'text/markdown',
+                dataBase64: '',
+                canWrite: true
+            },
+            modelValue: '# A'
+        });
+
+        await Promise.resolve();
+        await Promise.resolve();
+        await wrapper.vm.$nextTick();
+
+        expect(createMarkdownEditor).toHaveBeenCalledTimes(3);
+
+        const updatedMarkdown = '# A updated after switch';
+        onChangeHandlers.at(-1)?.(updatedMarkdown);
+        await wrapper.vm.$nextTick();
+
+        expect(wrapper.emitted('update:modelValue')?.at(0)).toEqual([updatedMarkdown]);
     });
 
     it('logs editorView context errors with navigation context while the viewer is tearing down', async () => {

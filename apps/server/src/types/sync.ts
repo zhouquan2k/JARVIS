@@ -76,7 +76,9 @@ export interface SyncConversation {
     starred?: boolean;
     origin?: string;
     externalId?: string;
+    /** @deprecated Use documentIds instead */
     documentPaths?: string[];
+    documentIds?: string[];
     messages: ConversationMessage[];
     updatedAt: number;
     sync?: ConversationSyncState;
@@ -349,6 +351,13 @@ export function normalizeConversation(value: unknown): SyncConversation {
                 value.documentPaths.filter((path): path is string => {
                     return typeof path === 'string' && path.trim().length > 0;
                 }).map((path) => path.trim())
+            ))
+            : undefined,
+        documentIds: Array.isArray(value.documentIds)
+            ? Array.from(new Set(
+                value.documentIds.filter((id): id is string => {
+                    return typeof id === 'string' && id.trim().length > 0;
+                })
             ))
             : undefined,
         messages: value.messages.map((message, index) => normalizeMessage(message, index)),

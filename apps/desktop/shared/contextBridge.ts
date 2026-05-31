@@ -14,3 +14,5 @@ export const DESKTOP_CONTEXT_DELETE_NODE_CHANNEL = 'chatprism:context:delete-nod
 export const DESKTOP_CONTEXT_RENAME_NODE_CHANNEL = 'chatprism:context:rename-node';
 export const DESKTOP_CONTEXT_MOVE_NODE_CHANNEL = 'chatprism:context:move-node';
 export const DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL = 'chatprism:context:search-in-scope';
+export const DESKTOP_CONTEXT_GET_DOCUMENT_ID_CHANNEL = 'chatprism:context:get-document-id';
+export const DESKTOP_CONTEXT_RESOLVE_DOCUMENT_IDS_CHANNEL = 'chatprism:context:resolve-document-ids';

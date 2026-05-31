@@ -33,9 +33,10 @@ export class HttpContextService {
         documentPath?: string | null,
         agentKey?: string | null,
         completed?: boolean,
-        tag?: TaskQueryTag | null
+        tag?: TaskQueryTag | null,
+        documentId?: string | null
     ): Promise<Task[]> {
-        return this.provider.getTaskProvider().getTasks(documentPath, agentKey, completed, tag);
+        return this.provider.getTaskProvider().getTasks(documentPath, agentKey, completed, tag, documentId);
     }
 
     async createTask(task: Task): Promise<Task> {
@@ -84,5 +85,13 @@ export class HttpContextService {
 
     async searchInScope(request: ContextSearchRequest): Promise<ContextSearchMatch[]> {
         return this.provider.searchInScope(request);
+    }
+
+    async getDocumentId(path: string): Promise<string> {
+        return this.provider.getDocumentId(path);
+    }
+
+    async resolveDocumentIds(ids: string[]): Promise<Map<string, ContextNode | null>> {
+        return this.provider.resolveDocumentIds(ids);
     }
 }

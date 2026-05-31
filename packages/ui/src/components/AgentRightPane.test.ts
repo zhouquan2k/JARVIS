@@ -62,4 +62,81 @@ describe('AgentRightPane', () => {
         await wrapper.get('[data-testid="agent-right-pane-tab-conversations"]').trigger('click');
         expect(wrapper.find('[data-testid="agent-conversation-panel"]').exists()).toBe(true);
     });
+
+    it('switches to the conversation tab when a restore conversation id is provided', async () => {
+        setActivePinia(createPinia());
+
+        const wrapper = mount(AgentRightPane, {
+            props: {
+                activeAgentKey: '/docs/',
+                showAgentConversationList: true,
+                restoreConversationId: 'conversation-1',
+                contextProvider: {
+                    id: 'ctx',
+                    initializeAccess: vi.fn(),
+                    getContext: vi.fn(),
+                    getConversations: vi.fn(async () => []),
+                    getTaskProvider: vi.fn(() => ({
+                        getTasks: vi.fn(async () => []),
+                        createTask: vi.fn(),
+                        updateTask: vi.fn(),
+                        deleteTask: vi.fn(),
+                        setTaskCompleted: vi.fn()
+                    })),
+                    getProjectDocuments: vi.fn(),
+                    readDocument: vi.fn(),
+                    writeDocument: vi.fn(),
+                    createNode: vi.fn(),
+                    deleteNode: vi.fn(),
+                    renameNode: vi.fn(),
+                    searchInScope: vi.fn()
+                } as any
+            }
+        });
+
+        await flushPromises();
+
+        expect(wrapper.find('[data-testid="agent-task-panel"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid="agent-conversation-panel"]').exists()).toBe(true);
+    });
+
+    it('switches to the conversation tab when an open conversation request is provided', async () => {
+        setActivePinia(createPinia());
+
+        const wrapper = mount(AgentRightPane, {
+            props: {
+                activeAgentKey: '/docs/',
+                showAgentConversationList: true,
+                openConversationRequest: {
+                    conversationId: 'conversation-1',
+                    nonce: 1
+                },
+                contextProvider: {
+                    id: 'ctx',
+                    initializeAccess: vi.fn(),
+                    getContext: vi.fn(),
+                    getConversations: vi.fn(async () => []),
+                    getTaskProvider: vi.fn(() => ({
+                        getTasks: vi.fn(async () => []),
+                        createTask: vi.fn(),
+                        updateTask: vi.fn(),
+                        deleteTask: vi.fn(),
+                        setTaskCompleted: vi.fn()
+                    })),
+                    getProjectDocuments: vi.fn(),
+                    readDocument: vi.fn(),
+                    writeDocument: vi.fn(),
+                    createNode: vi.fn(),
+                    deleteNode: vi.fn(),
+                    renameNode: vi.fn(),
+                    searchInScope: vi.fn()
+                } as any
+            }
+        });
+
+        await flushPromises();
+
+        expect(wrapper.find('[data-testid="agent-task-panel"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid="agent-conversation-panel"]').exists()).toBe(true);
+    });
 });

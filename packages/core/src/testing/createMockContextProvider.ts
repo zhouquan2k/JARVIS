@@ -17,6 +17,11 @@ import type {
     WriteContextDocumentInput,
     WriteContextDocumentResult
 } from '../interfaces/IContextProvider';
+
+let mockIdCounter = 0;
+function generateMockId(): string {
+    return `mock-id-${++mockIdCounter}-${Date.now()}`;
+}
 import { searchInScopedFiles } from '../providers/context/fileSearch';
 import {
     decodeTextDocument,
@@ -214,6 +219,9 @@ export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): I
     });
 
     let taskSequence = (currentSnapshot.tasks?.length ?? 0) + 1;
+
+    const mockIdToPath = new Map<string, string>();
+    const mockPathToId = new Map<string, string>();
 
     const taskProvider = {
         async getTasks(
@@ -572,6 +580,7 @@ export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): I
             }
 
             remapNodeSubtree(currentSnapshot, normalizedPath, targetPath);
+            remapMockIdIndex(mockIdToPath, mockPathToId, normalizedPath, targetPath);
 
             const resolved = await resolveScopedAgentConfig(provider, targetPath, DEFAULT_SCOPED_AGENT_CONFIG);
             return {
@@ -623,6 +632,7 @@ export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): I
             }
 
             remapNodeSubtree(currentSnapshot, normalizedPath, targetPath);
+            remapMockIdIndex(mockIdToPath, mockPathToId, normalizedPath, targetPath);
 
             const movedNode = ensureNode(currentSnapshot, targetPath);
             const resolved = await resolveScopedAgentConfig(provider, targetPath, DEFAULT_SCOPED_AGENT_CONFIG);
@@ -656,10 +666,61 @@ export function createMockContextProvider(snapshot?: StoredWorkspaceSnapshot): I
                         }
                     }))
             });
+        },
+        async getDocumentId(path: string): Promise<string> {
+            const normalizedPath = normalizePath(path);
+            if (!normalizedPath) {
+                throw new Error('Document path must not be empty.');
+            }
+            if (!isMarkdownPath(normalizedPath)) {
+                throw new Error('Only Markdown documents can have document IDs.');
+            }
+            const existing = mockPathToId.get(normalizedPath);
+            if (existing) {
+                return existing;
+            }
+            const id = generateMockId();
+            mockPathToId.set(normalizedPath, id);
+            mockIdToPath.set(id, normalizedPath);
+            return id;
+        },
+        async resolveDocumentIds(ids: string[]): Promise<Map<string, ContextNode | null>> {
+            const context = await provider.getContext();
+            const result = new Map<string, ContextNode | null>();
+            for (const id of ids) {
+                const virtualPath = mockIdToPath.get(id);
+                if (!virtualPath) {
+                    result.set(id, null);
+                    continue;
+                }
+                const node = context.nodes.find((n) => n.path === virtualPath) ?? null;
+                result.set(id, node);
+            }
+            return result;
         }
     };
 
     return provider;
+}
+
+function remapMockIdIndex(
+    idToPath: Map<string, string>,
+    pathToId: Map<string, string>,
+    fromPath: string,
+    toPath: string
+): void {
+    const affected: Array<{ from: string; to: string; id: string }> = [];
+    for (const [vPath, id] of pathToId) {
+        if (vPath === fromPath || vPath.startsWith(`${fromPath}/`)) {
+            const suffix = vPath.slice(fromPath.length);
+            affected.push({ from: vPath, to: `${toPath}${suffix}`, id });
+        }
+    }
+    for (const { from, to, id } of affected) {
+        pathToId.delete(from);
+        pathToId.set(to, id);
+        idToPath.set(id, to);
+    }
 }
 
 function matchesTaskTag(task: Task, tag: TaskQueryTag | null | undefined, now: number): boolean {

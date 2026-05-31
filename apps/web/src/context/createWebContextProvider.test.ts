@@ -196,7 +196,9 @@ describe('createWebContextProvider', () => {
         isDevelopment: true,
         corsAllowlist: [],
         knowledgeRoot: rootPath,
-        contextBackend: 'local-file'
+        contextBackend: 'local-file',
+        codexCommand: 'codex',
+        codexWorkingDirectory: rootPath
       }
     });
 
@@ -274,7 +276,9 @@ describe('createWebContextProvider', () => {
         isDevelopment: true,
         corsAllowlist: [],
         knowledgeRoot: rootPath,
-        contextBackend: 'local-file'
+        contextBackend: 'local-file',
+        codexCommand: 'codex',
+        codexWorkingDirectory: rootPath
       }
     });
 
@@ -306,7 +310,9 @@ describe('createWebContextProvider', () => {
         isDevelopment: true,
         corsAllowlist: [],
         knowledgeRoot: rootPath,
-        contextBackend: 'local-file'
+        contextBackend: 'local-file',
+        codexCommand: 'codex',
+        codexWorkingDirectory: rootPath
       }
     });
 

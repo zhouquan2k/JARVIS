@@ -65,6 +65,10 @@ export const MIGRATION_STATEMENTS = [
     `
     ALTER TABLE synced_conversations
     ADD COLUMN document_paths TEXT
+    `,
+    `
+    ALTER TABLE synced_conversations
+    ADD COLUMN document_ids TEXT
     `
 ] as const;
 

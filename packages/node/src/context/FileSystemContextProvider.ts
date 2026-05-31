@@ -26,6 +26,7 @@ import {
 } from '../coreRuntime.ts';
 import type { ITaskCalendarSyncService } from './ITaskCalendarSyncService.ts';
 import { FileSystemTaskProvider } from './FileSystemTaskProvider.ts';
+import { DocumentIdentityIndex } from './DocumentIdentityIndex.ts';
 
 const DEFAULT_WORKSPACE_AGENT_KEY = '/' as const;
 const TEXT_ENCODER = new TextEncoder();
@@ -490,19 +491,68 @@ export class FileSystemContextProvider implements IContextProvider {
     readonly id = 'local-file-context';
     private readonly rootPath?: string;
     private readonly conversationQueryProvider: IConversationQueryProvider | null;
-    private readonly taskProvider: ITaskProvider;
+    private readonly taskProvider: FileSystemTaskProvider;
+    private readonly identityIndex = new DocumentIdentityIndex();
 
     constructor(options: FileSystemContextProviderOptions = {}) {
         this.rootPath = options.rootPath?.trim() || undefined;
         this.conversationQueryProvider = options.conversationQueryProvider ?? null;
         this.taskProvider = new FileSystemTaskProvider({
             resolveRootDirectory: () => this.resolveRootDirectory(),
-            calendarSyncService: options.taskCalendarSyncService ?? null
+            calendarSyncService: options.taskCalendarSyncService ?? null,
+            resolveDocumentIdForTaskPath: async (documentPath) => {
+                try {
+                    return await this.getDocumentId(documentPath);
+                } catch {
+                    return null;
+                }
+            }
         });
     }
 
     async initializeAccess(): Promise<void> {
-        await this.resolveRootDirectory();
+        const rootDirectory = await this.resolveRootDirectory();
+        await this.identityIndex.initialize(rootDirectory, '/');
+        await this.taskProvider.migrateMissingDocumentIds();
+    }
+
+    async getDocumentId(virtualPath: string): Promise<string> {
+        const normalizedPath = normalizeVirtualPath(virtualPath, { allowRoot: false });
+        if (!normalizedPath) {
+            throw new Error('Document path must not be empty.');
+        }
+        if (!isMarkdownPath(normalizedPath)) {
+            throw new Error('Only Markdown documents can have document IDs.');
+        }
+        const existing = this.identityIndex.resolveByPath(normalizedPath);
+        if (existing) {
+            return existing;
+        }
+        const realPath = await this.resolveRealPath(normalizedPath, { expectExisting: true, expectDirectory: false });
+        return this.identityIndex.assignId(normalizedPath, realPath);
+    }
+
+    async resolveDocumentIds(ids: string[]): Promise<Map<string, ContextNode | null>> {
+        const context = await this.getContext();
+        const result = new Map<string, ContextNode | null>();
+        for (const id of ids) {
+            const virtualPath = this.identityIndex.resolve(id);
+            if (!virtualPath) {
+                result.set(id, null);
+                continue;
+            }
+            result.set(id, findContextNodeByPath(context.nodes, virtualPath));
+        }
+        return result;
+    }
+
+    private assertSameAgent(context: WorkspaceContext, srcPath: string, dstParentPath: string | undefined): void {
+        const srcNode = findContextNodeByPath(context.nodes, srcPath);
+        const srcAgentKey = srcNode?.agentKey ?? getParentAgentKeyFromContext(context, path.posix.dirname(srcPath));
+        const dstAgentKey = getParentAgentKeyFromContext(context, dstParentPath);
+        if (srcAgentKey !== dstAgentKey) {
+            throw new Error(`Cross-agent moves are not supported. Source agent: "${srcAgentKey}", target agent: "${dstAgentKey}".`);
+        }
     }
 
     async getContext(): Promise<WorkspaceContext> {
@@ -532,14 +582,25 @@ export class FileSystemContextProvider implements IContextProvider {
             return [];
         }
 
+        if (query.documentId) {
+            return this._getConversationsByDocumentId(query.documentId);
+        }
+
+        return this._getConversationsByPath(query);
+    }
+
+    private async _getConversationsByDocumentId(documentId: string): Promise<Conversation[]> {
+        return this.conversationQueryProvider!.getConversations({ documentId });
+    }
+
+    private async _getConversationsByPath(query: ConversationQuery): Promise<Conversation[]> {
         const normalizedDocumentPath = query.documentPath === undefined
             ? undefined
             : normalizeVirtualPath(query.documentPath, { allowRoot: false });
         if (query.documentPath !== undefined && !normalizedDocumentPath) {
             throw new Error('Document path must not be empty.');
         }
-
-        return this.conversationQueryProvider.getConversations({
+        return this.conversationQueryProvider!.getConversations({
             ...query,
             documentPath: normalizedDocumentPath
         });
@@ -617,7 +678,8 @@ export class FileSystemContextProvider implements IContextProvider {
                 : encodeBase64(contentBuffer),
             updatedAt: stats.mtimeMs,
             version: `${stats.mtimeMs}`,
-            canWrite: isTextDocumentMimeType(mimeType)
+            canWrite: isTextDocumentMimeType(mimeType),
+            documentId: this.identityIndex.resolveByPath(normalizedPath)
         };
     }
 
@@ -663,6 +725,9 @@ export class FileSystemContextProvider implements IContextProvider {
             await fs.mkdir(targetRealPath);
         } else {
             await fs.writeFile(targetRealPath, '', 'utf8');
+            if (isMarkdownPath(targetPath)) {
+                await this.identityIndex.assignId(targetPath, targetRealPath);
+            }
         }
 
         const stats = await fs.stat(targetRealPath);
@@ -723,6 +788,7 @@ export class FileSystemContextProvider implements IContextProvider {
         }
 
         await fs.rename(sourceRealPath, targetRealPath);
+        this.identityIndex.remap(normalizedPath, targetPath);
         const stats = await fs.stat(targetRealPath);
         if (input.name.startsWith('.')) {
             return buildHiddenContextNode({
@@ -754,6 +820,9 @@ export class FileSystemContextProvider implements IContextProvider {
             throw new Error('Cannot move a node into itself or its descendant.');
         }
 
+        const preContext = await this.getContext();
+        this.assertSameAgent(preContext, normalizedPath, targetParentPath);
+
         const sourceRealPath = await this.resolveRealPath(normalizedPath, { expectExisting: true });
         const sourceStats = await fs.stat(sourceRealPath);
         if (targetParentPath) {
@@ -762,8 +831,7 @@ export class FileSystemContextProvider implements IContextProvider {
 
         const targetPath = toVirtualPath(targetParentPath, path.posix.basename(normalizedPath));
         if (targetPath === normalizedPath) {
-            const context = await this.getContext();
-            const unchangedNode = findContextNodeByPath(context.nodes, normalizedPath);
+            const unchangedNode = findContextNodeByPath(preContext.nodes, normalizedPath);
             if (!unchangedNode) {
                 throw new Error(`Unable to find the node in context after move: ${normalizedPath}`);
             }
@@ -776,6 +844,7 @@ export class FileSystemContextProvider implements IContextProvider {
         }
 
         await fs.rename(sourceRealPath, targetRealPath);
+        this.identityIndex.remap(normalizedPath, targetPath);
         const stats = await fs.stat(targetRealPath);
         const movedPath = sourceStats.isDirectory() ? targetPath : targetPath;
         const context = await this.getContext();

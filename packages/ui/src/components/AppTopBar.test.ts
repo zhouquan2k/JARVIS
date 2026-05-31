@@ -6,7 +6,7 @@ import AppTopBar from './AppTopBar.vue';
 import { PRIMARY_WORKSPACE_ROUTES } from '../routes';
 
 describe('AppTopBar', () => {
-    it('highlights the active workspace and emits navigation for another workspace', async () => {
+    it('renders workspace buttons in workspace-task-chat order and reveals the sidebar for manual chat navigation', async () => {
         const wrapper = mount(AppTopBar, {
             props: {
                 isCompareMode: false,
@@ -19,15 +19,21 @@ describe('AppTopBar', () => {
         const knowledgeButton = wrapper.get('[data-testid="topbar-workspace-knowledge-workspace"]');
         const chatButton = wrapper.get('[data-testid="topbar-workspace-normal-chat"]');
         const allTasksButton = wrapper.get('[data-testid="topbar-workspace-all-tasks"]');
+        const buttonTestIds = wrapper.findAll('.workspace-btn').map((button) => button.attributes('data-testid'));
 
         expect(wrapper.get('.brand-title').text()).toBe('JARVIS');
         expect(wrapper.get('.brand-icon').attributes('src')).toBe('/jarvis.png');
+        expect(buttonTestIds).toEqual([
+            'topbar-workspace-knowledge-workspace',
+            'topbar-workspace-all-tasks',
+            'topbar-workspace-normal-chat'
+        ]);
         expect(knowledgeButton.attributes('aria-pressed')).toBe('true');
         expect(chatButton.attributes('aria-pressed')).toBe('false');
         expect(allTasksButton.attributes('aria-pressed')).toBe('false');
 
         await chatButton.trigger('click');
-        expect(wrapper.emitted('navigate-workspace')).toEqual([[ '/chat' ]]);
+        expect(wrapper.emitted('navigate-workspace')).toEqual([[ '/chat', { revealSidebar: true } ]]);
     });
 
     it('renders top-level node history controls when enabled', async () => {

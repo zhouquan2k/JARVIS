@@ -131,8 +131,6 @@ When a rendered Markdown link resolves to a workspace conversation href, the kno
 - **THEN** the workspace MUST NOT replace the active document
 - **AND** the workspace MUST NOT corrupt the current conversation or document state
 
-## MODIFIED Requirements
-
 ### Requirement: Knowledge workspace MUST provide a default assistant pane that is bound to the active scope agent
 knowledge workspace的右栏 MUST defaultrender真实的 AI 对话 pane，并将其绑定到current激活文件或directoryresolve得到的生效 Agent 上下文，而不是始终以global固定的通用聊天身份运行。该 pane MUST continue复用现有聊天detailsview，但在currentselected节点为document时，右栏 MUST 先enter该document的关联conversationlist，在currentselected节点为绑定 Agent 的directory时，右栏 MUST 先enter该 Agent 的localconversationlist，再由the userswitch到具体conversationdetails。document关联conversationlist MUST 通过 `IContextProvider` provide的通用conversationquerycapability获取，而directory级 Agent conversationlist MUST 复用current `agentKey` scope下的localconversation聚合result，而不是另起一套list实现。该工作区在从对话模式return时 MUST recovery之前save的selected节点、活动路径与currentconversationdetails，使 Agent 主viewcontinue停留在离开前的上下文上。 #### Scenario: Render the default assistant pane with the active scope agent
 - **WHEN** hostenterknowledge workspace且current激活节点已经resolve出一个生效 Agent
@@ -186,7 +184,9 @@ knowledge workspace的右栏 MUST defaultrender真实的 AI 对话 pane，并将
 - **AND** The system MUST NOT 要求该conversation必须由knowledge workspaceautomaticallycreate或automatically绑定后才visible #### Scenario: Keep an existing conversation bound to its own agent in detail mode
 - **WHEN** the user opens an existing conversation detail in the knowledge workspace and that conversation already persists `conversation.agentKey`
 - **THEN** follow-up sends MUST use the Agent context resolved from that persisted conversation binding
-- **AND** The system MUST NOT override that conversation's Agent tools, instructions, or model selection only because the currently selected tree node resolves to a different Agent ## ADDED Requirements ### Requirement: Knowledge workspace MUST surface file changes with line-level undo and redo
+- **AND** The system MUST NOT override that conversation's Agent tools, instructions, or model selection only because the currently selected tree node resolves to a different Agent
+
+### Requirement: Knowledge workspace MUST surface file changes with line-level undo and redo
 knowledge workspace MUST 为文件修订resultprovide diff 展示与行级 undo/redo 入口，以supportthe user理解和fallback Agent 写盘后的变更。 #### Scenario: Show the latest file change as a line diff
 - **WHEN** 某个文件修订tool成功修改current工作区文件
 - **THEN** UI MUST 能根据修改前后text展示 line diff

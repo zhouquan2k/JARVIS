@@ -199,6 +199,16 @@ const TaskListRow = defineComponent({
             ? h('span', { class: 'task-list-panel__priority', 'data-priority': rowProps.task.priority }, formatPriority(rowProps.task.priority, t))
             : null
         ]),
+        buildTaskScopeMeta(rowProps.task).length > 0
+          ? h('div', {
+            class: 'task-list-panel__scope-meta',
+            'data-testid': `agent-task-scope-meta-${rowProps.task.id}`
+          }, buildTaskScopeMeta(rowProps.task).map((item) => h('span', {
+            key: item.key,
+            class: 'task-list-panel__scope-chip',
+            'data-testid': `agent-task-scope-${item.key}-${rowProps.task.id}`
+          }, item.label)))
+          : null,
         rowProps.task.notes ? h('p', { class: 'task-list-panel__notes' }, rowProps.task.notes) : null
       ]),
       rowProps.task.dueAt ? h('p', {
@@ -246,12 +256,14 @@ const TaskListRow = defineComponent({
 const props = withDefaults(defineProps<{
   contextProvider?: IContextProvider | null;
   documentPath?: string | null;
+  documentId?: string | null;
   agentKey?: string | null;
   tag?: TaskQueryTag | null;
   groupByDate?: boolean;
 }>(), {
   contextProvider: null,
   documentPath: null,
+  documentId: null,
   agentKey: null,
   tag: 'all',
   groupByDate: false
@@ -271,13 +283,15 @@ const normalizedAgentKey = computed(() => normalizeScopeValue(props.agentKey));
 const editingTaskId = computed(() => editingTask.value?.id ?? null);
 const openTasks = computed(() => sortTasksByDueAt(tasks.value.filter((task) => !task.completed)));
 const completedTasks = computed(() => sortTasksByDueAt(tasks.value.filter((task) => task.completed)));
+
+defineExpose({ openTaskCount: computed(() => openTasks.value.length) });
 const visibleOpenTasks = computed(() => openTasks.value.filter((task) => task.id !== editingTaskId.value));
 const visibleCompletedTasks = computed(() => completedTasks.value.filter((task) => task.id !== editingTaskId.value));
 const canCreateTask = computed(() => true);
 const openTaskGroups = computed(() => props.groupByDate ? buildDateGroups(visibleOpenTasks.value) : []);
 
 watch(
-  () => [props.contextProvider ?? null, normalizedDocumentPath.value, normalizedAgentKey.value, props.tag ?? 'all'] as const,
+  () => [props.contextProvider ?? null, normalizedDocumentPath.value, props.documentId ?? null, normalizedAgentKey.value, props.tag ?? 'all'] as const,
   () => {
     void loadTasks();
   },
@@ -305,8 +319,8 @@ async function loadTasks(): Promise<void> {
   try {
     const taskProvider = provider.getTaskProvider();
     const [open, completed] = await Promise.all([
-      taskProvider.getTasks(normalizedDocumentPath.value, normalizedAgentKey.value, false, props.tag),
-      taskProvider.getTasks(normalizedDocumentPath.value, normalizedAgentKey.value, true, props.tag)
+      taskProvider.getTasks(normalizedDocumentPath.value, normalizedAgentKey.value, false, props.tag, props.documentId),
+      taskProvider.getTasks(normalizedDocumentPath.value, normalizedAgentKey.value, true, props.tag, props.documentId)
     ]);
     tasks.value = [...open, ...completed];
   } catch (loadError) {
@@ -326,6 +340,7 @@ function createDraftTask(): Task {
     dueAt: null,
     priority: null,
     documentPath: normalizedDocumentPath.value,
+    documentId: props.documentId ?? null,
     agentKey: normalizedAgentKey.value,
     createdAt: 0,
     updatedAt: 0,
@@ -460,7 +475,7 @@ function sortTasksByDueAt(sourceTasks: Task[]): Task[] {
 
     if (leftHasDueAt && rightHasDueAt) {
       if (left.dueAt !== right.dueAt) {
-        return left.dueAt - right.dueAt;
+        return left.dueAt! - right.dueAt!;
       }
       return right.updatedAt - left.updatedAt;
     }
@@ -522,6 +537,44 @@ function formatDueAt(value: number): string {
   const hours = String(dueDate.getHours()).padStart(2, '0');
   const minutes = String(dueDate.getMinutes()).padStart(2, '0');
   return `${dateLabel} ${hours}:${minutes}`;
+}
+
+function buildTaskScopeMeta(task: Task): Array<{ key: string; label: string }> {
+  const items: Array<{ key: string; label: string }> = [];
+  if (task.documentPath) {
+    items.push({
+      key: 'document',
+      label: formatTaskDocumentLabel(task.documentPath)
+    });
+  }
+  if (task.agentKey) {
+    items.push({
+      key: 'agent',
+      label: formatTaskAgentLabel(task.agentKey)
+    });
+  }
+  return items;
+}
+
+function formatTaskDocumentLabel(documentPath: string): string {
+  const normalized = documentPath.trim();
+  if (!normalized) {
+    return '';
+  }
+
+  const segments = normalized.split('/').filter(Boolean);
+  const fileName = segments[segments.length - 1] ?? normalized;
+  return fileName.endsWith('.md') ? fileName.slice(0, -3) : fileName;
+}
+
+function formatTaskAgentLabel(agentKey: string): string {
+  const normalized = agentKey.trim().replace(/\/+$/, '');
+  if (!normalized) {
+    return '';
+  }
+
+  const segments = normalized.split('/').filter(Boolean);
+  return segments[segments.length - 1] ?? normalized;
 }
 </script>
 
@@ -659,6 +712,25 @@ function formatDueAt(value: number): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+:deep(.task-list-panel__scope-meta) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 5px;
+}
+
+:deep(.task-list-panel__scope-chip) {
+  font-size: 11px;
+  line-height: 1.2;
+  color: rgba(148, 163, 184, 0.78);
+}
+
+:deep(.task-list-panel__scope-chip + .task-list-panel__scope-chip)::before {
+  content: '·';
+  margin-right: 6px;
+  color: rgba(100, 116, 139, 0.72);
 }
 
 :deep(.task-list-panel__meta) {

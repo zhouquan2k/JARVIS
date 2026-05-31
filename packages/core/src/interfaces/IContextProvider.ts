@@ -29,6 +29,8 @@ export interface ContextDocument {
     updatedAt?: number;
     version?: string;
     canWrite?: boolean;
+    /** Stable document identity (jarvis_id). Replaces documentPath-based lookup; documentPath kept for backward compat. */
+    documentId?: string;
 }
 
 export interface WriteContextDocumentInput {
@@ -91,4 +93,6 @@ export interface IContextProvider {
     renameNode(input: RenameContextNodeInput): Promise<ContextNode>;
     moveNode(input: MoveContextNodeInput): Promise<ContextNode>;
     searchInScope(request: ContextSearchRequest): Promise<ContextSearchMatch[]>;
+    resolveDocumentIds(ids: string[]): Promise<Map<string, ContextNode | null>>;
+    getDocumentId(path: string): Promise<string>;
 }

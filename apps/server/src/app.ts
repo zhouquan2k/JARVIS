@@ -1,3 +1,5 @@
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import { Hono } from 'hono';
 import { FileSystemContextProvider } from '../../../packages/node/src/context/FileSystemContextProvider.ts';
 import { GoogleCalendarSyncService } from '../../../packages/node/src/context/GoogleCalendarSyncService.ts';
@@ -52,6 +54,55 @@ function createContextProvider(config: ServerConfig, repository: SyncRepository)
             })
             : null
     });
+}
+
+async function runDocumentIdMigration(
+    provider: ContextProvider,
+    repository: SyncRepository,
+    knowledgeRoot: string
+): Promise<void> {
+    const metaPath = path.join(knowledgeRoot, '.jarvis-meta.json');
+    try {
+        const raw = await fs.readFile(metaPath, 'utf8');
+        const meta = JSON.parse(raw) as Record<string, unknown>;
+        if (meta.migrateNeeded === false) {
+            return;
+        }
+    } catch {
+        // file absent or invalid — treat as migrateNeeded=true
+    }
+
+    try {
+        await provider.initializeAccess();
+    } catch (err) {
+        console.warn('[document-id-migration] initializeAccess failed, skipping migration:', err);
+        return;
+    }
+
+    const rows = repository.getConversationsNeedingMigration();
+    let migrated = 0;
+    for (const { syncKey, conversationId, documentPaths } of rows) {
+        const ids: string[] = [];
+        for (const docPath of documentPaths) {
+            try {
+                ids.push(await provider.getDocumentId(docPath));
+            } catch {
+                // path no longer exists or provider error — skip
+            }
+        }
+        if (ids.length > 0) {
+            repository.setConversationDocumentIds(syncKey, conversationId, ids);
+            migrated++;
+        }
+    }
+
+    try {
+        await fs.mkdir(path.dirname(metaPath), { recursive: true });
+        await fs.writeFile(metaPath, JSON.stringify({ migrateNeeded: false }, null, 2) + '\n', 'utf8');
+        console.info(`[document-id-migration] Complete. Migrated ${migrated}/${rows.length} conversations.`);
+    } catch (err) {
+        console.warn('[document-id-migration] Failed to write .jarvis-meta.json:', err);
+    }
 }
 
 function normalizeEnvValue(value: string | undefined): string | undefined {
@@ -113,6 +164,14 @@ export function createApp(options: CreateAppOptions = {}) {
     app.route('/api/context', createContextRouter({ service: contextService, config }));
     app.route('/api/provider-configs', createProviderConfigRouter());
     app.route('/api/sync', createSyncRouter({ service, config }));
+
+    if (config.contextBackend !== 'database' && config.knowledgeRoot) {
+        setImmediate(() => {
+            runDocumentIdMigration(contextProvider, repository, config.knowledgeRoot!).catch((err) => {
+                console.warn('[document-id-migration] Unhandled error:', err);
+            });
+        });
+    }
 
     return app;
 }

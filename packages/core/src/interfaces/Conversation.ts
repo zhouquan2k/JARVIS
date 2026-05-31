@@ -98,6 +98,7 @@ export interface ConversationModelSelection {
 
 export interface ConversationArchiveMetadata {
     documentPath: string;
+    documentId?: string;
     archivedAt: number;
     sourceMessageCount: number;
 }
@@ -106,6 +107,7 @@ export type ConversationArchiveStatus = {
     state: 'idle' | 'archived' | 'stale';
     archivedAt?: number;
     documentPath?: string;
+    documentId?: string;
     sourceMessageCount?: number;
 };
 
@@ -118,7 +120,9 @@ export interface Conversation {
     externalId?: string;
     agentKey?: string;
     starred?: boolean;
+    /** @deprecated Use documentIds instead */
     documentPaths?: string[];
+    documentIds?: string[];
     archive?: ConversationArchiveMetadata;
     messages: ConversationMessage[];
     updatedAt: number;
@@ -400,9 +404,11 @@ export function cloneConversation(conversation: Conversation): Conversation {
         agentKey: conversation.agentKey,
         starred: conversation.starred === true ? true : undefined,
         documentPaths: conversation.documentPaths ? [...conversation.documentPaths] : undefined,
+        documentIds: conversation.documentIds ? [...conversation.documentIds] : undefined,
         archive: conversation.archive
             ? {
                 documentPath: conversation.archive.documentPath,
+                documentId: conversation.archive.documentId,
                 archivedAt: conversation.archive.archivedAt,
                 sourceMessageCount: conversation.archive.sourceMessageCount
             }
@@ -441,6 +447,14 @@ export function normalizeConversation(conversation: Conversation): Conversation 
         ))
         : undefined;
 
+    const documentIds = Array.isArray(conversation.documentIds)
+        ? Array.from(new Set(
+            conversation.documentIds.filter((id): id is string => {
+                return typeof id === 'string' && id.trim().length > 0;
+            }).map((id) => id.trim())
+        ))
+        : undefined;
+
     return {
         ...conversation,
         boundNodeName: typeof conversation.boundNodeName === 'string' && conversation.boundNodeName.trim()
@@ -452,6 +466,7 @@ export function normalizeConversation(conversation: Conversation): Conversation 
             : undefined,
         starred: conversation.starred === true ? true : undefined,
         documentPaths: documentPaths?.length ? documentPaths : undefined,
+        documentIds: documentIds?.length ? documentIds : undefined,
         archive: archive
             && typeof archive.documentPath === 'string'
             && archive.documentPath.trim()
@@ -462,6 +477,9 @@ export function normalizeConversation(conversation: Conversation): Conversation 
             && archive.sourceMessageCount >= 0
             ? {
                 documentPath: archive.documentPath.trim(),
+                documentId: typeof archive.documentId === 'string' && archive.documentId.trim()
+                    ? archive.documentId.trim()
+                    : undefined,
                 archivedAt: archive.archivedAt,
                 sourceMessageCount: archive.sourceMessageCount
             }

@@ -117,7 +117,11 @@ function openCompareMode() {
   props.navigateTo('/compare');
 }
 
-async function onNavigateWorkspace(path: ChatRoutePath) {
+async function onNavigateWorkspace(path: ChatRoutePath, options?: { revealSidebar?: boolean }) {
+  await navigateWorkspace(path, options);
+}
+
+async function navigateWorkspace(path: ChatRoutePath, options?: { revealSidebar?: boolean }) {
   syncWorkspaceMode(path);
   if (path === '/chat' && path !== props.currentRoutePath) {
     chatStore.saveAgentViewStatus({
@@ -128,8 +132,18 @@ async function onNavigateWorkspace(path: ChatRoutePath) {
     if (documentStore.activeAgent) {
       chatStore.saveWorkspaceAgentContext(documentStore.activeAgent);
     }
-    chatStore.setSidebarCollapsed(true);
+    chatStore.setSidebarCollapsed(options?.revealSidebar !== true);
     await chatStore.applyWorkspaceAgentContextSelection();
+  }
+  if (path === '/' && props.currentRoutePath === '/chat') {
+    const savedAgentViewStatus = chatStore.restoreAgentViewStatus();
+    if (savedAgentViewStatus && (savedAgentViewStatus.selectedNodePath || savedAgentViewStatus.activePath)) {
+      chatStore.saveAgentViewStatus({
+        selectedNodePath: savedAgentViewStatus.selectedNodePath,
+        activePath: savedAgentViewStatus.activePath,
+        activeConversationId: chatStore.currentConversation?.id ?? null
+      });
+    }
   }
   props.navigateTo(path);
 }

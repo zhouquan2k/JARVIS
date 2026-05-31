@@ -111,6 +111,7 @@ describe('IndexedDBStorageProvider', () => {
             updatedAt: 123,
             archive: {
                 documentPath: '/docs/archive.md',
+                documentId: 'doc-archive',
                 archivedAt: 122,
                 sourceMessageCount: 2
             },

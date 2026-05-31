@@ -3535,7 +3535,8 @@ describe('useChatStore workspace history flow', () => {
             activeDocument: {
                 path: '/docs/guide.md',
                 mimeType: 'text/markdown',
-                dataBase64: encodeTextDocument('# Q\n\nOriginal question\n\n***\n\n# A\n\nOriginal answer')
+                dataBase64: encodeTextDocument('# Q\n\nOriginal question\n\n***\n\n# A\n\nOriginal answer'),
+                documentId: 'doc-guide'
             },
             contextProvider: null,
             onFileChanged
@@ -3582,11 +3583,13 @@ describe('useChatStore workspace history flow', () => {
         expect(store.currentConversationArchiveStatus).toMatchObject({
             state: 'archived',
             documentPath: '/docs/guide.md',
+            documentId: 'doc-guide',
             sourceMessageCount: 2
         });
         expect(await storage.getConversation('archive-conversation')).toMatchObject({
             archive: {
                 documentPath: '/docs/guide.md',
+                documentId: 'doc-guide',
                 sourceMessageCount: 2
             }
         });
@@ -3658,6 +3661,7 @@ describe('useChatStore workspace history flow', () => {
                 updatedAt: 1,
                 archive: {
                     documentPath: '/docs/guide.md',
+                    documentId: 'doc-guide',
                     archivedAt: 10,
                     sourceMessageCount: 2
                 },
@@ -3677,7 +3681,8 @@ describe('useChatStore workspace history flow', () => {
             activeDocument: {
                 path: '/docs/guide.md',
                 mimeType: 'text/markdown',
-                dataBase64: encodeTextDocument('# Q\n\nArchived question\n\n***\n\n# A\n\nArchived answer')
+                dataBase64: encodeTextDocument('# Q\n\nArchived question\n\n***\n\n# A\n\nArchived answer'),
+                documentId: 'doc-guide'
             },
             contextProvider: null,
             onFileChanged: vi.fn()
@@ -3686,6 +3691,7 @@ describe('useChatStore workspace history flow', () => {
         expect(store.currentConversationArchiveStatus).toMatchObject({
             state: 'archived',
             documentPath: '/docs/guide.md',
+            documentId: 'doc-guide',
             sourceMessageCount: 2
         });
 

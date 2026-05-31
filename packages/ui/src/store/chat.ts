@@ -247,7 +247,8 @@ function cloneActiveWorkspaceDocument(
         dataBase64: document.dataBase64,
         updatedAt: document.updatedAt,
         version: document.version,
-        canWrite: document.canWrite
+        canWrite: document.canWrite,
+        documentId: document.documentId
     };
 }
 
@@ -770,7 +771,8 @@ function buildIdleConversationArchiveStatus(): ConversationArchiveStatus {
 
 function resolveConversationArchiveStatus(
     conversation: Conversation | null,
-    activeDocumentPath?: string | null
+    activeDocumentPath?: string | null,
+    activeDocumentId?: string | null
 ): ConversationArchiveStatus {
     if (!conversation || conversation.origin !== 'local' || !conversation.archive) {
         return buildIdleConversationArchiveStatus();
@@ -778,13 +780,17 @@ function resolveConversationArchiveStatus(
 
     const visibleMessageCount = buildVisibleMessages(conversation.messages).length;
     const normalizedActiveDocumentPath = activeDocumentPath?.trim() || '';
-    const matchesActiveDocument = !normalizedActiveDocumentPath || conversation.archive.documentPath === normalizedActiveDocumentPath;
+    const normalizedActiveDocumentId = activeDocumentId?.trim() || '';
+    const matchesActiveDocument = normalizedActiveDocumentId
+        ? conversation.archive.documentId === normalizedActiveDocumentId
+        : (!normalizedActiveDocumentPath || conversation.archive.documentPath === normalizedActiveDocumentPath);
     const isCurrentSnapshot = matchesActiveDocument && visibleMessageCount === conversation.archive.sourceMessageCount;
 
     return {
         state: isCurrentSnapshot ? 'archived' : 'stale',
         archivedAt: conversation.archive.archivedAt,
         documentPath: conversation.archive.documentPath,
+        documentId: conversation.archive.documentId,
         sourceMessageCount: conversation.archive.sourceMessageCount
     };
 }
@@ -1753,10 +1759,28 @@ export const useChatStore = defineStore('chat', {
                 const normalizedPath = normalizeContextPath(path);
                 return normalizedPath !== normalizedPreviousDocumentPath && normalizedPath !== normalizedDocumentPath;
             });
+
+            let resolvedDocumentId: string | undefined;
+            if (this.activeWorkspaceContextProvider) {
+                try {
+                    resolvedDocumentId = await this.activeWorkspaceContextProvider.getDocumentId(normalizedDocumentPath);
+                } catch {
+                    // fall back to path-only linking if ID resolution fails
+                }
+            }
+
+            const existingIds = Array.isArray(targetConversation.documentIds)
+                ? targetConversation.documentIds
+                : [];
+            const nextDocumentIds = resolvedDocumentId
+                ? Array.from(new Set([resolvedDocumentId, ...existingIds]))
+                : existingIds;
+
             const nextConversation = normalizeStoredConversation({
                 ...cloneConversation(targetConversation),
                 updatedAt: Date.now(),
-                documentPaths: [normalizedDocumentPath, ...retainedPaths]
+                documentPaths: [normalizedDocumentPath, ...retainedPaths],
+                documentIds: nextDocumentIds.length > 0 ? nextDocumentIds : undefined
             });
 
             await this.storageProvider.saveConversation(toRaw(nextConversation));
@@ -1801,6 +1825,12 @@ export const useChatStore = defineStore('chat', {
             const nextDocumentPaths = new Set(conversation.documentPaths ?? []);
             nextDocumentPaths.add(normalizedDocumentPath);
             conversation.documentPaths = Array.from(nextDocumentPaths);
+
+            if (input.activeDocument?.documentId) {
+                const nextDocumentIds = new Set(conversation.documentIds ?? []);
+                nextDocumentIds.add(input.activeDocument.documentId);
+                conversation.documentIds = Array.from(nextDocumentIds);
+            }
         },
 
         applyConversationDocumentRelation(
@@ -1931,12 +1961,14 @@ export const useChatStore = defineStore('chat', {
         refreshCurrentConversationArchiveStatus(): void {
             this.currentConversationArchiveStatus = resolveConversationArchiveStatus(
                 this.currentConversation,
-                this.activeWorkspaceDocument?.path
+                this.activeWorkspaceDocument?.path,
+                this.activeWorkspaceDocument?.documentId
             );
         },
 
         async markCurrentConversationArchived(input: {
             documentPath: string;
+            documentId?: string;
             sourceMessageCount: number;
             archivedAt: number;
         }): Promise<void> {
@@ -1946,6 +1978,7 @@ export const useChatStore = defineStore('chat', {
 
             this.currentConversation.archive = {
                 documentPath: input.documentPath,
+                documentId: input.documentId,
                 archivedAt: input.archivedAt,
                 sourceMessageCount: input.sourceMessageCount
             };
@@ -2019,6 +2052,7 @@ export const useChatStore = defineStore('chat', {
 
                 await this.markCurrentConversationArchived({
                     documentPath: activeDocument.path,
+                    documentId: activeDocument.documentId,
                     sourceMessageCount: this.visibleMessages.length,
                     archivedAt: Date.now()
                 });

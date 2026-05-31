@@ -131,7 +131,7 @@ describe('context api', () => {
                 kind: 'file'
             })
         });
-        await expect(readFile(path.join(rootPath, 'notes', 'draft.md'), 'utf8')).resolves.toBe('');
+        await expect(readFile(path.join(rootPath, 'notes', 'draft.md'), 'utf8')).resolves.toContain('jarvis_id:');
 
         const deleteNodeResponse = await app.request('/api/context/delete-node', {
             method: 'POST',

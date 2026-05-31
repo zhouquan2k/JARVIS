@@ -138,7 +138,7 @@ describe('http context service', () => {
         expect(provider.initializeAccess).toHaveBeenCalledTimes(1);
         expect(provider.getContext).toHaveBeenCalledTimes(1);
         expect(provider.getConversations).toHaveBeenCalledWith({ documentPath: '/welcome.md' });
-        expect(taskProvider.getTasks).toHaveBeenCalledWith('/welcome.md', null, false, 'today');
+        expect(taskProvider.getTasks).toHaveBeenCalledWith('/welcome.md', null, false, 'today', undefined);
         expect(provider.getProjectDocuments).toHaveBeenCalledWith('/');
         expect(provider.readDocument).toHaveBeenCalledWith('/welcome.md');
         expect(provider.writeDocument).toHaveBeenCalledWith({

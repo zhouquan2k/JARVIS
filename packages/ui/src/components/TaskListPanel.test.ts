@@ -190,13 +190,14 @@ describe('TaskListPanel', () => {
 
     it('groups planned tasks by date in the global planned view', async () => {
         const now = new Date();
+        const laterTodayHour = Math.min(now.getHours() + 1, 23);
         const provider = createTaskPanelProvider([
             createTask({
                 id: 'task-today',
                 title: 'Later today',
                 documentPath: null,
                 agentKey: '/docs/',
-                dueAt: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 18, 0, 0, 0).getTime()
+                dueAt: new Date(now.getFullYear(), now.getMonth(), now.getDate(), laterTodayHour, 0, 0, 0).getTime()
             }),
             createTask({
                 id: 'task-future',
@@ -219,7 +220,7 @@ describe('TaskListPanel', () => {
 
         await flushPromises();
 
-        expect(provider.getTaskProvider().getTasks).toHaveBeenCalledWith(null, null, false, 'planned');
+        expect(provider.getTaskProvider().getTasks).toHaveBeenCalledWith(null, null, false, 'planned', null);
         expect(wrapper.get('[data-testid="task-group-title-' + formatDateKey(now, 0) + '"]').text()).toContain('Today');
         expect(wrapper.get('[data-testid="task-group-title-' + formatDateKey(now, 7) + '"]').text()).not.toBe('');
         expect(wrapper.get('[data-testid="agent-task-open-list"]').text()).toContain('Later today');
@@ -258,10 +259,50 @@ describe('TaskListPanel', () => {
 
         await flushPromises();
 
-        expect(provider.getTaskProvider().getTasks).toHaveBeenCalledWith(null, '/docs/', false, 'all');
+        expect(provider.getTaskProvider().getTasks).toHaveBeenCalledWith(null, '/docs/', false, 'all', null);
         expect(wrapper.text()).toContain('Doc and agent task');
         expect(wrapper.text()).toContain('Agent only task');
         expect(wrapper.text()).not.toContain('Other agent task');
+    });
+
+    it('shows subtle scope metadata for related document and agent or project', async () => {
+        const provider = createTaskPanelProvider([
+            createTask({
+                id: 'doc-and-agent-task',
+                title: 'Doc and agent task',
+                documentPath: '/docs/guide.md',
+                agentKey: '/docs/'
+            }),
+            createTask({
+                id: 'doc-only-task',
+                title: 'Doc only task',
+                documentPath: '/docs/reference.md',
+                agentKey: null
+            }),
+            createTask({
+                id: 'agent-only-task',
+                title: 'Agent only task',
+                documentPath: null,
+                agentKey: '/workspace/archive/'
+            })
+        ]);
+
+        const wrapper = mount(TaskListPanel, {
+            props: {
+                documentPath: null,
+                agentKey: null,
+                contextProvider: provider
+            }
+        });
+
+        await flushPromises();
+
+        expect(wrapper.get('[data-testid="agent-task-scope-document-doc-and-agent-task"]').text()).toBe('guide');
+        expect(wrapper.get('[data-testid="agent-task-scope-agent-doc-and-agent-task"]').text()).toBe('docs');
+        expect(wrapper.get('[data-testid="agent-task-scope-document-doc-only-task"]').text()).toBe('reference');
+        expect(wrapper.find('[data-testid="agent-task-scope-agent-doc-only-task"]').exists()).toBe(false);
+        expect(wrapper.get('[data-testid="agent-task-scope-agent-agent-only-task"]').text()).toBe('archive');
+        expect(wrapper.find('[data-testid="agent-task-scope-document-agent-only-task"]').exists()).toBe(false);
     });
 
     it('sorts tasks by dueAt and places undated tasks after dated tasks', async () => {
@@ -423,7 +464,7 @@ describe('TaskListPanel', () => {
 
         await flushPromises();
 
-        expect(provider.getTaskProvider().getTasks).toHaveBeenCalledWith(null, null, false, 'today');
+        expect(provider.getTaskProvider().getTasks).toHaveBeenCalledWith(null, null, false, 'today', null);
         expect(wrapper.text()).toContain('Overdue task');
         expect(wrapper.text()).not.toContain('Future task');
     });

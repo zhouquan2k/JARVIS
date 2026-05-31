@@ -64,9 +64,13 @@ function normalizeConversationQuery(body: Record<string, unknown>): Conversation
     if (body.documentPath !== undefined && body.documentPath !== null && typeof body.documentPath !== 'string') {
         throw new Error('documentPath must be a string.');
     }
+    if (body.documentId !== undefined && body.documentId !== null && typeof body.documentId !== 'string') {
+        throw new Error('documentId must be a string.');
+    }
 
     return {
-        documentPath: typeof body.documentPath === 'string' ? body.documentPath : undefined
+        documentPath: typeof body.documentPath === 'string' ? body.documentPath : undefined,
+        documentId: typeof body.documentId === 'string' ? body.documentId : undefined
     };
 }
 
@@ -173,6 +177,7 @@ function normalizeTask(body: Record<string, unknown>): Task {
         dueAt: typeof body.dueAt === 'number' ? body.dueAt : null,
         priority: normalizeTaskPriority(body.priority),
         documentPath: normalizeOptionalTaskScopePath(body.documentPath, 'task.documentPath') ?? null,
+        documentId: typeof body.documentId === 'string' && body.documentId.trim() ? body.documentId.trim() : null,
         agentKey: normalizeOptionalTaskScopePath(body.agentKey, 'task.agentKey') ?? null,
         createdAt: body.createdAt,
         updatedAt: body.updatedAt,
@@ -344,7 +349,8 @@ export function createContextRouter(options: { service: HttpContextService; conf
                     normalizeOptionalTaskScopePath(body.documentPath, 'documentPath'),
                     normalizeOptionalTaskScopePath(body.agentKey, 'agentKey'),
                     normalizeOptionalBoolean(body.completed, 'completed'),
-                    normalizeTaskQueryTag(body.tag)
+                    normalizeTaskQueryTag(body.tag),
+                    typeof body.documentId === 'string' ? body.documentId : undefined
                 )
             });
         } catch (error) {
@@ -515,6 +521,29 @@ export function createContextRouter(options: { service: HttpContextService; conf
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to search scope.';
             return c.json({ error: message, code: 'CONTEXT_SEARCH_SCOPE_FAILED' }, 400);
+        }
+    });
+
+    app.post('/get-document-id', async (c) => {
+        try {
+            const body = normalizeObjectBody(await readJsonBody(c));
+            const path = normalizeRequiredPath(body);
+            return c.json({ id: await service.getDocumentId(path) });
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to get document ID.';
+            return c.json({ error: message, code: 'CONTEXT_GET_DOCUMENT_ID_FAILED' }, 400);
+        }
+    });
+
+    app.post('/resolve-document-ids', async (c) => {
+        try {
+            const body = normalizeObjectBody(await readJsonBody(c));
+            const ids = Array.isArray(body.ids) ? (body.ids as string[]) : [];
+            const result = await service.resolveDocumentIds(ids);
+            return c.json({ resolved: Object.fromEntries(result) });
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to resolve document IDs.';
+            return c.json({ error: message, code: 'CONTEXT_RESOLVE_DOCUMENT_IDS_FAILED' }, 400);
         }
     });
 

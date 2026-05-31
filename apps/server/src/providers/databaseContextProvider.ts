@@ -91,4 +91,12 @@ export class DatabaseContextProvider implements ContextProvider {
     async searchInScope(_request: ContextSearchRequest): Promise<ContextSearchMatch[]> {
         throw new Error('DatabaseContextProvider does not support searchInScope yet.');
     }
+
+    async getDocumentId(_path: string): Promise<string> {
+        notImplemented();
+    }
+
+    async resolveDocumentIds(_ids: string[]): Promise<Map<string, ContextNode | null>> {
+        return new Map();
+    }
 }

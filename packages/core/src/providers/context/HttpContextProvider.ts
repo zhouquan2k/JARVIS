@@ -79,9 +79,10 @@ export class HttpContextProvider implements IContextProvider {
                 documentPath?: string | null,
                 agentKey?: string | null,
                 completed?: boolean,
-                tag?: TaskQueryTag | null
+                tag?: TaskQueryTag | null,
+                documentId?: string | null
             ) => {
-                const response = await this.post('/get-tasks', { documentPath, agentKey, completed, tag });
+                const response = await this.post('/get-tasks', { documentPath, agentKey, completed, tag, documentId });
                 return (response as { tasks: Task[] }).tasks;
             },
             createTask: async (task: Task) => {
@@ -161,6 +162,17 @@ export class HttpContextProvider implements IContextProvider {
     async searchInScope(request: ContextSearchRequest): Promise<ContextSearchMatch[]> {
         const response = await this.post('/search-in-scope', { ...request });
         return (response as { matches: ContextSearchMatch[] }).matches;
+    }
+
+    async getDocumentId(docPath: string): Promise<string> {
+        const response = await this.post('/get-document-id', { path: docPath });
+        return (response as { id: string }).id;
+    }
+
+    async resolveDocumentIds(ids: string[]): Promise<Map<string, ContextNode | null>> {
+        const response = await this.post('/resolve-document-ids', { ids });
+        const resolved = (response as { resolved: Record<string, ContextNode | null> }).resolved;
+        return new Map(Object.entries(resolved));
     }
 
     private async post(path: string, body: Record<string, unknown>): Promise<unknown> {

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => {
     const renderMermaidPreview = vi.fn();
@@ -744,5 +744,63 @@ describe('markdownDocument', () => {
         expect(() => scrollToMarkdownEditorSearchMatch(editor, 1)).not.toThrow();
         expect(getMarkdownEditorSearchMatchCount(editor)).toBe(0);
         expect(crepeInstance?.mockView.updateState).not.toHaveBeenCalled();
+    });
+});
+
+describe('rewriteOutgoingLinks', () => {
+    let rewriteOutgoingLinks: (markdown: string, fromDir: string, toDir: string) => string;
+
+    beforeEach(async () => {
+        ({ rewriteOutgoingLinks } = await import('./markdownDocument'));
+    });
+
+    it('returns markdown unchanged when fromDir equals toDir', () => {
+        const md = 'See [note](../other/note.md) and ![img](images/photo.png)';
+        expect(rewriteOutgoingLinks(md, '/agent/docs', '/agent/docs')).toBe(md);
+    });
+
+    it('rewrites relative link when moved up one level', () => {
+        const md = '[note](sub/note.md)';
+        const result = rewriteOutgoingLinks(md, '/agent/docs', '/agent');
+        expect(result).toBe('[note](docs/sub/note.md)');
+    });
+
+    it('rewrites relative link when moved down into subdirectory', () => {
+        const md = '[note](note.md)';
+        const result = rewriteOutgoingLinks(md, '/agent/docs', '/agent/docs/archive');
+        expect(result).toBe('[note](../note.md)');
+    });
+
+    it('rewrites image link correctly', () => {
+        const md = '![photo](images/photo.png)';
+        const result = rewriteOutgoingLinks(md, '/agent/docs', '/agent');
+        expect(result).toBe('![photo](docs/images/photo.png)');
+    });
+
+    it('does not rewrite absolute URLs', () => {
+        const md = '[link](https://example.com/page)';
+        expect(rewriteOutgoingLinks(md, '/agent/docs', '/agent')).toBe(md);
+    });
+
+    it('does not rewrite #-only anchors', () => {
+        const md = '[section](#heading)';
+        expect(rewriteOutgoingLinks(md, '/agent/docs', '/agent')).toBe(md);
+    });
+
+    it('rewrites path part but preserves anchor fragment', () => {
+        const md = '[note](sub/note.md#section)';
+        const result = rewriteOutgoingLinks(md, '/agent/docs', '/agent');
+        expect(result).toBe('[note](docs/sub/note.md#section)');
+    });
+
+    it('is a no-op for document with no links', () => {
+        const md = '# Hello\n\nJust plain text with no links.';
+        expect(rewriteOutgoingLinks(md, '/agent/docs', '/agent')).toBe(md);
+    });
+
+    it('handles mixed absolute and relative links in same document', () => {
+        const md = '[ext](https://example.com) and [local](sub/note.md)';
+        const result = rewriteOutgoingLinks(md, '/agent/docs', '/agent');
+        expect(result).toBe('[ext](https://example.com) and [local](docs/sub/note.md)');
     });
 });

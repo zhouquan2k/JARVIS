@@ -19,7 +19,7 @@ import {
 import { buildLineDiffEntries, FileChangeService, type FileChangeRecord, type LineDiffEntry } from '../services/FileChangeService';
 import { resolveDocumentViewer } from '../document-viewers';
 import { formatHttpApiError } from '../utils/formatHttpApiError';
-import { buildPastedMarkdownImagePath, buildRelativeMarkdownImageReference } from '../utils/markdownDocument';
+import { buildPastedMarkdownImagePath, buildRelativeMarkdownImageReference, rewriteOutgoingLinks } from '../utils/markdownDocument';
 import { normalizeCreatedFileName, normalizeRenamedFileName } from '../utils/contextNodePresentation';
 
 type ActiveViewerCapabilities = {
@@ -965,6 +965,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             const shouldRecordHistory = options?.recordHistory !== false;
             if (path === '/') {
                 await this.flushAgentIndexDocument();
+                await this.flushActiveDocument();
                 this.selectedNodePath = '/';
                 this.expandedPaths = ensureRootExpanded(this.expandedPaths);
                 clearActiveDocumentState(this);
@@ -986,6 +987,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             const selectedNodePath = options?.selectedNodePath ?? path;
             if (node.kind === 'directory') {
                 await this.flushAgentIndexDocument();
+                await this.flushActiveDocument();
                 this.selectedNodePath = selectedNodePath;
                 clearActiveDocumentState(this);
                 clearAgentIndexDocumentState(this);
@@ -1155,50 +1157,40 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
 
         updateActiveDocument(content: string) {
             if (!this.activePath || !this.activeViewerCapabilities?.edit) {
-                console.log('[insert-debug] store.updateActiveDocument BLOCKED', {
-                    activePath: this.activePath,
-                    canEdit: this.activeViewerCapabilities?.edit,
-                    contentLength: content.length
-                });
                 return;
             }
 
-            const previousDraftLength = this.draftContent.length;
             this.draftContent = content;
             this.dirtyPaths = {
                 ...this.dirtyPaths,
                 [this.activePath]: getEditableDocumentText(this.activeDocument) !== content
             };
-            console.log('[insert-debug] store.updateActiveDocument APPLIED', {
-                activePath: this.activePath,
-                previousDraftLength,
-                nextDraftLength: this.draftContent.length,
-                preview: content.slice(0, 80)
-            });
             scheduleAutoSave(this);
         },
 
         async flushActiveDocument() {
-            if (
-                !this.contextProvider
-                || !this.activePath
-                || !this.activeDocument
-                || !this.activeViewerCapabilities?.edit
-                || !this.dirtyPaths[this.activePath]
-                || this.isSaving
-            ) {
+            const canFlush = !!(
+                this.contextProvider
+                && this.activePath
+                && this.activeDocument
+                && this.activeViewerCapabilities?.edit
+                && this.dirtyPaths[this.activePath]
+                && !this.isSaving
+            );
+            if (!canFlush) {
                 return;
             }
 
             clearAutoSaveTimer(this);
-            const activePath = this.activePath;
-            const activeDocument = this.activeDocument;
+            const contextProvider = this.contextProvider!;
+            const activePath = this.activePath!;
+            const activeDocument = this.activeDocument!;
             const savedContent = this.draftContent;
             let shouldScheduleNextSave = false;
             this.isSaving = true;
             try {
                 this.currentError = null;
-                const writeResult = await this.contextProvider.writeDocument({
+                const writeResult = await contextProvider.writeDocument({
                     path: activePath,
                     mimeType: activeDocument.mimeType,
                     dataBase64: encodeTextDocument(savedContent),
@@ -1469,14 +1461,48 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             this.syncActiveAgent(nextSelectedPath || '/');
         },
 
-        async moveNode(input: { path: string; targetParentPath?: string }) {
+        async moveNode(input: { path: string; targetParentPath?: string }): Promise<{ error?: string }> {
             if (!this.contextProvider || !input.path || input.path === '/') {
-                return;
+                return {};
             }
 
             await this.flushAgentIndexDocument();
             await this.flushActiveDocument();
-            const movedNode = await this.contextProvider.moveNode(input);
+            let movedNode;
+            try {
+                movedNode = await this.contextProvider.moveNode(input);
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                this.currentError = message;
+                return { error: message };
+            }
+
+            if (
+                movedNode.kind === 'file'
+                && (input.path.endsWith('.md') || input.path.endsWith('.markdown'))
+            ) {
+                const fromDir = input.path.slice(0, Math.max(0, input.path.lastIndexOf('/'))) || '/';
+                const toDir = movedNode.path.slice(0, Math.max(0, movedNode.path.lastIndexOf('/'))) || '/';
+                if (fromDir !== toDir) {
+                    try {
+                        const doc = await this.contextProvider.readDocument(movedNode.path);
+                        if (isTextDocumentMimeType(doc.mimeType)) {
+                            const originalContent = decodeTextDocument(doc.dataBase64);
+                            const rewritten = rewriteOutgoingLinks(originalContent, fromDir, toDir);
+                            if (rewritten !== originalContent) {
+                                await this.contextProvider.writeDocument({
+                                    path: movedNode.path,
+                                    mimeType: doc.mimeType ?? 'text/markdown',
+                                    dataBase64: encodeTextDocument(rewritten),
+                                    expectedVersion: doc.version
+                                });
+                            }
+                        }
+                    } catch {
+                        // Link rewrite is best-effort; don't block the move on failure.
+                    }
+                }
+            }
 
             const previousActivePath = this.activePath;
             const previousSelectedPath = this.selectedNodePath;
@@ -1510,17 +1536,18 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
 
             if (nextActivePath && this.nodes.some((node) => node.path === nextActivePath)) {
                 await this.openNode(nextActivePath);
-                return;
+                return {};
             }
 
             if (nextSelectedPath && this.nodes.some((node) => node.path === nextSelectedPath)) {
                 await this.openNode(nextSelectedPath);
-                return;
+                return {};
             }
 
             clearActiveDocumentState(this);
             this.syncActiveFileChange(null);
             this.syncActiveAgent(resolveExistingPath(nextSelectedPath || targetParentPath, this.nodes) || '/');
+            return {};
         },
 
         async undoActiveFileChange() {

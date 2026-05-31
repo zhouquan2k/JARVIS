@@ -110,7 +110,7 @@ describe('LocalFileContextProvider.getContext', () => {
 
         expect(context.agentConfigs['/workspace/']?.tools).toEqual([
             { id: 'read_current_file', description: 'Read the currently active file.' },
-            { id: 'list_directory', description: 'List files and directories within the knowledge workspace.' },
+            { id: 'list_directory', description: 'List files and directories within the knowledge workspace. Use "." for the current agent root and absolute paths for workspace locations.' },
             { id: 'read_file', description: 'Read workspace files only' },
             { id: 'search_in_scope', description: 'Search for relevant text within the current agent scope.' },
             { id: 'replace_text_in_file', description: 'Replace an exact text match in a file.' },
@@ -122,7 +122,7 @@ describe('LocalFileContextProvider.getContext', () => {
         ]);
         expect(context.agentConfigs['/workspace/archive/']?.tools).toEqual([
             { id: 'read_current_file', description: 'Read the currently active file.' },
-            { id: 'list_directory', description: 'List files and directories within the knowledge workspace.' },
+            { id: 'list_directory', description: 'List files and directories within the knowledge workspace. Use "." for the current agent root and absolute paths for workspace locations.' },
             { id: 'read_file', description: 'Read workspace files only' },
             { id: 'search_in_scope', description: 'Search for relevant text within the current agent scope.' },
             { id: 'replace_text_in_file', description: 'Replace an exact text match in a file.' },
@@ -229,7 +229,7 @@ describe('LocalFileContextProvider.getContext', () => {
             kind: 'file',
             agentKey: '/reports/'
         });
-        await expect(readFile(path.join(targetPath, 'draft.md'), 'utf8')).resolves.toBe('');
+        await expect(readFile(path.join(targetPath, 'draft.md'), 'utf8')).resolves.toContain('jarvis_id:');
 
         await provider.renameNode({ path: '/reports', name: 'docs' });
         const renamedContext = await provider.getContext();
@@ -238,7 +238,7 @@ describe('LocalFileContextProvider.getContext', () => {
         expect(Buffer.from((await provider.readDocument('/docs/summary.md')).dataBase64, 'base64').toString('utf8'))
             .toContain('Updated Mounted Summary');
         expect(Buffer.from((await provider.readDocument('docs/draft.md')).dataBase64, 'base64').toString('utf8'))
-            .toBe('');
+            .toContain('jarvis_id:');
         const normalizedMatches = await provider.searchInScope({
             query: 'Updated Mounted Summary',
             scopePath: '/docs/'

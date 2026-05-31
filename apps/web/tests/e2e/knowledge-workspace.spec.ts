@@ -675,7 +675,7 @@ test('web knowledge workspace archives an agent conversation into a markdown doc
     await expect(page.getByTestId('agent-document-conversation-list')).toBeVisible();
 
     await page.getByTestId('agent-conversation-list-plus').click();
-    await expect(page.getByTestId('agent-conversation-toolbar')).toBeVisible();
+    await expect(page.getByTestId('normal-input')).toBeVisible();
     await page.getByTestId('normal-input').fill('Playwright archive prompt');
     await page.getByTestId('normal-send').click();
     await expect(page.getByTestId('normal-messages')).toContainText('Playwright archive prompt');
@@ -762,6 +762,84 @@ test('web knowledge workspace negotiates text pdf and unsupported document reque
   await page.getByTestId('normal-input').fill('TRIGGER_ATTACHMENT_ECHO');
   await page.getByTestId('normal-send').click();
   await expect(page.getByTestId('normal-messages')).not.toContainText('archive.bin [application/octet-stream]');
+});
+
+test('web knowledge workspace persists viewer edits for markdown documents with frontmatter', async ({ page, request }, testInfo) => {
+  const baseName = `playwright-frontmatter-edit-${testInfo.workerIndex}-${Date.now()}`;
+  const virtualPath = `/${baseName}.md`;
+  const diskPath = path.join(knowledgeFixtureRoot, `${baseName}.md`);
+  const siblingVirtualPath = `/${baseName}-other.md`;
+  const siblingDiskPath = path.join(knowledgeFixtureRoot, `${baseName}-other.md`);
+  const initialContent = [
+    '---',
+    'jarvis_id: frontmatter-test',
+    '---',
+    '# Frontmatter Test',
+    '',
+    'Body'
+  ].join('\n');
+
+  await writeFile(diskPath, initialContent, 'utf8');
+  await writeFile(siblingDiskPath, '# Other Doc\n\nSibling', 'utf8');
+
+  try {
+    await page.goto('/#/');
+    await expect(page.getByTestId('document-workspace')).toBeVisible();
+
+    await page.locator(`[data-path="${virtualPath}"]`).click();
+    const bodyParagraph = page.locator('[data-testid="document-editor-surface"] .ProseMirror p').last();
+    await expect(bodyParagraph).toContainText('Body');
+    await bodyParagraph.evaluate((paragraph) => {
+      const textNode = paragraph.firstChild;
+      if (!textNode) {
+        return;
+      }
+
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.setStart(textNode, textNode.textContent?.length ?? 0);
+      range.collapse(true);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    });
+    await page.keyboard.type(' updated');
+
+    await expect(page.getByTestId('document-save')).toHaveClass(/save-button--dirty/);
+    await page.getByTestId('document-save').click();
+    await expect.poll(async () => readContextText(request, virtualPath)).toContain('Body updated');
+
+    await page.locator(`[data-path="${siblingVirtualPath}"]`).click();
+    await page.locator(`[data-path="${virtualPath}"]`).click();
+
+    const updatedParagraph = page.locator('[data-testid="document-editor-surface"] .ProseMirror p').last();
+    await expect(updatedParagraph).toContainText('Body updated');
+    await updatedParagraph.evaluate((paragraph) => {
+      const textNode = paragraph.firstChild;
+      if (!textNode) {
+        return;
+      }
+
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.setStart(textNode, textNode.textContent?.length ?? 0);
+      range.collapse(true);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    });
+    await page.keyboard.type(' again');
+
+    await expect(page.getByTestId('document-save')).toHaveClass(/save-button--dirty/);
+    await page.getByTestId('document-save').click();
+    await expect.poll(async () => readContextText(request, virtualPath)).toContain('Body updated again');
+
+    await page.locator(`[data-path="${siblingVirtualPath}"]`).click();
+    await page.locator(`[data-path="${virtualPath}"]`).click();
+    await page.getByTestId('markdown-mode-toggle').click();
+    await expect(page.getByTestId('document-editor-input')).toHaveValue(/Body updated again/);
+  } finally {
+    await rm(diskPath, { force: true });
+    await rm(siblingDiskPath, { force: true });
+  }
 });
 
 test('web knowledge workspace renders markdown mermaid and images while preserving mode switches', async ({ page }) => {
@@ -1053,5 +1131,359 @@ test('web knowledge workspace edits AgentView prompt model and inheritance throu
     await expect(page.getByTestId('agent-view-instructions')).not.toContainText('Updated parent prompt from AgentView');
   } finally {
     await rm(ownerDiskPath, { recursive: true, force: true });
+  }
+});
+
+test('web knowledge workspace rename preserves linked conversation via stable document id', async ({ page, request }, testInfo) => {
+  const baseName = `playwright-rename-id-${testInfo.workerIndex}-${Date.now()}`;
+  const originalVirtualPath = `/${baseName}.md`;
+  const renamedVirtualPath = `/${baseName}-renamed.md`;
+  const originalDiskPath = path.join(knowledgeFixtureRoot, `${baseName}.md`);
+  const renamedDiskPath = path.join(knowledgeFixtureRoot, `${baseName}-renamed.md`);
+
+  await writeFile(originalDiskPath, '# Rename ID Test\n', 'utf8');
+  // Pre-assign jarvis_id so the active document has documentId loaded from the start,
+  // allowing the conversation to store documentIds immediately (no reload/migration needed).
+  await request.post(`${contextApiBase}/get-document-id`, { data: { path: originalVirtualPath } });
+
+  try {
+    // Session 1: create a conversation linked to the document
+    await page.goto('/#/');
+    await expect(page.getByTestId('document-workspace')).toBeVisible();
+    await page.locator(`[data-path="${originalVirtualPath}"]`).click();
+    // Wait for readDocument to complete so activeDocument.documentId is populated
+    // before we create the conversation (avoids the race between readDocument and + click).
+    await page.waitForTimeout(500);
+    await openConversationTab(page);
+    await page.getByTestId('agent-conversation-list-plus').click();
+    await page.getByTestId('normal-input').fill('Conversation rename id test');
+    await page.getByTestId('normal-send').click();
+    await expect(page.getByTestId('agent-conversation-title')).toContainText('Conversation rename id test');
+    await page.getByTestId('agent-conversation-back').click();
+    await expect(page.getByTestId('agent-document-conversation-item')).toContainText('Conversation rename id test');
+
+    // Session 2: reload to run the ID migration. Because jarvis_id is already in frontmatter
+    // (pre-assigned above), migration immediately finds the ID and saves documentIds to the
+    // conversation — no write to disk needed, making the migration race-free.
+    await page.reload();
+    await expect(page.getByTestId('document-workspace')).toBeVisible();
+
+    // Rename via double-click inline edit
+    await page.locator(`[data-path="${originalVirtualPath}"]`).click();
+    await page.locator(`[data-path="${originalVirtualPath}"]`).dblclick();
+    await expect(page.getByTestId('document-rename-node-input')).toBeVisible();
+    await page.getByTestId('document-rename-node-input').fill(`${baseName}-renamed`);
+    await page.getByTestId('document-rename-node-input').press('Enter');
+
+    // Navigate to renamed document and verify conversation is still linked via stable ID
+    await expect(page.locator(`[data-path="${renamedVirtualPath}"]`)).toBeVisible();
+    await page.locator(`[data-path="${renamedVirtualPath}"]`).click();
+    await openConversationTab(page);
+    // The conversation should appear in the list — proving ID-based lookup survives a rename
+    await expect(page.getByTestId('agent-document-conversation-item')).toContainText('Conversation rename id test');
+  } finally {
+    await rm(originalDiskPath, { force: true });
+    await rm(renamedDiskPath, { force: true });
+  }
+});
+
+test('web knowledge workspace move preserves task association via stable document id', async ({ page, request }, testInfo) => {
+  const baseName = `playwright-move-task-${testInfo.workerIndex}-${Date.now()}`;
+  const docVirtualPath = `/${baseName}.md`;
+  const targetDirVirtualPath = `/${baseName}-dir`;
+  const movedVirtualPath = `/${baseName}-dir/${baseName}.md`;
+  const docDiskPath = path.join(knowledgeFixtureRoot, `${baseName}.md`);
+  const targetDirDiskPath = path.join(knowledgeFixtureRoot, `${baseName}-dir`);
+
+  await writeFile(docDiskPath, '# Move Task Test\n', 'utf8');
+  await mkdir(targetDirDiskPath, { recursive: true });
+  await writeFile(path.join(targetDirDiskPath, '.gitkeep'), '', 'utf8');
+
+  try {
+    // Assign a jarvis_id via API so the task gets documentId at creation time
+    await request.post(`${contextApiBase}/get-document-id`, { data: { path: docVirtualPath } });
+
+    await page.goto('/#/');
+    await expect(page.getByTestId('document-workspace')).toBeVisible();
+
+    // Open document and create a task linked to it
+    await page.locator(`[data-path="${docVirtualPath}"]`).click();
+    await page.getByTestId('agent-right-pane-tab-tasks').click();
+    await expect(page.getByTestId('agent-task-panel')).toBeVisible();
+    await page.getByTestId('agent-task-add').click();
+    await page.getByTestId('task-editor-title').fill('Task for move test');
+    await page.getByTestId('task-editor-save').click();
+    await expect(page.getByTestId('agent-task-open-list')).toContainText('Task for move test');
+
+    // Drag file to target directory
+    await page.locator(`[data-path="${docVirtualPath}"]`).dragTo(page.locator(`[data-path="${targetDirVirtualPath}"]`));
+    await expect(page.getByTestId('move-confirm-message')).toBeVisible();
+    await page.getByTestId('move-confirm-ok').click();
+
+    // Verify file moved
+    await expect.poll(async () => {
+      try { return await readContextText(request, movedVirtualPath); } catch { return ''; }
+    }).toContain('Move Task Test');
+
+    // The moveNode action auto-expands the target directory, so the moved file
+    // should be visible without manually toggling the directory.
+    await expect(page.locator(`[data-path="${movedVirtualPath}"]`)).toBeVisible();
+    await page.locator(`[data-path="${movedVirtualPath}"]`).click();
+    await page.getByTestId('agent-right-pane-tab-tasks').click();
+    await expect(page.getByTestId('agent-task-open-list')).toContainText('Task for move test');
+  } finally {
+    await rm(docDiskPath, { force: true });
+    await rm(targetDirDiskPath, { recursive: true, force: true });
+  }
+});
+
+test('web knowledge workspace move dialog warns about outgoing links and rewrites them on confirm', async ({ page, request }, testInfo) => {
+  const baseName = `playwright-move-links-${testInfo.workerIndex}-${Date.now()}`;
+  const sourceName = `${baseName}-source.md`;
+  const targetName = `${baseName}-target.md`;
+  const dirName = `${baseName}-dir`;
+  const sourceVirtualPath = `/${sourceName}`;
+  const targetVirtualPath = `/${targetName}`;
+  const dirVirtualPath = `/${dirName}`;
+  const movedVirtualPath = `/${dirName}/${sourceName}`;
+  const sourceDiskPath = path.join(knowledgeFixtureRoot, sourceName);
+  const targetDiskPath = path.join(knowledgeFixtureRoot, targetName);
+  const dirDiskPath = path.join(knowledgeFixtureRoot, dirName);
+
+  await writeFile(sourceDiskPath, `See [link](./${targetName})`, 'utf8');
+  await writeFile(targetDiskPath, '# Target\n', 'utf8');
+  await mkdir(dirDiskPath, { recursive: true });
+  await writeFile(path.join(dirDiskPath, '.gitkeep'), '', 'utf8');
+
+  try {
+    await page.goto('/#/');
+    await expect(page.getByTestId('document-workspace')).toBeVisible();
+
+    // Drag source document with an outgoing relative link to the directory
+    await page.locator(`[data-path="${sourceVirtualPath}"]`).dragTo(page.locator(`[data-path="${dirVirtualPath}"]`));
+
+    // Dialog should appear and show the link rewrite warning
+    await expect(page.getByTestId('move-confirm-message')).toBeVisible();
+    await expect(page.getByTestId('move-confirm-links-warning')).toBeVisible();
+
+    // Confirm the move
+    await page.getByTestId('move-confirm-ok').click();
+
+    // Poll until the link is rewritten to the correct relative path (the write is async after the move)
+    let movedContent = '';
+    await expect.poll(async () => {
+      try {
+        movedContent = await readContextText(request, movedVirtualPath);
+        return movedContent;
+      } catch {
+        return '';
+      }
+    }).toContain(`../${targetName}`);
+    // Verify the original same-directory reference (./) is gone.
+    // Use the full link syntax to avoid a false positive: '../foo' contains './foo' as a substring.
+    expect(movedContent).not.toContain(`(./${targetName})`);
+
+    // Source at original path should no longer exist
+    const originalResponse = await request.post(`${contextApiBase}/read-document`, { data: { path: sourceVirtualPath } });
+    expect(originalResponse.ok()).toBe(false);
+  } finally {
+    await rm(sourceDiskPath, { force: true });
+    await rm(targetDiskPath, { force: true });
+    await rm(dirDiskPath, { recursive: true, force: true });
+  }
+});
+
+test('web knowledge workspace move dialog cancel leaves node at original path unchanged', async ({ page, request }, testInfo) => {
+  const baseName = `playwright-move-cancel-${testInfo.workerIndex}-${Date.now()}`;
+  const docVirtualPath = `/${baseName}.md`;
+  const dirVirtualPath = `/${baseName}-dir`;
+  const movedVirtualPath = `/${baseName}-dir/${baseName}.md`;
+  const docDiskPath = path.join(knowledgeFixtureRoot, `${baseName}.md`);
+  const dirDiskPath = path.join(knowledgeFixtureRoot, `${baseName}-dir`);
+
+  await writeFile(docDiskPath, '# Cancel Move Test\n', 'utf8');
+  await mkdir(dirDiskPath, { recursive: true });
+  await writeFile(path.join(dirDiskPath, '.gitkeep'), '', 'utf8');
+
+  try {
+    await page.goto('/#/');
+    await expect(page.getByTestId('document-workspace')).toBeVisible();
+
+    // Drag file to directory
+    await page.locator(`[data-path="${docVirtualPath}"]`).dragTo(page.locator(`[data-path="${dirVirtualPath}"]`));
+    await expect(page.getByTestId('move-confirm-message')).toBeVisible();
+
+    // Cancel the move
+    await page.getByTestId('move-confirm-cancel').click();
+    await expect(page.getByTestId('move-confirm-message')).toHaveCount(0);
+
+    // File should still exist at original path
+    const originalContent = await readContextText(request, docVirtualPath);
+    expect(originalContent).toContain('Cancel Move Test');
+
+    // File should NOT be at new path
+    const movedResponse = await request.post(`${contextApiBase}/read-document`, { data: { path: movedVirtualPath } });
+    expect(movedResponse.ok()).toBe(false);
+  } finally {
+    await rm(docDiskPath, { force: true });
+    await rm(dirDiskPath, { recursive: true, force: true });
+  }
+});
+
+test('web knowledge workspace cross-agent drag shows blocking error dialog not confirmation', async ({ page, request }, testInfo) => {
+  const baseName = `playwright-crossagent-${testInfo.workerIndex}-${Date.now()}`;
+  const agentADir = `${baseName}-agent-a`;
+  const agentBDir = `${baseName}-agent-b`;
+  const agentAVirtualPath = `/${agentADir}`;
+  const agentBVirtualPath = `/${agentBDir}`;
+  const fileVirtualPath = `/${agentADir}/note.md`;
+  const agentADiskPath = path.join(knowledgeFixtureRoot, agentADir);
+  const agentBDiskPath = path.join(knowledgeFixtureRoot, agentBDir);
+
+  await mkdir(agentADiskPath, { recursive: true });
+  await mkdir(agentBDiskPath, { recursive: true });
+  await writeFile(path.join(agentADiskPath, '.agent.json'), JSON.stringify({ name: `${baseName} Agent A` }, null, 2), 'utf8');
+  await writeFile(path.join(agentADiskPath, 'note.md'), '# Agent A Note\n', 'utf8');
+  await writeFile(path.join(agentBDiskPath, '.agent.json'), JSON.stringify({ name: `${baseName} Agent B` }, null, 2), 'utf8');
+  // Sentinel file so agent-b shows as a drop target directory node
+  await writeFile(path.join(agentBDiskPath, '.gitkeep'), '', 'utf8');
+
+  try {
+    await page.goto('/#/');
+    await expect(page.getByTestId('document-workspace')).toBeVisible();
+
+    // Expand agent A to expose note.md
+    const agentANode = page.locator(`[data-path="${agentAVirtualPath}"]`);
+    await expect(agentANode).toBeVisible();
+    await agentANode.locator('.tree-toggle').click();
+    await expect(page.locator(`[data-path="${fileVirtualPath}"]`)).toBeVisible();
+
+    // Drag note.md from agent A to agent B directory
+    await page.locator(`[data-path="${fileVirtualPath}"]`).dragTo(page.locator(`[data-path="${agentBVirtualPath}"]`));
+
+    // Should show blocking error dialog, NOT the move confirmation dialog
+    await expect(page.getByTestId('move-error-message')).toBeVisible();
+    await expect(page.getByTestId('move-confirm-message')).toHaveCount(0);
+
+    // Dismiss error dialog
+    await page.getByTestId('move-error-ok').click();
+    await expect(page.getByTestId('move-error-message')).toHaveCount(0);
+
+    // File should still be at original location in agent A
+    const content = await readContextText(request, fileVirtualPath);
+    expect(content).toContain('Agent A Note');
+  } finally {
+    await rm(agentADiskPath, { recursive: true, force: true });
+    await rm(agentBDiskPath, { recursive: true, force: true });
+  }
+});
+
+test('web knowledge workspace rename directory preserves linked conversation resolution', async ({ page, request }, testInfo) => {
+  const baseName = `playwright-rename-dir-${testInfo.workerIndex}-${Date.now()}`;
+  const originalDirName = `${baseName}-original`;
+  const renamedDirName = `${baseName}-renamed`;
+  const originalDirVirtualPath = `/${originalDirName}`;
+  const renamedDirVirtualPath = `/${renamedDirName}`;
+  const docInOriginalPath = `/${originalDirName}/doc.md`;
+  const docInRenamedPath = `/${renamedDirName}/doc.md`;
+  const originalDirDiskPath = path.join(knowledgeFixtureRoot, originalDirName);
+  const renamedDirDiskPath = path.join(knowledgeFixtureRoot, renamedDirName);
+
+  await mkdir(originalDirDiskPath, { recursive: true });
+  await writeFile(path.join(originalDirDiskPath, 'doc.md'), '# Dir Rename Test\n', 'utf8');
+  // Pre-assign jarvis_id so the document's stable ID is available when creating the conversation
+  await request.post(`${contextApiBase}/get-document-id`, { data: { path: docInOriginalPath } });
+
+  try {
+    // Open document, create conversation linked to it (documentIds saved via documentId on activeDocument)
+    await page.goto('/#/');
+    await expect(page.getByTestId('document-workspace')).toBeVisible();
+    await page.locator(`[data-path="${originalDirVirtualPath}"]`).locator('.tree-toggle').click();
+    await expect(page.locator(`[data-path="${docInOriginalPath}"]`)).toBeVisible();
+    await page.locator(`[data-path="${docInOriginalPath}"]`).click();
+    await openConversationTab(page);
+    await page.getByTestId('agent-conversation-list-plus').click();
+    await page.getByTestId('normal-input').fill('Conversation in renamed dir');
+    await page.getByTestId('normal-send').click();
+    await expect(page.getByTestId('agent-conversation-title')).toContainText('Conversation in renamed dir');
+    await page.getByTestId('agent-conversation-back').click();
+    await expect(page.getByTestId('agent-document-conversation-item')).toContainText('Conversation in renamed dir');
+
+    // Rename the parent directory via double-click
+    const originalDirNode = page.locator(`[data-path="${originalDirVirtualPath}"]`);
+    await expect(originalDirNode).toBeVisible();
+    await originalDirNode.dblclick();
+    await expect(page.getByTestId('document-rename-node-input')).toBeVisible();
+    await page.getByTestId('document-rename-node-input').fill(renamedDirName);
+    await page.getByTestId('document-rename-node-input').press('Enter');
+
+    // Navigate to document in renamed directory and verify conversation still linked via stable ID
+    await expect(page.locator(`[data-path="${renamedDirVirtualPath}"]`)).toBeVisible();
+    await page.locator(`[data-path="${renamedDirVirtualPath}"]`).locator('.tree-toggle').click();
+    await expect(page.locator(`[data-path="${docInRenamedPath}"]`)).toBeVisible();
+    await page.locator(`[data-path="${docInRenamedPath}"]`).click();
+    await openConversationTab(page);
+    await expect(page.getByTestId('agent-document-conversation-item')).toContainText('Conversation in renamed dir');
+  } finally {
+    await rm(originalDirDiskPath, { recursive: true, force: true });
+    await rm(renamedDirDiskPath, { recursive: true, force: true });
+  }
+});
+
+test('web knowledge workspace move rewrites pasted image link to remain valid at new location', async ({ page, request }, testInfo) => {
+  const baseName = `playwright-move-image-${testInfo.workerIndex}-${Date.now()}`;
+  const imageFileName = `Pasted image 20240101120000.png`;
+  const virtualPath = `/${baseName}.md`;
+  const dirVirtualPath = `/${baseName}-dir`;
+  const movedVirtualPath = `/${baseName}-dir/${baseName}.md`;
+  const diskPath = path.join(knowledgeFixtureRoot, `${baseName}.md`);
+  const dirDiskPath = path.join(knowledgeFixtureRoot, `${baseName}-dir`);
+  const referencesDir = path.join(knowledgeFixtureRoot, 'references');
+  const imageDiskPath = path.join(referencesDir, imageFileName);
+
+  // Pre-populate the document with an image link and create the image file —
+  // this avoids the fragile clipboard API simulation and directly tests the
+  // link-rewriting-on-move feature.
+  await mkdir(referencesDir, { recursive: true });
+  await writeFile(imageDiskPath, Buffer.from([137, 80, 78, 71]));
+  const encodedImageName = encodeURIComponent(imageFileName);
+  await writeFile(diskPath, `Intro\n\n![](references/${encodedImageName})`, 'utf8');
+  await mkdir(dirDiskPath, { recursive: true });
+  await writeFile(path.join(dirDiskPath, '.gitkeep'), '', 'utf8');
+
+  try {
+    await page.goto('/#/');
+    await expect(page.getByTestId('document-workspace')).toBeVisible();
+
+    // Verify the file already has the image link (confirming our setup)
+    const initialContent = await readContextText(request, virtualPath);
+    expect(initialContent).toMatch(/!\[\]\(references\/Pasted%20image%20\d{14}\.png\)/);
+
+    // Drag document to subdirectory — dialog should warn that the image link will be rewritten
+    await page.locator(`[data-path="${virtualPath}"]`).dragTo(page.locator(`[data-path="${dirVirtualPath}"]`));
+    await expect(page.getByTestId('move-confirm-message')).toBeVisible();
+    await expect(page.getByTestId('move-confirm-links-warning')).toBeVisible();
+
+    // Confirm the move
+    await page.getByTestId('move-confirm-ok').click();
+
+    // Verify moved file has the image link rewritten from `references/...` to `../references/...`
+    let movedContent = '';
+    await expect.poll(async () => {
+      try {
+        movedContent = await readContextText(request, movedVirtualPath);
+      } catch {
+        return '';
+      }
+      return movedContent;
+    }).toMatch(/!\[\]\(\.\.\/references\/Pasted%20image%20\d{14}\.png\)/);
+
+    // Original path must no longer exist
+    const originalResponse = await request.post(`${contextApiBase}/read-document`, { data: { path: virtualPath } });
+    expect(originalResponse.ok()).toBe(false);
+  } finally {
+    await rm(diskPath, { force: true });
+    await rm(dirDiskPath, { recursive: true, force: true });
+    await rm(imageDiskPath, { force: true });
   }
 });

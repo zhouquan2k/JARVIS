@@ -18,7 +18,7 @@
         :class="{ active: option.path === activeWorkspacePath }"
         :aria-pressed="option.path === activeWorkspacePath"
         :data-testid="`topbar-workspace-${option.name}`"
-        @click="emit('navigate-workspace', option.path)"
+        @click="navigateWorkspace(option.path)"
       >
         {{ option.label }}
       </button>
@@ -94,7 +94,7 @@ const props = withDefaults(defineProps<{
 });
 
 const emit = defineEmits<{
-  (event: 'navigate-workspace', path: ChatRoutePath): void;
+  (event: 'navigate-workspace', path: ChatRoutePath, options?: { revealSidebar?: boolean }): void;
   (event: 'go-back-node-history'): void;
   (event: 'go-forward-node-history'): void;
 }>();
@@ -117,6 +117,10 @@ const compareStageLabel = computed(() => {
 });
 
 const brandIconSrc = '/jarvis.png';
+
+function navigateWorkspace(path: ChatRoutePath): void {
+  emit('navigate-workspace', path, path === '/chat' ? { revealSidebar: true } : undefined);
+}
 </script>
 
 <style scoped>

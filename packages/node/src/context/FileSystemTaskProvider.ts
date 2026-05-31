@@ -15,18 +15,57 @@ import {
 export interface FileSystemTaskProviderOptions {
     resolveRootDirectory: () => Promise<string>;
     calendarSyncService?: ITaskCalendarSyncService | null;
+    resolveDocumentIdForTaskPath?: ((documentPath: string) => Promise<string | null>) | null;
 }
 
 export class FileSystemTaskProvider implements ITaskProvider {
     private readonly resolveRootDirectory: () => Promise<string>;
     private readonly calendarSyncService: ITaskCalendarSyncService | null;
+    private readonly resolveDocumentIdForTaskPath: ((documentPath: string) => Promise<string | null>) | null;
 
     constructor(options: FileSystemTaskProviderOptions) {
         this.resolveRootDirectory = options.resolveRootDirectory;
         this.calendarSyncService = options.calendarSyncService ?? null;
+        this.resolveDocumentIdForTaskPath = options.resolveDocumentIdForTaskPath ?? null;
     }
 
     async getTasks(
+        documentPath?: string | null,
+        agentKey?: string | null,
+        completed?: boolean,
+        tag?: TaskQueryTag | null,
+        documentId?: string | null
+    ): Promise<Task[]> {
+        const normalizedDocumentId = documentId?.trim() || null;
+        if (normalizedDocumentId) {
+            return this._getTasksByDocumentId(normalizedDocumentId, agentKey, completed, tag);
+        }
+        return this._getTasksByPath(documentPath, agentKey, completed, tag);
+    }
+
+    private async _getTasksByDocumentId(
+        documentId: string,
+        agentKey?: string | null,
+        completed?: boolean,
+        tag?: TaskQueryTag | null
+    ): Promise<Task[]> {
+        const storedTasks = await this.readTaskIndex();
+        const scope = normalizeTaskScope(null, agentKey);
+        const now = Date.now();
+
+        return storedTasks
+            .filter((task) => {
+                if ((task.documentId ?? null) !== documentId) return false;
+                if (scope.agentKey !== null && (scope.agentKey ?? null) !== (task.agentKey ?? null)) return false;
+                if (typeof completed === 'boolean' && task.completed !== completed) return false;
+                if (!matchesTaskTag(task, tag, now)) return false;
+                return true;
+            })
+            .map(cloneTask)
+            .sort((left, right) => right.updatedAt - left.updatedAt);
+    }
+
+    private async _getTasksByPath(
         documentPath?: string | null,
         agentKey?: string | null,
         completed?: boolean,
@@ -38,26 +77,10 @@ export class FileSystemTaskProvider implements ITaskProvider {
 
         return storedTasks
             .filter((task) => {
-                if (scope.documentPath !== null) {
-                    if (task.documentPath !== scope.documentPath) {
-                        return false;
-                    }
-                }
-
-                if (scope.agentKey !== null) {
-                    if ((scope.agentKey ?? null) !== (task.agentKey ?? null)) {
-                        return false;
-                    }
-                }
-
-                if (typeof completed === 'boolean' && task.completed !== completed) {
-                    return false;
-                }
-
-                if (!matchesTaskTag(task, tag, now)) {
-                    return false;
-                }
-
+                if (scope.documentPath !== null && task.documentPath !== scope.documentPath) return false;
+                if (scope.agentKey !== null && (scope.agentKey ?? null) !== (task.agentKey ?? null)) return false;
+                if (typeof completed === 'boolean' && task.completed !== completed) return false;
+                if (!matchesTaskTag(task, tag, now)) return false;
                 return true;
             })
             .map(cloneTask)
@@ -68,7 +91,7 @@ export class FileSystemTaskProvider implements ITaskProvider {
         const storedTasks = await this.readTaskIndex();
         const now = Date.now();
         const normalized: Task = {
-            ...normalizeTaskRecord(task, now),
+            ...await this.ensureDocumentId(normalizeTaskRecord(task, now)),
             id: `task-${now}-${Math.random().toString(36).slice(2, 10)}`,
             createdAt: now,
             updatedAt: now,
@@ -148,6 +171,29 @@ export class FileSystemTaskProvider implements ITaskProvider {
         return cloneTask(normalized);
     }
 
+    async migrateMissingDocumentIds(): Promise<number> {
+        if (!this.resolveDocumentIdForTaskPath) {
+            return 0;
+        }
+
+        const storedTasks = await this.readTaskIndex();
+        let changed = 0;
+
+        for (let index = 0; index < storedTasks.length; index += 1) {
+            const normalized = await this.ensureDocumentId(storedTasks[index]);
+            if (normalized.documentId !== storedTasks[index].documentId) {
+                storedTasks[index] = normalized;
+                changed += 1;
+            }
+        }
+
+        if (changed > 0) {
+            await this.writeTaskIndex(storedTasks);
+        }
+
+        return changed;
+    }
+
     private async syncIfNeeded(storedTasks: Task[], task: Task): Promise<Task> {
         const hasTimedDueAt = hasSpecificDueTime(task.dueAt);
         console.info('[task-calendar-sync] evaluating task sync', {
@@ -214,6 +260,22 @@ export class FileSystemTaskProvider implements ITaskProvider {
 
         storedTasks[index] = task;
         await this.writeTaskIndex(storedTasks);
+    }
+
+    private async ensureDocumentId(task: Task): Promise<Task> {
+        if (task.documentId || !this.resolveDocumentIdForTaskPath || !isMarkdownTaskPath(task.documentPath)) {
+            return task;
+        }
+
+        const resolvedDocumentId = await this.resolveDocumentIdForTaskPath(task.documentPath);
+        if (!resolvedDocumentId) {
+            return task;
+        }
+
+        return {
+            ...task,
+            documentId: resolvedDocumentId
+        };
     }
 
     private async readTaskIndex(): Promise<Task[]> {
@@ -289,6 +351,11 @@ async function exists(targetPath: string): Promise<boolean> {
     } catch {
         return false;
     }
+}
+
+function isMarkdownTaskPath(documentPath: string | null): documentPath is string {
+    return typeof documentPath === 'string'
+        && (documentPath.endsWith('.md') || documentPath.endsWith('.markdown'));
 }
 
 function isPlainObject(value: unknown): value is Record<string, any> {

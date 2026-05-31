@@ -236,4 +236,20 @@ describe('createMockContextProvider.getContext', () => {
         expect(updated.calendarSyncStatus).toBe('failed');
         expect(updated.calendarLastSyncError).toBe('sync failed');
     });
+
+    it('rejects document IDs for non-Markdown files', async () => {
+        const provider = createMockContextProvider({
+            nodes: [
+                { path: '/workspace', name: 'workspace', kind: 'directory' },
+                { path: '/workspace/notes.txt', name: 'notes.txt', kind: 'file', parentPath: '/workspace' }
+            ],
+            documents: {
+                '/workspace/notes.txt': 'plain text'
+            }
+        });
+
+        await expect(provider.getDocumentId('/workspace/notes.txt')).rejects.toThrow(
+            'Only Markdown documents can have document IDs.'
+        );
+    });
 });

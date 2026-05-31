@@ -179,6 +179,7 @@ describe('SyncStorageProvider', () => {
             updatedAt: 100,
             archive: {
                 documentPath: '/docs/archive.md',
+                documentId: 'doc-archive',
                 archivedAt: 99,
                 sourceMessageCount: 4
             }
@@ -188,6 +189,7 @@ describe('SyncStorageProvider', () => {
             id: 'sync-archive',
             archive: {
                 documentPath: '/docs/archive.md',
+                documentId: 'doc-archive',
                 archivedAt: 99,
                 sourceMessageCount: 4
             }
@@ -196,6 +198,7 @@ describe('SyncStorageProvider', () => {
         await provider.syncNow();
         expect(transport.pushes[0]?.[0]?.archive).toEqual({
             documentPath: '/docs/archive.md',
+            documentId: 'doc-archive',
             archivedAt: 99,
             sourceMessageCount: 4
         });

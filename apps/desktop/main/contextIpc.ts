@@ -27,7 +27,9 @@ import {
     DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL,
     DESKTOP_CONTEXT_SET_TASK_COMPLETED_CHANNEL,
     DESKTOP_CONTEXT_UPDATE_TASK_CHANNEL,
-    DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL
+    DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL,
+    DESKTOP_CONTEXT_GET_DOCUMENT_ID_CHANNEL,
+    DESKTOP_CONTEXT_RESOLVE_DOCUMENT_IDS_CHANNEL
 } from '../shared/contextBridge';
 
 interface IpcHandlerRegistry {
@@ -112,9 +114,15 @@ export function registerContextIpc(options: RegisterContextIpcOptions = {}) {
         DESKTOP_CONTEXT_GET_TASKS_CHANNEL,
         async (
             _event,
-            query: { documentPath?: string | null; agentKey?: string | null; completed?: boolean; tag?: 'all' | 'today' | 'planned' | null }
+            query: {
+                documentPath?: string | null;
+                agentKey?: string | null;
+                completed?: boolean;
+                tag?: 'all' | 'today' | 'planned' | null;
+                documentId?: string | null;
+            }
         ) => {
-            return provider.getTaskProvider().getTasks(query.documentPath, query.agentKey, query.completed, query.tag);
+            return provider.getTaskProvider().getTasks(query.documentPath, query.agentKey, query.completed, query.tag, query.documentId);
         }
     );
     ipc.handle(DESKTOP_CONTEXT_CREATE_TASK_CHANNEL, async (_event, task: Task) => {
@@ -191,6 +199,13 @@ export function registerContextIpc(options: RegisterContextIpcOptions = {}) {
     ipc.handle(DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL, async (_event, request: ContextSearchRequest) => {
         return provider.searchInScope(request);
     });
+    ipc.handle(DESKTOP_CONTEXT_GET_DOCUMENT_ID_CHANNEL, async (_event, docPath: string) => {
+        return provider.getDocumentId(docPath);
+    });
+    ipc.handle(DESKTOP_CONTEXT_RESOLVE_DOCUMENT_IDS_CHANNEL, async (_event, ids: string[]) => {
+        const result = await provider.resolveDocumentIds(ids);
+        return Object.fromEntries(result);
+    });
 
     return () => {
         ipc.removeHandler(DESKTOP_CONTEXT_INITIALIZE_CHANNEL);
@@ -209,5 +224,7 @@ export function registerContextIpc(options: RegisterContextIpcOptions = {}) {
         ipc.removeHandler(DESKTOP_CONTEXT_DELETE_NODE_CHANNEL);
         ipc.removeHandler(DESKTOP_CONTEXT_RENAME_NODE_CHANNEL);
         ipc.removeHandler(DESKTOP_CONTEXT_MOVE_NODE_CHANNEL);
+        ipc.removeHandler(DESKTOP_CONTEXT_GET_DOCUMENT_ID_CHANNEL);
+        ipc.removeHandler(DESKTOP_CONTEXT_RESOLVE_DOCUMENT_IDS_CHANNEL);
     };
 }

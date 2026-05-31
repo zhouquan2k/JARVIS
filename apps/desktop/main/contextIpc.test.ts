@@ -164,6 +164,43 @@ describe('contextIpc', () => {
         expect(ipc.removeHandler).toHaveBeenCalledWith(DESKTOP_CONTEXT_MOVE_NODE_CHANNEL);
     });
 
+    it('passes documentId through the desktop getTasks IPC handler', async () => {
+        const workspaceRoot = await mkdtemp(join(tmpdir(), 'chatprism-context-task-query-'));
+        tempDirs.push(workspaceRoot);
+        await mkdir(join(workspaceRoot, 'notes'), { recursive: true });
+        await writeFile(join(workspaceRoot, 'notes', 'today.md'), '# Today\n', 'utf8');
+
+        const ipc = createIpcMock();
+        registerContextIpc({ ipc, workspaceRoot });
+        const getTasksHandler = getHandler(ipc, DESKTOP_CONTEXT_GET_TASKS_CHANNEL);
+        expect(getTasksHandler).toBeDefined();
+
+        const createTaskHandler = getHandler(ipc, DESKTOP_CONTEXT_CREATE_TASK_CHANNEL);
+        const createdTask = await createTaskHandler?.({}, {
+            id: 'temp-task',
+            title: 'Desktop follow-up',
+            notes: '',
+            completed: false,
+            dueAt: null,
+            priority: null,
+            documentPath: '/notes/today.md',
+            documentId: 'doc-123',
+            agentKey: null,
+            createdAt: 0,
+            updatedAt: 0,
+            completedAt: null,
+            calendarProviderId: null,
+            calendarEventId: null,
+            calendarSyncStatus: null,
+            calendarLastSyncedAt: null,
+            calendarLastSyncError: null
+        }) as Task;
+
+        await expect(getTasksHandler?.({}, { documentId: 'doc-123', completed: false })).resolves.toEqual([
+            expect.objectContaining({ id: createdTask.id, documentId: 'doc-123' })
+        ]);
+    });
+
     it('syncs timed tasks through the desktop IPC path and preserves the calendar event id on update', async () => {
         const workspaceRoot = await mkdtemp(join(tmpdir(), 'chatprism-context-sync-'));
         tempDirs.push(workspaceRoot);

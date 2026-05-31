@@ -15,7 +15,9 @@ import {
     DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL,
     DESKTOP_CONTEXT_SET_TASK_COMPLETED_CHANNEL,
     DESKTOP_CONTEXT_UPDATE_TASK_CHANNEL,
-    DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL
+    DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL,
+    DESKTOP_CONTEXT_GET_DOCUMENT_ID_CHANNEL,
+    DESKTOP_CONTEXT_RESOLVE_DOCUMENT_IDS_CHANNEL
 } from '../shared/contextBridge';
 import {
     DESKTOP_PROVIDER_LOGIN_COMPLETED_CHANNEL,
@@ -41,7 +43,13 @@ contextBridge.exposeInMainWorld('chatprismDesktop', {
     getConversations(query: { documentPath?: string }) {
         return ipcRenderer.invoke(DESKTOP_CONTEXT_GET_CONVERSATIONS_CHANNEL, query);
     },
-    getTasks(query: { documentPath?: string | null; agentKey?: string | null; completed?: boolean; tag?: 'all' | 'today' | 'planned' | null }) {
+    getTasks(query: {
+        documentPath?: string | null;
+        agentKey?: string | null;
+        completed?: boolean;
+        tag?: 'all' | 'today' | 'planned' | null;
+        documentId?: string | null;
+    }) {
         return ipcRenderer.invoke(DESKTOP_CONTEXT_GET_TASKS_CHANNEL, query);
     },
     createTask(task: Record<string, unknown>) {
@@ -79,6 +87,12 @@ contextBridge.exposeInMainWorld('chatprismDesktop', {
     },
     searchContextInScope(request: { query: string; scopePath?: string; maxResults?: number }) {
         return ipcRenderer.invoke(DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL, request);
+    },
+    getDocumentId(docPath: string) {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_GET_DOCUMENT_ID_CHANNEL, docPath);
+    },
+    resolveDocumentIds(ids: string[]) {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_RESOLVE_DOCUMENT_IDS_CHANNEL, ids);
     },
     sendProxyRequest(request: ProxyRequest) {
         ipcRenderer.send(DESKTOP_PROXY_REQUEST_CHANNEL, request);

@@ -8,7 +8,7 @@
         data-testid="agent-right-pane-tab-tasks"
         @click="activeTab = 'tasks'"
       >
-        {{ t('shared.taskTab') }}
+        {{ t('shared.taskTab') }}<span v-if="taskCount > 0" class="agent-right-pane__tab-count">({{ taskCount }})</span>
       </button>
       <button
         type="button"
@@ -17,7 +17,7 @@
         data-testid="agent-right-pane-tab-conversations"
         @click="activeTab = 'conversations'"
       >
-        {{ t('shared.conversationTab') }}
+        {{ t('shared.conversationTab') }}<span v-if="conversationCount > 0" class="agent-right-pane__tab-count">({{ conversationCount }})</span>
       </button>
     </div>
 
@@ -71,6 +71,77 @@ const props = defineProps<{
 const chatStore = useChatStore();
 const { t } = useWorkspaceI18n();
 const activeTab = ref<'conversations' | 'tasks'>('tasks');
+const taskCount = ref(0);
+const conversationCount = ref(0);
+
+watch(
+  () => [
+    props.activeAgentKey?.trim() || '',
+    props.activeDocument?.path?.trim() || '',
+    props.activeDocument?.documentId || '',
+    props.contextProvider ?? null,
+    props.showAgentConversationList === true
+  ] as const,
+  async ([agentKey, documentPath, documentId, contextProvider, showAgentConversationList]) => {
+    const resolvedDocumentId = documentId || undefined;
+    // 任务计数
+    if (contextProvider && (documentPath || agentKey)) {
+      try {
+        const taskProvider = contextProvider.getTaskProvider();
+        const openTasks = await taskProvider.getTasks(documentPath || null, agentKey || null, false, 'all', resolvedDocumentId);
+        taskCount.value = openTasks.length;
+      } catch {
+        taskCount.value = 0;
+      }
+    } else {
+      taskCount.value = 0;
+    }
+
+    // 对话计数
+    if (documentPath) {
+      if (contextProvider) {
+        try {
+          const conversations = await contextProvider.getConversations({ documentPath, documentId: resolvedDocumentId });
+          conversationCount.value = conversations.filter(
+            (c) => !c.compare && !c.sync?.deleted && (!agentKey || c.agentKey === agentKey)
+          ).length;
+        } catch {
+          conversationCount.value = 0;
+        }
+      } else {
+        conversationCount.value = 0;
+      }
+    } else if (agentKey && showAgentConversationList) {
+      conversationCount.value = chatStore.getConversationsByAgent(agentKey).length;
+    } else {
+      conversationCount.value = 0;
+    }
+  },
+  { immediate: true }
+);
+
+watch(
+  () => [
+    props.restoreConversationId ?? null,
+    props.openConversationRequest?.conversationId ?? null,
+    props.openConversationRequest?.nonce ?? null,
+    props.activeAgentKey?.trim() || '',
+    props.activeDocument?.path?.trim() || '',
+    props.showAgentConversationList === true
+  ] as const,
+  ([restoreConversationId, requestedConversationId, requestedNonce, agentKey, documentPath, showAgentConversationList]) => {
+    const hasConversationContext = !!documentPath || (!!agentKey && showAgentConversationList);
+    if (!hasConversationContext) {
+      return;
+    }
+
+    if (restoreConversationId || (requestedConversationId && requestedNonce !== null)) {
+      activeTab.value = 'conversations';
+    }
+  },
+  { immediate: true, flush: 'sync' }
+);
+
 const emit = defineEmits<{
   (event: 'request-workspace-switch', path: ChatRoutePath): void;
 }>();
@@ -157,6 +228,13 @@ onBeforeUnmount(() => {
 .agent-right-pane__tab--active {
   color: #f8fafc;
   background: rgba(15, 23, 42, 0.24);
+}
+
+.agent-right-pane__tab-count {
+  margin-left: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.72;
 }
 
 .agent-right-pane__tab--active::after {

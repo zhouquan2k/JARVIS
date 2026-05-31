@@ -81,6 +81,55 @@ viewer 模式下的插入操作（文档工具栏触发的链接 / 会话引用 
 viewer 模式插入入口位于 `packages/ui/src/utils/markdownDocument.ts` 的
 `insertMarkdownAtViewerSelection`。
 
+## 文档身份标识与节点移动策略
+
+### 概述
+
+每个 markdown 文档在 YAML frontmatter 中写有一个稳定的 ULID，键名为 `jarvis_id`。
+无论文件路径如何变化，该 ID 始终是文档的不可变规范标识。
+
+### 身份标识分配
+
+- 首次打开时，`DocumentIdentityIndex` 检查 frontmatter 中是否存在 `jarvis_id`；若不存在则生成并写回。
+- 索引仅保留在内存中（`path → id` 与 `id → path` 双向映射）。没有独立的持久化索引文件；源码 frontmatter 才是真值。
+- Milkdown 编辑器通过以文档实例为键的 WeakMap 将 frontmatter 在展现层剥离，序列化时再还原。用户不会看到也不会直接编辑 `jarvis_id`。
+
+### 移动 / 重命名策略（零成本）
+
+节点移动或重命名时：
+
+1. 仅更新内存中的 `DocumentIdentityIndex`（`identityIndex.remap(oldPath, newPath)`）。
+2. 不写数据库、不改路径列。会话和任务记录中原有的 `documentIds[]` 条目保持不变，依然与文档 frontmatter 中的 ULID 匹配，和文件当前位置无关。
+3. `moveNode` 内部的跨 Agent 守卫确保当另一个 Agent 进程持有文件锁时拒绝重命名，防止并发访问导致身份标识分裂。
+
+### 查询路由
+
+所有上下文查询均以 **`documentId` 优先**：
+
+- 服务端：有 `documentId` 时优先走 `_getConversationsByDocumentId` / `_getTasksByDocumentId`；`documentPath` 仅作为早期记录的降级回退。
+- 客户端：`AgentConversationPanel` 中的 `documentScopedConversations` 接受同时满足以下任一条件的会话：`documentPaths` 包含当前路径，**或** `documentIds` 包含当前文档的 ULID。这一双重匹配守卫处理了移动操作与下一次异步数据重载之间的窗口期，确保重命名后会话依然立即显示。
+
+### 出链重写
+
+工具栏写入文档的链接（会话引用、资源嵌入）使用相对于仓库根目录的标准相对路径。`references/` 目录受保护，其内容不受链接重写操作影响。
+
+### 数据迁移
+
+首次设置 `contextProvider` 或工作区上下文时触发对存量文档的单次迁移。迁移在 frontmatter 写入 `jarvis_schema: 1` 作为完成标志，操作幂等；`_conversationIdsMigrated` / `_taskIdsMigrated` 两个标志分别追踪关联记录是否已回填新的 ULID。
+
+### 与 OpenSpec 设计决策的一致性核查
+
+| OpenSpec 决策 | 状态 |
+|---|---|
+| 决策 1：ID 写入 frontmatter，不使用独立持久化索引 | ✓ 已实现 |
+| 决策 2：移动时的跨 Agent 守卫 | ✓ 已实现 |
+| 决策 3：单次迁移，不进行双写 | ✓ 已实现 |
+| 决策 4：出链使用标准相对路径，不用 `@/` 语法 | ✓ 已实现 |
+
+实现过程中产生的两个 OpenSpec 未涵盖的细节：
+- Milkdown 中基于 WeakMap 的 frontmatter 隔离（使 `jarvis_id` 对编辑器不可见）。
+- `documentScopedConversations` 中的双重匹配过滤（`documentPaths` 或 `documentIds`），用于覆盖移动后异步重载的竞态窗口期。
+
 ## 外部依赖链路
 
 - Web、Extension、Desktop 通过共享运行时契约调用外部模型提供方。

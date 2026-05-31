@@ -15,13 +15,14 @@ export function createDesktopContextProvider(): IContextProvider {
             documentPath?: string | null,
             agentKey?: string | null,
             completed?: boolean,
-            tag?: TaskQueryTag | null
+            tag?: TaskQueryTag | null,
+            documentId?: string | null
         ) => {
             if (!window.chatprismDesktop) {
                 throw new Error('Desktop context bridge is unavailable');
             }
 
-            return window.chatprismDesktop.getTasks({ documentPath, agentKey, completed, tag });
+            return window.chatprismDesktop.getTasks({ documentPath, agentKey, completed, tag, documentId });
         },
         createTask: async (task: Task) => {
             if (!window.chatprismDesktop) {
@@ -130,6 +131,21 @@ export function createDesktopContextProvider(): IContextProvider {
             }
 
             return window.chatprismDesktop.searchContextInScope(request);
+        },
+        async getDocumentId(path: string) {
+            if (!window.chatprismDesktop) {
+                throw new Error('Desktop context bridge is unavailable');
+            }
+
+            return window.chatprismDesktop.getDocumentId(path);
+        },
+        async resolveDocumentIds(ids: string[]) {
+            if (!window.chatprismDesktop) {
+                throw new Error('Desktop context bridge is unavailable');
+            }
+
+            const resolved = await window.chatprismDesktop.resolveDocumentIds(ids);
+            return new Map(Object.entries(resolved));
         }
     };
 }

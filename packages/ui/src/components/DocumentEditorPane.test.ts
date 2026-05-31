@@ -838,7 +838,12 @@ describe('DocumentEditorPane', () => {
         await Promise.resolve();
         await wrapper.vm.$nextTick();
 
-        expect(replaceMarkdownDocument).toHaveBeenCalledWith(firstEditor, '# Today');
+        expect(replaceMarkdownDocument).not.toHaveBeenCalled();
+        expect(createMarkdownEditor).toHaveBeenCalledTimes(2);
+        expect(createMarkdownEditor).toHaveBeenNthCalledWith(2, expect.objectContaining({
+            documentPath: '/notes/today.md',
+            content: '# Today'
+        }));
     });
 
     it('emits save and tears down the editor on unmount', async () => {

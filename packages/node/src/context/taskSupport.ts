@@ -25,9 +25,13 @@ export function normalizeTaskScope(documentPath?: string | null, agentKey?: stri
 
 export function normalizeTaskRecord(task: Task, fallbackNow: number): Task {
     const scope = normalizeTaskScope(task.documentPath, task.agentKey);
+    const documentId = typeof task.documentId === 'string' && task.documentId.trim()
+        ? task.documentId.trim()
+        : (task.documentId === null ? null : undefined);
     return {
         ...cloneTask(task),
         ...scope,
+        documentId,
         notes: task.notes ?? '',
         dueAt: task.dueAt ?? null,
         priority: task.priority ?? null,

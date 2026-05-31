@@ -35,5 +35,15 @@ export const CHAT_ROUTES: ChatRoute[] = [
 ];
 
 export const PRIMARY_WORKSPACE_ROUTES: ChatRoute[] = CHAT_ROUTES.filter((route) => {
-  return route.path === '/' || route.path === '/chat' || route.path === '/all-tasks';
+  return route.path === '/' || route.path === '/all-tasks' || route.path === '/chat';
+}).sort((left, right) => {
+  const order: Record<ChatRoutePath, number> = {
+    '/': 0,
+    '/all-tasks': 1,
+    '/chat': 2,
+    '/compare': 3,
+    '/knowledge': 4
+  };
+
+  return order[left.path] - order[right.path];
 });

@@ -31,7 +31,13 @@ declare global {
             initializeContextAccess(): Promise<void>;
             getContext(): Promise<WorkspaceContext>;
             getConversations(query: ConversationQuery): Promise<Conversation[]>;
-            getTasks(query: { documentPath?: string | null; agentKey?: string | null; completed?: boolean; tag?: TaskQueryTag | null }): Promise<Task[]>;
+            getTasks(query: {
+                documentPath?: string | null;
+                agentKey?: string | null;
+                completed?: boolean;
+                tag?: TaskQueryTag | null;
+                documentId?: string | null;
+            }): Promise<Task[]>;
             createTask(task: Task): Promise<Task>;
             updateTask(task: Task): Promise<Task>;
             deleteTask(taskId: string): Promise<void>;
@@ -44,6 +50,8 @@ declare global {
             renameContextNode(input: { path: string; name: string }): Promise<ContextNode>;
             moveContextNode(input: MoveContextNodeInput): Promise<ContextNode>;
             searchContextInScope(request: ContextSearchRequest): Promise<ContextSearchMatch[]>;
+            getDocumentId(path: string): Promise<string>;
+            resolveDocumentIds(ids: string[]): Promise<Record<string, ContextNode | null>>;
             sendProxyRequest(request: ProxyRequest): void;
             onProxyResponse(listener: (response: ProxyResponse) => void): () => void;
             openProviderLoginWindow(providerId: string): Promise<void>;

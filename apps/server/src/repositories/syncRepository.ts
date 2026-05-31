@@ -1,4 +1,4 @@
-import type { Conversation, ConversationQuery, IConversationQueryProvider } from '@packages/core';
+import type { Conversation, ConversationOrigin, ConversationQuery, IConversationQueryProvider } from '@packages/core';
 import type { SyncDatabase } from '../db.js';
 import type { SyncConversation, SyncDeletedConversation } from '../types/sync.js';
 
@@ -9,6 +9,7 @@ interface CursorRow {
 interface ConversationRow {
     agent_key: string | null;
     document_paths: string | null;
+    document_ids: string | null;
     payload_json: string;
     server_cursor: number;
     created_at: number;
@@ -89,8 +90,7 @@ export class SyncRepository implements IConversationQueryProvider {
     getConversation(syncKey: string, conversationId: string): PersistedConversation | null {
         const row = this.database
             .prepare(`
-                SELECT agent_key, payload_json, server_cursor, created_at, last_seen_at
-                , document_paths
+                SELECT agent_key, document_paths, document_ids, payload_json, server_cursor, created_at, last_seen_at
                 FROM synced_conversations
                 WHERE sync_key = ? AND conversation_id = ?
             `)
@@ -112,8 +112,7 @@ export class SyncRepository implements IConversationQueryProvider {
         const minCursor = cursor ?? 0;
         const rows = this.database
             .prepare(`
-                SELECT agent_key, payload_json, server_cursor, created_at, last_seen_at
-                , document_paths
+                SELECT agent_key, document_paths, document_ids, payload_json, server_cursor, created_at, last_seen_at
                 FROM synced_conversations
                 WHERE sync_key = ? AND server_cursor > ?
                 ORDER BY server_cursor ASC
@@ -129,38 +128,56 @@ export class SyncRepository implements IConversationQueryProvider {
     }
 
     async getConversations(query: ConversationQuery): Promise<Conversation[]> {
-        const rows = this.database
+        if (query.documentId) {
+            return this._getConversationsByDocumentId(query.documentId);
+        }
+        return this._getConversationsByPath(query.documentPath);
+    }
+
+    private _allConversationRows(): ConversationRow[] {
+        return this.database
             .prepare(`
-                SELECT agent_key, payload_json, server_cursor, created_at, last_seen_at
-                , document_paths
+                SELECT agent_key, document_paths, document_ids, payload_json, server_cursor, created_at, last_seen_at
                 FROM synced_conversations
                 WHERE deleted = 0
                 ORDER BY updated_at DESC
             `)
             .all() as ConversationRow[];
+    }
 
-        return rows
+    private _normalizeConversation(conversation: SyncConversation): Conversation {
+        const validOrigins: ConversationOrigin[] = ['chatgpt-web', 'gemini-web', 'external-file', 'local'];
+        const origin: ConversationOrigin = validOrigins.includes(conversation.origin as ConversationOrigin)
+            ? conversation.origin as ConversationOrigin
+            : 'local';
+        return {
+            ...conversation,
+            origin,
+            documentPaths: Array.isArray(conversation.documentPaths)
+                ? Array.from(new Set(conversation.documentPaths.filter((path): path is string => {
+                    return typeof path === 'string' && path.trim().length > 0;
+                }).map((path) => path.trim())))
+                : undefined,
+            documentIds: Array.isArray(conversation.documentIds)
+                ? Array.from(new Set(conversation.documentIds.filter((id): id is string => {
+                    return typeof id === 'string' && id.trim().length > 0;
+                })))
+                : undefined
+        };
+    }
+
+    private _getConversationsByDocumentId(documentId: string): Conversation[] {
+        return this._allConversationRows()
             .map((row) => this.hydrateConversation(row))
-            .filter((conversation) => {
-                if (query.documentPath) {
-                    return conversation.documentPaths?.includes(query.documentPath);
-                }
-                return true;
-            })
-            .map((conversation) => ({
-                ...conversation,
-                origin: conversation.origin === 'chatgpt-web'
-                    || conversation.origin === 'gemini-web'
-                    || conversation.origin === 'external-file'
-                    || conversation.origin === 'local'
-                    ? conversation.origin
-                    : 'local',
-                documentPaths: Array.isArray(conversation.documentPaths)
-                    ? Array.from(new Set(conversation.documentPaths.filter((path): path is string => {
-                        return typeof path === 'string' && path.trim().length > 0;
-                    }).map((path) => path.trim())))
-                    : undefined
-            }));
+            .filter((c) => c.documentIds?.includes(documentId))
+            .map((c) => this._normalizeConversation(c));
+    }
+
+    private _getConversationsByPath(documentPath?: string): Conversation[] {
+        return this._allConversationRows()
+            .map((row) => this.hydrateConversation(row))
+            .filter((c) => documentPath ? c.documentPaths?.includes(documentPath) : true)
+            .map((c) => this._normalizeConversation(c));
     }
 
     getDeletedConversation(syncKey: string, conversationId: string): PersistedDeletedConversation | null {
@@ -213,6 +230,7 @@ export class SyncRepository implements IConversationQueryProvider {
                     title,
                     agent_key,
                     document_paths,
+                    document_ids,
                     backend_id,
                     source_type,
                     external_id,
@@ -231,6 +249,7 @@ export class SyncRepository implements IConversationQueryProvider {
                     @title,
                     @agentKey,
                     @documentPaths,
+                    @documentIds,
                     @backendId,
                     @origin,
                     @externalId,
@@ -247,6 +266,7 @@ export class SyncRepository implements IConversationQueryProvider {
                     title = excluded.title,
                     agent_key = excluded.agent_key,
                     document_paths = excluded.document_paths,
+                    document_ids = excluded.document_ids,
                     backend_id = excluded.backend_id,
                     source_type = excluded.source_type,
                     external_id = excluded.external_id,
@@ -266,6 +286,9 @@ export class SyncRepository implements IConversationQueryProvider {
                 documentPaths: Array.isArray(conversation.documentPaths) && conversation.documentPaths.length > 0
                     ? JSON.stringify(conversation.documentPaths)
                     : null,
+                documentIds: Array.isArray(conversation.documentIds) && conversation.documentIds.length > 0
+                    ? JSON.stringify(conversation.documentIds)
+                    : null,
                 backendId: conversation.backendId ?? null,
                 origin: conversation.origin ?? null,
                 externalId: conversation.externalId ?? null,
@@ -282,15 +305,17 @@ export class SyncRepository implements IConversationQueryProvider {
 
     private hydrateConversation(row: ConversationRow): SyncConversation {
         const conversation = JSON.parse(row.payload_json) as SyncConversation;
-        const resolvedDocumentPaths = this.parseDocumentPathsColumn(row.document_paths);
-        const nextConversation: SyncConversation = resolvedDocumentPaths
-            ? {
-                ...conversation,
-                documentPaths: resolvedDocumentPaths
-            }
-            : conversation;
+        const resolvedDocumentPaths = this.parseJsonStringArrayColumn(row.document_paths);
+        const resolvedDocumentIds = this.parseJsonStringArrayColumn(row.document_ids);
+        let nextConversation: SyncConversation = conversation;
+        if (resolvedDocumentPaths) {
+            nextConversation = { ...nextConversation, documentPaths: resolvedDocumentPaths };
+        }
+        if (resolvedDocumentIds) {
+            nextConversation = { ...nextConversation, documentIds: resolvedDocumentIds };
+        }
 
-        // Prefer the actual column value. This allows manual DB patches to the agent_key column 
+        // Prefer the actual column value. This allows manual DB patches to the agent_key column
         // to take effect without having to parse and re-stringify the entire payload_json.
         if (typeof row.agent_key === 'string' && row.agent_key.trim()) {
             return {
@@ -306,7 +331,7 @@ export class SyncRepository implements IConversationQueryProvider {
         return nextConversation;
     }
 
-    private parseDocumentPathsColumn(value: string | null): string[] | undefined {
+    private parseJsonStringArrayColumn(value: string | null): string[] | undefined {
         if (typeof value !== 'string' || value.trim().length === 0) {
             return undefined;
         }
@@ -317,11 +342,11 @@ export class SyncRepository implements IConversationQueryProvider {
                 return undefined;
             }
 
-            const normalizedPaths = parsed.filter((path): path is string => {
-                return typeof path === 'string' && path.trim().length > 0;
-            }).map((path) => path.trim());
+            const normalized = parsed.filter((item): item is string => {
+                return typeof item === 'string' && item.trim().length > 0;
+            }).map((item) => item.trim());
 
-            return normalizedPaths.length > 0 ? Array.from(new Set(normalizedPaths)) : undefined;
+            return normalized.length > 0 ? Array.from(new Set(normalized)) : undefined;
         } catch {
             return undefined;
         }
@@ -370,5 +395,35 @@ export class SyncRepository implements IConversationQueryProvider {
         this.database
             .prepare('DELETE FROM synced_conversations WHERE sync_key = ? AND conversation_id = ?')
             .run(syncKey, conversationId);
+    }
+
+    getConversationsNeedingMigration(): Array<{ syncKey: string; conversationId: string; documentPaths: string[] }> {
+        const rows = this.database
+            .prepare(`
+                SELECT sync_key, conversation_id, document_paths
+                FROM synced_conversations
+                WHERE document_ids IS NULL AND document_paths IS NOT NULL AND deleted = 0
+            `)
+            .all() as Array<{ sync_key: string; conversation_id: string; document_paths: string }>;
+
+        return rows.flatMap((row) => {
+            const paths = this.parseJsonStringArrayColumn(row.document_paths);
+            if (!paths || paths.length === 0) return [];
+            return [{ syncKey: row.sync_key, conversationId: row.conversation_id, documentPaths: paths }];
+        });
+    }
+
+    setConversationDocumentIds(syncKey: string, conversationId: string, documentIds: string[]): void {
+        this.database
+            .prepare(`
+                UPDATE synced_conversations
+                SET document_ids = @documentIds
+                WHERE sync_key = @syncKey AND conversation_id = @conversationId
+            `)
+            .run({
+                syncKey,
+                conversationId,
+                documentIds: JSON.stringify(documentIds)
+            });
     }
 }

@@ -209,7 +209,7 @@ describe('FileSystemContextProvider', () => {
             kind: 'file',
             agentKey: '/reports/'
         });
-        await expect(readFile(path.join(targetPath, 'draft.md'), 'utf8')).resolves.toBe('');
+        await expect(readFile(path.join(targetPath, 'draft.md'), 'utf8')).resolves.toContain('jarvis_id:');
 
         await provider.renameNode({ path: '/reports', name: 'docs' });
         const renamedContext = await provider.getContext();
@@ -218,7 +218,7 @@ describe('FileSystemContextProvider', () => {
         expect(Buffer.from((await provider.readDocument('/docs/summary.md')).dataBase64, 'base64').toString('utf8'))
             .toContain('Updated Mounted Summary');
         expect(Buffer.from((await provider.readDocument('docs/draft.md')).dataBase64, 'base64').toString('utf8'))
-            .toBe('');
+            .toContain('jarvis_id:');
         const normalizedMatches = await provider.searchInScope({
             query: 'Updated Mounted Summary',
             scopePath: '/docs/'
@@ -256,6 +256,31 @@ describe('FileSystemContextProvider', () => {
             agentKey: '/'
         });
         await expect(readFile(path.join(rootPath, 'docs', '.agent.json'), 'utf8')).resolves.toBe('');
+    });
+
+    it('assigns a documentId immediately when creating a markdown document', async () => {
+        const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-node-create-markdown-id-'));
+        tempRoots.push(rootPath);
+
+        await mkdir(path.join(rootPath, 'docs'), { recursive: true });
+        const provider = new FileSystemContextProvider({ rootPath });
+
+        const createdNode = await provider.createNode({
+            parentPath: '/docs',
+            name: 'draft.md',
+            kind: 'file'
+        });
+
+        expect(createdNode).toMatchObject({
+            path: '/docs/draft.md',
+            kind: 'file',
+            parentPath: '/docs'
+        });
+
+        const createdDocument = await provider.readDocument('/docs/draft.md');
+        expect(createdDocument.documentId).toBeTruthy();
+        const persisted = await readFile(path.join(rootPath, 'docs', 'draft.md'), 'utf8');
+        expect(persisted).toContain('jarvis_id:');
     });
 
     it('renames a visible file into hidden agent config without requiring context visibility', async () => {
@@ -358,6 +383,50 @@ describe('FileSystemContextProvider', () => {
         const storedTaskFile = await readFile(path.join(rootPath, '.chatprism', 'tasks.json'), 'utf8');
         expect(storedTaskFile).toContain(docTask.id);
         expect(storedTaskFile).toContain(projectTask.id);
+    });
+
+    it('migrates legacy markdown tasks to documentId during initializeAccess', async () => {
+        const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-node-task-migration-'));
+        tempRoots.push(rootPath);
+        await mkdir(path.join(rootPath, 'workspace'), { recursive: true });
+        await writeFile(path.join(rootPath, 'workspace', 'guide.md'), '# Guide\n');
+        await mkdir(path.join(rootPath, '.chatprism'), { recursive: true });
+        await writeFile(
+            path.join(rootPath, '.chatprism', 'tasks.json'),
+            JSON.stringify({
+                tasks: [
+                    {
+                        id: 'legacy-task',
+                        title: 'Legacy task',
+                        notes: '',
+                        completed: false,
+                        dueAt: null,
+                        priority: null,
+                        documentPath: '/workspace/guide.md',
+                        agentKey: '/workspace/',
+                        createdAt: 1,
+                        updatedAt: 1,
+                        completedAt: null,
+                        calendarProviderId: null,
+                        calendarEventId: null,
+                        calendarSyncStatus: null,
+                        calendarLastSyncedAt: null,
+                        calendarLastSyncError: null
+                    }
+                ]
+            }, null, 2),
+            'utf8'
+        );
+
+        const provider = new FileSystemContextProvider({ rootPath });
+        await provider.initializeAccess();
+
+        const migratedDocument = await provider.readDocument('/workspace/guide.md');
+        expect(migratedDocument.documentId).toBeTruthy();
+
+        const storedTaskFile = await readFile(path.join(rootPath, '.chatprism', 'tasks.json'), 'utf8');
+        expect(storedTaskFile).toContain('"documentId":');
+        expect(storedTaskFile).toContain(migratedDocument.documentId!);
     });
 
     it('includes same-agent document tasks but not child-agent tasks when listing top-level agent tasks', async () => {
@@ -512,6 +581,23 @@ describe('FileSystemContextProvider', () => {
             mimeType: 'image/png',
             dataBase64: Buffer.from([137, 80, 78, 71]).toString('base64')
         });
+
+        const persisted = await readFile(path.join(rootPath, 'references', 'diagram.png'));
+        expect(Array.from(persisted)).toEqual([137, 80, 78, 71]);
+    });
+
+    it('rejects document IDs for non-Markdown files without modifying file content', async () => {
+        const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-node-non-markdown-id-'));
+        tempRoots.push(rootPath);
+
+        await mkdir(path.join(rootPath, 'references'), { recursive: true });
+        await writeFile(path.join(rootPath, 'references', 'diagram.png'), Buffer.from([137, 80, 78, 71]));
+
+        const provider = new FileSystemContextProvider({ rootPath });
+
+        await expect(provider.getDocumentId('/references/diagram.png')).rejects.toThrow(
+            'Only Markdown documents can have document IDs.'
+        );
 
         const persisted = await readFile(path.join(rootPath, 'references', 'diagram.png'));
         expect(Array.from(persisted)).toEqual([137, 80, 78, 71]);
