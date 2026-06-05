@@ -1,4 +1,5 @@
-import type { Conversation, ConversationQuery, Task, TaskQueryTag } from '@packages/core';
+import type { Conversation, ConversationQuery } from '@plugins/ai-agent/api';
+import type { Task, TaskQueryTag, TaskService } from '@plugins/task-mgr/api';
 import type {
     ContextDocument,
     ContextNode,
@@ -15,7 +16,10 @@ import type {
 } from '../types/context.js';
 
 export class HttpContextService {
-    constructor(private readonly provider: ContextProvider) {}
+    constructor(
+        private readonly provider: ContextProvider,
+        private readonly taskService: TaskService
+    ) {}
 
     async initializeAccess(): Promise<void> {
         await this.provider.initializeAccess();
@@ -36,23 +40,23 @@ export class HttpContextService {
         tag?: TaskQueryTag | null,
         documentId?: string | null
     ): Promise<Task[]> {
-        return this.provider.getTaskProvider().getTasks(documentPath, agentKey, completed, tag, documentId);
+        return this.taskService.getTasks(documentPath, agentKey, completed, tag, documentId);
     }
 
     async createTask(task: Task): Promise<Task> {
-        return this.provider.getTaskProvider().createTask(task);
+        return this.taskService.createTask(task);
     }
 
     async updateTask(task: Task): Promise<Task> {
-        return this.provider.getTaskProvider().updateTask(task);
+        return this.taskService.updateTask(task);
     }
 
     async deleteTask(taskId: string): Promise<void> {
-        await this.provider.getTaskProvider().deleteTask(taskId);
+        await this.taskService.deleteTask(taskId);
     }
 
     async setTaskCompleted(taskId: string, completed: boolean): Promise<Task> {
-        return this.provider.getTaskProvider().setTaskCompleted(taskId, completed);
+        return this.taskService.setTaskCompleted(taskId, completed);
     }
 
     async getProjectDocuments(curNode: string): Promise<ProjectDocumentEntry[]> {

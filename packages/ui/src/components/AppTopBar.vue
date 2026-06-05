@@ -62,7 +62,6 @@
         {{ localeLabel }}
       </button>
       <span v-if="isCompareMode" class="mode-pill">{{ t('topBar.compareMode') }}</span>
-      <span v-if="isCompareMode" class="compare-stage">{{ compareStageLabel }}</span>
     </div>
   </header>
 </template>
@@ -70,17 +69,21 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { ChevronLeft, ChevronRight } from 'lucide-vue-next';
-import type { ChatRoute, ChatRoutePath } from '../routes';
+import type { ChatRoutePath } from '../routes';
 import { useWorkspaceI18n } from '../i18n';
 
-type Stage = 'idle' | 'generating' | 'analyzing' | 'completed' | 'failed';
+type WorkspaceOption = {
+  path: string;
+  name: string;
+  label: string;
+  labelKey?: string;
+};
 
 const props = withDefaults(defineProps<{
   title?: string;
   isCompareMode: boolean;
-  compareStage: Stage;
   activeWorkspacePath?: ChatRoutePath;
-  workspaceOptions?: ReadonlyArray<Pick<ChatRoute, 'path' | 'name' | 'label' | 'labelKey'>>;
+  workspaceOptions?: ReadonlyArray<WorkspaceOption>;
   showNodeHistoryControls?: boolean;
   canGoBackNodeHistory?: boolean;
   canGoForwardNodeHistory?: boolean;
@@ -112,14 +115,10 @@ const localeLabel = computed(() => {
   return locale.value === 'en' ? t('topBar.localeEnglish') : t('topBar.localeChinese');
 });
 
-const compareStageLabel = computed(() => {
-  return t(`topBar.stage.${props.compareStage}`);
-});
-
 const brandIconSrc = '/jarvis.png';
 
-function navigateWorkspace(path: ChatRoutePath): void {
-  emit('navigate-workspace', path, path === '/chat' ? { revealSidebar: true } : undefined);
+function navigateWorkspace(path: string): void {
+  emit('navigate-workspace', path as ChatRoutePath, path === '/chat' ? { revealSidebar: true } : undefined);
 }
 </script>
 

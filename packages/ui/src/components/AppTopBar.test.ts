@@ -10,7 +10,6 @@ describe('AppTopBar', () => {
         const wrapper = mount(AppTopBar, {
             props: {
                 isCompareMode: false,
-                compareStage: 'idle',
                 activeWorkspacePath: '/',
                 workspaceOptions: PRIMARY_WORKSPACE_ROUTES
             }
@@ -40,7 +39,6 @@ describe('AppTopBar', () => {
         const wrapper = mount(AppTopBar, {
             props: {
                 isCompareMode: false,
-                compareStage: 'idle',
                 activeWorkspacePath: '/',
                 workspaceOptions: PRIMARY_WORKSPACE_ROUTES,
                 showNodeHistoryControls: true,

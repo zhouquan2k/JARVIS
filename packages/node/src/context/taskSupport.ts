@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type { Task } from '../../../core/src/interfaces/ITaskProvider.ts';
+import type { Task } from '@plugins/task-mgr/api';
 
 export const TASK_STORAGE_DIRECTORY = '.chatprism';
 export const TASK_STORAGE_FILE = 'tasks.json';

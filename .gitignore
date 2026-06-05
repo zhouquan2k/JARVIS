@@ -15,3 +15,5 @@ apps/desktop/playwright-report
 apps/desktop/test-results
 docs/.structurizr
 .playwright-mcp
+apps/desktop2/dist
+apps/web2/dist

@@ -8,8 +8,11 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "paths": {
-      "@packages/core": ["../core/src/index.ts"],
-      "@packages/core/*": ["../core/*"]
+      "@packages/core": ["../core/index.ts"],
+      "@packages/core/*": ["../core/*"],
+      "@plugins/task-mgr": ["../../plugins/task-mgr/src/index.ts"],
+      "@plugins/task-mgr/*": ["../../plugins/task-mgr/*"],
+      "@plugins/task-mgr/api": ["../../plugins/task-mgr/api.ts"]
     },
     "types": ["node"]
   },

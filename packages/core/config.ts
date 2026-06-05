@@ -34,6 +34,19 @@ export interface ProviderConfig {
     enabled?: boolean;
 }
 
+export interface LightweightModelSelection {
+    providerId: string;
+    modelId: string;
+    reasoningEffort?: 'low' | 'medium' | 'high';
+    modelOptions?: Record<string, boolean>;
+}
+
+export interface LightweightModelConfig {
+    desktop: LightweightModelSelection;
+    web: LightweightModelSelection;
+    extension: LightweightModelSelection;
+}
+
 export interface AnalyzerConfig {
     defaultProvider: string;
     defaultModel: string;
@@ -109,7 +122,7 @@ const DEFAULT_ANALYZER_PROMPT = [
     'Model B output: {outputB}'
 ].join('\n\n');
 
-export const APP_CONFIG: { providers: ProviderConfig[]; analyzer: AnalyzerConfig } = {
+export const APP_CONFIG: { providers: ProviderConfig[]; analyzer: AnalyzerConfig; lightweightModels: LightweightModelConfig } = {
     providers: [
         {
             id: 'chatgpt-codex',
@@ -358,8 +371,41 @@ export const APP_CONFIG: { providers: ProviderConfig[]; analyzer: AnalyzerConfig
         defaultProvider: 'gemini-api',
         defaultModel: 'gemini-pro-latest',
         systemPrompt: DEFAULT_ANALYZER_PROMPT
+    },
+    lightweightModels: {
+        desktop: {
+            providerId: 'chatgpt-web',
+            modelId: 'gpt-4o',
+            reasoningEffort: 'low',
+            modelOptions: {
+                web_search: false,
+                deep_research: false
+            }
+        },
+        web: {
+            providerId: 'chatgpt-codex',
+            modelId: 'gpt-5.4',
+            reasoningEffort: 'low',
+            modelOptions: {
+                web_search: false,
+                deep_research: false
+            }
+        },
+        extension: {
+            providerId: 'chatgpt-web',
+            modelId: 'gpt-4o',
+            reasoningEffort: 'low',
+            modelOptions: {
+                web_search: false,
+                deep_research: false
+            }
+        }
     }
 };
+
+export function resolveLightweightModelSelection(runtimeMode: RuntimeMode): LightweightModelSelection {
+    return APP_CONFIG.lightweightModels[runtimeMode];
+}
 
 function normalizeSyncKey(value?: string | null): string | null {
     if (typeof value !== 'string') {
@@ -470,6 +516,37 @@ export function readCodexBaseUrl(options: CodexBaseUrlOptions = {}): string {
 
 export function resolveCodexBaseUrl(options: CodexBaseUrlOptions = {}): string {
     return readCodexBaseUrl(options);
+}
+
+export const DEFAULT_CONTEXT_BASE_URL = 'http://127.0.0.1:8787/api/context';
+
+export interface ResolveContextBaseUrlOptions {
+    env?: Record<string, string | undefined>;
+}
+
+function hasEnvContainer(
+    value: ResolveContextBaseUrlOptions | Record<string, string | undefined>
+): value is ResolveContextBaseUrlOptions {
+    return 'env' in value;
+}
+
+export function resolveContextBaseUrl(
+    options: ResolveContextBaseUrlOptions | Record<string, string | undefined> = {}
+): string {
+    const env = hasEnvContainer(options) ? options.env : options;
+    const explicit = env?.CHATPRISM_CONTEXT_BASE_URL?.trim()
+        || env?.VITE_CONTEXT_BASE_URL?.trim()
+        || env?.WXT_CONTEXT_BASE_URL?.trim();
+    if (explicit) {
+        return explicit.replace(/\/+$/, '');
+    }
+
+    const syncBaseUrl = resolveSyncBaseUrl({ env });
+    if (syncBaseUrl !== DEFAULT_SYNC_BASE_URL && syncBaseUrl.endsWith('/api/sync')) {
+        return `${syncBaseUrl.slice(0, -'/api/sync'.length)}/api/context`;
+    }
+
+    return DEFAULT_CONTEXT_BASE_URL;
 }
 
 export function resolveGeminiHistoryRuntimeConfig(

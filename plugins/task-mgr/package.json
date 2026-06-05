@@ -1,0 +1,13 @@
+{
+  "name": "@plugins/task-mgr",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "../../packages/ui/node_modules/.bin/vitest run --config ../../packages/ui/vitest.plugins.config.ts"
+  },
+  "dependencies": {
+    "@packages/core": "workspace:*",
+    "@packages/ui": "workspace:*",
+    "vue": "^3.5.29"
+  }
+}

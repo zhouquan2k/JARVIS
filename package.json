@@ -12,19 +12,22 @@
   },
   "scripts": {
     "dev:server": "pnpm --filter server dev",
-    "dev:desktop:renderer": "pnpm --filter desktop dev:renderer",
-    "dev:desktop:host": "pnpm --filter desktop dev:host",
-    "typecheck": "pnpm --filter server typecheck && pnpm --filter web exec vue-tsc -p tsconfig.typecheck.json --noEmit && pnpm --filter desktop exec vue-tsc -p tsconfig.typecheck.json --noEmit",
+    "dev:web": "pnpm --filter web2 dev",
+    "dev:desktop:renderer": "pnpm --filter desktop2 dev:renderer",
+    "dev:desktop:host": "pnpm --filter desktop2 dev:host",
+    "typecheck": "pnpm --filter server typecheck && pnpm --filter web2 typecheck && pnpm --filter desktop2 exec vue-tsc -p tsconfig.typecheck.json --noEmit",
     "lint": "pnpm run typecheck",
     "build:server": "pnpm --filter server build",
-    "build:desktop": "pnpm --filter desktop build",
+    "build:web": "pnpm --filter web2 build",
+    "build:desktop": "pnpm --filter desktop2 build",
     "diagram:core": "pnpm exec tsuml2 --glob \"./packages/core/src/**/!(*.d|*.test|*.spec).ts\" --outMermaidDsl \"./docs/architecture/core-class-diagram.mmd\" --outFile \"./docs/architecture/core-class-diagram.svg\" --memberAssociations --exportedTypesOnly",
     "test:server": "pnpm --filter server test",
     "test:core": "pnpm --filter @packages/core test",
     "test:ui": "pnpm --filter @packages/ui test",
-    "test:desktop": "pnpm --filter desktop test",
-    "test:e2e:web": "pnpm --filter web test:e2e",
-    "test:e2e:desktop": "pnpm --filter desktop test:e2e"
+    "test:web": "pnpm --filter web2 test",
+    "test:desktop": "pnpm --filter desktop2 test",
+    "test:e2e:web": "pnpm --filter web2 test:e2e",
+    "test:e2e:desktop": "pnpm --filter desktop2 test:e2e"
   },
   "engines": {
     "node": ">=18"

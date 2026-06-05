@@ -47,44 +47,25 @@
             data-testid="middle-pane-viewport"
             @wheel="handleMiddlePaneWheel"
           >
-            <AgentView
-              v-if="selectedOwnerNode && documentStore.activeAgent && documentStore.activeAgentKey && !documentStore.activePath"
-              :agent-key="documentStore.activeAgentKey"
-              :agent="documentStore.activeAgent"
-              :owner-node="selectedOwnerNode"
-              :index-path="documentStore.agentIndexPath"
-              :index-document="documentStore.agentIndexDocument"
-              :index-draft-content="documentStore.agentIndexDraftContent"
-              :index-viewer-id="documentStore.agentIndexViewerId"
-              :index-pane-mode="documentStore.agentIndexPaneMode"
-              :index-is-saving="documentStore.agentIndexIsSaving"
-              :index-is-dirty="!!(documentStore.agentIndexPath && documentStore.dirtyPaths[documentStore.agentIndexPath])"
-              :providers="chatStore.availableProviders"
-              :builtin-tools="builtinTools"
-              :model-load-states="chatStore.providerModelStates"
-              :linkable-markdown-documents="agentIndexLinkableMarkdownDocuments"
-              :linkable-conversations="agentIndexLinkableConversations"
-              :linkable-reference-resources="agentIndexLinkableReferenceResources"
-              @load-provider-models="chatStore.ensureProviderModelsLoaded"
-              @save-agent-config="saveSelectedAgentConfig"
-              @update-index-content="documentStore.updateAgentIndexDocument"
-              @save-index-document="documentStore.flushAgentIndexDocument"
+            <component
+              :is="activeWorkspaceSelectionComponent"
+              v-if="activeWorkspaceSelectionComponent"
               @open-document-link="onOpenDocumentLink"
               @open-conversation-link="onOpenConversationLink"
             />
             <DocumentEditorPane
               v-else
-              :active-path="documentStore.activePath"
+              :active-path="displayedDocumentPath"
               :active-agent-name="documentStore.activeAgent?.name ?? null"
-              :active-document="documentStore.activeDocument"
-              :active-viewer-id="documentStore.activeViewerId"
-              :active-pane-mode="documentStore.activePaneMode"
-              :model-value="draftContent"
+              :active-document="displayedDocument"
+              :active-viewer-id="displayedViewerId"
+              :active-pane-mode="displayedPaneMode"
+              :model-value="displayedDraftContent"
               :linkable-markdown-documents="activeLinkableMarkdownDocuments"
-              :linkable-conversations="activeLinkableConversations"
               :linkable-reference-resources="activeLinkableReferenceResources"
-              :is-saving="documentStore.isSaving"
-              :is-dirty="activeDocumentIsDirty"
+              :insert-link-types="activeInsertLinkTypes"
+              :is-saving="displayedIsSaving"
+              :is-dirty="displayedDocumentIsDirty"
               :persist-markdown-image="documentStore.persistPastedMarkdownImage"
               :middle-pane-mode="documentStore.middlePaneMode"
               :middle-pane-zoom="documentStore.middlePaneZoom"
@@ -93,7 +74,7 @@
               :can-undo="documentStore.canUndoActiveFile"
               :can-redo="documentStore.canRedoActiveFile"
               @update:model-value="onDraftChange"
-              @save="documentStore.flushActiveDocument"
+              @save="onSaveDisplayedDocument"
               @toggle-middle-pane-mode="documentStore.toggleMiddlePaneExpanded()"
               @undo-change="documentStore.undoActiveFileChange"
               @redo-change="documentStore.redoActiveFileChange"
@@ -114,7 +95,7 @@
         :class="{ 'grid-pane--collapsed': documentStore.middlePaneMode === 'maximized' }"
       >
         <slot name="assistant-pane">
-        <AgentRightPane
+        <WorkspaceRightPane
           @request-workspace-switch="requestWorkspaceSwitch"
           :active-agent="documentStore.activeAgent"
           :active-agent-key="documentStore.activeAgentKey"
@@ -125,7 +106,6 @@
             :context-provider="props.contextProvider"
             :on-file-changed="handleAssistantFileChanged"
             :agent-resolution-error="documentStore.agentResolutionError"
-            :restore-conversation-id="restoredAgentConversationId"
             :open-conversation-request="openConversationRequest"
           />
         </slot>
@@ -135,29 +115,27 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import {
-  DEFAULT_WORKSPACE_AGENT_KEY,
-  createBuiltinWorkspaceToolDefinitions,
+  DEFAULT_WORKSPACE_SCOPE_KEY as DEFAULT_WORKSPACE_AGENT_KEY,
   decodeTextDocument,
   encodeTextDocument,
   isTextDocumentMimeType,
-  type AgentInheritanceMode,
   type ContextNode,
   type IContextProvider
 } from '@packages/core/src';
-import AgentView from '../components/AgentView.vue';
-import AgentRightPane from '../components/AgentRightPane.vue';
+import WorkspaceRightPane from '../components/WorkspaceRightPane.vue';
 import DocumentEditorPane from '../components/DocumentEditorPane.vue';
 import DocumentFileTree from '../components/DocumentFileTree.vue';
 import MoveConfirmDialog from '../components/MoveConfirmDialog.vue';
 import MoveErrorDialog from '../components/MoveErrorDialog.vue';
-import { useChatStore } from '../store/chat';
+import { contributionQueryKey, workspaceRuntimeContextKey } from '../plugins/injectionKeys';
+import { useDocumentCreationFlows } from '../services/documentCreationFlows';
 import { useDocumentWorkspaceStore } from '../store/documentWorkspace';
 import type { ChatRoutePath } from '../routes';
 import { rewriteOutgoingLinks, type MarkdownConversationLinkTarget } from '../utils/markdownDocument';
 import type { OpenConversationRequest } from '../types/conversationLink';
-import { buildLinkableConversationEntries } from '../utils/conversationLink';
+import type { ResolvedInsertLinkType } from '../types/insertLink';
 
 const props = withDefaults(defineProps<{
   contextProvider: IContextProvider;
@@ -167,15 +145,15 @@ const props = withDefaults(defineProps<{
 });
 
 const documentStore = useDocumentWorkspaceStore();
-const chatStore = useChatStore();
-const builtinTools = createBuiltinWorkspaceToolDefinitions();
+const contributionQuery = inject(contributionQueryKey, null);
+const runtimeContext = inject(workspaceRuntimeContextKey, null);
+useDocumentCreationFlows();
 const emit = defineEmits<{
   (event: 'request-workspace-switch', path: ChatRoutePath): void;
 }>();
 const shellRef = ref<HTMLElement | null>(null);
 const viewportRef = ref<HTMLElement | null>(null);
 const panelSizes = computed(() => documentStore.panelSizes);
-const draftContent = computed(() => documentStore.draftContent);
 const gridTemplateColumns = computed(() => {
   if (documentStore.middlePaneMode === 'maximized') {
     return `minmax(0, calc((100% - 4px) * ${panelSizes.value[0]} / 100)) 4px minmax(0, calc((100% - 4px) * ${100 - panelSizes.value[0]} / 100)) 0px minmax(0, 0px)`;
@@ -186,20 +164,46 @@ const gridTemplateColumns = computed(() => {
 const activeDocumentIsDirty = computed(() => {
   return !!documentStore.activePath && documentStore.dirtyPaths[documentStore.activePath] === true;
 });
+const fallbackIndexDocumentIsActive = computed(() => {
+  return !activeWorkspaceSelectionComponent.value
+    && !documentStore.activePath
+    && !!documentStore.agentIndexDocument;
+});
+const displayedDocumentPath = computed(() => {
+  return documentStore.activePath ?? (fallbackIndexDocumentIsActive.value ? documentStore.agentIndexPath : null);
+});
+const displayedDocument = computed(() => {
+  return documentStore.activeDocument ?? (fallbackIndexDocumentIsActive.value ? documentStore.agentIndexDocument : null);
+});
+const displayedViewerId = computed(() => {
+  return documentStore.activeViewerId ?? (fallbackIndexDocumentIsActive.value ? documentStore.agentIndexViewerId : null);
+});
+const displayedPaneMode = computed(() => {
+  return documentStore.activePath
+    ? documentStore.activePaneMode
+    : (fallbackIndexDocumentIsActive.value ? documentStore.agentIndexPaneMode : documentStore.activePaneMode);
+});
+const displayedDraftContent = computed(() => {
+  return documentStore.activePath
+    ? documentStore.draftContent
+    : (fallbackIndexDocumentIsActive.value ? documentStore.agentIndexDraftContent : documentStore.draftContent);
+});
+const displayedIsSaving = computed(() => {
+  return documentStore.activePath
+    ? documentStore.isSaving
+    : (fallbackIndexDocumentIsActive.value ? documentStore.agentIndexIsSaving : documentStore.isSaving);
+});
+const displayedDocumentIsDirty = computed(() => {
+  const path = displayedDocumentPath.value;
+  return !!path && documentStore.dirtyPaths[path] === true;
+});
 const activeLinkableMarkdownDocuments = computed(() => {
-  return documentStore.getLinkableMarkdownDocuments(documentStore.activePath);
+  return documentStore.getLinkableMarkdownDocuments(displayedDocumentPath.value);
 });
 const activeLinkableReferenceResources = computed(() => {
-  return documentStore.getLinkableReferenceResources(documentStore.activePath);
+  return documentStore.getLinkableReferenceResources(displayedDocumentPath.value);
 });
-const agentIndexLinkableMarkdownDocuments = computed(() => {
-  return documentStore.getLinkableMarkdownDocuments(documentStore.agentIndexPath);
-});
-const agentIndexLinkableReferenceResources = computed(() => {
-  return documentStore.getLinkableReferenceResources(documentStore.agentIndexPath);
-});
-const activeLinkableConversations = computed(() => buildLinkableConversations(documentStore.activeAgentKey));
-const agentIndexLinkableConversations = computed(() => buildLinkableConversations(documentStore.activeAgentKey));
+const activeInsertLinkTypes = ref<ResolvedInsertLinkType[]>([]);
 const isWorkspaceSelectionReady = ref(false);
 const openConversationRequest = ref<OpenConversationRequest | null>(null);
 const showMoveConfirm = ref(false);
@@ -215,39 +219,87 @@ const selectedOwnerNode = computed<ContextNode | null>(() => {
       path: '/',
       name: 'Root',
       kind: 'directory',
-      agentKey: documentStore.activeAgentKey ?? DEFAULT_WORKSPACE_AGENT_KEY,
-      isAgentOwner: true
+      scopeKey: documentStore.activeAgentKey ?? DEFAULT_WORKSPACE_AGENT_KEY,
+      ownsMetadata: true
     };
   }
 
   const activeNode = documentStore.activeNode;
-  return activeNode?.kind === 'directory' && activeNode.isAgentOwner ? activeNode : null;
+  return activeNode?.kind === 'directory' && activeNode.ownsMetadata ? activeNode : null;
 });
-const restoredAgentConversationId = computed(() => {
-  const savedAgentViewStatus = chatStore.restoreAgentViewStatus();
-  if (!savedAgentViewStatus?.activeConversationId) {
-    return null;
-  }
-
-  const matchesSavedSelection = savedAgentViewStatus.activePath
-    ? documentStore.activePath === savedAgentViewStatus.activePath
-    : documentStore.selectedNodePath === savedAgentViewStatus.selectedNodePath;
-
-  return matchesSavedSelection ? savedAgentViewStatus.activeConversationId : null;
+const workspaceSelectionInput = computed(() => ({
+  selectedNode: documentStore.activeNode,
+  selectedOwnerNode: selectedOwnerNode.value,
+  activePath: documentStore.activePath,
+  activeScopeKey: documentStore.activeAgentKey,
+  activeScopeMetadata: documentStore.activeScopeMetadata,
+  contextProvider: props.contextProvider
+}));
+const activeWorkspaceSelectionComponent = computed(() => {
+  const views = contributionQuery?.value?.getWorkspaceSelectionViews() ?? [];
+  return views.find((view) => view.matches(workspaceSelectionInput.value))?.component ?? null;
 });
 const activeAssistantDocument = computed(() => {
-  if (!documentStore.activeDocument) {
+  const currentDocument = displayedDocument.value;
+  if (!currentDocument) {
     return null;
   }
 
-  if (!documentStore.activeViewerCapabilities?.edit) {
-    return documentStore.activeDocument;
+  const viewerCapabilities = documentStore.activePath
+    ? documentStore.activeViewerCapabilities
+    : (fallbackIndexDocumentIsActive.value ? documentStore.agentIndexViewerCapabilities : null);
+  if (!viewerCapabilities?.edit) {
+    return currentDocument;
   }
 
   return {
-    ...documentStore.activeDocument,
-    dataBase64: encodeTextDocument(documentStore.draftContent)
+    ...currentDocument,
+    dataBase64: encodeTextDocument(displayedDraftContent.value)
   };
+});
+
+async function refreshInsertLinkTypes(): Promise<void> {
+  const insertLinkTypes = contributionQuery?.value?.getInsertLinkTypes() ?? [];
+  const input = {
+    activePath: documentStore.activePath,
+    activeDocument: activeAssistantDocument.value,
+    activeScopeMetadata: documentStore.activeScopeMetadata,
+    activeScopeKey: documentStore.activeAgentKey,
+    selectedNodePath: documentStore.selectedNodePath,
+    contextProvider: props.contextProvider
+  };
+
+  const resolved = await Promise.all(
+    insertLinkTypes
+      .filter((insertLinkType) => insertLinkType.supports(input))
+      .map(async (insertLinkType) => ({
+        id: insertLinkType.id,
+        title: insertLinkType.title,
+        titleKey: insertLinkType.titleKey,
+        items: await insertLinkType.getItems(input)
+      }))
+  );
+
+  activeInsertLinkTypes.value = resolved;
+}
+
+const insertLinkRefreshState = computed(() => {
+  const insertLinkTypes = contributionQuery?.value?.getInsertLinkTypes() ?? [];
+  const input = {
+    activePath: documentStore.activePath,
+    activeDocument: activeAssistantDocument.value,
+    activeScopeMetadata: documentStore.activeScopeMetadata,
+    activeScopeKey: documentStore.activeAgentKey,
+    selectedNodePath: documentStore.selectedNodePath,
+    contextProvider: props.contextProvider
+  };
+
+  return insertLinkTypes
+    .filter((insertLinkType) => insertLinkType.supports(input))
+    .map((insertLinkType) => ({
+      id: insertLinkType.id,
+      refreshKey: insertLinkType.getRefreshKey?.(input) ?? null
+    }));
 });
 
 async function onMoveNode(input: { path: string; targetParentPath?: string }) {
@@ -263,7 +315,7 @@ async function onMoveNode(input: { path: string; targetParentPath?: string }) {
   }
 
   const targetNode = targetParentPath !== '/' ? documentStore.findNodeByPath(targetParentPath) : null;
-  if (movedNode?.agentKey && targetNode?.agentKey && movedNode.agentKey !== targetNode.agentKey) {
+  if (movedNode?.scopeKey && targetNode?.scopeKey && movedNode.scopeKey !== targetNode.scopeKey) {
     moveErrorReason.value = 'cross-agent';
     showMoveError.value = true;
     return;
@@ -305,10 +357,6 @@ function onMoveCancel() {
 }
 
 function requestWorkspaceSwitch(path: ChatRoutePath): void {
-  if (path === '/chat' && documentStore.activeAgent) {
-    chatStore.saveWorkspaceAgentContext(documentStore.activeAgent);
-  }
-
   emit('request-workspace-switch', path);
 }
 
@@ -317,35 +365,15 @@ async function syncWorkspaceConversationSelection(): Promise<void> {
     return;
   }
 
-  const savedAgentViewStatus = chatStore.restoreAgentViewStatus();
-  const isSameSelection = savedAgentViewStatus
-    && (
-      savedAgentViewStatus.activePath
-        ? documentStore.activePath === savedAgentViewStatus.activePath
-        : documentStore.selectedNodePath === savedAgentViewStatus.selectedNodePath
-    );
-
-  if (isSameSelection) {
-    if (!savedAgentViewStatus.activeConversationId) {
-      if (chatStore.currentConversation) {
-        chatStore.clearWorkspaceConversationSelection();
-      }
-      return;
-    }
-
-    if (chatStore.currentConversation?.id !== savedAgentViewStatus.activeConversationId) {
-      try {
-        await chatStore.selectLocalConversation(savedAgentViewStatus.activeConversationId);
-      } catch {
-        chatStore.clearWorkspaceConversationSelection();
-      }
-    }
-    return;
-  }
-
-  if (chatStore.currentConversation) {
-    chatStore.clearWorkspaceConversationSelection();
-  }
+  await runtimeContext?.value?.publishWorkspaceSelectionChanged({
+    activeScopeMetadata: documentStore.activeScopeMetadata,
+    activeScopeKey: documentStore.activeAgentKey,
+    selectedNodePath: documentStore.selectedNodePath,
+    activePath: documentStore.activePath,
+    activeDocument: activeAssistantDocument.value,
+    contextProvider: props.contextProvider,
+    onFileChanged: handleAssistantFileChanged
+  });
 }
 
 async function onOpenNode(path: string) {
@@ -362,14 +390,6 @@ async function onOpenDocumentLink(path: string): Promise<void> {
   await syncWorkspaceConversationSelection();
 }
 
-function buildLinkableConversations(agentKey: string | null) {
-  if (!agentKey) {
-    return [];
-  }
-
-  return buildLinkableConversationEntries(chatStore.getConversationsByAgent(agentKey));
-}
-
 async function onOpenConversationLink(target: MarkdownConversationLinkTarget): Promise<void> {
   if (!documentStore.activeAgentKey) {
     return;
@@ -381,62 +401,46 @@ async function onOpenConversationLink(target: MarkdownConversationLinkTarget): P
   };
 }
 
-async function saveSelectedAgentConfig(patch: {
-  description?: string;
-  instructions?: string;
-  modelProviderName?: string;
-  modelName?: string;
-  inheritance?: AgentInheritanceMode;
-  tools?: Array<{ id: string; description?: string }>;
-  inheritTools?: boolean;
-}): Promise<void> {
-  if (!selectedOwnerNode.value) {
-    return;
-  }
-
-  await documentStore.saveAgentConfig({
-    ownerPath: selectedOwnerNode.value.path,
-    patch
-  });
-}
-
 watch(() => props.panelSizes, (value) => {
   documentStore.setPanelSizes(value);
 }, { immediate: true });
 
+watch(
+  () => insertLinkRefreshState.value,
+  () => {
+    void refreshInsertLinkTypes();
+  },
+  { immediate: true }
+);
+
 watch(() => props.contextProvider, async (provider) => {
   isWorkspaceSelectionReady.value = false;
-  documentStore.setContextProvider(provider);
-  await documentStore.hydrateWorkspace();
+  const shouldResetWorkspace = documentStore.contextProvider !== provider;
 
-  const savedAgentViewStatus = chatStore.restoreAgentViewStatus();
-  if (!savedAgentViewStatus) {
+  if (shouldResetWorkspace) {
+    documentStore.setContextProvider(provider);
+  }
+
+  if (!provider) {
     isWorkspaceSelectionReady.value = true;
     return;
   }
 
-  if (
-    savedAgentViewStatus.activeConversationId
-    && chatStore.currentConversation?.id !== savedAgentViewStatus.activeConversationId
-  ) {
-    await chatStore.selectLocalConversation(savedAgentViewStatus.activeConversationId).catch(() => undefined);
-  } else {
-    if (chatStore.isPreviewing) {
-      chatStore.exitPreview();
-    }
-
-    if (chatStore.historySource !== 'local') {
-      await chatStore.setHistorySource('local');
-    }
+  if (shouldResetWorkspace || !documentStore.accessInitialized) {
+    await documentStore.hydrateWorkspace();
   }
 
-  await documentStore.restoreSelection({
-    selectedNodePath: savedAgentViewStatus.selectedNodePath,
-    activePath: savedAgentViewStatus.activePath
-  });
   isWorkspaceSelectionReady.value = true;
   await syncWorkspaceConversationSelection();
 }, { immediate: true });
+
+watch(
+  runtimeContext ?? ref(null),
+  () => {
+    void syncWorkspaceConversationSelection();
+  },
+  { flush: 'sync' }
+);
 
 watch(
   () => [documentStore.selectedNodePath, documentStore.activePath] as const,
@@ -448,13 +452,14 @@ watch(
 
 watch(
   () => [documentStore.activeAgentKey, documentStore.activePath, activeAssistantDocument.value, props.contextProvider] as const,
-  ([activeAgentKey, activePath, activeDocument, contextProvider]) => {
-    chatStore.setWorkspaceContext({
-      activeAgentKey,
+  () => {
+    void runtimeContext?.value?.publishWorkspaceSelectionChanged({
+      activeScopeMetadata: documentStore.activeScopeMetadata,
+      activeScopeKey: documentStore.activeAgentKey,
       selectedNodePath: documentStore.selectedNodePath,
-      activePath,
-      activeDocument,
-      contextProvider,
+      activePath: documentStore.activePath,
+      activeDocument: activeAssistantDocument.value,
+      contextProvider: props.contextProvider,
       onFileChanged: handleAssistantFileChanged
     });
   },
@@ -464,7 +469,20 @@ watch(
 let cleanupResize: (() => void) | null = null;
 
 function onDraftChange(markdown: string) {
+  if (fallbackIndexDocumentIsActive.value && !documentStore.activePath) {
+    documentStore.updateAgentIndexDocument(markdown);
+    return;
+  }
+
   documentStore.updateActiveDocument(markdown);
+}
+
+function onSaveDisplayedDocument() {
+  if (fallbackIndexDocumentIsActive.value && !documentStore.activePath) {
+    return documentStore.flushAgentIndexDocument();
+  }
+
+  return documentStore.flushActiveDocument();
 }
 
 function handleAssistantFileChanged(change: { path: string; beforeContent: string; afterContent: string; alreadyPersisted?: boolean }) {

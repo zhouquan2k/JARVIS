@@ -1,4 +1,4 @@
-import type { Conversation } from '@packages/core/src';
+import type { Conversation } from '@plugins/ai-agent/api';
 import type { LinkableConversationEntry } from '../types/conversationLink';
 
 export function buildLinkableConversationEntries(conversations: Conversation[]): LinkableConversationEntry[] {

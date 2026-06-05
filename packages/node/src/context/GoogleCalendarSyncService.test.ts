@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { Task } from '../../../core/src/interfaces/ITaskProvider.ts';
+import type { Task } from '@plugins/task-mgr/api';
 import { GoogleCalendarSyncService, computeReminderMinutes, resolveCalendarDueAt } from './GoogleCalendarSyncService.ts';
 
 function createTimedTask(overrides: Partial<Task> = {}): Task {

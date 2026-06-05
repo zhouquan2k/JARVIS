@@ -40,18 +40,6 @@
               <button
                 type="button"
                 class="editor-link-tab"
-                :class="{ 'editor-link-tab--active': activeLinkPickerTab === 'conversation' }"
-                data-testid="markdown-link-tab-conversation"
-                role="tab"
-                :aria-selected="activeLinkPickerTab === 'conversation' ? 'true' : 'false'"
-                @mousedown.prevent
-                @click="setLinkPickerTab('conversation')"
-              >
-                {{ t('shared.markdownLinkTabConversations') }}
-              </button>
-              <button
-                type="button"
-                class="editor-link-tab"
                 :class="{ 'editor-link-tab--active': activeLinkPickerTab === 'resource' }"
                 data-testid="markdown-link-tab-resource"
                 role="tab"
@@ -60,6 +48,20 @@
                 @click="setLinkPickerTab('resource')"
               >
                 {{ t('shared.markdownLinkTabResources') }}
+              </button>
+              <button
+                v-for="insertLinkType in props.insertLinkTypes"
+                :key="insertLinkType.id"
+                type="button"
+                class="editor-link-tab"
+                :class="{ 'editor-link-tab--active': activeLinkPickerTab === insertLinkType.id }"
+                :data-testid="`markdown-link-tab-${insertLinkType.id}`"
+                role="tab"
+                :aria-selected="activeLinkPickerTab === insertLinkType.id ? 'true' : 'false'"
+                @mousedown.prevent
+                @click="setLinkPickerTab(insertLinkType.id)"
+              >
+                {{ insertLinkType.titleKey ? t(insertLinkType.titleKey) : insertLinkType.title }}
               </button>
             </div>
             <p
@@ -86,20 +88,27 @@
                 {{ t('shared.noMarkdownLinkTargets') }}
               </p>
             </div>
-            <div v-else-if="activeLinkPickerTab === 'conversation'" data-testid="markdown-link-panel-conversation">
+            <div
+              v-else-if="activeInsertLinkType"
+              :data-testid="`markdown-link-panel-${activeInsertLinkType.id}`"
+            >
               <button
-                v-for="conversation in props.linkableConversations"
-                :key="conversation.conversationId"
+                v-for="item in activeInsertLinkType.items"
+                :key="item.id"
                 type="button"
                 class="editor-link-option"
-                :data-testid="`markdown-conversation-link-option-${conversation.conversationId}`"
+                :data-testid="`markdown-insert-link-option-${activeInsertLinkType.id}-${item.id}`"
                 @mousedown.prevent
-                @click="insertConversationLink(conversation.conversationId)"
+                @click="insertDynamicLinkItem(activeInsertLinkType.id, item.id)"
               >
                 <MessageSquareQuote class="editor-link-option-icon" :size="14" aria-hidden="true" />
-                {{ conversation.title }}
+                {{ item.title }}
               </button>
-              <p v-if="props.linkableConversations.length === 0" class="editor-link-empty" data-testid="markdown-link-empty-conversation">
+              <p
+                v-if="activeInsertLinkType.items.length === 0"
+                class="editor-link-empty"
+                :data-testid="`markdown-link-empty-${activeInsertLinkType.id}`"
+              >
                 {{ t('shared.noMarkdownLinkTargets') }}
               </p>
             </div>
@@ -253,11 +262,11 @@ import { Eye, Link2, Maximize2, MessageSquareQuote, Minimize2, PencilLine, Save 
 import type { ContextDocument, ContextNode } from '@packages/core/src';
 import { useWorkspaceI18n } from '../i18n';
 import { resolveDocumentViewer } from '../document-viewers';
-import { buildMarkdownConversationLinkHref, buildMarkdownResourceInsertion, buildRelativeMarkdownLinkPath, type MarkdownConversationLinkTarget, type MarkdownViewerMode } from '../utils/markdownDocument';
+import { buildMarkdownResourceInsertion, buildRelativeMarkdownLinkPath, type MarkdownConversationLinkTarget, type MarkdownViewerMode } from '../utils/markdownDocument';
 import type { FileChangeRecord, LineDiffEntry } from '../services/FileChangeService';
 import type { DocumentViewerSearchHandle } from '../document-viewers/types';
 import { getContextNodeDisplayName } from '../utils/contextNodePresentation';
-import type { LinkableConversationEntry } from '../types/conversationLink';
+import type { ResolvedInsertLinkType } from '../types/insertLink';
 
 const props = withDefaults(defineProps<{
   activePath: string | null;
@@ -267,8 +276,8 @@ const props = withDefaults(defineProps<{
   activePaneMode: 'empty' | 'viewer' | 'unsupported';
   modelValue: string;
   linkableMarkdownDocuments?: ContextNode[];
-  linkableConversations?: LinkableConversationEntry[];
   linkableReferenceResources?: ContextNode[];
+  insertLinkTypes?: ResolvedInsertLinkType[];
   isSaving: boolean;
   isDirty?: boolean;
   persistMarkdownImage?: (input: {
@@ -285,8 +294,8 @@ const props = withDefaults(defineProps<{
 }>(), {
   isDirty: false,
   linkableMarkdownDocuments: () => [],
-  linkableConversations: () => [],
   linkableReferenceResources: () => [],
+  insertLinkTypes: () => [],
   middlePaneZoom: 1
 });
 const { t } = useWorkspaceI18n();
@@ -353,7 +362,6 @@ const isMarkdownDocument = computed(() => {
 const markdownViewerMode = ref<MarkdownViewerMode>('viewer');
 const markdownViewerRef = ref<(Partial<DocumentViewerSearchHandle> & {
   insertMarkdownLink?: (input: { label: string; href: string }) => boolean;
-  insertMarkdownConversationLink?: (input: { label: string; conversationId: string }) => boolean;
   insertMarkdownSnippet?: (input: { markdown?: string; buildReplacement?: (selectedText: string) => string }) => boolean;
   insertMarkdownInViewer?: (markdown: string) => boolean;
   prepareMarkdownSelectionFromViewer?: () => boolean;
@@ -361,7 +369,7 @@ const markdownViewerRef = ref<(Partial<DocumentViewerSearchHandle> & {
 const searchInputRef = ref<HTMLInputElement | null>(null);
 const isSearchOpen = ref(false);
 const isLinkPickerOpen = ref(false);
-const activeLinkPickerTab = ref<'document' | 'conversation' | 'resource'>('document');
+const activeLinkPickerTab = ref<string>('document');
 const linkInsertionPointMissing = ref(false);
 const searchQuery = ref('');
 const activeSearchMatchIndex = ref(0);
@@ -382,18 +390,21 @@ const canInsertMarkdownLink = computed(() => {
     && props.linkableMarkdownDocuments.length > 0
     && !!props.activePath;
 });
-const canInsertConversationLink = computed(() => {
-  return isMarkdownDocument.value
-    && props.linkableConversations.length > 0
-    && !!props.activePath;
-});
 const canInsertReferenceResourceLink = computed(() => {
   return isMarkdownDocument.value
     && props.linkableReferenceResources.length > 0
     && !!props.activePath;
 });
+const canInsertDynamicLink = computed(() => {
+  return isMarkdownDocument.value
+    && props.insertLinkTypes.some((type) => type.items.length > 0)
+    && !!props.activePath;
+});
 const canInsertAnyLink = computed(() => {
-  return canInsertMarkdownLink.value || canInsertConversationLink.value || canInsertReferenceResourceLink.value;
+  return canInsertMarkdownLink.value || canInsertReferenceResourceLink.value || canInsertDynamicLink.value;
+});
+const activeInsertLinkType = computed(() => {
+  return props.insertLinkTypes.find((type) => type.id === activeLinkPickerTab.value) ?? null;
 });
 const searchMatchCurrent = computed(() => searchMatchCount.value === 0 ? 0 : activeSearchMatchIndex.value + 1);
 const tooltipState = reactive({
@@ -525,17 +536,17 @@ function toggleLinkPicker() {
   if (!isLinkPickerOpen.value) {
     if (canInsertMarkdownLink.value) {
       activeLinkPickerTab.value = 'document';
-    } else if (canInsertConversationLink.value) {
-      activeLinkPickerTab.value = 'conversation';
-    } else {
+    } else if (canInsertReferenceResourceLink.value) {
       activeLinkPickerTab.value = 'resource';
+    } else {
+      activeLinkPickerTab.value = props.insertLinkTypes[0]?.id ?? 'document';
     }
     linkInsertionPointMissing.value = false;
   }
   isLinkPickerOpen.value = !isLinkPickerOpen.value;
 }
 
-function setLinkPickerTab(tab: 'document' | 'conversation' | 'resource') {
+function setLinkPickerTab(tab: string) {
   activeLinkPickerTab.value = tab;
   linkInsertionPointMissing.value = false;
 }
@@ -567,19 +578,17 @@ function insertMarkdownLink(targetPath: string) {
   insertMarkdownSnippetIntoDocument(snippet, () => markdownViewerRef.value?.insertMarkdownLink?.({ label, href }));
 }
 
-function insertConversationLink(conversationId: string) {
-  const conversation = props.linkableConversations.find((candidate) => candidate.conversationId === conversationId);
-  if (!conversation) {
+function insertDynamicLinkItem(typeId: string, itemId: string) {
+  const insertLinkType = props.insertLinkTypes.find((candidate) => candidate.id === typeId);
+  const item = insertLinkType?.items.find((candidate) => candidate.id === itemId);
+  if (!item) {
     return;
   }
 
-  const snippet = `[${conversation.title}](${buildMarkdownConversationLinkHref(conversation.conversationId)})`;
+  const snippet = item.markdown;
   insertMarkdownSnippetIntoDocument(
     snippet,
-    () => markdownViewerRef.value?.insertMarkdownConversationLink?.({
-      label: conversation.title,
-      conversationId: conversation.conversationId
-    })
+    () => markdownViewerRef.value?.insertMarkdownSnippet?.({ markdown: snippet })
   );
 }
 
@@ -686,6 +695,12 @@ async function runMarkdownInsertion(
 }
 
 function onGlobalKeydown(event: KeyboardEvent) {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's' && canSave.value && !props.isSaving) {
+    event.preventDefault();
+    emit('save');
+    return;
+  }
+
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f' && supportsViewerSearch.value) {
     event.preventDefault();
     openViewerSearch();

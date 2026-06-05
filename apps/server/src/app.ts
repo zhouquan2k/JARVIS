@@ -17,11 +17,13 @@ import { CodexCliService } from './services/codexCliService.js';
 import { HttpContextService } from './services/httpContextService.js';
 import { SyncService } from './services/syncService.js';
 import type { ContextProvider } from './types/context.js';
+import type { TaskService } from '@plugins/task-mgr/api';
 
 export interface CreateAppOptions {
     config?: ServerConfig;
     database?: SyncDatabase;
     contextProvider?: ContextProvider;
+    taskService?: TaskService;
 }
 
 function createContextProvider(config: ServerConfig, repository: SyncRepository): ContextProvider {
@@ -118,8 +120,9 @@ export function createApp(options: CreateAppOptions = {}) {
     const database = options.database ?? createDatabase(config);
     const repository = new SyncRepository(database);
     const contextProvider = options.contextProvider ?? createContextProvider(config, repository);
+    const taskService = options.taskService ?? resolveTaskService(contextProvider);
     const service = new SyncService(repository);
-    const contextService = new HttpContextService(contextProvider);
+    const contextService = new HttpContextService(contextProvider, taskService);
     const codexAuthService = new CodexAuthService({
         command: config.codexCommand,
         cwd: config.codexWorkingDirectory
@@ -174,4 +177,12 @@ export function createApp(options: CreateAppOptions = {}) {
     }
 
     return app;
+}
+
+function resolveTaskService(provider: ContextProvider): TaskService {
+    if ('getTaskService' in provider && typeof provider.getTaskService === 'function') {
+        return provider.getTaskService();
+    }
+
+    throw new Error('Task service is not available for the configured context provider.');
 }

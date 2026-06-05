@@ -29,7 +29,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import type { MessageAnnotation } from '@packages/core/src';
+import type { MessageAnnotation } from '@plugins/ai-agent/api';
 
 const props = defineProps<{
   annotations?: MessageAnnotation[];

@@ -3,7 +3,7 @@ import { editorViewCtx, parserCtx, remarkCtx } from '@milkdown/kit/core';
 import type { Node as ProseMirrorNode } from '@milkdown/kit/prose/model';
 import { Decoration, DecorationSet, type EditorView as ProseMirrorEditorView } from '@milkdown/kit/prose/view';
 import { replaceAll } from '@milkdown/kit/utils';
-import { resolveContextBaseUrl } from '@packages/core/src';
+import { resolveContextBaseUrl } from '@plugins/ai-agent/api';
 import { translateWorkspaceMessage } from '../i18n';
 import { findMarkdownSearchMatches } from './markdownSearch';
 import { renderMermaidPreview } from './mermaidPreview';

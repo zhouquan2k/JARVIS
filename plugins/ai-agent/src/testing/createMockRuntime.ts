@@ -1,0 +1,559 @@
+import { APP_CONFIG, type ModelConfig, type ProviderConfig, type ProviderModelCatalog, type RuntimeMode } from '@packages/core/config';
+import type { AnalysisResult } from '../interfaces/AnalysisResult';
+import type {
+    AgentCapabilities,
+    AgentRunRequest,
+    IAgentCapableProvider
+} from '../interfaces/IAgentCapableProvider';
+import type {
+    IModelProvider,
+    ProviderSendResult,
+    ProviderStreamUpdate,
+    SendMessageOptions
+} from '../interfaces/IModelProvider';
+import type { MessageAnnotation, MessageAttachment } from '../interfaces/Conversation';
+import type { ModelProviderRuntime } from '../runtime/modelProviderRuntime.types';
+
+export interface CreateMockRuntimeOptions {
+    runtimeMode: RuntimeMode;
+    slowStreamTrigger?: string;
+    defaultCharDelayMs?: number;
+    slowCharDelayMs?: number;
+    providerAuthOverrides?: Partial<Record<string, boolean>>;
+}
+
+function buildMockProviders(runtimeMode: RuntimeMode): ProviderConfig[] {
+    return APP_CONFIG.providers
+        .filter((provider) => provider.supportedRuntimeModes.includes(runtimeMode))
+        .map((provider) => {
+            const models = ensurePreferredDefaultModel(provider).map((model) => ({ ...model }));
+            return {
+                ...provider,
+                name: provider.name.includes('(Mock)') ? provider.name : `${provider.name} (Mock)`,
+                supportedRuntimeModes: [runtimeMode],
+                models,
+                defaultModel: resolveMockDefaultModel(provider, models)
+            };
+        });
+}
+
+function normalizeModelToken(value: string): string {
+    return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function toMockModelId(providerId: string, preferredDefaultModel: string): string {
+    return `${providerId}-${normalizeModelToken(preferredDefaultModel) || 'preferred-default'}`;
+}
+
+function resolveMockDefaultModel(provider: ProviderConfig, models: ModelConfig[]): string {
+    const preferredDefaultModel = provider.preferredDefaultModel?.trim();
+    if (!preferredDefaultModel) {
+        return provider.defaultModel;
+    }
+
+    const normalizedPreferred = normalizeModelToken(preferredDefaultModel);
+    const matchedModel = models.find((model) => {
+        return model.id === preferredDefaultModel
+            || model.name === preferredDefaultModel
+            || normalizeModelToken(model.id) === normalizedPreferred
+            || normalizeModelToken(model.name) === normalizedPreferred;
+    });
+
+    return matchedModel?.id || provider.defaultModel;
+}
+
+function ensurePreferredDefaultModel(provider: ProviderConfig): ModelConfig[] {
+    const models: ModelConfig[] = provider.models.map((model) => ({
+        ...model,
+        options: model.options?.map((option) => ({
+            ...option,
+            conflictsWith: option.conflictsWith ? [...option.conflictsWith] : undefined
+        }))
+    }));
+    const preferredDefaultModel = provider.preferredDefaultModel?.trim();
+    if (!preferredDefaultModel) {
+        return models;
+    }
+
+    const normalizedPreferred = normalizeModelToken(preferredDefaultModel);
+    const hasMatch = models.some((model) => {
+        return model.id === preferredDefaultModel
+            || model.name === preferredDefaultModel
+            || normalizeModelToken(model.id) === normalizedPreferred
+            || normalizeModelToken(model.name) === normalizedPreferred;
+    });
+
+    if (hasMatch) {
+        return models;
+    }
+
+    models.push({
+        id: toMockModelId(provider.id, preferredDefaultModel),
+        name: preferredDefaultModel
+    });
+    return models;
+}
+
+function sleep(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function extractByLabel(text: string, label: string): string {
+    const index = text.indexOf(label);
+    if (index === -1) {
+        return '';
+    }
+
+    const nextLineIndex = text.indexOf('\n', index + label.length);
+    if (nextLineIndex === -1) {
+        return text.slice(index + label.length).trim();
+    }
+
+    return text.slice(index + label.length, nextLineIndex).trim();
+}
+
+function excerpt(text: string, maxLen = 96): string {
+    if (!text) return '';
+    return text.length <= maxLen ? text : `${text.slice(0, maxLen)}...`;
+}
+
+function buildMockTitle(prompt: string, maxLength = 30): string {
+    const normalized = prompt.trim().replace(/\s+/g, ' ').replace(/^["'“”‘’]+|["'“”‘’]+$/gu, '');
+    if (!normalized) {
+        return 'New Chat';
+    }
+
+    return normalized.length <= maxLength
+        ? normalized
+        : `${normalized.slice(0, maxLength)}...`;
+}
+
+function buildStructuredMockResponse(providerId: string, modelId?: string): { text: string; annotations?: MessageAnnotation[] } {
+    const text = `${providerId}/${modelId || 'default'} 返回了结构化消息 [1]`;
+    return {
+        text,
+        annotations: [
+            {
+                kind: 'cite',
+                range: { start: text.length - 3, end: text.length },
+                payload: {
+                    refId: 'ref-1',
+                    label: '[1]',
+                    title: 'Mock Source',
+                    url: 'https://example.com/mock-source',
+                    snippet: 'Mock citation payload'
+                }
+            },
+            {
+                kind: 'image_group',
+                range: null,
+                payload: {
+                    groupId: 'mock-gallery',
+                    images: [
+                        {
+                            id: 'mock-image-1',
+                            mimeType: 'image/png',
+                            previewBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2ZQ1EAAAAASUVORK5CYII=',
+                            alt: 'Mock image'
+                        }
+                    ]
+                }
+            }
+        ]
+    };
+}
+
+function buildAttachmentEchoText(
+    providerId: string,
+    modelId: string | undefined,
+    attachments: MessageAttachment[]
+): string {
+    const lines = attachments.map((attachment, index) => {
+        return `${index + 1}. ${attachment.name} [${attachment.mimeType}]`;
+    });
+
+    return [
+        `${providerId}/${modelId || 'default'} 附件回显`,
+        ...lines
+    ].join('\n');
+}
+
+function extractTaggedSection(text: string, tagName: string): string {
+    const match = text.match(new RegExp(`<${tagName}>\\n([\\s\\S]*?)\\n<\\/${tagName}>`, 'u'));
+    return match?.[1]?.trim() || '';
+}
+
+function buildArchiveMockResponse(prompt: string): string | null {
+    if (!prompt.includes('Visible conversation transcript:') || !prompt.includes('<Q>') || !prompt.includes('<A>')) {
+        return null;
+    }
+
+    const originalQ = extractTaggedSection(prompt, 'Q');
+    const originalA = extractTaggedSection(prompt, 'A');
+    const transcript = extractTaggedSection(prompt, 'TRANSCRIPT');
+    const transcriptBlocks = Array.from(transcript.matchAll(/\[(USER|ASSISTANT)\]\n([\s\S]*?)(?=\n\n\[(?:USER|ASSISTANT)\]\n|$)/gu));
+    const userMessages = transcriptBlocks
+        .filter((match) => match[1] === 'USER')
+        .map((match) => match[2]?.trim() || '')
+        .filter((value) => value && value !== '[EMPTY]');
+    const assistantMessages = transcriptBlocks
+        .filter((match) => match[1] === 'ASSISTANT')
+        .map((match) => match[2]?.trim() || '')
+        .filter((value) => value && value !== '[EMPTY]');
+
+    const dedupeKeepLast = (items: string[]) => {
+        const seen = new Set<string>();
+        const next: string[] = [];
+        for (let index = items.length - 1; index >= 0; index -= 1) {
+            const item = items[index];
+            if (!item || seen.has(item)) {
+                continue;
+            }
+            seen.add(item);
+            next.unshift(item);
+        }
+        return next;
+    };
+
+    const q = dedupeKeepLast([
+        originalQ === '[EMPTY]' ? '' : originalQ,
+        ...userMessages
+    ].filter(Boolean)).join('\n\n').trim();
+    const a = dedupeKeepLast([
+        originalA === '[EMPTY]' ? '' : originalA,
+        ...assistantMessages
+    ].filter(Boolean)).join('\n\n').trim();
+
+    return JSON.stringify({ q, a });
+}
+
+class MockStreamingProvider implements IAgentCapableProvider {
+    public id: string;
+    private aborted = false;
+
+    constructor(
+        providerId: string,
+        private readonly modelCatalog: ProviderModelCatalog,
+        private readonly options: {
+            isAuthenticated: boolean;
+            defaultCharDelayMs: number;
+            slowStreamTrigger: string;
+            slowCharDelayMs: number;
+        }
+    ) {
+        this.id = providerId;
+    }
+
+    async checkAuth(): Promise<boolean> {
+        return this.options.isAuthenticated;
+    }
+
+    async getDocumentCapability() {
+        return {
+            acceptedMimeTypes: ['text/plain', 'text/markdown', 'application/pdf']
+        };
+    }
+
+    async getAvailableModels(): Promise<ProviderModelCatalog> {
+        return {
+            models: this.modelCatalog.models.map((model) => ({
+                ...model,
+                options: model.options?.map((option) => ({
+                    ...option,
+                    conflictsWith: option.conflictsWith ? [...option.conflictsWith] : undefined
+                }))
+            })),
+            defaultModel: this.modelCatalog.defaultModel
+        };
+    }
+
+    async generateConversationTitle(
+        prompt: string,
+        maxLength = 30
+    ): Promise<string> {
+        return buildMockTitle(prompt, maxLength);
+    }
+
+    async sendMessage(
+        prompt: string,
+        options: SendMessageOptions = {},
+        onUpdate: (update: ProviderStreamUpdate) => void
+    ): Promise<ProviderSendResult> {
+        this.aborted = false;
+
+        const isAnalysisPrompt =
+            prompt.includes('User prompt:') &&
+            prompt.includes('Model A output:') &&
+            prompt.includes('Model B output:');
+        const userPrompt = extractByLabel(prompt, 'User prompt:');
+        const outputA = extractByLabel(prompt, 'Model A output:');
+        const outputB = extractByLabel(prompt, 'Model B output:');
+
+        const structuredResponse = prompt.includes('TRIGGER_ANNOTATED_NATIVE')
+            ? buildStructuredMockResponse(this.id, options.modelId)
+            : null;
+        const attachmentEchoText = prompt.includes('TRIGGER_ATTACHMENT_ECHO')
+            ? buildAttachmentEchoText(this.id, options.modelId, options.attachments || [])
+            : null;
+        const functionalParts = prompt.includes('TRIGGER_FUNCTIONAL_PARTS')
+            ? [
+                {
+                    id: 'mock-functional-tool-exchange',
+                    kind: 'tool_exchange' as const,
+                    title: 'mock_tool',
+                    content: JSON.stringify({
+                        request: { name: 'mock_tool', arguments: { prompt } },
+                        response: { ok: true, echoedPrompt: prompt }
+                    }, null, 2),
+                    requestContent: JSON.stringify({ name: 'mock_tool', arguments: { prompt } }, null, 2),
+                    responseContent: JSON.stringify({ ok: true, echoedPrompt: prompt }, null, 2)
+                }
+            ]
+            : undefined;
+        const archiveResponseText = buildArchiveMockResponse(prompt);
+        const finalText = isAnalysisPrompt
+            ? this.buildAnalysisText(userPrompt, outputA, outputB)
+            : structuredResponse?.text || attachmentEchoText || archiveResponseText || this.buildNativeText(prompt, options.modelId);
+
+        const charDelay = prompt.includes(this.options.slowStreamTrigger)
+            ? this.options.slowCharDelayMs
+            : this.options.defaultCharDelayMs;
+        let partial = '';
+        for (const char of finalText) {
+            if (this.aborted) {
+                throw new Error('Request aborted');
+            }
+            partial += char;
+            onUpdate({
+                text: partial,
+                annotations: structuredResponse && partial.length === finalText.length
+                    ? structuredResponse.annotations
+                    : undefined,
+                functionalParts: partial.length === finalText.length ? functionalParts : undefined
+            });
+            await sleep(charDelay);
+        }
+
+        return {
+            text: finalText,
+            conversationId: options.context?.conversationId || crypto.randomUUID(),
+            messageId: crypto.randomUUID(),
+            annotations: structuredResponse?.annotations,
+            functionalParts
+        };
+    }
+
+    getAgentCapabilities(): AgentCapabilities {
+        return {
+            nativeAgent: true,
+            toolLoop: 'application-managed'
+        };
+    }
+
+    async runAgent(
+        request: AgentRunRequest,
+        onUpdate: (update: ProviderStreamUpdate) => void
+    ): Promise<ProviderSendResult> {
+        this.aborted = false;
+
+        if (request.toolExchanges?.length) {
+            const toolSummary = request.toolExchanges
+                .map((exchange) => `${exchange.call.name}:${exchange.result.result}`)
+                .join('\n');
+            const finalText = `${this.id}/${request.modelId || request.agent.modelName || 'default'} agent(${request.agent.name}) => ${request.prompt}\n${toolSummary}`;
+            onUpdate({ text: finalText });
+            return {
+                text: finalText,
+                conversationId: request.context?.conversationId || crypto.randomUUID(),
+                messageId: crypto.randomUUID()
+            };
+        }
+
+        if (request.prompt.includes('TRIGGER_AGENT_TOOL_LOOP') && request.agent.tools?.[0]?.id) {
+            const runtimeTool = request.tools?.[0]?.id || request.agent.tools[0].id;
+            return {
+                text: '',
+                conversationId: request.context?.conversationId || crypto.randomUUID(),
+                messageId: crypto.randomUUID(),
+                toolCalls: [
+                    {
+                        id: 'mock-tool-call-1',
+                        name: runtimeTool,
+                        arguments: { scopePath: request.agent.scopePath }
+                    }
+                ]
+            };
+        }
+
+        if (request.prompt.includes('TRIGGER_AGENT_REPLACE_ACTIVE_FILE') && request.agent.tools?.some((tool) => tool.id === 'replace_text_in_file')) {
+            return {
+                text: '',
+                conversationId: request.context?.conversationId || crypto.randomUUID(),
+                messageId: crypto.randomUUID(),
+                toolCalls: [
+                    {
+                        id: 'mock-tool-call-replace',
+                        name: 'replace_text_in_file',
+                        arguments: {
+                            target: 'Playwright knowledge web',
+                            replacement: 'Playwright knowledge web updated by agent'
+                        }
+                    }
+                ]
+            };
+        }
+
+        if (request.prompt.includes('TRIGGER_ATTACHMENT_ECHO')) {
+            const finalText = buildAttachmentEchoText(
+                this.id,
+                request.modelId || request.agent.modelName,
+                request.attachments || []
+            );
+            onUpdate({ text: finalText });
+            return {
+                text: finalText,
+                conversationId: request.context?.conversationId || crypto.randomUUID(),
+                messageId: crypto.randomUUID()
+            };
+        }
+
+        const finalText = `${this.id}/${request.modelId || request.agent.modelName || 'default'} agent(${request.agent.name}) => ${request.prompt}`;
+        onUpdate({ text: finalText });
+        return {
+            text: finalText,
+            conversationId: request.context?.conversationId || crypto.randomUUID(),
+            messageId: crypto.randomUUID()
+        };
+    }
+
+    abort(): void {
+        this.aborted = true;
+    }
+
+    private buildNativeText(prompt: string, modelId?: string): string {
+        if (prompt.includes('TRIGGER_MARKDOWN_NATIVE')) {
+            return [
+                `## ${this.id}/${modelId || 'default'} Markdown`,
+                '',
+                '- 第一条要点',
+                '- 第二条要点',
+                '',
+                '```ts',
+                "console.log('markdown from model')",
+                '```'
+            ].join('\n');
+        }
+
+        return `${this.id}/${modelId || 'default'} => ${prompt}`;
+    }
+
+    private buildAnalysisText(userPrompt: string, outputA: string, outputB: string): string {
+        if (userPrompt.includes('TRIGGER_BAD_ANALYSIS')) {
+            return 'INVALID_ANALYSIS_PAYLOAD';
+        }
+
+        if (userPrompt.includes('TRIGGER_MD_ARRAY_ANALYSIS')) {
+            return [
+                '```json',
+                JSON.stringify(
+                    {
+                        agreements: [
+                            `共同问题原文：${userPrompt || 'N/A'}`,
+                            `A原文片段：${excerpt(outputA)}`,
+                            `B原文片段：${excerpt(outputB)}`
+                        ],
+                        conflictsA: [`${excerpt(outputA)}`],
+                        conflictsB: [`${excerpt(outputB)}`],
+                        uniqueA: [`${excerpt(outputA)}（A特有片段）`],
+                        uniqueB: [`${excerpt(outputB)}（B特有片段）`]
+                    },
+                    null,
+                    2
+                ),
+                '```'
+            ].join('\n');
+        }
+
+        return JSON.stringify({
+            agreements: `共同问题原文：${userPrompt || 'N/A'}`,
+            conflictsA: excerpt(outputA),
+            conflictsB: excerpt(outputB),
+            uniqueA: `${excerpt(outputA)}（A特有片段）`,
+            uniqueB: `${excerpt(outputB)}（B特有片段）`
+        } satisfies AnalysisResult);
+    }
+}
+
+export function createMockRuntime(options: CreateMockRuntimeOptions): ModelProviderRuntime {
+    const cache = new Map<string, IModelProvider>();
+    const modelCatalogCache = new Map<string, ProviderModelCatalog>();
+    const mockProviders = buildMockProviders(options.runtimeMode);
+    const defaultCharDelayMs = options.defaultCharDelayMs ?? 2;
+    const slowStreamTrigger = options.slowStreamTrigger ?? 'TRIGGER_SLOW_STREAM';
+    const slowCharDelayMs = options.slowCharDelayMs ?? 25;
+
+    return {
+        getAvailableProviders() {
+            return mockProviders;
+        },
+
+        getProviderCatalog() {
+            return mockProviders;
+        },
+
+        async getProviderModels(providerId: string): Promise<ProviderModelCatalog> {
+            const providerConfig = mockProviders.find((item) => item.id === providerId);
+            if (!providerConfig) {
+                throw new Error(`Mock provider '${providerId}' is not available`);
+            }
+
+            const cached = modelCatalogCache.get(providerId);
+            if (cached) {
+                return cached;
+            }
+
+            const catalog = {
+                models: providerConfig.models.map((model) => ({ ...model })),
+                defaultModel: providerConfig.defaultModel
+            };
+            modelCatalogCache.set(providerId, catalog);
+            return catalog;
+        },
+
+        getProvider(providerId: string, getProviderOptions?: { fresh?: boolean }): IModelProvider {
+            const providerConfig = mockProviders.find((item) => item.id === providerId);
+            if (!providerConfig) {
+                throw new Error(`Mock provider '${providerId}' is not available`);
+            }
+
+            if (getProviderOptions?.fresh) {
+                return new MockStreamingProvider(providerId, {
+                    models: providerConfig.models.map((model) => ({ ...model })),
+                    defaultModel: providerConfig.defaultModel
+                }, {
+                    isAuthenticated: options.providerAuthOverrides?.[providerId] ?? true,
+                    defaultCharDelayMs,
+                    slowStreamTrigger,
+                    slowCharDelayMs
+                });
+            }
+
+            const cached = cache.get(providerId);
+            if (cached) {
+                return cached;
+            }
+
+            const instance = new MockStreamingProvider(providerId, {
+                models: providerConfig.models.map((model) => ({ ...model })),
+                defaultModel: providerConfig.defaultModel
+            }, {
+                isAuthenticated: options.providerAuthOverrides?.[providerId] ?? true,
+                defaultCharDelayMs,
+                slowStreamTrigger,
+                slowCharDelayMs
+            });
+            cache.set(providerId, instance);
+            return instance;
+        }
+    };
+}

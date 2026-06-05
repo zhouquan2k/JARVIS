@@ -1,4 +1,4 @@
-import type { Task } from '../../../core/src/interfaces/ITaskProvider.ts';
+import type { Task } from '@plugins/task-mgr/api';
 import type { ITaskCalendarSyncService, TaskCalendarSyncResult } from './ITaskCalendarSyncService.ts';
 
 const GOOGLE_CALENDAR_PROVIDER_ID = 'google-calendar';

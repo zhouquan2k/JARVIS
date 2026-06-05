@@ -477,3 +477,22 @@ The knowledge workspace MUST allow the chat send pipeline to resolve `@filename`
 - **WHEN** an `@filename` reference resolves to a non-text document
 - **THEN** the system MUST block that prompt-section injection
 - **AND** the system MUST return a clear error instead of appending binary content to the prompt
+
+### Requirement: Knowledge workspace agent conversation list MUST rename the selected local conversation from the list toolbar
+When the knowledge workspace agent conversation surface is showing the conversation list, the rename entry MUST be exposed from the list toolbar instead of the detail header. Triggering that action MUST put only the currently selected local conversation row into inline editing inside the list.
+
+#### Scenario: Show rename only from the list toolbar
+- **WHEN** the right-side agent conversation surface is showing detail mode for the current conversation
+- **THEN** the system MUST NOT show a rename button in the detail header
+- **AND** switching back to the conversation list MUST restore the list-toolbar rename entry for eligible local conversations
+
+#### Scenario: Inline-edit only the selected local conversation row
+- **WHEN** the user activates rename from the list toolbar while a local conversation is selected
+- **THEN** the system MUST put only that selected conversation row into inline edit mode inside the list
+- **AND** the detail title area MUST remain non-editable
+- **AND** the system MUST NOT put any non-selected row into rename mode
+
+#### Scenario: Do not expose agent-list rename for ineligible conversations
+- **WHEN** the currently selected conversation is missing or is not a locally persisted conversation
+- **THEN** the system MUST NOT expose the list-toolbar rename action
+- **AND** the system MUST NOT enter inline rename mode for that row

@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { ITaskProvider, Task, TaskQueryTag } from '../../../core/src/interfaces/ITaskProvider.ts';
+import type { Task, TaskQueryTag, TaskService } from '@plugins/task-mgr/api';
 import type { ITaskCalendarSyncService } from './ITaskCalendarSyncService.ts';
 import {
     TASK_STORAGE_DIRECTORY,
@@ -18,7 +18,7 @@ export interface FileSystemTaskProviderOptions {
     resolveDocumentIdForTaskPath?: ((documentPath: string) => Promise<string | null>) | null;
 }
 
-export class FileSystemTaskProvider implements ITaskProvider {
+export class FileSystemTaskProvider implements TaskService {
     private readonly resolveRootDirectory: () => Promise<string>;
     private readonly calendarSyncService: ITaskCalendarSyncService | null;
     private readonly resolveDocumentIdForTaskPath: ((documentPath: string) => Promise<string | null>) | null;

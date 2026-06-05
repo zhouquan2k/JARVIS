@@ -1,153 +1,128 @@
 [English](ARCHITECTURE.md) | [中文](ARCHITECTURE.zh-CN.md)
 
-# Architecture
+# Architecture Overview
 
-`docs/workspace.dsl` is the primary public architecture source for this repository. This document explains the system context and container views defined there and should be updated together with the DSL.
+This document describes the overall structure of JARVIS: deployable hosts, code layering and dependency boundaries, the plugin system, and several key design decisions. Multiple runtime forms (browser extension, web, desktop) share the core workspace UI and plugin system contracts, but differ in environment access and capability exposure.
 
-## System Context
+## 1. Deployable Units / Hosts
 
-ChatPrism sits between end users, external AI providers, and the user's knowledge repository.
+Independently runnable and deployable units; they are runtime shells that expose their infrastructure capabilities to the application, and own no business logic.
 
-### Primary actor
+- **Browser Extension App**
 
-- Power AI users who compare model outputs, recover conversation history, and curate knowledge assets.
+- **Web App**
 
-### External systems
+- **Desktop App**
 
-- ChatGPT Web for login-backed model access and conversation history.
-- Google Gemini API for model execution and model catalog queries.
-- Gemini Web for browser-driven history extraction.
-- A local or hosted knowledge repository for documents, imported files, and scoped workspace context.
+- **Sync Server**: Exposes session sync APIs, context APIs, and provider configuration interfaces. Bridges shared contracts to filesystem- or database-backed persistence implementations; it is the backend boundary for remote context and data sync.
 
-## Container View
+## 2. Code Organization and Layering Boundaries
 
-### Browser Extension App
+The table below lists modules, responsibilities, and dependency directions for each layer. The principle is: environment access belongs to hosts; the core workspace frontend (node tree + markdown documents) belongs to `packages/ui`; other domain capabilities belong to plugins; globally shared contracts belong to `packages/core`.
 
-- Hosts chat, comparison, history import, and knowledge workspace flows inside the browser.
-- Uses browser capabilities such as cookies, content scripts, and extension storage.
+| Module | Responsibility | Dependencies |
+|---|---|---|
+| `apps/*` (hosts)<br/>(web / desktop / extension) | Runtime shell and composition root: lifecycle, bridges, storage, filesystem, browser capabilities, and other environment access; hands control to `ui` at the entry point; not responsible for plugin enablement or assembly | → `ui` / `core` (no direct dependency on `plugins` / `plugin-system`) |
+| `apps/server` | Session and context sync backend: exposes session sync APIs, context query/write interfaces; adapts filesystem persistence; is the sync boundary between remote UI and local data | → `core` / `node`; compile-time dependency on `@plugins/ai-agent` (pending migration to a generic CRUD API) |
+| `packages/ui` | Core frontend layer of the Markdown document workspace: workspace shell, layout containers, document tree interaction, document open/edit/save, shared display components, extension point rendering; responsible for loading the plugin system | → `plugin-system` / `core`; may consume environment facts and context exposed by hosts; does not carry AI/task-specific workflows, stores, or business rules |
+| `packages/plugin-system` | Plugin system: plugin registration, enablement, assembly, runtime context construction, and plugin runtime orchestration | → `core`; ideally no compile-time dependency on `plugins` — loads plugins dynamically at runtime per the plugin contracts defined in `core` |
+| `packages/core` | Minimal stable cross-package contracts, plugin contracts, and host-agnostic general infrastructure | No dependency on any upper layer; AI/task domain contracts should not accumulate here |
+| `packages/node` | Node-only adapter layer and infrastructure implementations shared between the Desktop main process and the sync server | → `core` |
+| `plugins/*` | Domain capabilities such as AI and tasks: domain models, workflows, stores, business views, capability-specific rules | → `core` (implements its plugin contracts); ideally exposes no `api` and is not a compile-time dependency of any package |
 
-### Web App
+The dependency chain is `apps → ui → plugin-system ⇢ plugins`: the host hands control to `ui` at the entry point; `ui` loads `plugin-system`; `plugin-system` dynamically loads, registers, and assembles `plugins` at runtime per plugin contracts (`⇢` denotes runtime loading, not a compile-time dependency). Hosts are thereby decoupled from concrete plugins and depend only on `ui` and `core`.
 
-- Provides the main browser-based workspace for chat, comparison, and document-centric work.
-- Relies on the sync server for shared context and provider configuration.
+**General Dependency Principles:**
 
-### Desktop App
+- When environment differences affect upper-layer behavior, hosts should expose them as **environment properties, capability handles, or context** to be consumed in place by upper layers, rather than writing business branches directly inside the host.
+- For runtime concepts, bootstrap result objects, or UI shell objects that are easy to blur, default to "**don't design for the future; refactor when needed; otherwise keep it simple (fewer classes is better)**"; introduce a new independent type or shell only when current responsibilities are already clearly distinct.
+- Hosts do not directly depend on `plugins` / `plugin-system`, and are not responsible for plugin enablement or assembly; plugin registration and assembly are the responsibility of `plugin-system`.
+- Interactions between plugins, and between `plugin-system` and concrete plugins, are all conducted through plugin contracts defined in `core`; ideally plugins need not expose an `api` and should not be a compile-time dependency of any package.
+- `packages/core` has no dependency on any upper layer; domain contracts belonging to AI or task capabilities should not accumulate here.
+- Business logic for AI, tasks, and future capabilities belongs in their respective plugins, and should not continue to accumulate in `packages/ui`.
+- A knowledge base, even when deployed locally, is still treated as an external dependency (see Section 5).
 
-- Extends the shared UI with desktop-only file and controlled-page capabilities.
-- Reuses shared packages while adding Electron-hosted bridge logic.
+## 3. Plugin System
 
-### Sync Server
+### 3.1 Role of plugin-system
 
-- Exposes conversation sync APIs, context APIs, and provider configuration endpoints.
-- Connects shared contracts to filesystem- or database-backed persistence.
+- `packages/plugin-system` is the implementation layer of the plugin system, responsible for plugin registration (`PluginRegistry`), enablement and assembly (`PluginManager`), runtime context construction, and plugin runtime orchestration.
+- It is loaded by `packages/ui` during workspace initialization; hosts do not depend on it directly and do not participate in plugin enablement or assembly.
+- It only has a compile-time dependency on `packages/core`; ideally it does not compile-time depend on concrete `plugins`, instead loading them dynamically at runtime per the plugin contracts defined in `core`, making it the decoupling layer between the "core workspace frontend" and "concrete domain plugins."
 
-### Shared Packages
+### 3.2 Plugin Role and Boundaries
 
-- `packages/core`: domain models, runtime abstractions, provider contracts, and workflow orchestration.
-- `packages/ui`: reusable UI components, views, and state used by Web, Extension, and Desktop renderers.
-- `packages/node`: Node-only adapters and infrastructure reused by Desktop main and the sync server.
+- `plugins/*` own domain models, workflows, stores, business views, and capability-specific rules.
+- AI, tasks, and future capabilities are all carried as plugins; their business state machines and workflow orchestration should not leak into hosts or `packages/ui`.
 
-## Responsibility Boundaries
+### 3.3 Plugin Contracts and Isolation
 
-- Host apps assemble capabilities for their runtime, but they do not redefine shared contracts.
-- Shared packages hold the reusable conversation, provider, and context abstractions.
-- The sync server is the public backend boundary for remote context and synchronization.
-- The knowledge repository remains an external dependency even when it is mounted locally.
+- Plugins integrate into the system by implementing plugin contracts defined in `core`, and are discovered and loaded by `plugin-system` at runtime.
+- Ideally plugins **need not expose an `api`** — no other module should need to consume a plugin directly; all interactions are conducted via contracts and runtime context.
+- Plugin internal implementations stay entirely within the plugin directory, are not compile-time dependencies of any package, and no one should depend on their internal implementation paths.
 
-## Markdown Document Editing Strategy
+### 3.4 Plugin Collaboration with Hosts / UI
 
-The markdown viewer (Milkdown / ProseMirror) edits a structured document tree,
-while the canonical document state remains the raw markdown string on disk.
-Any attempt to map "viewer caret → source string offset" is fundamentally
-fragile—Milkdown is a WYSIWYG editor and does not maintain a source map
-between its document tree and the original byte stream.
+- Plugins may consume environment facts exposed by hosts (via the runtime context built by `plugin-system`) and decide capability-related behavior accordingly.
+- The extension point rendering layer is consumed by `packages/ui`; plugins inject business views into the core workspace through extension points.
 
-### Decision
+### 3.5 Enablement and Assembly
 
-Viewer-mode insertions (link, conversation reference, resource embed triggered
-from the document toolbar) dispatch a native ProseMirror transaction via
-Milkdown's parser, and the new markdown source is re-emitted by Milkdown's
-serializer. No viewer-to-source coordinate translation is attempted.
+- Plugin enablement and assembly are the responsibility of `plugin-system`, occurring during the phase when `ui` loads the plugin system, not at the host composition root.
+- Hosts only hand control to `ui` at the entry point and expose environment facts upward for `plugin-system` to build the runtime context; business decisions remain inside plugins.
 
-### Consequences
+## 4. Key Design Decisions (ADRs)
 
-- Insert position is precise in every block kind, including empty paragraphs
-  and positions adjacent to raw HTML.
-- The first insertion after opening a document may normalize formatting
-  (emphasis style, list markers, blank-line collapsing), producing a larger
-  initial git diff. Subsequent edits are stable because the serializer output
-  is deterministic.
-- Edit mode (raw textarea) still splices the source string directly,
-  preserving exact bytes when byte-level fidelity is required.
-- This is a `packages/ui` internal decision; it does not affect the sync
-  server contracts or cross-host interfaces.
+### 4.1 Markdown Document Editing Strategy
 
-The viewer-mode insertion entry point is `insertMarkdownAtViewerSelection`
-in `packages/ui/src/utils/markdownDocument.ts`.
+The markdown viewer (Milkdown / ProseMirror) edits a structured document tree, while the source of truth for the document is still the raw markdown string on disk. Any mapping from "viewer cursor → source character offset" is fundamentally unstable — Milkdown is a WYSIWYG editor and does not maintain a source map between the document tree and the raw byte stream.
 
-## Document Identity and Node Move Strategy
+**Decision**
 
-### Overview
+Insert operations in viewer mode (links / conversation references / asset embeds triggered from the document toolbar) are parsed into nodes via Milkdown's parser and dispatched as native ProseMirror transactions; new markdown source is regenerated in full by Milkdown's serializer. No attempt is made to perform any "viewer → source" coordinate translation.
 
-Every markdown document carries a stable ULID written into its YAML frontmatter
-under the key `jarvis_id`. This ID is the canonical, immutable identifier for a
-document regardless of its path in the repository.
+**Consequences**
 
-### Identity Assignment
+- Insertion position is accurate on any block type, including empty paragraphs and positions adjacent to raw HTML.
+- The first insertion after opening a document may normalize formatting (emphasis marker style, list bullet style, consecutive blank line merging, etc.), producing a large initial git diff. Subsequent edits are stable because serializer output is deterministic.
+- Edit mode (plain textarea) continues to splice directly on the source string, preserving this path when byte-level truth is needed.
+- This is an internal decision of `packages/ui` and does not affect sync service contracts or cross-host interfaces.
 
-- On first open, `DocumentIdentityIndex` checks whether `jarvis_id` is present
-  in the frontmatter. If absent it is generated and written back.
-- The index is in-memory only (`path → id` and `id → path` maps). There is no
-  separate persistent index file; the source of truth is always the frontmatter.
-- Frontmatter is stripped from the Milkdown editor representation via a WeakMap
-  keyed on the document instance and restored on serialisation. The user never
-  sees or edits `jarvis_id` directly.
+The viewer-mode insertion entry point is `insertMarkdownAtViewerSelection` in `packages/ui/src/utils/markdownDocument.ts`.
 
-### Move / Rename Strategy (Zero-cost)
+### 4.2 Document Identity and Node Movement
+
+**Overview**
+
+Each markdown document has a stable ULID written into its YAML frontmatter under the key `jarvis_id`. Regardless of how the file path changes, this ID is always the document's immutable canonical identifier.
+
+**Identity Assignment**
+
+- On first open, `DocumentIdentityIndex` checks whether `jarvis_id` exists in the frontmatter; if not, one is generated and written back.
+- The index is kept in memory only (`path → id` and `id → path` bidirectional mappings). There is no separate persistent index file; the source frontmatter is the source of truth.
+- The Milkdown editor strips the frontmatter at the presentation layer using a WeakMap keyed by document instance, and restores it during serialization. Users never see or directly edit `jarvis_id`.
+
+**Move / Rename Strategy (Zero-Cost)**
 
 When a node is moved or renamed:
 
-1. Only the in-memory `DocumentIdentityIndex` is remapped (`identityIndex.remap(oldPath, newPath)`).
-2. No database writes, no path-column rewrites. Conversations and tasks retain their original `documentIds[]` entries, which continue to match the frontmatter ULID regardless of where the file now lives.
-3. The cross-agent guard inside `moveNode` ensures that the rename is refused if another agent process holds a lock on the file, preventing identity divergence under concurrent access.
+1. Only the in-memory `DocumentIdentityIndex` is updated (`identityIndex.remap(oldPath, newPath)`).
+2. No database writes; no path column changes. Existing `documentIds[]` entries in session and task records remain unchanged and still match the ULID in the document frontmatter, independent of the file's current location.
+3. A cross-agent guard inside `moveNode` ensures that a rename is rejected when another Agent process holds a file lock, preventing concurrent access from causing identity splits.
 
-### Query Routing
+**Query Routing**
 
-All context lookups are **`documentId`-first**:
+All context queries follow a **`documentId`-first** approach:
 
-- Server-side: `_getConversationsByDocumentId` / `_getTasksByDocumentId` are preferred when a `documentId` is supplied; `documentPath` is used only as a deprecated fallback for legacy records that predate the ULID scheme.
-- Client-side: `documentScopedConversations` in `AgentConversationPanel` accepts a conversation if `documentPaths` includes the active path **or** `documentIds` includes the active document's ULID. This dual-match guard handles the window between a move and the next async data reload, ensuring conversations continue to appear immediately after a rename.
+- Server-side: when `documentId` is present, prefer `_getConversationsByDocumentId` / `_getTasksByDocumentId`; `documentPath` is only a fallback for early records.
+- Client-side: `documentScopedConversations` in `AgentConversationPanel` accepts conversations that satisfy either of the following: `documentPaths` contains the current path, **or** `documentIds` contains the current document's ULID. This dual-match guard covers the window between a move operation and the next async data reload, ensuring conversations are shown immediately after a rename.
 
-### Outgoing Link Rewrite
+**Outbound Link Rewriting**
 
-Links written into a document by the toolbar (conversation reference, resource embed) use standard relative paths anchored to the repository root. The `references/` directory is protected and its contents are never moved by link rewrite operations.
+Links written into documents by the toolbar (conversation references, asset embeds) use standard relative paths relative to the repository root. The `references/` directory is protected and its contents are not affected by link rewriting operations.
 
-### Migration
+## 5. Runtime and External Dependency Chain
 
-Existing documents without `jarvis_id` are migrated in a single pass triggered the first time a `contextProvider` or workspace context is set. The migration sets `jarvis_schema: 1` in frontmatter as a completion flag and is idempotent—two flags `_conversationIdsMigrated` / `_taskIdsMigrated` track whether relationship records have been back-filled with the new ULID.
-
-### Consistency with OpenSpec Design Decisions
-
-| OpenSpec Decision | Status |
-|---|---|
-| Decision 1: ID in frontmatter, not a separate persistent index | ✓ Implemented |
-| Decision 2: Cross-agent guard on move | ✓ Implemented |
-| Decision 3: Single-pass migration, no double-write | ✓ Implemented |
-| Decision 4: Standard relative paths for outgoing links, not `@/` syntax | ✓ Implemented |
-
-Two implementation details that emerged during development and are not in the OpenSpec:
-- WeakMap-based frontmatter isolation in Milkdown (keeps `jarvis_id` invisible to the editor).
-- Dual-match filter (`documentPaths` OR `documentIds`) in `documentScopedConversations` to cover the async reload race condition after a move.
-
-## External Dependency Flow
-
-- The Web, Extension, and Desktop hosts call external model providers through shared runtime contracts.
-- Extension and Desktop hosts also bridge browser-controlled history access for ChatGPT and Gemini.
-- The sync server and desktop host can both access the knowledge repository through filesystem-aware adapters.
-
-## Related Documents
-
-- Repository overview: [README.md](README.md)
-- C4 DSL source: [docs/workspace.dsl](docs/workspace.dsl)
-- Documentation scope: [docs/overall.md](docs/overall.md)
-- Context provider details: [docs/context-provider.md](docs/context-provider.md)
+- Web, Extension, and Desktop call external model providers through shared runtime contracts.
+- Extension and Desktop also bridge browser-controlled pages to access ChatGPT and Gemini history.
+- Both the Sync Server and the Desktop host can access the knowledge base through a filesystem adapter layer; the knowledge base is treated as an external dependency even when deployed locally.

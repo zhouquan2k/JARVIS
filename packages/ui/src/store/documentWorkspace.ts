@@ -1,21 +1,7 @@
 import { defineStore } from 'pinia';
 import { markRaw } from 'vue';
-import {
-    DEFAULT_WORKSPACE_AGENT_KEY,
-    DEFAULT_SCOPED_AGENT_CONFIG,
-    type AgentToolBinding,
-    type ContextDocument,
-    type ContextNode,
-    type CreateContextNodeInput,
-    type AgentInheritanceMode,
-    type IContextProvider,
-    type ResolvedAgentConfig,
-    type WorkspaceContext,
-    type WriteContextDocumentResult,
-    decodeTextDocument,
-    encodeTextDocument,
-    isTextDocumentMimeType
-} from '@packages/core/src';
+import { DEFAULT_WORKSPACE_SCOPE_KEY as DEFAULT_WORKSPACE_AGENT_KEY, type ContextDocument, type ContextNode, type CreateContextNodeInput, type FolderMetadata, type IContextProvider, type WorkspaceContext, type WriteContextDocumentResult, decodeTextDocument, encodeTextDocument, isTextDocumentMimeType } from '@packages/core/src';
+import { DEFAULT_SCOPED_AGENT_CONFIG, type AgentToolBinding, type AgentInheritanceMode, type ResolvedAgentConfig } from '@plugins/ai-agent/api';
 import { buildLineDiffEntries, FileChangeService, type FileChangeRecord, type LineDiffEntry } from '../services/FileChangeService';
 import { resolveDocumentViewer } from '../document-viewers';
 import { formatHttpApiError } from '../utils/formatHttpApiError';
@@ -168,13 +154,13 @@ function resolveRootAgentKey(context: WorkspaceContext | null): string | null {
     }
 
     const rootAgentNode = findNodeByPath(context.nodes, '/.agent.json');
-    if (rootAgentNode?.agentKey) {
-        return rootAgentNode.agentKey;
+    if (rootAgentNode?.scopeKey) {
+        return rootAgentNode.scopeKey;
     }
 
-    return context.agentConfigs[DEFAULT_WORKSPACE_AGENT_KEY]
+    return context.folderMetadata[DEFAULT_WORKSPACE_AGENT_KEY]
         ? DEFAULT_WORKSPACE_AGENT_KEY
-        : Object.keys(context.agentConfigs)[0] ?? null;
+        : Object.keys(context.folderMetadata)[0] ?? null;
 }
 
 function ensureRootExpanded(expandedPaths: string[]): string[] {
@@ -208,6 +194,10 @@ export function findDefaultAgentIndexNode(nodes: ContextNode[], ownerPath: strin
     const indexPath = getDefaultAgentIndexPath(ownerPath);
     const node = findNodeByPath(nodes, indexPath);
     return node?.kind === 'file' && node.name === 'index.md' ? node : null;
+}
+
+function hasDirectoryIndexNode(nodes: ContextNode[], ownerPath: string): boolean {
+    return findDefaultAgentIndexNode(nodes, ownerPath) !== null;
 }
 
 function remapPath(path: string | null, fromPath: string, toPath: string): string | null {
@@ -361,7 +351,7 @@ function createSyntheticContextNode(input: {
         kind: input.kind,
         parentPath: input.parentPath,
         hasChildren: false,
-        agentKey: input.agentKey
+        scopeKey: input.agentKey
     };
 }
 
@@ -518,6 +508,13 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
 
         canGoForwardNodeHistory(state): boolean {
             return state.nodeHistoryIndex >= 0 && state.nodeHistoryIndex < state.nodeHistory.length - 1;
+        },
+
+        /** 当前作用域的通用元数据视图（供扩展点 / 贡献上下文消费，data 由插件解释）。 */
+        activeScopeMetadata(state): FolderMetadata | null {
+            return state.activeAgentKey
+                ? { scopeKey: state.activeAgentKey, data: (state.activeAgent ?? {}) as unknown as Record<string, unknown> }
+                : null;
         }
     },
     actions: {
@@ -873,12 +870,14 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
 
             const agentKey = path === '/'
                 ? resolveRootAgentKey(this.context)
-                : this.findNodeByPath(path)?.agentKey ?? null;
+                : this.findNodeByPath(path)?.scopeKey ?? null;
             const activeNode = path === '/' ? null : this.findNodeByPath(path);
             const isRootAgentOwner = path === '/' && !!findNodeByPath(this.context.nodes, '/.agent.json');
             this.activeAgentKey = agentKey;
-            this.activeAgent = agentKey ? this.context.agentConfigs[agentKey] ?? null : null;
-            this.isAgentOwnerSelected = isRootAgentOwner || (activeNode?.kind === 'directory' && activeNode.isAgentOwner === true);
+            this.activeAgent = agentKey
+                ? (this.context.folderMetadata[agentKey]?.data as unknown as ResolvedAgentConfig | undefined) ?? null
+                : null;
+            this.isAgentOwnerSelected = isRootAgentOwner || (activeNode?.kind === 'directory' && activeNode.ownsMetadata === true);
             this.agentResolutionError = agentKey && !this.activeAgent
                 ? `No Agent configuration was found for agentConfigs['${agentKey}'].`
                 : null;
@@ -996,7 +995,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
                 if (shouldRecordHistory) {
                     this.recordNodeHistory(path);
                 }
-                if (node.isAgentOwner) {
+                if (node.ownsMetadata || hasDirectoryIndexNode(this.nodes, selectedNodePath)) {
                     await this.loadAgentIndexDocument(selectedNodePath);
                 }
                 return;
@@ -1225,8 +1224,8 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             const documentDirectory = getParentPath(input.documentPath);
             const referencesDirectoryPath = documentDirectory === '/' ? '/references' : `${documentDirectory}/references`;
             const referencesNode = this.findNodeByPath(referencesDirectoryPath);
-            const parentAgentKey = this.findNodeByPath(documentDirectory)?.agentKey
-                ?? this.findNodeByPath(input.documentPath)?.agentKey
+            const parentAgentKey = this.findNodeByPath(documentDirectory)?.scopeKey
+                ?? this.findNodeByPath(input.documentPath)?.scopeKey
                 ?? this.activeAgentKey
                 ?? DEFAULT_WORKSPACE_AGENT_KEY;
 
@@ -1333,7 +1332,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             }
 
             const ownerNode = this.findNodeByPath(normalizedOwnerPath);
-            if (!ownerNode || ownerNode.kind !== 'directory' || ownerNode.isAgentOwner) {
+            if (!ownerNode || ownerNode.kind !== 'directory' || ownerNode.ownsMetadata) {
                 return;
             }
 

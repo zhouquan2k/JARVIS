@@ -10,6 +10,8 @@ The conversation workspace MUST replace the `New Chat` placeholder on a newly cr
 - **WHEN** a newly created local conversation still has the title `New Chat`
 - **AND** the user successfully sends the first question in normal conversation mode
 - **THEN** the system MUST generate a concise conversation title from that first question
+- **AND** the generated title MUST be as short as reasonably possible for the first question content
+- **AND** when the generated title is Chinese, it MUST NOT exceed 10 Chinese characters
 - **AND** the system MUST persist the generated title on the conversation
 
 #### Scenario: Do not block the main send flow when title generation fails
@@ -30,6 +32,15 @@ The conversation workspace MUST allow the title of a local conversation to be re
 - **AND** the user sends a later follow-up question without editing the first visible question
 - **THEN** the system MUST keep the existing conversation title unchanged
 - **AND** the system MUST NOT overwrite a manual rename during that send
+
+### Requirement: Conversation workspace MUST preserve conversation activity timestamps during manual rename
+The conversation workspace MUST treat a manual rename as title metadata editing rather than a new conversation activity event. Renaming a local conversation MUST update the persisted title, but MUST NOT refresh the conversation's activity timestamp used by history sorting or date/time display.
+
+#### Scenario: Rename a local conversation without changing its activity timestamp
+- **WHEN** the user manually renames a local conversation
+- **THEN** the system MUST persist the new title on that conversation
+- **AND** the system MUST keep the existing activity timestamp unchanged
+- **AND** any history date or time shown for that conversation MUST continue reflecting the last real conversation activity rather than the rename action
 
 ### Requirement: Conversation workspace MUST open externally requested Agent conversations in detail mode
 The conversation workspace MUST allow the right-side Agent conversation surface to honor an external request to open a local conversation from workspace navigation. When such a request is valid, the surface MUST select the requested conversation and present its detail view even if it is currently showing the Agent conversation list.

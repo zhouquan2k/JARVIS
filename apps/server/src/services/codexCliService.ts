@@ -5,7 +5,7 @@ import {
     type ProviderModelCatalog,
     type ProviderSendResult,
     type SendMessageOptions
-} from '@packages/core';
+} from '@plugins/ai-agent/api';
 
 export interface CodexCliServiceOptions {
     command?: string;

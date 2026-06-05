@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mermaid Class Diagram"
+  short_description: "Standardize concise Mermaid class diagrams"
+  default_prompt: "Create or refine this Mermaid class diagram with explicit create/consume/render edges, package grouping, and short Chinese role labels."

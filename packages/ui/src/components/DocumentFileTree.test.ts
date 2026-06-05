@@ -1,7 +1,21 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest';
-import { mount } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
+import { nextTick, ref } from 'vue';
+import type { ContributionQuery } from '@packages/core/src';
 import DocumentFileTree from './DocumentFileTree.vue';
+import { contributionQueryKey } from '../plugins/injectionKeys';
+
+function createContributionQuery(overrides: Partial<ContributionQuery> = {}): ContributionQuery {
+    return {
+        getGlobalViews: () => [],
+        getRightPanelTabs: () => [],
+        getWorkspaceSelectionViews: () => [],
+        getDocumentCreationFlows: () => [],
+        getNodePresentations: () => [],
+        ...overrides
+    };
+}
 
 describe('DocumentFileTree', () => {
     it('renders icon actions with floating tooltip labels', async () => {
@@ -41,8 +55,8 @@ describe('DocumentFileTree', () => {
         const wrapper = mount(DocumentFileTree, {
             props: {
                 nodes: [
-                    { path: '/docs', name: 'docs', kind: 'directory', agentKey: '/' },
-                    { path: '/agent', name: 'agent', kind: 'directory', isAgentOwner: true, agentKey: '/agent/' }
+                    { path: '/docs', name: 'docs', kind: 'directory', scopeKey: '/' },
+                    { path: '/agent', name: 'agent', kind: 'directory', ownsMetadata: true, scopeKey: '/agent/' }
                 ],
                 expandedPaths: ['/'],
                 activePath: '/docs',
@@ -64,15 +78,30 @@ describe('DocumentFileTree', () => {
         const wrapper = mount(DocumentFileTree, {
             props: {
                 nodes: [
-                    { path: '/docs', name: 'docs', kind: 'directory', isAgentOwner: true, agentKey: '/docs/.agent.json' },
+                    { path: '/docs', name: 'docs', kind: 'directory', ownsMetadata: true, scopeKey: '/docs/.agent.json' },
                     { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' }
                 ],
                 expandedPaths: ['/', '/docs'],
                 activePath: '/docs/guide.md',
                 currentError: null
+            },
+            global: {
+                provide: {
+                    [contributionQueryKey as symbol]: ref(createContributionQuery({
+                        getNodePresentations: () => [{
+                            id: 'ai-agent-owner-node',
+                            priority: 20,
+                            supports: (node) => node.kind === 'directory' && node.ownsMetadata === true,
+                            getPresentation: () => ({ icon: 'bot' })
+                        }]
+                    }))
+                }
             }
         });
 
+        await flushPromises();
+        await nextTick();
+        expect(wrapper.get('[data-path="/docs"]').find('[data-testid="document-node-presentation-icon"]').exists()).toBe(true);
         expect(wrapper.get('[data-path="/docs"]').find('[data-testid="document-node-agent-owner"]').exists()).toBe(true);
 
         await wrapper.get('[data-testid="document-new-file"]').trigger('click');
@@ -238,5 +267,38 @@ describe('DocumentFileTree', () => {
         expect(wrapper.get('[data-path="/docs/guide.md"]').text()).not.toContain('guide.md');
         expect(wrapper.get('[data-path="/docs/notes.txt"]').text()).toContain('notes.txt');
         expect(wrapper.get('[data-path="/docs/notes.txt"]').find('[data-testid="document-node-file-icon"]').attributes('data-icon-kind')).toBe('text');
+    });
+
+    it('renders node decorations from plugin contributions instead of hard-coded agent checks', async () => {
+        const wrapper = mount(DocumentFileTree, {
+            props: {
+                nodes: [
+                    { path: '/docs', name: 'docs', kind: 'directory', ownsMetadata: true, scopeKey: '/docs/' },
+                    { path: '/plain', name: 'plain', kind: 'directory' }
+                ],
+                expandedPaths: ['/'],
+                activePath: '/docs',
+                currentError: null
+            },
+            global: {
+                provide: {
+                    [contributionQueryKey as symbol]: ref(createContributionQuery({
+                        getNodePresentations: () => [{
+                            id: 'ai-agent-owner-node',
+                            priority: 20,
+                            supports: async (node) => node.kind === 'directory' && node.ownsMetadata === true,
+                            getPresentation: async () => ({ icon: 'bot', badge: 'Agent', labelSuffix: 'Project' })
+                        }]
+                    }))
+                }
+            }
+        });
+
+        await flushPromises();
+        await nextTick();
+        expect(wrapper.get('[data-path="/docs"]').find('[data-testid="document-node-presentation-icon"]').attributes('data-icon-id')).toBe('bot');
+        expect(wrapper.get('[data-path="/docs"]').find('[data-testid="document-node-presentation-badge"]').text()).toBe('Agent');
+        expect(wrapper.get('[data-path="/docs"]').find('[data-testid="document-node-presentation-suffix"]').text()).toBe('Project');
+        expect(wrapper.get('[data-path="/plain"]').find('[data-testid="document-node-presentation-icon"]').exists()).toBe(false);
     });
 });

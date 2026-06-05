@@ -141,13 +141,19 @@
           @blur="handleInlineInputBlur"
         >
         <span v-else class="tree-label-group">
-          <Bot
-            v-if="item.node.kind === 'directory' && item.node.isAgentOwner"
-            class="tree-agent-icon"
-            :size="14"
-            aria-hidden="true"
-            data-testid="document-node-agent-owner"
-          />
+          <span
+            v-if="resolveNodePresentation(item.node)?.icon === 'bot'"
+            :data-testid="item.node.ownsMetadata ? 'document-node-agent-owner' : undefined"
+            class="tree-agent-icon-wrap"
+          >
+            <Bot
+              class="tree-agent-icon"
+              :size="14"
+              aria-hidden="true"
+              data-testid="document-node-presentation-icon"
+              data-icon-id="bot"
+            />
+          </span>
           <component
             :is="resolveNodeIcon(item.node)"
             v-if="resolveNodeIcon(item.node)"
@@ -158,6 +164,20 @@
             :data-icon-kind="getContextNodeIconKind(item.node) ?? undefined"
           />
           <span class="tree-label">{{ getNodeLabel(item.node) }}</span>
+          <span
+            v-if="resolveNodePresentation(item.node)?.badge"
+            class="tree-node-badge"
+            data-testid="document-node-presentation-badge"
+          >
+            {{ resolveNodePresentation(item.node)?.badge }}
+          </span>
+          <span
+            v-if="resolveNodePresentation(item.node)?.labelSuffix"
+            class="tree-node-suffix"
+            data-testid="document-node-presentation-suffix"
+          >
+            {{ resolveNodePresentation(item.node)?.labelSuffix }}
+          </span>
         </span>
       </button>
     </div>
@@ -175,10 +195,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref } from 'vue';
+import { computed, inject, nextTick, reactive, ref, watch } from 'vue';
 import { Bot, FileJson2, FilePlus, FileText, FileType2, FolderPlus, Image, RefreshCw, Trash2 } from 'lucide-vue-next';
-import type { ContextNode } from '@packages/core/src';
+import type { ContextNode, NodePresentationResult } from '@packages/core/src';
 import { useWorkspaceI18n } from '../i18n';
+import { contributionQueryKey } from '../plugins/injectionKeys';
 import { getContextNodeDisplayName, getContextNodeIconKind, isMarkdownDisplayName } from '../utils/contextNodePresentation';
 
 const props = defineProps<{
@@ -225,6 +246,8 @@ const deleteConfirmation = reactive<{
   message: ''
 });
 const { t } = useWorkspaceI18n();
+const contributionQuery = inject(contributionQueryKey, null);
+const nodePresentations = ref<Record<string, NodePresentationResult>>({});
 
 const activeNode = computed(() => {
   if (!props.activePath || props.activePath === '/') {
@@ -236,7 +259,7 @@ const activeNode = computed(() => {
 
 const canDeleteSelectedNode = computed(() => !!activeNode.value);
 const canConvertSelectedDirectoryToAgent = computed(() => {
-  return activeNode.value?.kind === 'directory' && activeNode.value.isAgentOwner !== true;
+  return activeNode.value?.kind === 'directory' && activeNode.value.ownsMetadata !== true;
 });
 
 const tooltipState = reactive({
@@ -281,7 +304,7 @@ const visibleNodes = computed(() => {
     name: t('shared.rootDirectory'),
     kind: 'directory',
     hasChildren: true,
-    agentKey: '__default__'
+    scopeKey: '__default__'
   };
   const rows: Array<{ node: ContextNode; depth: number; isRoot?: boolean; isInlineEditing?: boolean }> = [
     { node: rootNode, depth: 0, isRoot: true }
@@ -305,7 +328,7 @@ const visibleNodes = computed(() => {
           path: '__pending__',
           name: inlineEdit.name,
           kind: inlineEdit.kind,
-          agentKey: inlineEdit.parentPath ?? '__default__'
+          scopeKey: inlineEdit.parentPath ?? '__default__'
         },
         depth,
         isInlineEditing: true
@@ -318,6 +341,63 @@ const visibleNodes = computed(() => {
   }
   return rows;
 });
+
+function getNodePresentationContributions() {
+  const query = contributionQuery?.value;
+  if (!query || typeof query.getNodePresentations !== 'function') {
+    return [];
+  }
+
+  return query.getNodePresentations();
+}
+
+function mergeNodePresentation(
+  base: NodePresentationResult | null,
+  incoming: NodePresentationResult
+): NodePresentationResult {
+  return {
+    icon: base?.icon ?? incoming.icon,
+    badge: base?.badge ?? incoming.badge,
+    labelSuffix: base?.labelSuffix ?? incoming.labelSuffix,
+    accentTone: base?.accentTone ?? incoming.accentTone
+  };
+}
+
+watch(
+  [() => props.nodes, getNodePresentationContributions],
+  async ([nodes, contributions]) => {
+    const nextPresentations: Record<string, NodePresentationResult> = {};
+
+    for (const node of nodes) {
+      let merged: NodePresentationResult | null = null;
+
+      for (const contribution of [...contributions].sort((left, right) => (right.priority ?? 0) - (left.priority ?? 0))) {
+        const supported = await contribution.supports(node);
+        if (!supported) {
+          continue;
+        }
+
+        const presentation = await contribution.getPresentation(node);
+        if (!presentation) {
+          continue;
+        }
+
+        merged = mergeNodePresentation(merged, presentation);
+      }
+
+      if (merged) {
+        nextPresentations[node.path] = merged;
+      }
+    }
+
+    nodePresentations.value = nextPresentations;
+  },
+  { immediate: true, deep: true }
+);
+
+function resolveNodePresentation(node: ContextNode): NodePresentationResult | null {
+  return nodePresentations.value[node.path] ?? null;
+}
 
 function onNodeClick(node: ContextNode) {
   emit('open', node.path);

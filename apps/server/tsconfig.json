@@ -10,10 +10,16 @@
     "resolveJsonModule": true,
     "skipLibCheck": true,
     "paths": {
-      "@packages/core": ["../../packages/core/src/index.ts"],
+      "@packages/core": ["../../packages/core/index.ts"],
       "@packages/core/*": ["../../packages/core/*"],
       "@packages/node": ["../../packages/node/src/index.ts"],
       "@packages/node/*": ["../../packages/node/*"],
+      "@plugins/ai-agent": ["../../plugins/ai-agent/src/index.ts"],
+      "@plugins/ai-agent/*": ["../../plugins/ai-agent/*"],
+      "@plugins/ai-agent/api": ["../../plugins/ai-agent/api.ts"],
+      "@plugins/task-mgr": ["../../plugins/task-mgr/src/index.ts"],
+      "@plugins/task-mgr/*": ["../../plugins/task-mgr/*"],
+      "@plugins/task-mgr/api": ["../../plugins/task-mgr/api.ts"],
       "@packages/core/src": ["../../packages/core/src/index.ts"],
       "@packages/core/config": ["../../packages/core/config.ts"]
     },

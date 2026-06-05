@@ -2,9 +2,8 @@
   <div class="app-shell">
     <AppTopBar
       :is-compare-mode="isCompareMode"
-      :compare-stage="compareStore.stage"
       :active-workspace-path="activeWorkspacePath"
-      :workspace-options="PRIMARY_WORKSPACE_ROUTES"
+      :workspace-options="workspaceOptions"
       :show-node-history-controls="isKnowledgeMode"
       :can-go-back-node-history="documentStore.canGoBackNodeHistory"
       :can-go-forward-node-history="documentStore.canGoForwardNodeHistory"
@@ -13,18 +12,18 @@
       @go-forward-node-history="onGoForwardNodeHistory"
     />
     <div
-      v-if="chatStore.currentError"
+      v-if="props.runtimeContext?.currentError"
       class="global-error-banner"
       data-testid="workspace-global-error"
       role="alert"
     >
-      <span class="global-error-banner__message">{{ chatStore.currentError }}</span>
+      <span class="global-error-banner__message">{{ props.runtimeContext?.currentError }}</span>
       <button
         type="button"
         class="global-error-banner__close"
         data-testid="workspace-global-error-close"
         aria-label="Close error"
-        @click="chatStore.clearCurrentError()"
+        @click="props.runtimeContext?.clearCurrentError()"
       >
         ×
       </button>
@@ -35,118 +34,123 @@
         :context-provider="props.contextProvider"
         @request-workspace-switch="onNavigateWorkspace"
       />
-      <AllTasksWorkspaceView
-        v-else-if="isAllTasksMode"
-        :context-provider="props.contextProvider"
-      />
-      <ConversationWorkspaceView
-        v-else
-        :is-compare-mode="isCompareMode"
-        :context-provider="props.contextProvider"
-        :show-history-source-switch="props.showHistorySourceSwitch"
-        :auth-status-override="props.authStatusOverride"
-        :auth-unavailable-message="props.authUnavailableMessage"
-        :auth-recovery-action-label="props.authRecoveryActionLabel"
-        :auth-recovery-action-disabled="props.authRecoveryActionDisabled"
-        :host-recovery-message="props.hostRecoveryMessage"
-        :host-recovery-action-label="props.hostRecoveryActionLabel"
-        :host-recovery-action-disabled="props.hostRecoveryActionDisabled"
+      <component
+        :is="activeGlobalViewComponent"
+        v-else-if="activeGlobalViewComponent"
+        v-bind="activeGlobalViewProps"
         @request-workspace-switch="onNavigateWorkspace"
-        @request-compare-mode="openCompareMode"
-        @request-auth-recovery="emit('request-auth-recovery')"
-        @request-host-recovery="emit('request-host-recovery')"
       />
     </main>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, watch } from 'vue';
-import type { IContextProvider } from '@packages/core/src';
+import { computed, provide, ref, watch } from 'vue';
+import type { ContributionQuery, IContextProvider, WorkspaceRuntimeContext } from '@packages/core/src';
 import AppTopBar from '../components/AppTopBar.vue';
-import { useChatStore } from '../store/chat';
-import { useCompareStore } from '../store/compare';
+import { contributionQueryKey, workspaceRuntimeContextKey } from '../plugins/injectionKeys';
 import { useDocumentWorkspaceStore } from '../store/documentWorkspace';
-import AllTasksWorkspaceView from './AllTasksWorkspaceView.vue';
-import ConversationWorkspaceView from './ConversationWorkspaceView.vue';
 import DocumentWorkspaceView from './DocumentWorkspaceView.vue';
-import { PRIMARY_WORKSPACE_ROUTES, type ChatRoutePath } from '../routes';
+import type { ChatRoute } from '../routes';
+import type { ChatRoutePath } from '../routes';
 
 const props = withDefaults(defineProps<{
   currentRoutePath: ChatRoutePath;
   navigateTo: (path: ChatRoutePath) => void;
   contextProvider: IContextProvider;
+  contributionQuery?: ContributionQuery | null;
+  runtimeContext?: WorkspaceRuntimeContext | null;
   showHistorySourceSwitch?: boolean;
-  authStatusOverride?: boolean | null;
-  authUnavailableMessage?: string;
-  authRecoveryActionLabel?: string;
-  authRecoveryActionDisabled?: boolean;
-  hostRecoveryMessage?: string;
-  hostRecoveryActionLabel?: string;
-  hostRecoveryActionDisabled?: boolean;
 }>(), {
-  showHistorySourceSwitch: false,
-  authStatusOverride: null,
-  authUnavailableMessage: undefined,
-  authRecoveryActionLabel: undefined,
-  authRecoveryActionDisabled: false,
-  hostRecoveryMessage: '',
-  hostRecoveryActionLabel: '',
-  hostRecoveryActionDisabled: false
+  showHistorySourceSwitch: false
 });
 
-const emit = defineEmits<{
-  (event: 'request-auth-recovery'): void;
-  (event: 'request-host-recovery'): void;
-}>();
-
-const chatStore = useChatStore();
 const documentStore = useDocumentWorkspaceStore();
-const compareStore = useCompareStore();
+const providedContributionQuery = computed(() => props.contributionQuery ?? null);
+const providedRuntimeContext = computed(() => props.runtimeContext ?? null);
+provide(contributionQueryKey, providedContributionQuery);
+provide(workspaceRuntimeContextKey, providedRuntimeContext);
 const isCompareMode = computed(() => props.currentRoutePath === '/compare');
 const isKnowledgeMode = computed(() => props.currentRoutePath === '/');
-const isAllTasksMode = computed(() => props.currentRoutePath === '/all-tasks');
 const activeWorkspacePath = computed<ChatRoutePath>(() => props.currentRoutePath === '/compare' ? '/chat' : props.currentRoutePath);
+const globalViews = computed(() => props.contributionQuery?.getGlobalViews() ?? []);
+const pendingNavigationTarget = ref<ChatRoutePath | null>(null);
+const activeGlobalView = computed(() => {
+  const targetRoutePath = props.currentRoutePath === '/compare' ? '/chat' : props.currentRoutePath;
+  return globalViews.value.find((view) => view.routePath === targetRoutePath) ?? null;
+});
+const activeGlobalViewComponent = computed(() => activeGlobalView.value?.component ?? null);
+const workspaceOptions = computed<ReadonlyArray<Pick<ChatRoute, 'path' | 'name' | 'label' | 'labelKey'>>>(() => {
+  return [
+    {
+      path: '/',
+      name: 'knowledge-workspace',
+      label: 'Workspace',
+      labelKey: 'routes.knowledgeWorkspace'
+    },
+    ...globalViews.value
+      .filter((view) => view.routePath !== '/compare')
+      .map((view) => ({
+        path: view.routePath as ChatRoutePath,
+        name: view.routeName as ChatRoute['name'],
+        label: view.label,
+        labelKey: view.labelKey as ChatRoute['labelKey']
+      }))
+  ];
+});
+const activeGlobalViewProps = computed(() => ({
+  contextProvider: props.contextProvider,
+  isCompareMode: isCompareMode.value,
+  showHistorySourceSwitch: props.showHistorySourceSwitch
+}));
 
-function syncWorkspaceMode(path: ChatRoutePath): void {
-  chatStore.setWorkspaceMode(path === '/' ? 'agent' : 'conversation');
-}
-
-function openCompareMode() {
-  compareStore.startNewCompare();
-  props.navigateTo('/compare');
+async function syncRuntimeRouteState(nextRoutePath: ChatRoutePath, previousRoutePath?: ChatRoutePath) {
+  await props.runtimeContext?.beforeRouteNavigate({
+    currentRoutePath: previousRoutePath ?? nextRoutePath,
+    nextRoutePath,
+    selectedNodePath: documentStore.selectedNodePath,
+    activePath: documentStore.activePath,
+    activeScopeMetadata: documentStore.activeScopeMetadata
+  });
 }
 
 async function onNavigateWorkspace(path: ChatRoutePath, options?: { revealSidebar?: boolean }) {
-  await navigateWorkspace(path, options);
-}
-
-async function navigateWorkspace(path: ChatRoutePath, options?: { revealSidebar?: boolean }) {
-  syncWorkspaceMode(path);
-  if (path === '/chat' && path !== props.currentRoutePath) {
-    chatStore.saveAgentViewStatus({
-      selectedNodePath: documentStore.selectedNodePath,
-      activePath: documentStore.activePath,
-      activeConversationId: chatStore.currentConversation?.id ?? null
-    });
-    if (documentStore.activeAgent) {
-      chatStore.saveWorkspaceAgentContext(documentStore.activeAgent);
-    }
-    chatStore.setSidebarCollapsed(options?.revealSidebar !== true);
-    await chatStore.applyWorkspaceAgentContextSelection();
-  }
-  if (path === '/' && props.currentRoutePath === '/chat') {
-    const savedAgentViewStatus = chatStore.restoreAgentViewStatus();
-    if (savedAgentViewStatus && (savedAgentViewStatus.selectedNodePath || savedAgentViewStatus.activePath)) {
-      chatStore.saveAgentViewStatus({
-        selectedNodePath: savedAgentViewStatus.selectedNodePath,
-        activePath: savedAgentViewStatus.activePath,
-        activeConversationId: chatStore.currentConversation?.id ?? null
-      });
-    }
-  }
+  pendingNavigationTarget.value = path;
+  await props.runtimeContext?.beforeRouteNavigate({
+    currentRoutePath: props.currentRoutePath,
+    nextRoutePath: path,
+    selectedNodePath: documentStore.selectedNodePath,
+    activePath: documentStore.activePath,
+    activeScopeMetadata: documentStore.activeScopeMetadata,
+    revealSidebar: options?.revealSidebar
+  });
   props.navigateTo(path);
 }
+
+watch(
+  () => props.currentRoutePath,
+  (nextRoutePath, previousRoutePath) => {
+    if (pendingNavigationTarget.value === nextRoutePath) {
+      pendingNavigationTarget.value = null;
+      return;
+    }
+
+    void syncRuntimeRouteState(nextRoutePath, previousRoutePath);
+  },
+  { immediate: true, flush: 'sync' }
+);
+
+watch(
+  () => props.runtimeContext,
+  (runtimeContext, previousRuntimeContext) => {
+    if (!runtimeContext || runtimeContext === previousRuntimeContext) {
+      return;
+    }
+
+    void syncRuntimeRouteState(props.currentRoutePath);
+  },
+  { flush: 'sync' }
+);
 
 async function onGoBackNodeHistory(): Promise<void> {
   if (!isKnowledgeMode.value) {
@@ -164,13 +168,6 @@ async function onGoForwardNodeHistory(): Promise<void> {
   await documentStore.goForwardNodeHistory();
 }
 
-watch(
-  () => props.currentRoutePath,
-  (path) => {
-    syncWorkspaceMode(path);
-  },
-  { immediate: true }
-);
 </script>
 
 <style scoped>

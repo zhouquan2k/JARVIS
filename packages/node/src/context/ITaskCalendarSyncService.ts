@@ -1,4 +1,4 @@
-import type { Task } from '../../../core/src/interfaces/ITaskProvider.ts';
+import type { Task } from '@plugins/task-mgr/api';
 
 export interface TaskCalendarSyncResult {
     providerId: string;

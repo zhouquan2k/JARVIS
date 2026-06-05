@@ -1,22 +1,32 @@
-export { default as ChatApp } from './src/ChatApp.vue';
-export { default as ConversationWorkspaceView } from './src/views/ConversationWorkspaceView.vue';
 export { default as DocumentWorkspaceView } from './src/views/DocumentWorkspaceView.vue';
-export { default as NormalChatView } from './src/views/NormalChatView.vue';
-export { default as CompareChatView } from './src/views/CompareChatView.vue';
+export { default as BuiltinWorkspaceHostApp } from './src/views/BuiltinWorkspaceHostApp.vue';
 export { default as WorkspaceHostApp } from './src/views/WorkspaceHostApp.vue';
 export { default as AppTopBar } from './src/components/AppTopBar.vue';
-export { default as AttachmentComposer } from './src/components/AttachmentComposer.vue';
-export { default as ConversationSidebar } from './src/components/ConversationSidebar.vue';
-export { default as AgentPane } from './src/components/AgentPane.vue';
-export { default as AgentRightPane } from './src/components/AgentRightPane.vue';
+export { default as WorkspaceRightPane } from './src/components/WorkspaceRightPane.vue';
 export { default as DocumentEditorPane } from './src/components/DocumentEditorPane.vue';
 export { default as DocumentFileTree } from './src/components/DocumentFileTree.vue';
 export { default as MessageAnnotationLayer } from './src/components/MessageAnnotationLayer.vue';
-export { default as MessageAttachmentStrip } from './src/components/MessageAttachmentStrip.vue';
 export { createWorkspaceI18n, translateWorkspaceMessage, useWorkspaceI18n, resolveWorkspaceText, resolveInitialLocale } from './src/i18n';
-export { useChatStore } from './src/store/chat';
 export { useDocumentWorkspaceStore } from './src/store/documentWorkspace';
-export { useCompareStore } from './src/store/compare';
 export { CHAT_ROUTES, PRIMARY_WORKSPACE_ROUTES, type ChatRoute, type ChatRoutePath } from './src/routes';
+export { createWorkspaceHostRouter, type WorkspaceHostRouter, type CreateWorkspaceHostRouterOptions } from './src/routing/createWorkspaceHostRouter';
 export { openConversationImportDialog, parseConversationImportPayload } from './src/utils/externalFileImport';
 export { installGlobalUnhandledErrorFallback } from './src/utils/installGlobalUnhandledErrorFallback';
+export { contributionQueryKey } from './src/plugins/injectionKeys';
+export { useDocumentCreationFlows } from './src/services/documentCreationFlows';
+export {
+    createBuiltinWorkspaceRuntime,
+    type BuiltinWorkspaceRuntimeResult,
+    type CreateBuiltinWorkspaceRuntimeOptions,
+    type WorkspaceHostRuntimeMode
+} from './src/bootstrap/createBuiltinWorkspaceRuntime';
+export {
+    loadPluginEnablementConfig,
+    type LoadPluginEnablementConfigOptions
+} from './src/bootstrap/loadPluginEnablementConfig';
+export {
+    HttpContextProvider,
+    resolveContextBaseUrl,
+    type HttpContextProviderOptions,
+    type ResolveContextBaseUrlOptions
+} from './src/context/HttpContextProvider';

@@ -23,6 +23,58 @@ importers:
       '@packages/node':
         specifier: workspace:*
         version: link:../../packages/node
+      '@packages/plugin-system':
+        specifier: workspace:*
+        version: link:../../packages/plugin-system
+      '@packages/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+      pinia:
+        specifier: ^3.0.4
+        version: 3.0.4(typescript@5.9.3)(vue@3.5.29(typescript@5.9.3))
+      vue:
+        specifier: ^3.5.29
+        version: 3.5.29(typescript@5.9.3)
+    devDependencies:
+      '@playwright/test':
+        specifier: ^1.58.2
+        version: 1.58.2
+      '@types/node':
+        specifier: ^24.6.0
+        version: 24.12.0
+      '@vitejs/plugin-vue':
+        specifier: ^6.0.4
+        version: 6.0.4(vite@7.3.1(@types/node@24.12.0)(jiti@2.6.1)(tsx@4.21.0))(vue@3.5.29(typescript@5.9.3))
+      '@vue/test-utils':
+        specifier: ^2.4.6
+        version: 2.4.6
+      electron:
+        specifier: ^30.0.0
+        version: 30.5.1
+      esbuild:
+        specifier: ^0.25.0
+        version: 0.25.12
+      happy-dom:
+        specifier: ^20.8.3
+        version: 20.8.3
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vite:
+        specifier: ^7.3.1
+        version: 7.3.1(@types/node@24.12.0)(jiti@2.6.1)(tsx@4.21.0)
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@24.12.0)(happy-dom@20.8.3)
+      vue-tsc:
+        specifier: ^3.2.5
+        version: 3.2.5(typescript@5.9.3)
+
+  apps/desktop2:
+    dependencies:
+      '@packages/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@packages/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -69,6 +121,15 @@ importers:
 
   apps/extension:
     dependencies:
+      '@packages/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@packages/plugin-system':
+        specifier: workspace:*
+        version: link:../../packages/plugin-system
+      '@packages/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       localforage:
         specifier: ^1.10.0
         version: 1.10.0
@@ -115,6 +176,9 @@ importers:
       '@packages/node':
         specifier: workspace:*
         version: link:../../packages/node
+      '@plugins/ai-agent':
+        specifier: workspace:*
+        version: link:../../plugins/ai-agent
       better-sqlite3:
         specifier: ^12.4.1
         version: 12.6.2
@@ -142,6 +206,49 @@ importers:
         version: 2.1.9(@types/node@24.12.0)(happy-dom@20.8.3)
 
   apps/web:
+    dependencies:
+      '@packages/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@packages/plugin-system':
+        specifier: workspace:*
+        version: link:../../packages/plugin-system
+      '@packages/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+      pinia:
+        specifier: ^3.0.4
+        version: 3.0.4(typescript@5.9.3)(vue@3.5.29(typescript@5.9.3))
+      vue:
+        specifier: ^3.5.29
+        version: 3.5.29(typescript@5.9.3)
+    devDependencies:
+      '@playwright/test':
+        specifier: ^1.55.0
+        version: 1.58.2
+      '@vitejs/plugin-vue':
+        specifier: ^6.0.4
+        version: 6.0.4(vite@7.3.1(@types/node@25.3.3)(jiti@2.6.1)(tsx@4.21.0))(vue@3.5.29(typescript@5.9.3))
+      '@vue/test-utils':
+        specifier: ^2.4.6
+        version: 2.4.6
+      happy-dom:
+        specifier: ^20.8.3
+        version: 20.8.3
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vite:
+        specifier: ^7.3.1
+        version: 7.3.1(@types/node@25.3.3)(jiti@2.6.1)(tsx@4.21.0)
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@25.3.3)(happy-dom@20.8.3)
+      vue-tsc:
+        specifier: ^3.2.5
+        version: 3.2.5(typescript@5.9.3)
+
+  apps/web2:
     dependencies:
       '@packages/core':
         specifier: workspace:*
@@ -216,6 +323,25 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@24.12.0)(happy-dom@20.8.3)
 
+  packages/plugin-system:
+    dependencies:
+      '@packages/core':
+        specifier: workspace:*
+        version: link:../core
+      '@plugins/ai-agent':
+        specifier: workspace:*
+        version: link:../../plugins/ai-agent
+      '@plugins/task-mgr':
+        specifier: workspace:*
+        version: link:../../plugins/task-mgr
+    devDependencies:
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@25.3.3)(happy-dom@20.8.3)
+      vue:
+        specifier: ^3.5.29
+        version: 3.5.29(typescript@5.9.3)
+
   packages/ui:
     dependencies:
       '@milkdown/crepe':
@@ -224,6 +350,12 @@ importers:
       '@milkdown/kit':
         specifier: 7.19.2
         version: 7.19.2(@codemirror/language@6.12.3)(@codemirror/state@6.6.0)(@codemirror/view@6.40.0)(typescript@5.9.3)
+      '@packages/core':
+        specifier: workspace:*
+        version: link:../core
+      '@packages/plugin-system':
+        specifier: workspace:*
+        version: link:../plugin-system
       lucide-vue-next:
         specifier: ^1.0.0
         version: 1.0.0(vue@3.5.29(typescript@5.9.3))
@@ -252,6 +384,49 @@ importers:
       vitest:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@25.3.3)(happy-dom@20.8.3)
+
+  plugins/ai-agent:
+    dependencies:
+      '@packages/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@packages/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+      js-sha3:
+        specifier: ^0.9.3
+        version: 0.9.3
+      localforage:
+        specifier: ^1.10.0
+        version: 1.10.0
+      lucide-vue-next:
+        specifier: ^1.0.0
+        version: 1.0.0(vue@3.5.29(typescript@5.9.3))
+      pinia:
+        specifier: ^3.0.4
+        version: 3.0.4(typescript@5.9.3)(vue@3.5.29(typescript@5.9.3))
+      random-int:
+        specifier: ^3.1.0
+        version: 3.1.0
+      vue:
+        specifier: ^3.5.29
+        version: 3.5.29(typescript@5.9.3)
+    devDependencies:
+      '@types/chrome':
+        specifier: ^0.1.37
+        version: 0.1.37
+
+  plugins/task-mgr:
+    dependencies:
+      '@packages/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@packages/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+      vue:
+        specifier: ^3.5.29
+        version: 3.5.29(typescript@5.9.3)
 
 packages:
 

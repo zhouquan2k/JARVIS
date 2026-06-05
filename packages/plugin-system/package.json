@@ -1,0 +1,17 @@
+{
+  "name": "@packages/plugin-system",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "../../packages/ui/node_modules/.bin/vitest run"
+  },
+  "dependencies": {
+    "@packages/core": "workspace:*",
+    "@plugins/ai-agent": "workspace:*",
+    "@plugins/task-mgr": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8",
+    "vue": "^3.5.29"
+  }
+}

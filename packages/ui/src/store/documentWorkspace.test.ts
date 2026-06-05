@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
-import { createMockContextProvider, decodeTextDocument, DEFAULT_SCOPED_AGENT_CONFIG, HttpApiError } from '@packages/core/src';
+import { decodeTextDocument, HttpApiError } from '@packages/core/src';
+import { DEFAULT_SCOPED_AGENT_CONFIG } from '@plugins/ai-agent/api';
+import { createMockContextProvider } from '@plugins/ai-agent/src/testing';
 import { useDocumentWorkspaceStore } from './documentWorkspace';
 
 describe('useDocumentWorkspaceStore', () => {
@@ -400,6 +402,48 @@ describe('useDocumentWorkspaceStore', () => {
         expect(store.selectedNodePath).toBe('/docs');
         expect(store.activePath).toBeNull();
         expect(store.isAgentOwnerSelected).toBe(true);
+    });
+
+    it('loads index.md for a normal directory while preserving the selected folder scope', async () => {
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/docs/index.md', name: 'index.md', kind: 'file', parentPath: '/docs' }
+            ],
+            documents: {
+                '/docs/index.md': '# Docs index'
+            }
+        }));
+
+        await store.hydrateWorkspace();
+        await store.openNode('/docs');
+
+        expect(store.selectedNodePath).toBe('/docs');
+        expect(store.activePath).toBeNull();
+        expect(store.agentIndexPath).toBe('/docs/index.md');
+        expect(store.agentIndexDocument?.path).toBe('/docs/index.md');
+        expect(store.agentIndexDraftContent).toBe('# Docs index');
+        expect(store.isAgentOwnerSelected).toBe(false);
+    });
+
+    it('keeps a normal directory empty when index.md is absent', async () => {
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' }
+            ],
+            documents: {}
+        }));
+
+        await store.hydrateWorkspace();
+        await store.openNode('/docs');
+
+        expect(store.selectedNodePath).toBe('/docs');
+        expect(store.activePath).toBeNull();
+        expect(store.agentIndexPath).toBeNull();
+        expect(store.agentIndexDocument).toBeNull();
+        expect(store.isAgentOwnerSelected).toBe(false);
     });
 
     it('loads the root index document when the root agent owner has one', async () => {

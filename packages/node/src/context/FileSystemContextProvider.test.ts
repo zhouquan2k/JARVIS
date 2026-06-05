@@ -15,7 +15,7 @@ describe('FileSystemContextProvider', () => {
         tempRoots.length = 0;
     });
 
-    it('returns a full tree with owner markers, effective agent keys and aligned agent configs', async () => {
+    it('returns a full tree with metadata ownership, effective scope keys and aligned agent configs', async () => {
         const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-node-context-'));
         tempRoots.push(rootPath);
 
@@ -46,46 +46,49 @@ describe('FileSystemContextProvider', () => {
         expect(rootNodes.some((node) => node.path === '/.secret.md')).toBe(false);
         expect(workspaceNode).toMatchObject({
             kind: 'directory',
-            isAgentOwner: true,
-            agentKey: '/workspace/'
+            ownsMetadata: true,
+            scopeKey: '/workspace/'
         });
         expect(guideNode).toMatchObject({
             kind: 'file',
-            agentKey: '/workspace/'
+            scopeKey: '/workspace/'
         });
         expect(archiveNode).toMatchObject({
             kind: 'directory',
-            isAgentOwner: true,
-            agentKey: '/workspace/archive/'
+            ownsMetadata: true,
+            scopeKey: '/workspace/archive/'
         });
         expect(historyNode).toMatchObject({
             kind: 'file',
-            agentKey: '/workspace/archive/'
+            scopeKey: '/workspace/archive/'
         });
         expect(welcomeNode).toMatchObject({
             kind: 'file',
-            agentKey: '/'
+            scopeKey: '/'
         });
 
-        expect(context.agentConfigs['/']).toMatchObject({
+        expect(context.folderMetadata['/']?.data).toMatchObject({
             ...DEFAULT_SCOPED_AGENT_CONFIG,
             scopePath: '/',
             sourcePaths: ['/.agent.json']
         });
         const rootAgentFile = await readFile(path.join(rootPath, '.agent.json'), 'utf8');
-        expect(JSON.parse(rootAgentFile)).toMatchObject(DEFAULT_SCOPED_AGENT_CONFIG);
-        expect(context.agentConfigs['/workspace/']).toMatchObject({
+        expect(JSON.parse(rootAgentFile)).toMatchObject({
+            name: 'Default Knowledge Agent',
+            modelProviderName: 'gemini-api'
+        });
+        expect(context.folderMetadata['/workspace/']?.data).toMatchObject({
             name: 'Workspace Agent',
             scopePath: '/workspace',
             sourcePaths: ['/.agent.json', '/workspace/.agent.json']
         });
-        expect(context.agentConfigs['/workspace/archive/']).toMatchObject({
+        expect(context.folderMetadata['/workspace/archive/']?.data).toMatchObject({
             name: 'Archive Agent',
             scopePath: '/workspace/archive',
             sourcePaths: ['/.agent.json', '/workspace/.agent.json', '/workspace/archive/.agent.json']
         });
-        expect(context.agentConfigs['/workspace/archive/']?.effectiveInstructions).toContain('Handle workspace docs.');
-        expect(context.agentConfigs['/workspace/archive/']?.effectiveInstructions).toContain('Handle archived docs.');
+        expect(String(context.folderMetadata['/workspace/archive/']?.data?.effectiveInstructions)).toContain('Handle workspace docs.');
+        expect(String(context.folderMetadata['/workspace/archive/']?.data?.effectiveInstructions)).toContain('Handle archived docs.');
     });
 
     it('supports mounted top-level directories with virtual paths and alias-only root operations', async () => {
@@ -121,28 +124,28 @@ describe('FileSystemContextProvider', () => {
         expect(context.nodes.some((node) => node.path === '/welcome.md')).toBe(true);
         expect(reportsNode).toMatchObject({
             kind: 'directory',
-            isAgentOwner: true,
-            agentKey: '/reports/'
+            ownsMetadata: true,
+            scopeKey: '/reports/'
         });
         expect(summaryNode).toMatchObject({
             kind: 'file',
-            agentKey: '/reports/'
+            scopeKey: '/reports/'
         });
         expect(archiveNode).toMatchObject({
             kind: 'directory',
-            isAgentOwner: true,
-            agentKey: '/reports/archive/'
+            ownsMetadata: true,
+            scopeKey: '/reports/archive/'
         });
         expect(historyNode).toMatchObject({
             kind: 'file',
-            agentKey: '/reports/archive/'
+            scopeKey: '/reports/archive/'
         });
-        expect(context.agentConfigs['/reports/']).toMatchObject({
+        expect(context.folderMetadata['/reports/']?.data).toMatchObject({
             name: 'Reports Mount',
             scopePath: '/reports',
             sourcePaths: ['/.agent.json', '/reports/.agent.json']
         });
-        expect(context.agentConfigs['/reports/archive/']).toMatchObject({
+        expect(context.folderMetadata['/reports/archive/']?.data).toMatchObject({
             name: 'Archive Agent',
             scopePath: '/reports/archive',
             sourcePaths: ['/.agent.json', '/reports/.agent.json', '/reports/archive/.agent.json']
@@ -169,7 +172,7 @@ describe('FileSystemContextProvider', () => {
         await expect(readFile(path.join(targetPath, '.agent.json'), 'utf8')).rejects.toThrow();
 
         const updatedMountContext = await provider.getContext();
-        expect(updatedMountContext.agentConfigs['/reports/']).toMatchObject({
+        expect(updatedMountContext.folderMetadata['/reports/']?.data).toMatchObject({
             name: 'Updated Reports Mount',
             scopePath: '/reports',
             sourcePaths: ['/.agent.json', '/reports/.agent.json']
@@ -206,8 +209,7 @@ describe('FileSystemContextProvider', () => {
         expect(createdNode).toMatchObject({
             path: '/reports/draft.md',
             parentPath: '/reports',
-            kind: 'file',
-            agentKey: '/reports/'
+            kind: 'file'
         });
         await expect(readFile(path.join(targetPath, 'draft.md'), 'utf8')).resolves.toContain('jarvis_id:');
 
@@ -252,8 +254,7 @@ describe('FileSystemContextProvider', () => {
             path: '/docs/.agent.json',
             name: '.agent.json',
             kind: 'file',
-            parentPath: '/docs',
-            agentKey: '/'
+            parentPath: '/docs'
         });
         await expect(readFile(path.join(rootPath, 'docs', '.agent.json'), 'utf8')).resolves.toBe('');
     });
@@ -300,8 +301,7 @@ describe('FileSystemContextProvider', () => {
             path: '/docs/.agent.json',
             name: '.agent.json',
             kind: 'file',
-            parentPath: '/docs',
-            agentKey: '/'
+            parentPath: '/docs'
         });
         await expect(readFile(path.join(rootPath, 'docs', '.agent.json'), 'utf8')).resolves.toBe('{}\n');
     });
@@ -330,7 +330,7 @@ describe('FileSystemContextProvider', () => {
         await writeFile(path.join(rootPath, 'workspace', 'guide.md'), '# Guide\n');
 
         const provider = new FileSystemContextProvider({ rootPath });
-        const taskProvider = provider.getTaskProvider();
+        const taskProvider = provider.getTaskService();
 
         const docTask = await taskProvider.createTask({
             id: 'temp-doc',
@@ -437,7 +437,7 @@ describe('FileSystemContextProvider', () => {
         await writeFile(path.join(rootPath, 'workspace', 'child', 'note.md'), '# Child\n');
 
         const provider = new FileSystemContextProvider({ rootPath });
-        const taskProvider = provider.getTaskProvider();
+        const taskProvider = provider.getTaskService();
 
         await taskProvider.createTask({
             id: 'top-project',

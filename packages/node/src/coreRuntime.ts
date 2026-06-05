@@ -1,8 +1,9 @@
-import * as agentConfigRuntime from '../../core/src/agents/config/resolveScopedAgentConfig.ts';
+import * as agentConfigRuntime from '../../../plugins/ai-agent/src/runtime/agents/config/resolveScopedAgentConfig.ts';
 
 export type {
     ContextDocument,
     ContextNode,
+    FolderMetadata,
     ProjectDocumentEntry,
     ContextSearchMatch,
     ContextSearchRequest,
@@ -20,10 +21,10 @@ export type {
     AgentSkillBinding,
     AgentToolBinding,
     ResolvedAgentConfig
-} from '../../core/src/interfaces/IAgentConfig.ts';
+} from '@plugins/ai-agent/api';
 
-const agentConfigModule = agentConfigRuntime as typeof import('../../core/src/agents/config/resolveScopedAgentConfig.ts') & {
-    'module.exports'?: typeof import('../../core/src/agents/config/resolveScopedAgentConfig.ts');
+const agentConfigModule = agentConfigRuntime as typeof import('../../../plugins/ai-agent/src/runtime/agents/config/resolveScopedAgentConfig.ts') & {
+    'module.exports'?: typeof import('../../../plugins/ai-agent/src/runtime/agents/config/resolveScopedAgentConfig.ts');
 };
 const agentConfigExports = 'DEFAULT_SCOPED_AGENT_CONFIG' in agentConfigModule
     ? agentConfigModule

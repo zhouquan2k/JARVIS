@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "jsx": "preserve",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "paths": {
+      "@packages/core": ["../../packages/core"],
+      "@packages/core/*": ["../../packages/core/*"],
+      "@packages/ui": ["../../packages/ui"],
+      "@packages/ui/*": ["../../packages/ui/*"],
+      "@plugins/ai-agent": ["../../plugins/ai-agent/src/index.ts"],
+      "@plugins/ai-agent/*": ["../../plugins/ai-agent/*"],
+      "@plugins/ai-agent/api": ["../../plugins/ai-agent/api.ts"],
+      "@plugins/task-mgr": ["../../plugins/task-mgr/src/index.ts"],
+      "@plugins/task-mgr/*": ["../../plugins/task-mgr/*"],
+      "@plugins/task-mgr/api": ["../../plugins/task-mgr/api.ts"],
+      "vue": ["./node_modules/vue"],
+      "pinia": ["./node_modules/pinia"],
+      "lucide-vue-next": ["../../packages/ui/node_modules/lucide-vue-next"]
+    },
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.vue", "shared/**/*.ts", "vite.config.ts", "playwright.config.ts"]
+}

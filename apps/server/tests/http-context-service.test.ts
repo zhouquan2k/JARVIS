@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { HttpContextService } from '../src/services/httpContextService.js';
 import type { ContextProvider } from '../src/types/context.js';
-import { encodeTextDocument, type Conversation, type Task } from '@packages/core/src';
+import { encodeTextDocument } from '@packages/core/src';
+import { type Conversation } from '@plugins/ai-agent/api';
+import type { Task, TaskService } from '@plugins/task-mgr/api';
 
-function createProvider(): ContextProvider {
-    const taskProvider = {
+function createTaskService(): TaskService {
+    return {
         getTasks: vi.fn(async (): Promise<Task[]> => []),
         createTask: vi.fn(async (task: Task): Promise<Task> => task),
         updateTask: vi.fn(async (task: Task): Promise<Task> => task),
@@ -28,6 +30,9 @@ function createProvider(): ContextProvider {
             calendarLastSyncError: null
         }))
     };
+}
+
+function createProvider(): ContextProvider {
 
     return {
         id: 'test-context',
@@ -45,7 +50,6 @@ function createProvider(): ContextProvider {
             messages: [],
             updatedAt: 100
         }]),
-        getTaskProvider: vi.fn(() => taskProvider),
         getProjectDocuments: vi.fn(async () => [{ path: '/welcome.md', name: 'welcome.md' }]),
         readDocument: vi.fn(async (path: string) => ({ path, mimeType: 'text/markdown', dataBase64: encodeTextDocument('# hello') })),
         writeDocument: vi.fn(async () => ({ version: 'v2', updatedAt: 2 })),
@@ -77,8 +81,8 @@ function createProvider(): ContextProvider {
 describe('http context service', () => {
     it('delegates context operations to the injected provider', async () => {
         const provider = createProvider();
-        const service = new HttpContextService(provider);
-        const taskProvider = provider.getTaskProvider();
+        const taskProvider = createTaskService();
+        const service = new HttpContextService(provider, taskProvider);
 
         await service.initializeAccess();
         await expect(service.getContext()).resolves.toEqual({

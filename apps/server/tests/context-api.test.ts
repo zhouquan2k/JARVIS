@@ -2,7 +2,8 @@ import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { encodeBase64, encodeTextDocument, type Task } from '@packages/core/src';
+import { encodeBase64, encodeTextDocument } from '@packages/core/src';
+import type { Task } from '@plugins/task-mgr/api';
 import { createApp } from '../src/app.js';
 import type { ServerConfig } from '../src/config.js';
 import type { ContextProvider } from '../src/types/context.js';
@@ -79,7 +80,7 @@ describe('context api', () => {
                 expect.objectContaining({ path: '/notes', kind: 'directory' }),
                 expect.objectContaining({ path: '/welcome.md', kind: 'file' })
             ]),
-            agentConfigs: expect.any(Object)
+            folderMetadata: expect.any(Object)
         });
 
         const readDocumentResponse = await app.request('/api/context/read-document', {
@@ -283,9 +284,9 @@ describe('context api', () => {
             }),
             contextProvider: {
                 initializeAccess: vi.fn(async () => {}),
-                getContext: vi.fn(async () => ({ nodes: [], agentConfigs: {} })),
+                getContext: vi.fn(async () => ({ nodes: [], folderMetadata: {} })),
                 getConversations: vi.fn(async () => []),
-                getTaskProvider: vi.fn(() => ({
+                getTaskService: vi.fn(() => ({
                     getTasks: vi.fn(async (): Promise<Task[]> => []),
                     createTask: vi.fn(async (task: Task): Promise<Task> => task),
                     updateTask: vi.fn(async (task: Task): Promise<Task> => task),
@@ -583,8 +584,8 @@ describe('context api', () => {
             id: 'fake-context',
             initializeAccess: vi.fn(async () => undefined),
             getContext: vi.fn(async () => ({
-                nodes: [{ path: '/virtual.md', name: 'virtual.md', kind: 'file', agentKey: '/' }],
-                agentConfigs: {}
+                nodes: [{ path: '/virtual.md', name: 'virtual.md', kind: 'file', scopeKey: '/' }],
+                folderMetadata: {}
             })),
             getConversations: vi.fn(async (query: { documentPath?: string }) => [{
                 id: 'conversation-1',
@@ -594,7 +595,7 @@ describe('context api', () => {
                 messages: [],
                 updatedAt: 100
             }]),
-            getTaskProvider: vi.fn(() => ({
+            getTaskService: vi.fn(() => ({
                 getTasks: vi.fn(async (): Promise<Task[]> => []),
                 createTask: vi.fn(async (task: Task): Promise<Task> => task),
                 updateTask: vi.fn(async (task: Task): Promise<Task> => task),
@@ -630,21 +631,45 @@ describe('context api', () => {
                 path: `/${input.name}`,
                 name: input.name,
                 kind: input.kind,
-                agentKey: '/'
+                scopeKey: '/'
             })),
             deleteNode: vi.fn(async () => undefined),
             renameNode: vi.fn(async (input) => ({
                 path: `/${input.name}`,
                 name: input.name,
                 kind: 'file',
-                agentKey: '/'
+                scopeKey: '/'
             })),
             searchInScope: vi.fn(async () => [])
         };
 
         const app = createApp({
             config: createConfig({ isDevelopment: true }),
-            contextProvider: provider
+            contextProvider: provider,
+            taskService: {
+                getTasks: vi.fn(async () => []),
+                createTask: vi.fn(async (task: Task) => task),
+                updateTask: vi.fn(async (task: Task) => task),
+                deleteTask: vi.fn(async () => undefined),
+                setTaskCompleted: vi.fn(async (taskId: string, completed: boolean) => ({
+                    id: taskId,
+                    title: 'Task',
+                    notes: '',
+                    completed,
+                    dueAt: null,
+                    priority: null,
+                    documentPath: null,
+                    agentKey: null,
+                    createdAt: 0,
+                    updatedAt: 0,
+                    completedAt: completed ? 0 : null,
+                    calendarProviderId: null,
+                    calendarEventId: null,
+                    calendarSyncStatus: null,
+                    calendarLastSyncedAt: null,
+                    calendarLastSyncError: null
+                }))
+            }
         });
 
         const response = await app.request('/api/context/get-context', {
@@ -655,8 +680,8 @@ describe('context api', () => {
 
         expect(response.status).toBe(200);
         await expect(response.json()).resolves.toEqual({
-            nodes: [{ path: '/virtual.md', name: 'virtual.md', kind: 'file', agentKey: '/' }],
-            agentConfigs: {}
+            nodes: [{ path: '/virtual.md', name: 'virtual.md', kind: 'file', scopeKey: '/' }],
+            folderMetadata: {}
         });
         expect(provider.getContext).toHaveBeenCalledTimes(1);
 

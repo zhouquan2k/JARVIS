@@ -1,4 +1,4 @@
-import type { Conversation, ConversationOrigin, ConversationQuery, IConversationQueryProvider } from '@packages/core';
+import type { Conversation, ConversationOrigin, ConversationQuery, IConversationQueryProvider } from '@plugins/ai-agent/api';
 import type { SyncDatabase } from '../db.js';
 import type { SyncConversation, SyncDeletedConversation } from '../types/sync.js';
 

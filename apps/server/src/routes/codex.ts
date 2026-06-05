@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { AgentRunRequest, SendMessageOptions } from '@packages/core/src';
+import type { AgentRunRequest, SendMessageOptions } from '@plugins/ai-agent/api';
 import type { ServerConfig } from '../config.js';
 import type { CodexAuthService } from '../services/codexAuthService.js';
 import type { CodexChatRequest, CodexCliService, CodexStreamEvent } from '../services/codexCliService.js';

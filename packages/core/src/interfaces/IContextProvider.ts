@@ -1,9 +1,13 @@
-import type { Conversation } from './Conversation';
-import type { ConversationQuery } from './IConversationPersistProvider';
-import type { ResolvedAgentConfig } from './IAgentConfig';
-import type { ITaskProvider } from './ITaskProvider';
+export const DEFAULT_WORKSPACE_SCOPE_KEY = '/';
 
-export const DEFAULT_WORKSPACE_AGENT_KEY = '/';
+/**
+ * 文件夹级别的不透明元数据。core 不解释 `data` 的内容；具体语义（如 AI agent 配置）
+ * 由消费该元数据的插件解释。`scopeKey` 标识携带该元数据的作用域文件夹。
+ */
+export interface FolderMetadata {
+    scopeKey: string;
+    data: Record<string, unknown>;
+}
 
 export interface ContextNode {
     path: string;
@@ -13,13 +17,16 @@ export interface ContextNode {
     hasChildren?: boolean;
     updatedAt?: number;
     children?: ContextNode[];
-    isAgentOwner?: boolean;
-    agentKey: string;
+    /** 该节点自身是否是一个携带元数据的作用域文件夹。 */
+    ownsMetadata?: boolean;
+    /** 该节点所归属的最近作用域文件夹（携带元数据的祖先）的键。 */
+    scopeKey: string;
 }
 
 export interface WorkspaceContext {
     nodes: ContextNode[];
-    agentConfigs: Record<string, ResolvedAgentConfig>;
+    /** 以 scopeKey 索引的文件夹元数据；内容不透明，由插件解释。 */
+    folderMetadata: Record<string, FolderMetadata>;
 }
 
 export interface ContextDocument {
@@ -83,8 +90,7 @@ export interface IContextProvider {
     id: string;
     initializeAccess(): Promise<void>;
     getContext(): Promise<WorkspaceContext>;
-    getConversations(query: ConversationQuery): Promise<Conversation[]>;
-    getTaskProvider(): ITaskProvider;
+    getFolderMetadata(path: string): Promise<FolderMetadata | null>;
     getProjectDocuments(curNode: string): Promise<ProjectDocumentEntry[]>;
     readDocument(path: string): Promise<ContextDocument>;
     writeDocument(input: WriteContextDocumentInput): Promise<WriteContextDocumentResult>;

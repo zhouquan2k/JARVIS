@@ -1,4 +1,49 @@
-English | [Chinese](spec.zh-CN.md) ## MODIFIED Requirements ### Requirement: Workspace shell MUST provide shared history sidebar for chat workspace
+English | [Chinese](spec.zh-CN.md)
+
+## Requirements
+
+### Requirement: 对话工作区 MUST 在首条问题后自动生成简短标题
+对话工作区 MUST 在新建本地会话的首条问题成功发送后，用该问题替换 `New Chat` 占位标题。该标题 MUST 尽可能短，并持久化到当前会话。
+
+#### Scenario: 首次发送后替换占位标题
+- **WHEN** 一条新建本地会话的标题仍为 `New Chat`
+- **AND** 用户成功发送首条问题
+- **THEN** 系统 MUST 基于该首条问题生成简洁会话标题
+- **AND** 该标题 MUST 在表达核心语义的前提下尽可能短
+- **AND** 当标题为中文时，长度 MUST NOT 超过 10 个汉字
+- **AND** 系统 MUST 将该标题持久化到当前会话
+
+#### Scenario: 标题生成失败时回退但不阻塞主发送链路
+- **WHEN** 首条问题发送成功，但自动标题生成失败
+- **THEN** 系统 MUST 保持主对话发送成功
+- **AND** 系统 MUST 回退到一个确定性的本地标题，而不是保持未命名状态
+
+### Requirement: 对话工作区 MUST 仅在重发第一条可见问题时重新生成标题
+对话工作区 MUST 只在用户编辑并重发第一条可见用户问题时重新生成标题。普通后续追问 MUST NOT 覆盖已有非占位标题，手动重命名结果也 MUST NOT 被自动标题覆盖。
+
+#### Scenario: 重发第一条问题时重新生成标题
+- **WHEN** 用户编辑并重发一条本地会话的第一条可见用户问题
+- **THEN** 系统 MUST 基于修改后的问题重新生成会话标题
+- **AND** 新标题 MUST 持久化到同一条会话
+
+#### Scenario: 普通后续追问保持当前标题不变
+- **WHEN** 一条本地会话已经具有非占位标题
+- **AND** 用户发送普通后续追问，且未编辑第一条可见用户问题
+- **THEN** 系统 MUST 保持当前会话标题不变
+- **AND** 系统 MUST NOT 覆盖手动重命名结果
+
+### Requirement: 对话工作区 MUST 在手动重命名时保持会话活动时间不变
+对话工作区 MUST 将手动重命名视为标题元数据编辑，而不是新的会话活动事件。重命名本地会话时，系统 MUST 更新持久化标题，但 MUST NOT 刷新用于历史排序或日期/时间展示的活动时间戳。
+
+#### Scenario: 重命名本地会话但不改变活动时间
+- **WHEN** 用户手动重命名一条本地会话
+- **THEN** 系统 MUST 持久化新的标题
+- **AND** 系统 MUST 保持该会话原有活动时间戳不变
+- **AND** 历史列表中显示的日期或时间 MUST 继续反映最近一次真实对话活动，而不是本次重命名动作
+
+## MODIFIED Requirements
+
+### Requirement: Workspace shell MUST provide shared history sidebar for chat workspace
 The system MUST provide一个高于 `NormalChatView` 与 `CompareChatView` 的共享对话工作台view容器，用于统一承载left-sideconversation边栏、中部聊天内容区域以及普通聊天模式下的right-sidequestion索引区域，并在 Web 与 Extension 两个host中复用一致的暗色沉浸式布局。该容器 MUST keep“local / 外部”一级switch，并在外部view下进一步管理具体 provider 选择；当right-side内容区处于普通聊天活动态时，工作台 MUST syncmountquestion索引panel。对于localhistory来源，工作台还 MUST provide整conversation级starredfilter入口，使the user可以在不离开current workspace 的前提下switch“全部”与“only看starred”两种view。该工作台在 `chatStore.workspaceMode === 'active'` 时 MUST continue作为 Agent 主view的辅助展示层，而在switch到对话模式时 MUST only改变展示方式，不得清空currentconversation或重置已save的 Agent recovery点。 #### Scenario: Render workspace shell in host app
 - **WHEN** Web host或扩展hostenter聊天工作台
 - **THEN** The system MUST render一个包含可折叠侧边栏和right-side内容区的 workspace 容器

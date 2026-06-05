@@ -4,7 +4,7 @@
   "main": "index.ts",
   "scripts": {
     "build": "tsc",
-    "test": "../../apps/web/node_modules/.bin/vitest run --config vitest.config.ts"
+    "test": "pnpm exec vitest run --config vitest.config.ts"
   },
   "peerDependencies": {
     "pinia": "^2.0.0 || ^3.0.0",
@@ -20,6 +20,8 @@
   "dependencies": {
     "@milkdown/crepe": "7.19.2",
     "@milkdown/kit": "7.19.2",
+    "@packages/core": "workspace:*",
+    "@packages/plugin-system": "workspace:*",
     "lucide-vue-next": "^1.0.0",
     "mermaid": "^11.14.0"
   }

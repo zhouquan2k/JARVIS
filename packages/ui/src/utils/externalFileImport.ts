@@ -1,4 +1,4 @@
-import { normalizeConversationMessage, type Conversation } from '@packages/core/src';
+import { normalizeConversationMessage, type Conversation } from '@plugins/ai-agent/api';
 import { translateWorkspaceMessage } from '../i18n';
 
 type JsonRecord = Record<string, unknown>;

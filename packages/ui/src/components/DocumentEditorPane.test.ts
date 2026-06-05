@@ -12,7 +12,6 @@ const buildRelativeMarkdownLinkPath = vi.fn((from: string, to: string) => {
     const fromDirectory = from.slice(0, from.lastIndexOf('/') + 1);
     return to.startsWith(fromDirectory) ? to.slice(fromDirectory.length) : to;
 });
-const buildMarkdownConversationLinkHref = vi.fn((conversationId: string) => `chatprism://conversation/${conversationId}`);
 const buildMarkdownResourceInsertion = vi.fn((from: string, to: string) => {
     const href = buildRelativeMarkdownLinkPath(from, to);
     if (to.endsWith('.png')) {
@@ -82,7 +81,6 @@ const createObjectURL = vi.fn(() => 'blob:pdf-preview');
 const revokeObjectURL = vi.fn();
 
 vi.mock('../utils/markdownDocument', () => ({
-    buildMarkdownConversationLinkHref,
     buildMarkdownResourceInsertion,
     buildRelativeMarkdownLinkPath,
     captureRenderableMarkdownSelection,
@@ -252,8 +250,18 @@ describe('DocumentEditorPane', () => {
             activeViewerId: 'text',
             activePaneMode: 'viewer',
             modelValue: 'See discussion',
-            linkableConversations: [
-                { conversationId: 'conversation-1', title: 'Plan review' }
+            insertLinkTypes: [
+                {
+                    id: 'conversation',
+                    title: 'Conversations',
+                    items: [
+                        {
+                            id: 'conversation-1',
+                            title: 'Plan review',
+                            markdown: '[Plan review](chatprism://conversation/conversation-1)'
+                        }
+                    ]
+                }
             ],
             isSaving: false,
             isDirty: false,
@@ -265,7 +273,7 @@ describe('DocumentEditorPane', () => {
 
         await wrapper.get('[data-testid="markdown-insert-link"]').trigger('click');
         await wrapper.get('[data-testid="markdown-link-tab-conversation"]').trigger('click');
-        await wrapper.get('[data-testid="markdown-conversation-link-option-conversation-1"]').trigger('click');
+        await wrapper.get('[data-testid="markdown-insert-link-option-conversation-conversation-1"]').trigger('click');
         await wrapper.vm.$nextTick();
         await wrapper.vm.$nextTick();
         await wrapper.vm.$nextTick();
@@ -1318,5 +1326,38 @@ describe('DocumentEditorPane', () => {
         await wrapper.setProps({ isSaving: true });
         expect(wrapper.get('[data-testid="document-save"]').classes()).toContain('save-button--saving');
         expect(wrapper.get('[data-testid="document-save"]').attributes('disabled')).toBeDefined();
+    });
+
+    it('handles cmd/ctrl+s as save when the document can be saved', async () => {
+        const { default: DocumentEditorPane } = await import('./DocumentEditorPane.vue');
+        const wrapper = mount(DocumentEditorPane, {
+            props: {
+                activePath: '/notes/today.md',
+                activeDocument: {
+                    path: '/notes/today.md',
+                    mimeType: 'text/markdown',
+                    dataBase64: encodeTextDocument('# Today'),
+                    canWrite: true
+                },
+                activeViewerId: 'text',
+                activePaneMode: 'viewer',
+                modelValue: '# Today',
+                isSaving: false,
+                latestFileChange: null,
+                diffEntries: [],
+                canUndo: false,
+                canRedo: false
+            },
+            attachTo: document.body
+        });
+
+        const saveEvent = new KeyboardEvent('keydown', { key: 's', metaKey: true, cancelable: true });
+        window.dispatchEvent(saveEvent);
+        await wrapper.vm.$nextTick();
+
+        expect(saveEvent.defaultPrevented).toBe(true);
+        expect(wrapper.emitted('save')).toHaveLength(1);
+
+        wrapper.unmount();
     });
 });

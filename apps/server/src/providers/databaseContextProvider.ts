@@ -1,4 +1,4 @@
-import type { TaskQueryTag } from '@packages/core';
+import type { Task, TaskQueryTag, TaskService } from '@plugins/task-mgr/api';
 import type {
     Conversation,
     ContextDocument,
@@ -7,9 +7,9 @@ import type {
     ContextSearchRequest,
     ContextProvider,
     CreateContextNodeInput,
+    FolderMetadata,
     MoveContextNodeInput,
     RenameContextNodeInput,
-    Task,
     WorkspaceContext,
     WriteContextDocumentInput,
     WriteContextDocumentResult
@@ -56,7 +56,11 @@ export class DatabaseContextProvider implements ContextProvider {
         return [];
     }
 
-    getTaskProvider() {
+    async getFolderMetadata(_path: string): Promise<FolderMetadata | null> {
+        return null;
+    }
+
+    getTaskService(): TaskService {
         return this.taskProvider;
     }
 

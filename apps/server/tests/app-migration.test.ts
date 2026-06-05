@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../src/app.js';
 import type { ServerConfig } from '../src/config.js';
 import type { ContextProvider } from '../src/types/context.js';
+import type { TaskService } from '@plugins/task-mgr/api';
 
 function createConfig(overrides: Partial<ServerConfig> = {}): ServerConfig {
     return {
@@ -37,6 +38,15 @@ async function waitForCondition(assertion: () => Promise<void>, attempts = 20): 
 
 describe('app migration startup', () => {
     const tempRoots: string[] = [];
+    const taskService: TaskService = {
+        getTasks: vi.fn(async () => []),
+        createTask: vi.fn(async (task) => task),
+        updateTask: vi.fn(async (task) => task),
+        deleteTask: vi.fn(async () => undefined),
+        setTaskCompleted: vi.fn(async (_taskId, _completed) => {
+            throw new Error('not implemented');
+        })
+    };
 
     afterEach(async () => {
         await Promise.all(tempRoots.map(async (root) => {
@@ -58,7 +68,8 @@ describe('app migration startup', () => {
 
         createApp({
             config: createConfig({ knowledgeRoot: rootPath }),
-            contextProvider: provider
+            contextProvider: provider,
+            taskService
         });
 
         await waitForCondition(async () => {
@@ -81,7 +92,8 @@ describe('app migration startup', () => {
 
         createApp({
             config: createConfig({ knowledgeRoot: rootPath }),
-            contextProvider: provider
+            contextProvider: provider,
+            taskService
         });
 
         await new Promise((resolve) => setTimeout(resolve, 30));

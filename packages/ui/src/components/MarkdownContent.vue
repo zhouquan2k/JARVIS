@@ -7,7 +7,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { MessageAnnotation } from '@packages/core/src';
+import type { MessageAnnotation } from '@plugins/ai-agent/api';
 import MessageAnnotationLayer from './MessageAnnotationLayer.vue';
 
 const props = defineProps<{

@@ -1,8 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { Conversation } from '../../../core/src/interfaces/Conversation.ts';
-import type { ConversationQuery, IConversationQueryProvider } from '../../../core/src/interfaces/IConversationPersistProvider.ts';
-import type { ITaskProvider } from '../../../core/src/interfaces/ITaskProvider.ts';
+import type { Conversation, ConversationQuery, IConversationQueryProvider } from '@plugins/ai-agent/api';
+import type { TaskService } from '@plugins/task-mgr/api';
 import {
     DEFAULT_SCOPED_AGENT_CONFIG,
     type AgentConfig,
@@ -11,6 +10,7 @@ import {
     type AgentToolBinding,
     type ContextDocument,
     type ContextNode,
+    type FolderMetadata,
     type ProjectDocumentEntry,
     type ContextSearchMatch,
     type ContextSearchRequest,
@@ -460,8 +460,8 @@ function buildHiddenContextNode(input: {
         parentPath: input.parentPath,
         hasChildren: input.kind === 'directory' ? false : undefined,
         updatedAt: input.updatedAt,
-        isAgentOwner: false,
-        agentKey: input.agentKey
+        ownsMetadata: false,
+        scopeKey: input.agentKey
     };
 }
 
@@ -470,7 +470,7 @@ function getParentAgentKeyFromContext(context: WorkspaceContext, parentPath?: st
         return DEFAULT_WORKSPACE_AGENT_KEY;
     }
 
-    return findContextNodeByPath(context.nodes, parentPath)?.agentKey ?? DEFAULT_WORKSPACE_AGENT_KEY;
+    return findContextNodeByPath(context.nodes, parentPath)?.scopeKey ?? DEFAULT_WORKSPACE_AGENT_KEY;
 }
 
 function resolveEffectiveAgentBinding(
@@ -548,7 +548,7 @@ export class FileSystemContextProvider implements IContextProvider {
 
     private assertSameAgent(context: WorkspaceContext, srcPath: string, dstParentPath: string | undefined): void {
         const srcNode = findContextNodeByPath(context.nodes, srcPath);
-        const srcAgentKey = srcNode?.agentKey ?? getParentAgentKeyFromContext(context, path.posix.dirname(srcPath));
+        const srcAgentKey = srcNode?.scopeKey ?? getParentAgentKeyFromContext(context, path.posix.dirname(srcPath));
         const dstAgentKey = getParentAgentKeyFromContext(context, dstParentPath);
         if (srcAgentKey !== dstAgentKey) {
             throw new Error(`Cross-agent moves are not supported. Source agent: "${srcAgentKey}", target agent: "${dstAgentKey}".`);
@@ -573,8 +573,20 @@ export class FileSystemContextProvider implements IContextProvider {
 
         return {
             nodes,
-            agentConfigs: Object.fromEntries(agentConfigs.entries())
+            folderMetadata: Object.fromEntries(
+                [...agentConfigs.entries()].map(([scopeKey, config]) => [
+                    scopeKey,
+                    { scopeKey, data: config as unknown as Record<string, unknown> } satisfies FolderMetadata
+                ])
+            )
         };
+    }
+
+    async getFolderMetadata(targetPath: string): Promise<FolderMetadata | null> {
+        const context = await this.getContext();
+        const node = findContextNodeByPath(context.nodes, targetPath);
+        const scopeKey = node?.scopeKey ?? getParentAgentKeyFromContext(context, targetPath);
+        return context.folderMetadata[scopeKey] ?? null;
     }
 
     async getConversations(query: ConversationQuery): Promise<Conversation[]> {
@@ -606,7 +618,7 @@ export class FileSystemContextProvider implements IContextProvider {
         });
     }
 
-    getTaskProvider(): ITaskProvider {
+    getTaskService(): TaskService {
         return this.taskProvider;
     }
 
@@ -1022,8 +1034,8 @@ export class FileSystemContextProvider implements IContextProvider {
                     hasChildren: children.length > 0,
                     updatedAt: stats.mtimeMs,
                     children,
-                    isAgentOwner: directoryAgent.agentKey === (virtualPath.endsWith('/') ? virtualPath : `${virtualPath}/`),
-                    agentKey: directoryAgent.agentKey
+                    ownsMetadata: directoryAgent.agentKey === (virtualPath.endsWith('/') ? virtualPath : `${virtualPath}/`),
+                    scopeKey: directoryAgent.agentKey
                 } satisfies ContextNode;
             }
 
@@ -1049,8 +1061,8 @@ export class FileSystemContextProvider implements IContextProvider {
                     hasChildren: children.length > 0,
                     updatedAt: stats.mtimeMs,
                     children,
-                    isAgentOwner: directoryAgent.agentKey === (virtualPath.endsWith('/') ? virtualPath : `${virtualPath}/`),
-                    agentKey: directoryAgent.agentKey
+                    ownsMetadata: directoryAgent.agentKey === (virtualPath.endsWith('/') ? virtualPath : `${virtualPath}/`),
+                    scopeKey: directoryAgent.agentKey
                 } satisfies ContextNode;
             }
 
@@ -1061,7 +1073,7 @@ export class FileSystemContextProvider implements IContextProvider {
                 parentPath: input.virtualPath,
                 hasChildren: false,
                 updatedAt: stats.mtimeMs,
-                agentKey: input.inheritedAgent.agentKey
+                scopeKey: input.inheritedAgent.agentKey
             } satisfies ContextNode;
         }));
 

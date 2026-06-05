@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { Task } from '../../../core/src/interfaces/ITaskProvider.ts';
+import type { Task } from '@plugins/task-mgr/api';
 import type { ITaskCalendarSyncService } from './ITaskCalendarSyncService.ts';
 import { FileSystemTaskProvider } from './FileSystemTaskProvider.ts';
 

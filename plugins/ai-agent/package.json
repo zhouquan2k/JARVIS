@@ -1,0 +1,21 @@
+{
+  "name": "@plugins/ai-agent",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "../../packages/ui/node_modules/.bin/vitest run --config ../../packages/ui/vitest.plugins.config.ts"
+  },
+  "dependencies": {
+    "@packages/core": "workspace:*",
+    "@packages/ui": "workspace:*",
+    "js-sha3": "^0.9.3",
+    "localforage": "^1.10.0",
+    "lucide-vue-next": "^1.0.0",
+    "pinia": "^3.0.4",
+    "random-int": "^3.1.0",
+    "vue": "^3.5.29"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.37"
+  }
+}

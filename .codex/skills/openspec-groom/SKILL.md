@@ -68,6 +68,7 @@ Follow these phases in sequence. **User must explicitly confirm (e.g., "确认")
 - Only after user confirms all previous phases
 - Create or update: `docs/<change-name>.md`
 - Generate structured documentation based on confirmed content
+- **Include key class Mermaid diagram** using mermaid-class-diagram skill to visualize core classes and relationships
 
 ### General Rules
 
@@ -112,12 +113,13 @@ Generated after Phase 4, when user confirms all previous discussions:
 ### 架构设计
 [Modules, classes, interfaces, responsibilities, relationships]
 
-### 核心组件
-[Key components and their interactions]
+### 关键类 Mermaid 类图
+使用 mermaid-class-diagram skill 生成的关键类设计图，展示核心类、接口及其关系：
 
-## 影响到的核心类 / 全局类图
-
-[Possible impacts on existing classes and global design]
+```mermaid
+classDiagram
+    [Key classes and relationships diagram]
+```
 
 ## 验收标准
 

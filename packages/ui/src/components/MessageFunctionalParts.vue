@@ -33,7 +33,7 @@
 </template>
 
 <script setup lang="ts">
-import type { MessageFunctionalPart, MessageFunctionalPartKind } from '@packages/core/src';
+import type { MessageFunctionalPart, MessageFunctionalPartKind } from '@plugins/ai-agent/api';
 import { useWorkspaceI18n } from '../i18n';
 
 defineProps<{

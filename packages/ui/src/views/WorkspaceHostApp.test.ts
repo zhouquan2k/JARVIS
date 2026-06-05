@@ -1,20 +1,221 @@
 // @vitest-environment happy-dom
 
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
+import { ref } from 'vue';
 import WorkspaceHostApp from './WorkspaceHostApp.vue';
-import { useChatStore } from '../store/chat';
-import { useCompareStore } from '../store/compare';
+import type { WorkspaceRuntimeContext } from '@packages/core/src';
 import { useDocumentWorkspaceStore } from '../store/documentWorkspace';
+import { resetMockChatStore, useMockChatStore } from '../../test-support/mockChatStore';
+
+const defaultAllTasksComponent = {
+    props: ['contextProvider'],
+    template: '<div data-testid="all-tasks-workspace-stub" :data-context-id="contextProvider?.id || \'\'" />'
+};
+
+const defaultChatComponent = {
+    props: ['contextProvider'],
+    template: '<div data-testid="conversation-workspace-stub" :data-context-id="contextProvider?.id || \'\'" />'
+};
+
+function createContributionQuery(options?: {
+    allTasksComponent?: object;
+    chatComponent?: object;
+}) {
+    return {
+        getGlobalViews: () => [
+            {
+                id: 'all-tasks',
+                routePath: '/all-tasks',
+                routeName: 'all-tasks',
+                label: 'All Tasks',
+                component: options?.allTasksComponent ?? defaultAllTasksComponent
+            },
+            {
+                id: 'chat',
+                routePath: '/chat',
+                routeName: 'normal-chat',
+                label: 'Chat',
+                component: options?.chatComponent ?? defaultChatComponent
+            }
+        ],
+        getRightPanelTabs: () => [],
+        getWorkspaceSelectionViews: () => [],
+        getInsertLinkTypes: () => [],
+        getDocumentCreationFlows: () => []
+    };
+}
+
+function createRuntimeContext(): WorkspaceRuntimeContext {
+    const chatStore = useMockChatStore();
+
+    return {
+        get currentError() {
+            return chatStore.currentError;
+        },
+        clearCurrentError() {
+            chatStore.clearCurrentError();
+        },
+        async beforeRouteNavigate(input) {
+            const currentConversationId = chatStore.currentConversation?.id ?? null;
+            chatStore.setWorkspaceMode(input.nextRoutePath === '/' ? 'agent' : 'conversation');
+            if (input.nextRoutePath === '/chat' && input.nextRoutePath !== input.currentRoutePath) {
+                chatStore.saveAgentViewStatus({
+                    selectedNodePath: input.selectedNodePath,
+                    activePath: input.activePath,
+                    activeConversationId: currentConversationId
+                });
+                const routeAgent = input.activeScopeMetadata?.data as Record<string, unknown> | undefined;
+                if (routeAgent) {
+                    chatStore.saveWorkspaceAgentContext(routeAgent);
+                }
+                chatStore.setSidebarCollapsed(input.revealSidebar !== true);
+                await chatStore.applyWorkspaceAgentContextSelection();
+            }
+            if (input.nextRoutePath === '/' && input.currentRoutePath === '/chat') {
+                const saved = chatStore.restoreAgentViewStatus();
+                if (saved && (saved.selectedNodePath || saved.activePath)) {
+                    chatStore.saveAgentViewStatus({
+                        selectedNodePath: saved.selectedNodePath,
+                        activePath: saved.activePath,
+                        activeConversationId: currentConversationId
+                    });
+                }
+            }
+        },
+        async publishWorkspaceSelectionChanged(input) {
+            chatStore.setWorkspaceContext(input);
+        },
+        registerCurrentErrorSource() {
+            return () => undefined;
+        },
+        registerBeforeRouteNavigateHandler() {
+            return () => undefined;
+        },
+        registerWorkspaceSelectionChangedHandler() {
+            return () => undefined;
+        },
+        getPluginMessages() {
+            return [];
+        },
+        subscribePluginMessages() {
+            return () => undefined;
+        },
+        postPluginMessage() {
+            return undefined;
+        },
+        postHostEvent() {
+            return undefined;
+        },
+        subscribeHostEvent() {
+            return () => undefined;
+        }
+    };
+}
 
 describe('WorkspaceHostApp', () => {
+    beforeEach(() => {
+        resetMockChatStore();
+    });
+
+    it('reacts to contribution query becoming available after mount', async () => {
+        setActivePinia(createPinia());
+        const contributionQuery = ref<ReturnType<typeof createContributionQuery> | null>(null);
+        const wrapper = mount(WorkspaceHostApp, {
+            props: {
+                currentRoutePath: '/chat',
+                navigateTo: vi.fn(),
+                contextProvider: { id: 'ctx' },
+                contributionQuery: contributionQuery.value,
+                runtimeContext: createRuntimeContext()
+            },
+            global: {
+                stubs: {
+                    AppTopBar: {
+                        template: '<div data-testid="topbar-stub" />'
+                    },
+                    DocumentWorkspaceView: {
+                        template: '<div data-testid="document-workspace-stub" />'
+                    }
+                }
+            }
+        });
+
+        expect(wrapper.find('[data-testid="conversation-workspace-stub"]').exists()).toBe(false);
+
+        contributionQuery.value = createContributionQuery();
+        await wrapper.setProps({ contributionQuery: contributionQuery.value });
+        await flushPromises();
+
+        expect(wrapper.get('[data-testid="conversation-workspace-stub"]').attributes('data-context-id')).toBe('ctx');
+    });
+
+    it('syncs agent workspace mode on initial knowledge workspace mount', async () => {
+        setActivePinia(createPinia());
+        const chatStore = useMockChatStore();
+
+        mount(WorkspaceHostApp, {
+            props: {
+                currentRoutePath: '/',
+                navigateTo: vi.fn(),
+                contextProvider: { id: 'ctx' },
+                contributionQuery: createContributionQuery(),
+                runtimeContext: createRuntimeContext()
+            },
+            global: {
+                stubs: {
+                    AppTopBar: {
+                        template: '<div data-testid="topbar-stub" />'
+                    },
+                    DocumentWorkspaceView: {
+                        template: '<div data-testid="document-workspace-stub" />'
+                    }
+                }
+            }
+        });
+
+        await flushPromises();
+
+        expect(chatStore.workspaceMode).toBe('agent');
+    });
+
+    it('syncs agent workspace mode when the runtime context becomes available after mount', async () => {
+        setActivePinia(createPinia());
+        const chatStore = useMockChatStore();
+        const wrapper = mount(WorkspaceHostApp, {
+            props: {
+                currentRoutePath: '/',
+                navigateTo: vi.fn(),
+                contextProvider: { id: 'ctx' },
+                contributionQuery: createContributionQuery(),
+                runtimeContext: null
+            },
+            global: {
+                stubs: {
+                    AppTopBar: {
+                        template: '<div data-testid="topbar-stub" />'
+                    },
+                    DocumentWorkspaceView: {
+                        template: '<div data-testid="document-workspace-stub" />'
+                    }
+                }
+            }
+        });
+
+        await wrapper.setProps({ runtimeContext: createRuntimeContext() });
+        await flushPromises();
+
+        expect(chatStore.workspaceMode).toBe('agent');
+    });
+
     it('saves the Agent view state and expands the sidebar before entering chat mode from the top bar', async () => {
         setActivePinia(createPinia());
-        const chatStore = useChatStore();
+        const chatStore = useMockChatStore();
         const documentStore = useDocumentWorkspaceStore();
         documentStore.selectedNodePath = '/docs';
         documentStore.activePath = '/docs/guide.md';
+        documentStore.activeAgentKey = '/docs/';
         documentStore.activeAgent = {
             name: 'Docs Agent',
             effectiveInstructions: 'Use docs context',
@@ -44,7 +245,9 @@ describe('WorkspaceHostApp', () => {
             props: {
                 currentRoutePath: '/',
                 navigateTo,
-                contextProvider: { id: 'ctx' }
+                contextProvider: { id: 'ctx' },
+                contributionQuery: createContributionQuery(),
+                runtimeContext: createRuntimeContext()
             },
             global: {
                 stubs: {
@@ -62,6 +265,13 @@ describe('WorkspaceHostApp', () => {
             }
         });
 
+        chatStore.currentConversation = {
+            id: 'conversation-1',
+            title: 'Workspace Chat',
+            origin: 'local',
+            updatedAt: Date.now(),
+            messages: []
+        };
         await wrapper.get('[data-testid="go-chat"]').trigger('click');
         await flushPromises();
         await flushPromises();
@@ -86,14 +296,16 @@ describe('WorkspaceHostApp', () => {
 
     it('does not resave the Agent snapshot when navigating to the current workspace', async () => {
         setActivePinia(createPinia());
-        const chatStore = useChatStore();
+        const chatStore = useMockChatStore();
         const saveSpy = vi.spyOn(chatStore, 'saveAgentViewStatus');
         const navigateTo = vi.fn();
         const wrapper = mount(WorkspaceHostApp, {
             props: {
                 currentRoutePath: '/chat',
                 navigateTo,
-                contextProvider: { id: 'ctx' }
+                contextProvider: { id: 'ctx' },
+                contributionQuery: createContributionQuery(),
+                runtimeContext: createRuntimeContext()
             },
             global: {
                 stubs: {
@@ -120,12 +332,14 @@ describe('WorkspaceHostApp', () => {
     it('navigates to chat mode from the knowledge workspace switch button', async () => {
         setActivePinia(createPinia());
         const navigateTo = vi.fn();
-        const chatStore = useChatStore();
+        const chatStore = useMockChatStore();
         const wrapper = mount(WorkspaceHostApp, {
             props: {
                 currentRoutePath: '/',
                 navigateTo,
-                contextProvider: { id: 'ctx' }
+                contextProvider: { id: 'ctx' },
+                contributionQuery: createContributionQuery(),
+                runtimeContext: createRuntimeContext()
             },
             global: {
                 stubs: {
@@ -152,7 +366,7 @@ describe('WorkspaceHostApp', () => {
     it('navigates back to knowledge mode from the chat restore button', async () => {
         setActivePinia(createPinia());
         const navigateTo = vi.fn();
-        const chatStore = useChatStore();
+        const chatStore = useMockChatStore();
         chatStore.saveWorkspaceAgentContext({
             name: 'Docs Agent',
             effectiveInstructions: 'Use docs context',
@@ -165,7 +379,13 @@ describe('WorkspaceHostApp', () => {
             props: {
                 currentRoutePath: '/chat',
                 navigateTo,
-                contextProvider: { id: 'ctx' }
+                contextProvider: { id: 'ctx' },
+                contributionQuery: createContributionQuery({
+                    chatComponent: {
+                        template: '<button data-testid="workspace-restore" @click="$emit(\'request-workspace-switch\', \'/\')" />'
+                    }
+                }),
+                runtimeContext: createRuntimeContext()
             },
             global: {
                 stubs: {
@@ -182,6 +402,13 @@ describe('WorkspaceHostApp', () => {
             }
         });
 
+        chatStore.currentConversation = {
+            id: 'conversation-2',
+            title: 'Current Chat',
+            origin: 'local',
+            updatedAt: Date.now(),
+            messages: []
+        };
         await wrapper.get('[data-testid="workspace-restore"]').trigger('click');
         await flushPromises();
 
@@ -193,7 +420,7 @@ describe('WorkspaceHostApp', () => {
     it('updates the saved agent conversation to the current chat before restoring the knowledge workspace', async () => {
         setActivePinia(createPinia());
         const navigateTo = vi.fn();
-        const chatStore = useChatStore();
+        const chatStore = useMockChatStore();
         chatStore.saveAgentViewStatus({
             selectedNodePath: '/docs',
             activePath: '/docs/guide.md',
@@ -211,7 +438,13 @@ describe('WorkspaceHostApp', () => {
             props: {
                 currentRoutePath: '/chat',
                 navigateTo,
-                contextProvider: { id: 'ctx' }
+                contextProvider: { id: 'ctx' },
+                contributionQuery: createContributionQuery({
+                    chatComponent: {
+                        template: '<button data-testid="workspace-restore" @click="$emit(\'request-workspace-switch\', \'/\')" />'
+                    }
+                }),
+                runtimeContext: createRuntimeContext()
             },
             global: {
                 stubs: {
@@ -246,7 +479,9 @@ describe('WorkspaceHostApp', () => {
             props: {
                 currentRoutePath: '/all-tasks',
                 navigateTo,
-                contextProvider: { id: 'ctx' }
+                contextProvider: { id: 'ctx' },
+                contributionQuery: createContributionQuery(),
+                runtimeContext: createRuntimeContext()
             },
             global: {
                 stubs: {
@@ -282,7 +517,9 @@ describe('WorkspaceHostApp', () => {
             props: {
                 currentRoutePath: '/',
                 navigateTo,
-                contextProvider: { id: 'ctx' }
+                contextProvider: { id: 'ctx' },
+                contributionQuery: createContributionQuery(),
+                runtimeContext: createRuntimeContext()
             },
             global: {
                 stubs: {
@@ -306,45 +543,42 @@ describe('WorkspaceHostApp', () => {
         expect(forwardSpy).not.toHaveBeenCalled();
     });
 
-    it('maps compare route to chat in the top bar and forwards recovery props', async () => {
+    it('maps compare route to chat in the top bar and forwards shared view props', async () => {
         setActivePinia(createPinia());
-        const compareStore = useCompareStore();
-        compareStore.stage = 'analyzing';
         const navigateTo = vi.fn();
         const wrapper = mount(WorkspaceHostApp, {
             props: {
                 currentRoutePath: '/compare',
                 navigateTo,
                 contextProvider: { id: 'ctx' },
-                showHistorySourceSwitch: true,
-                authStatusOverride: false,
-                authUnavailableMessage: 'auth-msg',
-                authRecoveryActionLabel: 'login',
-                authRecoveryActionDisabled: true,
-                hostRecoveryMessage: 'host-msg',
-                hostRecoveryActionLabel: 'host-login',
-                hostRecoveryActionDisabled: true
-            },
-            global: {
-                stubs: {
-                    AppTopBar: {
-                        props: ['activeWorkspacePath', 'isCompareMode', 'compareStage'],
-                        template: '<div data-testid="topbar-stub" :data-path="activeWorkspacePath" :data-compare="String(isCompareMode)" :data-stage="compareStage" />'
-                    },
-                    ConversationWorkspaceView: {
-                        props: ['contextProvider', 'showHistorySourceSwitch', 'authStatusOverride', 'authUnavailableMessage', 'authRecoveryActionLabel', 'authRecoveryActionDisabled', 'hostRecoveryMessage', 'hostRecoveryActionLabel', 'hostRecoveryActionDisabled'],
+                runtimeContext: createRuntimeContext(),
+                contributionQuery: createContributionQuery({
+                    chatComponent: {
+                        props: ['contextProvider', 'showHistorySourceSwitch'],
                         template: `
                           <div
                             data-testid="conversation-workspace-stub"
                             :data-context-id="contextProvider?.id || ''"
                             :data-switch="String(showHistorySourceSwitch)"
-                            :data-auth-status="authStatusOverride === null ? 'null' : String(authStatusOverride)"
-                            :data-auth-message="authUnavailableMessage || ''"
-                            :data-auth-label="authRecoveryActionLabel || ''"
-                            :data-auth-disabled="String(authRecoveryActionDisabled)"
-                            :data-host-message="hostRecoveryMessage || ''"
-                            :data-host-label="hostRecoveryActionLabel || ''"
-                            :data-host-disabled="String(hostRecoveryActionDisabled)"
+                          />
+                        `
+                    }
+                }),
+                showHistorySourceSwitch: true
+            },
+            global: {
+                stubs: {
+                    AppTopBar: {
+                        props: ['activeWorkspacePath', 'isCompareMode'],
+                        template: '<div data-testid="topbar-stub" :data-path="activeWorkspacePath" :data-compare="String(isCompareMode)" />'
+                    },
+                    ConversationWorkspaceView: {
+                        props: ['contextProvider', 'showHistorySourceSwitch'],
+                        template: `
+                          <div
+                            data-testid="conversation-workspace-stub"
+                            :data-context-id="contextProvider?.id || ''"
+                            :data-switch="String(showHistorySourceSwitch)"
                           />
                         `
                     },
@@ -359,24 +593,22 @@ describe('WorkspaceHostApp', () => {
 
         expect(wrapper.get('[data-testid="topbar-stub"]').attributes('data-path')).toBe('/chat');
         expect(wrapper.get('[data-testid="topbar-stub"]').attributes('data-compare')).toBe('true');
-        expect(wrapper.get('[data-testid="topbar-stub"]').attributes('data-stage')).toBe('analyzing');
         expect(wrapper.get('[data-testid="conversation-workspace-stub"]').attributes('data-context-id')).toBe('ctx');
         expect(wrapper.get('[data-testid="conversation-workspace-stub"]').attributes('data-switch')).toBe('true');
-        expect(wrapper.get('[data-testid="conversation-workspace-stub"]').attributes('data-auth-status')).toBe('false');
-        expect(wrapper.get('[data-testid="conversation-workspace-stub"]').attributes('data-auth-message')).toBe('auth-msg');
-        expect(wrapper.get('[data-testid="conversation-workspace-stub"]').attributes('data-host-message')).toBe('host-msg');
     });
 
     it('shows a global error banner when chatStore.currentError is set', async () => {
         setActivePinia(createPinia());
-        const chatStore = useChatStore();
+        const chatStore = useMockChatStore();
         chatStore.currentError = 'Backend request failed.';
 
         const wrapper = mount(WorkspaceHostApp, {
             props: {
                 currentRoutePath: '/chat',
                 navigateTo: vi.fn(),
-                contextProvider: { id: 'ctx' }
+                contextProvider: { id: 'ctx' },
+                contributionQuery: createContributionQuery(),
+                runtimeContext: createRuntimeContext()
             },
             global: {
                 stubs: {
@@ -397,14 +629,16 @@ describe('WorkspaceHostApp', () => {
 
     it('clears the global error banner when the close button is clicked', async () => {
         setActivePinia(createPinia());
-        const chatStore = useChatStore();
+        const chatStore = useMockChatStore();
         chatStore.currentError = 'Backend request failed.';
 
         const wrapper = mount(WorkspaceHostApp, {
             props: {
                 currentRoutePath: '/chat',
                 navigateTo: vi.fn(),
-                contextProvider: { id: 'ctx' }
+                contextProvider: { id: 'ctx' },
+                contributionQuery: createContributionQuery(),
+                runtimeContext: createRuntimeContext()
             },
             global: {
                 stubs: {

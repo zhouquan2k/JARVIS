@@ -1,5 +1,6 @@
 import { Hono, type Context } from 'hono';
-import type { ConversationQuery, Task, TaskPriority, TaskQueryTag } from '@packages/core';
+import type { ConversationQuery } from '@plugins/ai-agent/api';
+import type { Task, TaskPriority, TaskQueryTag } from '@plugins/task-mgr/api';
 import type { ServerConfig } from '../config.js';
 import { HttpContextService } from '../services/httpContextService.js';
 import type { ContextSearchRequest, CreateContextNodeInput, MoveContextNodeInput, RenameContextNodeInput, WriteContextDocumentInput } from '../types/context.js';
