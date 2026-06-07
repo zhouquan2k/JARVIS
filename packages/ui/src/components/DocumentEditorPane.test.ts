@@ -35,6 +35,8 @@ const captureRenderableMarkdownSelection = vi.fn<(root: HTMLElement) => { blockT
 const resolveEmptyBlockMarkdownOffset = vi.fn(() => null);
 const resolveEmptyBlockAnchorFallback = vi.fn(() => null);
 const insertMarkdownAtViewerSelection = vi.fn(() => false);
+const applyMarkdownLinkAtViewerSelection = vi.fn(() => true);
+const toggleMarkdownHighlightAtViewerSelection = vi.fn(() => true);
 const findResizableMarkdownImageSource = vi.fn(() => null);
 const insertPastedMarkdownImage = vi.fn((markdown: string, selection: { start: number; end: number }, imageMarkdown: string) => (
     `${markdown.slice(0, selection.start)}${imageMarkdown}${markdown.slice(selection.end)}`
@@ -79,14 +81,17 @@ const getMarkdownEditorSearchMatchCount = vi.fn((editor: { __search?: { matchCou
 const scrollToMarkdownEditorSearchMatch = vi.fn();
 const createObjectURL = vi.fn(() => 'blob:pdf-preview');
 const revokeObjectURL = vi.fn();
+const openSingleFileDialog = vi.fn();
 
 vi.mock('../utils/markdownDocument', () => ({
+    applyMarkdownLinkAtViewerSelection,
     buildMarkdownResourceInsertion,
     buildRelativeMarkdownLinkPath,
     captureRenderableMarkdownSelection,
     createMarkdownEditor,
     findResizableMarkdownImageSource,
     insertMarkdownAtViewerSelection,
+    toggleMarkdownHighlightAtViewerSelection,
     insertPastedMarkdownImage,
     replaceMarkdownDocument,
     readMarkdownDocument,
@@ -102,6 +107,10 @@ vi.mock('../utils/markdownDocument', () => ({
     scrollToMarkdownEditorSearchMatch
 }));
 
+vi.mock('../utils/fileDialog', () => ({
+    openSingleFileDialog
+}));
+
 describe('DocumentEditorPane', () => {
     beforeEach(() => {
         createMarkdownEditor.mockReset();
@@ -115,6 +124,12 @@ describe('DocumentEditorPane', () => {
         scrollToMarkdownEditorSearchMatch.mockClear();
         createObjectURL.mockClear();
         revokeObjectURL.mockClear();
+        openSingleFileDialog.mockReset();
+        openSingleFileDialog.mockResolvedValue(null);
+        applyMarkdownLinkAtViewerSelection.mockReset();
+        applyMarkdownLinkAtViewerSelection.mockReturnValue(true);
+        insertMarkdownAtViewerSelection.mockReset();
+        insertMarkdownAtViewerSelection.mockReturnValue(false);
         captureRenderableMarkdownSelection.mockReset();
         captureRenderableMarkdownSelection.mockReturnValue({
             blockText: 'mock-block',
@@ -200,7 +215,8 @@ describe('DocumentEditorPane', () => {
         expect(wrapper.get('[data-testid="document-editor-title"]').text()).toBe('Docs Agent / guide');
     });
 
-    it('inserts a relative markdown link from the chooser and wraps the current selection', async () => {
+    it('inserts a relative markdown link via in-place command in viewer mode without switching to source', async () => {
+        applyMarkdownLinkAtViewerSelection.mockClear();
         const wrapper = await mountDocumentEditorWithModelSync({
             activePath: '/docs/guide.md',
             activeDocument: {
@@ -226,19 +242,22 @@ describe('DocumentEditorPane', () => {
         await wrapper.get('[data-testid="markdown-insert-link"]').trigger('click');
         await wrapper.get('[data-testid="markdown-link-option-/docs/reference.md"]').trigger('click');
         await wrapper.vm.$nextTick();
-        await wrapper.vm.$nextTick();
-        await wrapper.vm.$nextTick();
 
-        expect(wrapper.get('[data-testid="markdown-insert-link"]').attributes('aria-label')).toBe('Insert link');
-        expect(wrapper.get('[data-testid="markdown-insert-link"]').html()).toContain('lucide-link-2');
-        expect(wrapper.vm.modelValue).toBe('Read this[reference](reference.md)');
-        expect(wrapper.vm.updateHistory.at(-1)).toBe('Read this[reference](reference.md)');
-        expect(wrapper.get('[data-testid="markdown-mode-toggle"]').attributes('aria-pressed')).toBe('true');
-        expect(wrapper.find('[data-testid="document-editor-input"]').exists()).toBe(false);
+        // Applied via in-place ProseMirror command — no source-offset mapping needed.
+        expect(applyMarkdownLinkAtViewerSelection).toHaveBeenCalledTimes(1);
+        expect(applyMarkdownLinkAtViewerSelection).toHaveBeenCalledWith(
+            expect.anything(),
+            { label: 'reference', href: 'reference.md' }
+        );
+        expect(resolveMarkdownSourceSelection).not.toHaveBeenCalled();
+        // Picker closed; viewer mode maintained (no textarea).
         expect(wrapper.find('[data-testid="markdown-link-picker"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid="document-editor-input"]').exists()).toBe(false);
+        expect(wrapper.get('[data-testid="markdown-mode-toggle"]').attributes('aria-pressed')).toBe('true');
     });
 
-    it('inserts a conversation markdown link from the chooser', async () => {
+    it('inserts a conversation markdown link via in-place viewer command without switching to source', async () => {
+        insertMarkdownAtViewerSelection.mockClear();
         const wrapper = await mountDocumentEditorWithModelSync({
             activePath: '/docs/guide.md',
             activeDocument: {
@@ -275,15 +294,56 @@ describe('DocumentEditorPane', () => {
         await wrapper.get('[data-testid="markdown-link-tab-conversation"]').trigger('click');
         await wrapper.get('[data-testid="markdown-insert-link-option-conversation-conversation-1"]').trigger('click');
         await wrapper.vm.$nextTick();
-        await wrapper.vm.$nextTick();
-        await wrapper.vm.$nextTick();
 
-        expect(wrapper.get('[data-testid="markdown-insert-link"]').attributes('aria-label')).toBe('Insert link');
-        expect(wrapper.vm.modelValue).toBe('See discussion[Plan review](chatprism://conversation/conversation-1)');
+        // Applied via in-place ProseMirror insertion — no source-offset mapping needed.
+        expect(insertMarkdownAtViewerSelection).toHaveBeenCalledTimes(1);
+        expect(insertMarkdownAtViewerSelection).toHaveBeenCalledWith(
+            expect.anything(),
+            '[Plan review](chatprism://conversation/conversation-1)'
+        );
+        expect(resolveMarkdownSourceSelection).not.toHaveBeenCalled();
+        // Picker closed; viewer mode maintained (no textarea).
         expect(wrapper.find('[data-testid="markdown-link-picker"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid="document-editor-input"]').exists()).toBe(false);
+        expect(wrapper.get('[data-testid="markdown-mode-toggle"]').attributes('aria-pressed')).toBe('true');
     });
 
-    it('inserts an embedded pdf resource from the chooser', async () => {
+    it('toggles highlight directly in the viewer without round-tripping through source mode', async () => {
+        // 原型：viewer 模式高亮改走 ProseMirror 直接 toggleMark，不再切到 edit 源码模式拼接 ==..==。
+        toggleMarkdownHighlightAtViewerSelection.mockClear();
+        const wrapper = await mountDocumentEditorWithModelSync({
+            activePath: '/docs/guide.md',
+            activeDocument: {
+                path: '/docs/guide.md',
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('Read this'),
+                canWrite: true
+            },
+            activeViewerId: 'text',
+            activePaneMode: 'viewer',
+            modelValue: 'Read this',
+            isSaving: false,
+            isDirty: false,
+            latestFileChange: null,
+            diffEntries: [],
+            canUndo: false,
+            canRedo: false
+        });
+
+        await wrapper.get('[data-testid="markdown-style-picker-trigger"]').trigger('click');
+        await wrapper.get('[data-testid="markdown-style-option-highlight"]').trigger('click');
+        await wrapper.vm.$nextTick();
+        await wrapper.vm.$nextTick();
+        await wrapper.vm.$nextTick();
+
+        // 走的是 viewer 直插命令，且不再经过源码偏移映射。
+        expect(toggleMarkdownHighlightAtViewerSelection).toHaveBeenCalledTimes(1);
+        expect(resolveMarkdownSourceSelection).not.toHaveBeenCalled();
+        expect(wrapper.find('[data-testid="markdown-style-picker"]').exists()).toBe(false);
+    });
+
+    it('inserts an embedded pdf resource via in-place viewer command without switching to source', async () => {
+        insertMarkdownAtViewerSelection.mockClear();
         const wrapper = await mountDocumentEditorWithModelSync({
             activePath: '/docs/guide.md',
             activeDocument: {
@@ -310,16 +370,22 @@ describe('DocumentEditorPane', () => {
         await wrapper.get('[data-testid="markdown-link-tab-resource"]').trigger('click');
         await wrapper.get('[data-testid="markdown-resource-link-option-/docs/references/spec.pdf"]').trigger('click');
         await wrapper.vm.$nextTick();
-        await wrapper.vm.$nextTick();
-        await wrapper.vm.$nextTick();
 
-        expect(wrapper.vm.modelValue).toBe(
-            ['Open attachment', '', '```cp-pdf-embed', '{"label":"spec.pdf","candidates":["references/spec.pdf"],"showLink":false}', '```', '', ''].join('\n')
+        // Applied via in-place ProseMirror insertion — no source-offset mapping needed.
+        expect(insertMarkdownAtViewerSelection).toHaveBeenCalledTimes(1);
+        expect(insertMarkdownAtViewerSelection).toHaveBeenCalledWith(
+            expect.anything(),
+            '\n\n```cp-pdf-embed\n{"label":"spec.pdf","candidates":["references/spec.pdf"],"showLink":false}\n```\n\n'
         );
+        expect(resolveMarkdownSourceSelection).not.toHaveBeenCalled();
+        // Picker closed; viewer mode maintained (no textarea).
         expect(wrapper.find('[data-testid="markdown-link-picker"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid="document-editor-input"]').exists()).toBe(false);
+        expect(wrapper.get('[data-testid="markdown-mode-toggle"]').attributes('aria-pressed')).toBe('true');
     });
 
-    it('inserts an embedded image resource from the chooser', async () => {
+    it('inserts an embedded image resource via in-place viewer command without switching to source', async () => {
+        insertMarkdownAtViewerSelection.mockClear();
         const wrapper = await mountDocumentEditorWithModelSync({
             activePath: '/docs/guide.md',
             activeDocument: {
@@ -346,10 +412,101 @@ describe('DocumentEditorPane', () => {
         await wrapper.get('[data-testid="markdown-link-tab-resource"]').trigger('click');
         await wrapper.get('[data-testid="markdown-resource-link-option-/docs/references/diagram.png"]').trigger('click');
         await wrapper.vm.$nextTick();
+
+        // Applied via in-place ProseMirror insertion — no source-offset mapping needed.
+        expect(insertMarkdownAtViewerSelection).toHaveBeenCalledTimes(1);
+        expect(insertMarkdownAtViewerSelection).toHaveBeenCalledWith(
+            expect.anything(),
+            '![](references/diagram.png)'
+        );
+        expect(resolveMarkdownSourceSelection).not.toHaveBeenCalled();
+        // Picker closed; viewer mode maintained (no textarea).
+        expect(wrapper.find('[data-testid="markdown-link-picker"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid="document-editor-input"]').exists()).toBe(false);
+        expect(wrapper.get('[data-testid="markdown-mode-toggle"]').attributes('aria-pressed')).toBe('true');
+    });
+
+    it('uploads a new resource from the link picker and inserts it via in-place viewer command', async () => {
+        insertMarkdownAtViewerSelection.mockClear();
+        const uploadMarkdownLinkResource = vi.fn(async () => ({
+            resourcePath: '/docs/references/uploaded.pdf'
+        }));
+        const file = new File(['pdf'], 'uploaded.pdf', { type: 'application/pdf' });
+        Object.defineProperty(file, 'arrayBuffer', {
+            configurable: true,
+            value: vi.fn(async () => new TextEncoder().encode('pdf').buffer)
+        });
+        openSingleFileDialog.mockResolvedValue(file);
+        const wrapper = await mountDocumentEditorWithModelSync({
+            activePath: '/docs/guide.md',
+            activeDocument: {
+                path: '/docs/guide.md',
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('Attach file'),
+                canWrite: true
+            },
+            activeViewerId: 'text',
+            activePaneMode: 'viewer',
+            modelValue: 'Attach file',
+            linkableReferenceResources: [],
+            uploadMarkdownLinkResource,
+            isSaving: false,
+            isDirty: false,
+            latestFileChange: null,
+            diffEntries: [],
+            canUndo: false,
+            canRedo: false
+        });
+
+        await wrapper.get('[data-testid="markdown-insert-link"]').trigger('click');
+        await wrapper.get('[data-testid="markdown-link-tab-resource"]').trigger('click');
+        await wrapper.get('[data-testid="markdown-resource-upload"]').trigger('click');
+        await wrapper.vm.$nextTick();
         await wrapper.vm.$nextTick();
         await wrapper.vm.$nextTick();
 
-        expect(wrapper.vm.modelValue).toBe('See image![](references/diagram.png)');
+        expect(openSingleFileDialog).toHaveBeenCalledTimes(1);
+        expect(uploadMarkdownLinkResource).toHaveBeenCalledWith(expect.objectContaining({
+            documentPath: '/docs/guide.md',
+            fileName: 'uploaded.pdf',
+            mimeType: 'application/pdf'
+        }));
+        // Applied via in-place ProseMirror insertion — no source-offset mapping needed.
+        expect(insertMarkdownAtViewerSelection).toHaveBeenCalledTimes(1);
+        expect(insertMarkdownAtViewerSelection).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.stringContaining('references/uploaded.pdf')
+        );
+        expect(resolveMarkdownSourceSelection).not.toHaveBeenCalled();
+        // Viewer mode maintained (no textarea).
+        expect(wrapper.find('[data-testid="document-editor-input"]').exists()).toBe(false);
+        expect(wrapper.get('[data-testid="markdown-mode-toggle"]').attributes('aria-pressed')).toBe('true');
+    });
+
+    it('emits refresh-document from the toolbar button', async () => {
+        const { default: DocumentEditorPane } = await import('./DocumentEditorPane.vue');
+        const wrapper = mount(DocumentEditorPane, {
+            props: {
+                activePath: '/docs/guide.md',
+                activeDocument: {
+                    path: '/docs/guide.md',
+                    mimeType: 'text/markdown',
+                    dataBase64: encodeTextDocument('# Guide'),
+                    canWrite: true
+                },
+                activeViewerId: 'text',
+                activePaneMode: 'viewer',
+                modelValue: '# Guide',
+                isSaving: false,
+                latestFileChange: null,
+                diffEntries: [],
+                canUndo: false,
+                canRedo: false
+            }
+        });
+
+        await wrapper.get('[data-testid="document-refresh"]').trigger('click');
+        expect(wrapper.emitted('refresh-document')).toEqual([[]]);
     });
 
     it('retries markdown insertion until edit mode is ready', async () => {
@@ -393,12 +550,9 @@ describe('DocumentEditorPane', () => {
         expect(wrapper.find('[data-testid="markdown-link-picker"]').exists()).toBe(false);
     });
 
-    it('waits for parent modelValue acknowledgement before returning to viewer mode', async () => {
-        let onChange: ((markdown: string) => void) | undefined;
-        createMarkdownEditor.mockImplementation(async (options: { onChange: (markdown: string) => void }) => {
-            onChange = options.onChange;
-            return { content: 'Parent sync' };
-        });
+    it('stays in viewer mode throughout document link insertion (no mode round-trip)', async () => {
+        applyMarkdownLinkAtViewerSelection.mockClear();
+        createMarkdownEditor.mockResolvedValue({ content: 'Parent sync' });
         readMarkdownDocument.mockImplementation((value: { content: string }) => value.content);
 
         const { default: DocumentEditorPane } = await import('./DocumentEditorPane.vue');
@@ -437,14 +591,12 @@ describe('DocumentEditorPane', () => {
         const wrapper = mount(Harness);
         await wrapper.get('[data-testid="markdown-insert-link"]').trigger('click');
         await wrapper.get('[data-testid="markdown-link-option-/docs/reference.md"]').trigger('click');
-        onChange?.('Parent sync[reference](reference.md)');
         await wrapper.vm.$nextTick();
 
-        expect(wrapper.get('[data-testid="markdown-mode-toggle"]').attributes('aria-pressed')).toBe('false');
-        await wrapper.vm.$nextTick();
-        await wrapper.vm.$nextTick();
-
+        // Viewer mode is maintained at all times — no mode round-trip.
         expect(wrapper.get('[data-testid="markdown-mode-toggle"]').attributes('aria-pressed')).toBe('true');
+        expect(applyMarkdownLinkAtViewerSelection).toHaveBeenCalledTimes(1);
+        expect(wrapper.find('[data-testid="markdown-link-picker"]').exists()).toBe(false);
     });
 
     it('creates a Milkdown-backed editor and emits markdown updates', async () => {

@@ -14,6 +14,7 @@ function createTask(overrides: Partial<Task> = {}): Task {
         completed: false,
         dueAt: null,
         priority: null,
+        executionState: null,
         documentPath: '/docs/guide.md',
         agentKey: null,
         createdAt: 1,
@@ -42,12 +43,14 @@ describe('TaskEditorInline', () => {
         await wrapper.get('[data-testid="task-editor-time-toggle"]').trigger('click');
         await wrapper.get('[data-testid="task-editor-due-time"]').setValue('09:30');
         await wrapper.get('[data-testid="task-editor-priority"]').setValue('high');
+        await wrapper.get('[data-testid="task-editor-execution-state"]').setValue('doing');
         await wrapper.get('[data-testid="task-editor-save"]').trigger('submit');
 
         expect(wrapper.emitted('save')?.[0]?.[0]).toEqual(expect.objectContaining({
             title: 'Follow up',
             notes: 'Prepare summary',
             priority: 'high',
+            executionState: 'doing',
             dueAt: new Date('2026-05-24T09:30:00').getTime()
         }));
     });
@@ -64,6 +67,18 @@ describe('TaskEditorInline', () => {
 
         expect(notes.attributes('rows')).toBe('1');
         expect(meta.element.compareDocumentPosition(notes.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it('renders priority and execution-state controls in the same meta row', () => {
+        const wrapper = mount(TaskEditorInline, {
+            props: {
+                task: createTask()
+            }
+        });
+
+        const pairedRow = wrapper.get('.task-editor-inline__meta-row--paired');
+        expect(pairedRow.get('[data-testid="task-editor-priority-shell"]').exists()).toBe(true);
+        expect(pairedRow.get('[data-testid="task-editor-execution-state-shell"]').exists()).toBe(true);
     });
 
     it('hides time input by default and shows it only after explicit toggle', async () => {
@@ -90,6 +105,18 @@ describe('TaskEditorInline', () => {
 
         await wrapper.get('[data-testid="task-editor-priority-shell"]').trigger('click');
         expect(document.activeElement).toBe(wrapper.get('[data-testid="task-editor-priority"]').element);
+    });
+
+    it('focuses the execution-state select when clicking the shell', async () => {
+        const wrapper = mount(TaskEditorInline, {
+            attachTo: document.body,
+            props: {
+                task: createTask()
+            }
+        });
+
+        await wrapper.get('[data-testid="task-editor-execution-state-shell"]').trigger('click');
+        expect(document.activeElement).toBe(wrapper.get('[data-testid="task-editor-execution-state"]').element);
     });
 
     it('expands multi-line notes on mount for existing task details', async () => {

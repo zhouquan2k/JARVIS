@@ -19,6 +19,7 @@
           @rename="documentStore.renameNode"
           @move="onMoveNode"
           @refresh="documentStore.refreshTree"
+          @import="openImportWizard"
         />
         <MoveConfirmDialog
           v-if="showMoveConfirm && pendingMoveInput"
@@ -32,6 +33,15 @@
           v-if="showMoveError"
           :reason="moveErrorReason"
           @dismiss="showMoveError = false"
+        />
+        <ImportWizardDialog
+          v-if="showImportWizard"
+          :sources="documentImportSources"
+          :language-models="availableLanguageModels"
+          :directories="availableImportDirectories"
+          :initial-target-parent-path="importWizardTargetParentPath"
+          :run-import="runDocumentImport"
+          @close="showImportWizard = false"
         />
       </div>
       <div
@@ -67,6 +77,7 @@
               :is-saving="displayedIsSaving"
               :is-dirty="displayedDocumentIsDirty"
               :persist-markdown-image="documentStore.persistPastedMarkdownImage"
+              :upload-markdown-link-resource="documentStore.uploadMarkdownLinkResource"
               :middle-pane-mode="documentStore.middlePaneMode"
               :middle-pane-zoom="documentStore.middlePaneZoom"
               :latest-file-change="documentStore.latestFileChange"
@@ -75,6 +86,7 @@
               :can-redo="documentStore.canRedoActiveFile"
               @update:model-value="onDraftChange"
               @save="onSaveDisplayedDocument"
+              @refresh-document="onRefreshDisplayedDocument"
               @toggle-middle-pane-mode="documentStore.toggleMiddlePaneExpanded()"
               @undo-change="documentStore.undoActiveFileChange"
               @redo-change="documentStore.redoActiveFileChange"
@@ -127,10 +139,12 @@ import {
 import WorkspaceRightPane from '../components/WorkspaceRightPane.vue';
 import DocumentEditorPane from '../components/DocumentEditorPane.vue';
 import DocumentFileTree from '../components/DocumentFileTree.vue';
+import ImportWizardDialog from '../components/ImportWizardDialog.vue';
 import MoveConfirmDialog from '../components/MoveConfirmDialog.vue';
 import MoveErrorDialog from '../components/MoveErrorDialog.vue';
+import { useWorkspaceI18n } from '../i18n';
 import { contributionQueryKey, workspaceRuntimeContextKey } from '../plugins/injectionKeys';
-import { useDocumentCreationFlows } from '../services/documentCreationFlows';
+import { useDocumentImports } from '../services/documentCreationFlows';
 import { useDocumentWorkspaceStore } from '../store/documentWorkspace';
 import type { ChatRoutePath } from '../routes';
 import { rewriteOutgoingLinks, type MarkdownConversationLinkTarget } from '../utils/markdownDocument';
@@ -145,9 +159,10 @@ const props = withDefaults(defineProps<{
 });
 
 const documentStore = useDocumentWorkspaceStore();
+const { t } = useWorkspaceI18n();
 const contributionQuery = inject(contributionQueryKey, null);
 const runtimeContext = inject(workspaceRuntimeContextKey, null);
-useDocumentCreationFlows();
+const documentImportSources = useDocumentImports();
 const emit = defineEmits<{
   (event: 'request-workspace-switch', path: ChatRoutePath): void;
 }>();
@@ -213,6 +228,8 @@ const pendingMoveInput = ref<{ path: string; targetParentPath?: string } | null>
 const pendingNodeName = ref('');
 const pendingDestPath = ref('');
 const pendingHasLinks = ref(false);
+const showImportWizard = ref(false);
+const importWizardTargetParentPath = ref('/');
 const selectedOwnerNode = computed<ContextNode | null>(() => {
   if (documentStore.selectedNodePath === '/' && documentStore.activeAgent) {
     return {
@@ -238,6 +255,25 @@ const workspaceSelectionInput = computed(() => ({
 const activeWorkspaceSelectionComponent = computed(() => {
   const views = contributionQuery?.value?.getWorkspaceSelectionViews() ?? [];
   return views.find((view) => view.matches(workspaceSelectionInput.value))?.component ?? null;
+});
+const availableLanguageModels = computed(() => {
+  return contributionQuery?.value?.getLanguageModels() ?? [];
+});
+const availableImportDirectories = computed(() => {
+  const directories = documentStore.nodes
+    .filter((node) => node.kind === 'directory')
+    .map((node) => ({
+      path: node.path,
+      label: node.path
+    }));
+
+  return [
+    {
+      path: '/',
+      label: t('shared.rootDirectory')
+    },
+    ...directories
+  ];
 });
 const activeAssistantDocument = computed(() => {
   const currentDocument = displayedDocument.value;
@@ -390,6 +426,27 @@ async function onOpenDocumentLink(path: string): Promise<void> {
   await syncWorkspaceConversationSelection();
 }
 
+function resolveImportParentPath(path: string | null): string {
+  if (!path || path === '/') {
+    return '/';
+  }
+
+  const node = documentStore.findNodeByPath(path);
+  if (node?.kind === 'directory') {
+    return path;
+  }
+
+  const lastSlash = path.lastIndexOf('/');
+  return lastSlash <= 0 ? '/' : path.slice(0, lastSlash);
+}
+
+function openImportWizard(): void {
+  importWizardTargetParentPath.value = resolveImportParentPath(
+    documentStore.selectedNodePath ?? documentStore.activePath ?? '/'
+  );
+  showImportWizard.value = true;
+}
+
 async function onOpenConversationLink(target: MarkdownConversationLinkTarget): Promise<void> {
   if (!documentStore.activeAgentKey) {
     return;
@@ -485,6 +542,18 @@ function onSaveDisplayedDocument() {
   return documentStore.flushActiveDocument();
 }
 
+async function onRefreshDisplayedDocument() {
+  if (!documentStore.activePath) {
+    return;
+  }
+
+  if (displayedDocumentIsDirty.value && !window.confirm(t('shared.refreshCurrentDocumentConfirm'))) {
+    return;
+  }
+
+  await documentStore.reloadActiveDocumentFromDisk();
+}
+
 function handleAssistantFileChanged(change: { path: string; beforeContent: string; afterContent: string; alreadyPersisted?: boolean }) {
   if (change.alreadyPersisted) {
     documentStore.recordFileChange(change);
@@ -492,6 +561,75 @@ function handleAssistantFileChanged(change: { path: string; beforeContent: strin
   }
 
   return documentStore.applyGeneratedDocumentChange(change);
+}
+
+async function runDocumentImport(input: {
+  contribution: {
+    run(runInput: {
+      params: unknown;
+      targetParentPath: string;
+      hostApi: {
+        createDocument(path: string, content: string): Promise<void>;
+        createReferenceResource(
+          ownerDocumentPath: string,
+          filename: string,
+          content: string
+        ): Promise<{ resourcePath: string; relativePathFromOwner: string }>;
+        openDocument(path: string): Promise<void>;
+        report(message: { type: 'success' | 'error'; text: string }): void;
+        setStage(stage: { key: string; label: string; status: 'running' | 'completed' | 'failed'; detail?: string }): void;
+      };
+      signal?: AbortSignal;
+    }): Promise<{ primaryDocumentPath: string; createdPaths: string[] }>;
+  };
+  params: unknown;
+  targetParentPath: string;
+  onStageChange: (stage: { key: string; label: string; status: 'running' | 'completed' | 'failed'; detail?: string }) => void;
+}): Promise<void> {
+  const hostApi = {
+    createDocument(path: string, content: string) {
+      return documentStore.createImportedDocument({ path, content });
+    },
+    createReferenceResource(ownerDocumentPath: string, filename: string, content: string) {
+      return documentStore.createImportedReferenceResource({
+        ownerDocumentPath,
+        fileName: filename,
+        content
+      });
+    },
+    openDocument(path: string) {
+      return documentStore.openNode(path);
+    },
+    report(message: { type: 'success' | 'error'; text: string }) {
+      runtimeContext?.value?.postPluginMessage({
+        id: `document-import-${Date.now()}`,
+        level: message.type === 'error' ? 'error' : 'info',
+        message: message.text
+      });
+    },
+    setStage(stage: { key: string; label: string; status: 'running' | 'completed' | 'failed'; detail?: string }) {
+      input.onStageChange(stage);
+    }
+  };
+
+  try {
+    const result = await input.contribution.run({
+      params: input.params,
+      targetParentPath: input.targetParentPath,
+      hostApi
+    });
+    await hostApi.openDocument(result.primaryDocumentPath);
+    hostApi.report({
+      type: 'success',
+      text: t('shared.importSucceeded')
+    });
+  } catch (error) {
+    hostApi.report({
+      type: 'error',
+      text: error instanceof Error ? error.message : String(error)
+    });
+    throw error;
+  }
 }
 
 function handleMiddlePaneWheel(event: WheelEvent) {

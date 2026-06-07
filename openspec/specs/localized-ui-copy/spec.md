@@ -61,3 +61,7 @@ Shared UI copy for Markdown search, conversation rename, dirty save state, and f
 #### Scenario: Render dirty save copy through translations
 - **WHEN** the save button communicates unsaved changes
 - **THEN** the accessible label or tooltip MUST come from translation entries
+
+#### Scenario: Render Markdown style insertion copy through translations
+- **WHEN** the Markdown style insertion control is visible in the document toolbar
+- **THEN** its button label, tooltip, and highlight action label MUST come from translation entries

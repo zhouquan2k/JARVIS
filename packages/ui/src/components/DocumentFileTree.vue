@@ -63,6 +63,20 @@
         <button
           type="button"
           class="tree-icon-button"
+          data-testid="document-import"
+          :title="t('shared.importDocument')"
+          :aria-label="t('shared.importDocument')"
+          @mouseenter="showTooltip($event, t('shared.importDocument'))"
+          @mouseleave="hideTooltip"
+          @focus="showTooltip($event, t('shared.importDocument'))"
+          @blur="hideTooltip"
+          @click="emit('import')"
+        >
+          <FileText class="tree-icon" :size="18" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          class="tree-icon-button"
           data-testid="document-new-directory"
           :title="t('shared.createDirectory')"
           :aria-label="t('shared.createDirectory')"
@@ -218,6 +232,7 @@ const emit = defineEmits<{
   (event: 'rename', input: { path: string; name: string }): void;
   (event: 'move', input: { path: string; targetParentPath?: string }): void;
   (event: 'refresh'): void;
+  (event: 'import'): void;
 }>();
 
 const pendingInputRef = ref<HTMLInputElement | HTMLInputElement[] | null>(null);

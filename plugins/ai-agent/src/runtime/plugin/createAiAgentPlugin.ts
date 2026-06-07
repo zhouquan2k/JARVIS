@@ -299,7 +299,7 @@ function resolveSavedConversationIdForSelection(input: {
     return matchesSavedSelection ? savedStatus.activeConversationId : null;
 }
 
-async function initializeAiAgentPlugin(hostContext: IHostContext, options: AiAgentPluginOptions): Promise<void> {
+async function initializeAiAgentPlugin(hostContext: IHostContext, options: AiAgentPluginOptions): Promise<ModelProviderRuntime | null> {
     const chatStore = useChatStore();
     const compareStore = useCompareStore();
     const runtime = createRuntime(hostContext, options);
@@ -309,7 +309,7 @@ async function initializeAiAgentPlugin(hostContext: IHostContext, options: AiAge
 
     if (providerCatalog.length === 0) {
         chatStore.setProviderCatalog([]);
-        return;
+        return runtime;
     }
 
     let storageProvider: SyncStorageProvider | null = null;
@@ -324,7 +324,7 @@ async function initializeAiAgentPlugin(hostContext: IHostContext, options: AiAge
         chatStore.setProviderCatalog([]);
         chatStore.setHistoryProviders([]);
         chatStore.currentError = initializationError || 'AI Agent plugin failed to initialize.';
-        return;
+        return runtime;
     }
 
     const historyProviders = createHistoryProviders(hostContext, runtime, options);
@@ -354,6 +354,8 @@ async function initializeAiAgentPlugin(hostContext: IHostContext, options: AiAge
         const { initializeExtensionComparePersistence } = await import('./extensionComparePersistence');
         await initializeExtensionComparePersistence(storageProvider);
     }
+
+    return runtime;
 }
 
 function initializeAiAgentRuntimeBridge(
@@ -370,7 +372,7 @@ function initializeAiAgentRuntimeBridge(
 }
 
 export function createAiAgentPlugin(options: AiAgentPluginOptions): PluginManifest {
-    let initializationPromise: Promise<void> | null = null;
+    let initializationPromise: Promise<ModelProviderRuntime | null> | null = null;
 
     return {
         id: 'ai-agent',
@@ -393,6 +395,31 @@ export function createAiAgentPlugin(options: AiAgentPluginOptions): PluginManife
             await initializationPromise;
             initializeAiAgentRuntimeBridge(api.getRuntimeContext(), hostContext, options);
             const chatStore = useChatStore();
+            api.registerLanguageModel({
+                id: 'ai-agent-default-language-model',
+                async generateText(prompt, generateOptions = {}) {
+                    if (generateOptions.signal?.aborted) {
+                        throw new Error('Language model request was aborted.');
+                    }
+
+                    const { provider, modelId, modelOptions, reasoningEffort } = await chatStore.resolveSendTarget();
+                    const abortHandler = () => provider.abort();
+                    generateOptions.signal?.addEventListener('abort', abortHandler, { once: true });
+                    try {
+                        const fullPrompt = generateOptions.system?.trim()
+                            ? `System:\n${generateOptions.system.trim()}\n\nUser:\n${prompt}`
+                            : prompt;
+                        const result = await provider.sendMessage(fullPrompt, {
+                            modelId,
+                            modelOptions,
+                            reasoningEffort
+                        }, () => undefined);
+                        return result.text;
+                    } finally {
+                        generateOptions.signal?.removeEventListener('abort', abortHandler);
+                    }
+                }
+            });
             api.registerGlobalView({
                 id: 'chat',
                 routePath: '/chat',

@@ -43,7 +43,7 @@ describe('Desktop2 App shell', () => {
         const host = wrapper.get('[data-testid="desktop2-host-stub"]');
         expect(host.attributes('data-route')).toBe('/chat');
         expect(host.attributes('data-context-id')).toBe('desktop2-context');
-        expect(host.attributes('data-enabled-plugins')).toBe('ai-agent,task-mgr');
+        expect(host.attributes('data-enabled-plugins')).toBe('ai-agent,task-mgr,bilibili-import');
         expect(host.attributes('data-switch')).toBe('true');
     });
 });

@@ -19,6 +19,13 @@ workspace "ChatPrism" "Context and container views for the current codebase" {
                 uiPackage = component "packages/ui" "Shared UI components, views, and stores reused mainly by Web, Extension, and Desktop renderers." "Workspace package"
                 nodePackage = component "packages/node" "Node-only adapters and infrastructure implementations. Currently includes FileSystemContextProvider for Desktop main and the Sync Server." "Workspace package"
             }
+            uiMarkdownEditing = container "UI: Markdown Editing" "One-semantic-command, two-native-backends architecture for viewer/edit-mode formatting in the knowledge workspace. Each insert/format feature dispatches to the backend native to the active mode: ProseMirror live commands in viewer mode, source-string ops in edit mode." "Vue, TypeScript, Milkdown/Crepe, ProseMirror" {
+                documentEditorPane = component "DocumentEditorPane" "Orchestrates markdown document insert/format commands; dispatches to the active surface (viewer or edit mode). File: packages/ui/src/components/DocumentEditorPane.vue" "Vue component"
+                markdownDocumentViewer = component "MarkdownDocumentViewer" "Renders the live Crepe/ProseMirror editor in viewer mode; exposes toggleHighlightInViewer / applyLinkInViewer / insertMarkdownSnippet; dispatches by markdownViewerMode. File: packages/ui/src/document-viewers/MarkdownDocumentViewer.vue" "Vue component"
+                markdownViewerCommands = component "MarkdownViewerCommands" "Pure ProseMirror command utilities for viewer-mode formatting: toggleMarkdownHighlightAtViewerSelection, applyMarkdownLinkAtViewerSelection. File: packages/ui/src/utils/markdownDocument.ts" "Utility module"
+                sourceTextBackend = component "SourceTextBackend" "Raw Markdown textarea backend for edit mode; performs source-string offset insertions unchanged from before this refactor." "textarea / string ops"
+                crepeEditor = component "CrepeEditor" "Milkdown Crepe / ProseMirror live editor instance; viewer-mode commands act directly on EditorView state and dispatch transactions." "@milkdown/crepe, ProseMirror"
+            }
             coreAbstractions = container "Core Abstractions" "Relationships among shared interfaces, runtime contracts, and domain objects." "TypeScript interfaces and domain abstractions" {
                 modelProviderRuntime = component "ModelProviderRuntime" "Resolves and exposes available model providers and model catalogs. Typical factories: createProviderRuntime, createDesktopHostRuntime." "Interface"
                 modelProvider = component "IModelProvider" "Unified contract for model execution. Typical implementations: ChatGPTWebProvider, GeminiApiProvider, DesktopProxyProvider." "Interface"
@@ -69,6 +76,11 @@ workspace "ChatPrism" "Context and container views for the current codebase" {
         nodePackage -> corePackage "reuses core contracts and provides Node-only implementations"
         uiPackage -> corePackage "reuses shared domain models and interfaces"
 
+        documentEditorPane -> markdownDocumentViewer "calls exposed commands (viewer mode)"
+        markdownDocumentViewer -> markdownViewerCommands "delegates formatting in viewer mode"
+        markdownDocumentViewer -> sourceTextBackend "delegates formatting in edit mode"
+        markdownViewerCommands -> crepeEditor "applies toggleMark / addMark on live selection"
+
         modelProviderRuntime -> modelProvider "resolves and provides"
         agentCapableProvider -> modelProvider "extends"
         externalConversationProvider -> conversationModel "returns external conversations"
@@ -108,6 +120,10 @@ workspace "ChatPrism" "Context and container views for the current codebase" {
         }
 
         component coreAbstractions "core-abstractions" {
+            include *
+        }
+
+        component uiMarkdownEditing "ui-markdown-editing" {
             include *
         }
 

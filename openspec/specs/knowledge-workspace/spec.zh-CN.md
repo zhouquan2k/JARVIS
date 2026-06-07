@@ -4,6 +4,32 @@
 
 此文件是英文主文件的中文镜像。为了保持规范一致，要求与同目录英文主文件保持相同的能力语义。
 
+### 需求：知识工作区 MUST 提供 Markdown 样式插入 UI，用于对选中文字应用样式
+知识工作区 Markdown 编辑器 MUST 在工具栏暴露 Markdown 样式插入 UI，使用户无需手写格式标记即可对已编写文本应用 Markdown 样式。该样式 UI 后续 MAY 扩展为多个动作；当前阶段 MUST 至少提供“加亮笔”动作，用于把当前选中文字包裹为 Markdown 高亮语法。
+
+#### 场景：从编辑器工具栏插入高亮语法
+- **WHEN** 用户正在知识工作区中编辑一个 Markdown 文档
+- **THEN** 编辑器工具栏 MUST 提供一个 Markdown 样式插入入口
+- **AND** 选择“加亮笔”动作 MUST 在当前光标或当前选区处插入高亮语法
+
+#### 场景：对当前选中文字应用高亮
+- **WHEN** 用户在 Markdown 编辑器中选中了一段文本
+- **AND** 用户从 Markdown 样式插入 UI 中选择“加亮笔”
+- **THEN** 编辑器 MUST 保留这段被选中的原文本
+- **AND** 编辑器 MUST 在 Markdown 源码中用 `==` 将该文本包裹起来
+
+#### 场景：在空选区插入可继续输入的高亮占位
+- **WHEN** 用户在 Markdown 编辑器中没有选中文字
+- **AND** 用户从 Markdown 样式插入 UI 中选择“加亮笔”
+- **THEN** 编辑器 MUST 插入一对空的高亮标记
+- **AND** 光标 MUST 落在插入后的两组 `==` 之间，便于用户继续输入高亮内容
+
+#### 场景：将 Obsidian 兼容的高亮语法渲染为可见高亮样式
+- **WHEN** Markdown 文档中包含用 `==` 包裹的行内文本
+- **THEN** Markdown viewer/editor 的渲染链路 MUST 将该片段解析为高亮内容
+- **AND** 渲染结果 MUST 以可见的高亮样式呈现这段文本
+- **AND** 将渲染后的文档序列化回 Markdown 时 MUST 保持 `==...==` 形式
+
 ## ADDED Requirements
 
 ### 需求：知识工作区 Markdown viewer SHALL 提供 viewer 和 edit 模式

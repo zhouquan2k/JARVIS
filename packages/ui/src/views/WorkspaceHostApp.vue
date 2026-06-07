@@ -48,7 +48,14 @@
 import { computed, provide, ref, watch } from 'vue';
 import type { ContributionQuery, IContextProvider, WorkspaceRuntimeContext } from '@packages/core/src';
 import AppTopBar from '../components/AppTopBar.vue';
-import { contributionQueryKey, workspaceRuntimeContextKey } from '../plugins/injectionKeys';
+import {
+  contributionQueryKey,
+  workspaceNavigationApiKey,
+  workspaceNavigationStateKey,
+  workspaceRouteKey,
+  workspaceRuntimeContextKey,
+  type WorkspaceNavigationState
+} from '../plugins/injectionKeys';
 import { useDocumentWorkspaceStore } from '../store/documentWorkspace';
 import DocumentWorkspaceView from './DocumentWorkspaceView.vue';
 import type { ChatRoute } from '../routes';
@@ -70,11 +77,14 @@ const providedContributionQuery = computed(() => props.contributionQuery ?? null
 const providedRuntimeContext = computed(() => props.runtimeContext ?? null);
 provide(contributionQueryKey, providedContributionQuery);
 provide(workspaceRuntimeContextKey, providedRuntimeContext);
+const currentRouteRef = computed(() => props.currentRoutePath);
+provide(workspaceRouteKey, currentRouteRef);
 const isCompareMode = computed(() => props.currentRoutePath === '/compare');
 const isKnowledgeMode = computed(() => props.currentRoutePath === '/');
 const activeWorkspacePath = computed<ChatRoutePath>(() => props.currentRoutePath === '/compare' ? '/chat' : props.currentRoutePath);
 const globalViews = computed(() => props.contributionQuery?.getGlobalViews() ?? []);
 const pendingNavigationTarget = ref<ChatRoutePath | null>(null);
+const workspaceNavigationState = ref<WorkspaceNavigationState | null>(null);
 const activeGlobalView = computed(() => {
   const targetRoutePath = props.currentRoutePath === '/compare' ? '/chat' : props.currentRoutePath;
   return globalViews.value.find((view) => view.routePath === targetRoutePath) ?? null;
@@ -103,6 +113,22 @@ const activeGlobalViewProps = computed(() => ({
   isCompareMode: isCompareMode.value,
   showHistorySourceSwitch: props.showHistorySourceSwitch
 }));
+
+provide(workspaceNavigationStateKey, workspaceNavigationState);
+provide(workspaceNavigationApiKey, {
+  async openNode(path: string, options?: WorkspaceNavigationState) {
+    workspaceNavigationState.value = {
+      tab: options?.tab ?? null,
+      detailKey: options?.detailKey ?? null
+    };
+
+    if (props.currentRoutePath !== '/') {
+      await onNavigateWorkspace('/');
+    }
+
+    await documentStore.openNode(path);
+  }
+});
 
 async function syncRuntimeRouteState(nextRoutePath: ChatRoutePath, previousRoutePath?: ChatRoutePath) {
   await props.runtimeContext?.beforeRouteNavigate({

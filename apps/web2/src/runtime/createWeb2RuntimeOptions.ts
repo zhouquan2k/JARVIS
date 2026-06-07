@@ -20,7 +20,7 @@ export function createWeb2RuntimeOptions(): CreateBuiltinWorkspaceRuntimeOptions
         useMockHistoryProviders: import.meta.env.VITE_E2E === '1',
         pluginEnablement: loadPluginEnablementConfig({
             storage: typeof localStorage !== 'undefined' ? localStorage : undefined,
-            defaultEnabledPluginIds: ['ai-agent', 'task-mgr'], // 'ai-agent', 'task-mgr'
+            defaultEnabledPluginIds: ['ai-agent', 'task-mgr', 'bilibili-import'],
             fallbackToDefaultEnabled: false
         })
     };

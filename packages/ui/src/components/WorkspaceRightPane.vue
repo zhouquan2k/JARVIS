@@ -27,6 +27,7 @@
       :show-agent-conversation-list="props.showAgentConversationList"
       :context-provider="props.contextProvider"
       :open-conversation-request="props.openConversationRequest"
+      :workspace-detail-key="workspaceNavigationState?.detailKey ?? null"
       @request-workspace-switch="emit('request-workspace-switch', $event)"
     />
   </aside>
@@ -37,7 +38,7 @@ import type { ContextDocument, FolderMetadata, IContextProvider, WorkspaceTabCon
 import type { ResolvedAgentConfig } from '@plugins/ai-agent/api';
 import { computed, inject, ref, watch } from 'vue';
 import type { ChatRoutePath } from '../routes';
-import { contributionQueryKey, workspaceRuntimeContextKey } from '../plugins/injectionKeys';
+import { contributionQueryKey, workspaceNavigationStateKey, workspaceRuntimeContextKey, workspaceRouteKey } from '../plugins/injectionKeys';
 import type { OpenConversationRequest } from '../types/conversationLink';
 import { useWorkspaceI18n } from '../i18n';
 
@@ -56,6 +57,8 @@ const props = defineProps<{
 const { t } = useWorkspaceI18n();
 const contributionQuery = inject(contributionQueryKey, null);
 const runtimeContext = inject(workspaceRuntimeContextKey, null);
+const workspaceNavigationState = inject(workspaceNavigationStateKey, null);
+const workspaceRoute = inject(workspaceRouteKey, null);
 const rightPanelTabs = computed(() => contributionQuery?.value?.getRightPanelTabs() ?? []);
 const activeTab = ref('');
 const tabBadgeCounts = ref<Record<string, number>>({});
@@ -125,6 +128,20 @@ watch(
     const autoActivatedTab = tabs.find((tab) => tab.shouldAutoActivate?.(context) === true);
     if (autoActivatedTab) {
       activeTab.value = autoActivatedTab.id;
+    }
+  },
+  { immediate: true, flush: 'sync' }
+);
+
+watch(
+  () => [workspaceRoute?.value, workspaceNavigationState?.value?.tab] as const,
+  ([routePath, requestedTab]) => {
+    if (routePath !== '/' || !requestedTab) {
+      return;
+    }
+
+    if (rightPanelTabs.value.some((tab) => tab.id === requestedTab)) {
+      activeTab.value = requestedTab;
     }
   },
   { immediate: true, flush: 'sync' }

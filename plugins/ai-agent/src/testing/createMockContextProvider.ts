@@ -489,6 +489,13 @@ function normalizeTaskCalendarState(task: Task): Pick<
     };
 }
 
+function normalizeTaskExecutionState(task: Task): Task['executionState'] {
+    if (task.executionState === 'doing' || task.executionState === 'morning' || task.executionState === 'afternoon' || task.executionState === 'evening') {
+        return task.executionState;
+    }
+    return null;
+}
+
 function normalizeTaskScope(documentPath?: string | null, agentKey?: string | null): { documentPath: string | null; agentKey: string | null } {
     const normalizedDocumentPath = documentPath ? normalizePath(documentPath) ?? null : null;
     const normalizedAgentKey = agentKey?.trim() ? agentKey.trim() : null;
@@ -574,6 +581,7 @@ export function createMockContextProvider(
                 notes: task.notes ?? '',
                 dueAt: task.dueAt ?? null,
                 priority: task.priority ?? null,
+                executionState: normalizeTaskExecutionState(task),
                 completed: !!task.completed,
                 createdAt: now,
                 updatedAt: now,
@@ -599,6 +607,7 @@ export function createMockContextProvider(
                 notes: task.notes ?? '',
                 dueAt: task.dueAt ?? null,
                 priority: task.priority ?? null,
+                executionState: normalizeTaskExecutionState(task),
                 updatedAt,
                 completedAt: task.completed ? (existing.completedAt ?? updatedAt) : null
             };

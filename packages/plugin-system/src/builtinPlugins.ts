@@ -6,6 +6,7 @@ import type {
     WorkspaceRuntimeContext
 } from '@packages/core';
 import { createAiAgentPlugin } from '../../../plugins/ai-agent/src';
+import { createBilibiliImportPlugin } from '../../../plugins/bilibili-import/src';
 import { taskMgrPlugin } from '../../../plugins/task-mgr/src';
 import { PluginManager } from './PluginManager';
 import { PluginRegistry } from './PluginRegistry';
@@ -34,6 +35,9 @@ export interface BuiltinPluginRuntime {
 export function createBuiltinPluginManifests(host: BuiltinPluginHostContext): PluginManifest[] {
     return [
         taskMgrPlugin,
+        createBilibiliImportPlugin({
+            contextBaseUrl: host.hostContext.environment.contextBaseUrl
+        }),
         createAiAgentPlugin({
             runtimeMode: host.runtimeMode,
             env: host.env,

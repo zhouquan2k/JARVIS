@@ -31,7 +31,23 @@ function shouldIgnoreWindowError(message: string, event: ErrorEvent): boolean {
         return true;
     }
 
+    if (isIgnorableMilkdownContextError(normalized)) {
+        return true;
+    }
+
     return event.filename === '' && event.lineno === 0 && event.colno === 0 && normalized.startsWith('ResizeObserver');
+}
+
+/**
+ * Crepe/Milkdown schedules a requestAnimationFrame inside its editor `onMount`
+ * that dispatches a transaction. When the editor is torn down during navigation
+ * before that rAF fires (e.g. a create that gets aborted), the detached callback
+ * runs against the destroyed editor and throws `Context "<slice>" not found`.
+ * This is a benign teardown-race artifact that cannot be caught locally (the rAF
+ * is not part of any awaited promise), so we treat it as ignorable noise here.
+ */
+function isIgnorableMilkdownContextError(message: string): boolean {
+    return /Context "[^"]*" not found/.test(message);
 }
 
 export function installGlobalUnhandledErrorFallback(options: {
@@ -40,6 +56,12 @@ export function installGlobalUnhandledErrorFallback(options: {
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
         const message = resolveErrorMessage(event.reason);
         if (!message) {
+            return;
+        }
+
+        if (isIgnorableMilkdownContextError(message.trim())) {
+            // Suppress the default "Uncaught (in promise)" console logging too.
+            event.preventDefault();
             return;
         }
 
@@ -53,6 +75,8 @@ export function installGlobalUnhandledErrorFallback(options: {
         }
 
         if (shouldIgnoreWindowError(message, event)) {
+            // Suppress the default "Uncaught" console logging for benign races.
+            event.preventDefault();
             return;
         }
 

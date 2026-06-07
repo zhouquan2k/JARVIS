@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(openspec list:*)",
+      "Bash(openspec status:*)",
+      "Bash(openspec instructions:*)",
+      "Bash(pnpm --filter @packages/ui test -- --run)",
+      "Bash(pnpm --filter @packages/ui exec vitest run src/utils/markdownDocument.test.ts src/utils/mermaidPreview.test.ts src/components/DocumentEditorPane.test.ts)",
+      "Bash(pnpm --filter @packages/ui exec vitest run src/components/DocumentEditorPane.test.ts)",
+      "Bash(pnpm --filter @packages/ui test -- markdownDocument)",
+      "Bash(pnpm --filter desktop exec tsc --noEmit)",
+      "Bash(pnpm --filter desktop test)",
+      "Bash(pnpm --filter ui test)"
+    ]
+  }
+}

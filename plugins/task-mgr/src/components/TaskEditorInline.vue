@@ -8,61 +8,89 @@
       maxlength="200"
     />
     <div class="task-editor-inline__meta">
-      <label class="task-editor-inline__field task-editor-inline__field--date">
-        <span class="task-editor-inline__sr-only">{{ t('shared.taskDueAt') }}</span>
-        <div class="task-editor-inline__input-shell task-editor-inline__input-shell--date">
-          <input
-            v-model="dueDateInput"
-            class="task-editor-inline__input"
-            data-testid="task-editor-due-at"
-            type="date"
-          />
-        </div>
-      </label>
-      <label class="task-editor-inline__field task-editor-inline__field--time">
-        <span class="task-editor-inline__sr-only">{{ t('shared.taskTime') }}</span>
-        <div class="task-editor-inline__input-shell task-editor-inline__input-shell--time">
-          <input
-            v-if="timeEditorVisible"
-            v-model="dueTimeInput"
-            class="task-editor-inline__input"
-            data-testid="task-editor-due-time"
-            type="time"
-          />
-          <button
-            v-else
-            type="button"
-            class="task-editor-inline__time-toggle"
-            data-testid="task-editor-time-toggle"
-            @click="timeEditorVisible = true"
+      <div class="task-editor-inline__meta-row">
+        <label class="task-editor-inline__field task-editor-inline__field--date">
+          <span class="task-editor-inline__sr-only">{{ t('shared.taskDueAt') }}</span>
+          <div class="task-editor-inline__input-shell task-editor-inline__input-shell--date">
+            <input
+              v-model="dueDateInput"
+              class="task-editor-inline__input"
+              data-testid="task-editor-due-at"
+              type="date"
+            />
+          </div>
+        </label>
+        <label class="task-editor-inline__field task-editor-inline__field--time">
+          <span class="task-editor-inline__sr-only">{{ t('shared.taskTime') }}</span>
+          <div class="task-editor-inline__input-shell task-editor-inline__input-shell--time">
+            <input
+              v-if="timeEditorVisible"
+              v-model="dueTimeInput"
+              class="task-editor-inline__input"
+              data-testid="task-editor-due-time"
+              type="time"
+            />
+            <button
+              v-else
+              type="button"
+              class="task-editor-inline__time-toggle"
+              data-testid="task-editor-time-toggle"
+              @click="timeEditorVisible = true"
+            >
+              {{ dueTimeDisplay }}
+            </button>
+          </div>
+        </label>
+      </div>
+      <div class="task-editor-inline__meta-row task-editor-inline__meta-row--paired">
+        <label class="task-editor-inline__field task-editor-inline__field--paired task-editor-inline__field--priority">
+          <span class="task-editor-inline__sr-only">{{ t('shared.taskPriority') }}</span>
+          <div
+            class="task-editor-inline__input-shell task-editor-inline__input-shell--select task-editor-inline__input-shell--paired"
+            data-testid="task-editor-priority-shell"
+            @click="openPriorityPicker"
           >
-            {{ dueTimeDisplay }}
-          </button>
-        </div>
-      </label>
-      <label class="task-editor-inline__field task-editor-inline__field--priority">
-        <span class="task-editor-inline__sr-only">{{ t('shared.taskPriority') }}</span>
-        <div
-          class="task-editor-inline__input-shell task-editor-inline__input-shell--select"
-          data-testid="task-editor-priority-shell"
-          @click="openPriorityPicker"
-        >
-          <select
-            ref="prioritySelect"
-            v-model="priorityValue"
-            class="task-editor-inline__input task-editor-inline__select"
-            data-testid="task-editor-priority"
+            <select
+              ref="prioritySelect"
+              v-model="priorityValue"
+              class="task-editor-inline__input task-editor-inline__select task-editor-inline__select--priority"
+              data-testid="task-editor-priority"
+            >
+              <option value="">{{ t('shared.taskPriorityNone') }}</option>
+              <option value="low">{{ t('shared.taskPriorityLow') }}</option>
+              <option value="medium">{{ t('shared.taskPriorityMedium') }}</option>
+              <option value="high">{{ t('shared.taskPriorityHigh') }}</option>
+            </select>
+            <svg class="task-editor-inline__select-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+              <path d="m5.25 7.75 4.75 4.75 4.75-4.75" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" />
+            </svg>
+          </div>
+        </label>
+        <label class="task-editor-inline__field task-editor-inline__field--paired task-editor-inline__field--execution-state">
+          <span class="task-editor-inline__sr-only">{{ t('shared.taskExecutionState') }}</span>
+          <div
+            class="task-editor-inline__input-shell task-editor-inline__input-shell--select task-editor-inline__input-shell--paired"
+            data-testid="task-editor-execution-state-shell"
+            @click="openExecutionStatePicker"
           >
-            <option value="">{{ t('shared.taskPriorityNone') }}</option>
-            <option value="low">{{ t('shared.taskPriorityLow') }}</option>
-            <option value="medium">{{ t('shared.taskPriorityMedium') }}</option>
-            <option value="high">{{ t('shared.taskPriorityHigh') }}</option>
-          </select>
-          <svg class="task-editor-inline__select-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
-            <path d="m5.25 7.75 4.75 4.75 4.75-4.75" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" />
-          </svg>
-        </div>
-      </label>
+            <select
+              ref="executionStateSelect"
+              v-model="executionStateValue"
+              class="task-editor-inline__input task-editor-inline__select task-editor-inline__select--execution-state"
+              data-testid="task-editor-execution-state"
+            >
+              <option value="">{{ t('shared.taskExecutionStateNone') }}</option>
+              <option value="doing">{{ t('shared.taskExecutionStateDoing') }}</option>
+              <option value="morning">{{ t('shared.taskExecutionStateMorning') }}</option>
+              <option value="afternoon">{{ t('shared.taskExecutionStateAfternoon') }}</option>
+              <option value="evening">{{ t('shared.taskExecutionStateEvening') }}</option>
+            </select>
+            <svg class="task-editor-inline__select-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+              <path d="m5.25 7.75 4.75 4.75 4.75-4.75" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" />
+            </svg>
+          </div>
+        </label>
+      </div>
     </div>
     <textarea
       ref="notesInput"
@@ -89,7 +117,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
-import type { Task, TaskPriority } from '../../api';
+import type { Task, TaskExecutionState, TaskPriority } from '../../api';
 import { useWorkspaceI18n } from '@packages/ui/src/i18n';
 
 const props = defineProps<{
@@ -106,6 +134,7 @@ const validationError = ref<string | null>(null);
 const draft = ref<Task>({ ...props.task });
 const notesInput = ref<HTMLTextAreaElement | null>(null);
 const prioritySelect = ref<HTMLSelectElement | null>(null);
+const executionStateSelect = ref<HTMLSelectElement | null>(null);
 const timeEditorVisible = ref(false);
 
 const dueDateInput = computed({
@@ -162,6 +191,13 @@ const priorityValue = computed({
   get: () => draft.value.priority ?? '',
   set: (value: string) => {
     draft.value.priority = (value || null) as TaskPriority | null;
+  }
+});
+
+const executionStateValue = computed({
+  get: () => draft.value.executionState ?? '',
+  set: (value: string) => {
+    draft.value.executionState = (value || null) as TaskExecutionState;
   }
 });
 
@@ -236,16 +272,38 @@ function openPriorityPicker(event: MouseEvent): void {
   }
   select.click();
 }
+
+function openExecutionStatePicker(event: MouseEvent): void {
+  const target = event.target as HTMLElement | null;
+  if (target?.closest('select')) {
+    return;
+  }
+
+  const select = executionStateSelect.value;
+  if (!select) {
+    return;
+  }
+
+  select.focus();
+  if (typeof select.showPicker === 'function') {
+    select.showPicker();
+    return;
+  }
+  select.click();
+}
 </script>
 
 <style scoped>
 .task-editor-inline {
   display: grid;
   gap: 10px;
-  padding: 14px;
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  border-radius: 16px;
-  background: rgba(15, 23, 42, 0.72);
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .task-editor-inline__title,
@@ -294,21 +352,26 @@ function openPriorityPicker(event: MouseEvent): void {
   align-items: center;
   min-height: 44px;
   border-radius: 12px;
-  background: transparent;
-  transition: background-color 120ms ease;
+  background: rgba(255, 255, 255, 0.03);
+  transition: background-color 120ms ease, box-shadow 120ms ease;
 }
 
 .task-editor-inline__input-shell:focus-within {
   background: rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.24);
 }
 
 .task-editor-inline__input-shell--date {
-  padding-right: 4px;
+  padding-right: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .task-editor-inline__input-shell--time {
-  justify-content: center;
-  padding: 0 4px;
+  justify-content: flex-end;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .task-editor-inline__input-shell--select {
@@ -316,16 +379,26 @@ function openPriorityPicker(event: MouseEvent): void {
   padding-right: 36px;
 }
 
+.task-editor-inline__input-shell--paired {
+  min-height: 34px;
+  padding-inline: 0;
+  border-radius: 10px;
+  background: transparent;
+  box-shadow: none;
+  justify-content: flex-start;
+}
+
 .task-editor-inline__time-toggle {
   border: 0;
   width: 100%;
-  padding: 0 4px;
+  padding: 4px 0;
   background: transparent;
-  color: rgba(148, 163, 184, 0.9);
-  font-size: 12px;
+  color: rgba(226, 232, 240, 0.82);
+  font-size: 13px;
+  font-weight: 500;
   line-height: 1;
   cursor: pointer;
-  text-align: center;
+  text-align: right;
 }
 
 .task-editor-inline__time-toggle:hover,
@@ -337,17 +410,60 @@ function openPriorityPicker(event: MouseEvent): void {
   min-width: 0;
 }
 
+.task-editor-inline__field--date .task-editor-inline__input,
+.task-editor-inline__field--time .task-editor-inline__input {
+  padding-inline: 0;
+  color: rgba(226, 232, 240, 0.82);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.task-editor-inline__field--time .task-editor-inline__input {
+  text-align: right;
+}
+
+.task-editor-inline__field--date .task-editor-inline__input:focus,
+.task-editor-inline__field--time .task-editor-inline__input:focus {
+  background: transparent;
+  color: rgba(226, 232, 240, 0.96);
+}
+
+.task-editor-inline__field--date .task-editor-inline__input-shell:hover,
+.task-editor-inline__field--time .task-editor-inline__input-shell:hover {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.task-editor-inline__field--date .task-editor-inline__input-shell:focus-within,
+.task-editor-inline__field--time .task-editor-inline__input-shell:focus-within {
+  background: rgba(255, 255, 255, 0.055);
+  box-shadow: none;
+}
+
+.task-editor-inline__input[type='date']::-webkit-calendar-picker-indicator,
+.task-editor-inline__input[type='time']::-webkit-calendar-picker-indicator {
+  filter: invert(0.9) brightness(1.2);
+  opacity: 0.92;
+  cursor: pointer;
+}
+
 .task-editor-inline__select {
   appearance: none;
+  width: auto;
+  min-width: 0;
+  padding: 4px 0;
   padding-right: 0;
+  border-radius: 0;
+  color: rgba(226, 232, 240, 0.82);
+  font-size: 13px;
+  font-weight: 500;
 }
 
 .task-editor-inline__select-icon {
   position: absolute;
-  right: 12px;
-  width: 16px;
-  height: 16px;
-  color: rgba(226, 232, 240, 0.72);
+  right: 2px;
+  width: 14px;
+  height: 14px;
+  color: rgba(148, 163, 184, 0.6);
   pointer-events: none;
 }
 
@@ -364,16 +480,37 @@ function openPriorityPicker(event: MouseEvent): void {
 }
 
 .task-editor-inline__meta {
-  display: grid;
-  gap: 8px;
-  grid-template-columns: minmax(0, 1fr) 84px 84px;
-  align-items: start;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  width: 100%;
+  min-width: 0;
 }
 
 @media (max-width: 640px) {
-  .task-editor-inline__meta {
+  .task-editor-inline__meta-row {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+.task-editor-inline__meta-row {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) 120px;
+  align-items: start;
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.task-editor-inline__meta-row--paired {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  justify-content: flex-start;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .task-editor-inline__field {
@@ -383,13 +520,55 @@ function openPriorityPicker(event: MouseEvent): void {
   color: rgba(148, 163, 184, 0.92);
 }
 
-.task-editor-inline__field--priority {
-  justify-self: end;
-  width: 84px;
+.task-editor-inline__field--time {
+  width: 120px;
 }
 
-.task-editor-inline__field--time {
-  width: 84px;
+.task-editor-inline__field--paired {
+  min-width: 0;
+  width: fit-content;
+  flex: 0 0 auto;
+}
+
+.task-editor-inline__field--paired .task-editor-inline__input-shell:hover {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.task-editor-inline__field--paired .task-editor-inline__input-shell:focus-within {
+  background: rgba(255, 255, 255, 0.055);
+  box-shadow: none;
+}
+
+.task-editor-inline__field--paired .task-editor-inline__input-shell {
+  display: inline-flex;
+  width: fit-content;
+  min-width: 0;
+  max-width: none;
+}
+
+.task-editor-inline__field--priority .task-editor-inline__input-shell {
+  min-width: 80px;
+}
+
+.task-editor-inline__field--execution-state .task-editor-inline__input-shell {
+  min-width: 80px;
+}
+
+.task-editor-inline__select--priority {
+  min-width: 56px;
+}
+
+.task-editor-inline__select--execution-state {
+  min-width: 56px;
+}
+
+.task-editor-inline__field--paired .task-editor-inline__select:focus {
+  color: rgba(226, 232, 240, 0.96);
+}
+
+.task-editor-inline__field--paired .task-editor-inline__input-shell:hover .task-editor-inline__select-icon,
+.task-editor-inline__field--paired .task-editor-inline__input-shell:focus-within .task-editor-inline__select-icon {
+  color: rgba(226, 232, 240, 0.82);
 }
 
 .task-editor-inline__actions {

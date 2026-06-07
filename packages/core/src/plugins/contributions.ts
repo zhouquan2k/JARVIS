@@ -79,20 +79,61 @@ export interface InsertLinkTypeContribution {
     getItems(input: InsertLinkContext): Promise<InsertLinkItem[]> | InsertLinkItem[];
 }
 
-export interface DocumentCreationFlowInput {
-    targetParentPath?: string;
+export interface DocumentImportHostApi {
+    createDocument(path: string, content: string): Promise<void>;
+    createReferenceResource(
+        ownerDocumentPath: string,
+        filename: string,
+        content: string
+    ): Promise<{ resourcePath: string; relativePathFromOwner: string }>;
+    openDocument(path: string): Promise<void>;
+    report(message: { type: 'success' | 'error'; text: string }): void;
+    setStage(stage: {
+        key: string;
+        label: string;
+        status: 'running' | 'completed' | 'failed';
+        detail?: string;
+    }): void;
 }
 
-export interface DocumentCreationFlowResult {
-    createdDocumentPath: string;
+export interface DocumentImportRunInput<TParams = unknown> {
+    params: TParams;
+    targetParentPath: string;
+    hostApi: DocumentImportHostApi;
+    signal?: AbortSignal;
 }
 
-export interface DocumentCreationFlowContribution {
+export interface DocumentImportResult {
+    primaryDocumentPath: string;
+    createdPaths: string[];
+}
+
+export interface DocumentImportFormProps<TParams = unknown> {
+    modelValue: TParams;
+    languageModels: readonly LanguageModelContribution[];
+    disabled?: boolean;
+}
+
+export interface DocumentImportContribution<TParams = unknown, TComponent = unknown> {
     id: string;
     title: string;
+    icon?: string;
+    formComponent: TComponent;
     titleKey?: string;
     order?: number;
-    run(input: DocumentCreationFlowInput): Promise<DocumentCreationFlowResult>;
+    createInitialParams?(): TParams;
+    run(input: DocumentImportRunInput<TParams>): Promise<DocumentImportResult>;
+}
+
+export interface LanguageModelContribution {
+    id: string;
+    generateText(
+        prompt: string,
+        options?: {
+            system?: string;
+            signal?: AbortSignal;
+        }
+    ): Promise<string>;
 }
 
 export type NodePresentationIcon = 'bot';

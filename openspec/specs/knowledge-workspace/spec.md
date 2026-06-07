@@ -39,13 +39,13 @@ The knowledge workspace AgentMode file tree MUST treat Markdown filenames as a d
 - **AND** the node label MUST keep the original filename
 
 ### Requirement: Knowledge workspace MUST provide a Markdown link insertion UI for existing Agent-scope documents
-The knowledge workspace Markdown editor MUST let users insert links to existing Markdown documents through a UI chooser instead of requiring manual Markdown syntax entry. The chooser MUST reuse the current Agent-scope Markdown document collection, and inserted links MUST target the chosen document with a relative Markdown path.
+The knowledge workspace Markdown editor MUST let users insert links to existing Markdown documents through a UI chooser instead of requiring manual Markdown syntax entry. The chooser MUST reuse the current Agent-scope Markdown document collection, and inserted links MUST target the chosen document with a relative Markdown path. In rendered viewer mode, insertion MUST apply at the user's live selection (or caret) and MUST preserve the viewport, without switching to raw-source edit mode.
 
 #### Scenario: Insert a link from the editor toolbar chooser
 - **WHEN** the user is editing a Markdown document in the knowledge workspace
 - **AND** the current Agent scope contains at least one other Markdown document
 - **THEN** the editor MUST offer a link insertion UI entry
-- **AND** choosing a target document MUST insert Markdown link syntax for that document at the current cursor position
+- **AND** choosing a target document MUST insert Markdown link syntax for that document at the current selection or caret
 
 #### Scenario: Wrap the current selection when inserting a chosen link
 - **WHEN** the user has selected text in the Markdown editor
@@ -56,6 +56,46 @@ The knowledge workspace Markdown editor MUST let users insert links to existing 
 #### Scenario: Exclude the active document from link choices
 - **WHEN** the link insertion UI lists candidate Markdown documents
 - **THEN** the active document being edited MUST NOT appear as a selectable target
+
+#### Scenario: Preserve the viewport and apply at the live selection in viewer mode
+- **WHEN** the rendered Markdown viewer is scrolled away from the top and the user has a live selection
+- **AND** the user chooses a target document from the link insertion UI
+- **THEN** the link MUST be applied over that live selection in place
+- **AND** the viewer's scroll position MUST remain unchanged
+- **AND** the editor MUST NOT switch to raw-source edit mode to perform the insertion
+
+### Requirement: Knowledge workspace MUST provide a Markdown style insertion UI for selected text
+The knowledge workspace Markdown editor MUST expose a toolbar style insertion UI for authored Markdown text transformations so users do not need to type formatting markers manually. The style UI MAY offer multiple actions over time; initially it MUST provide a highlight action that applies highlight to the current selection. In rendered viewer mode, applying a style MUST act on the user's live selection in place and MUST preserve the viewport, without switching to raw-source edit mode; the serialized Markdown MUST still use the `==...==` form.
+
+#### Scenario: Insert highlight markup from the editor toolbar
+- **WHEN** the user is editing a Markdown document in the knowledge workspace
+- **THEN** the editor MUST expose a Markdown style insertion UI entry in the toolbar
+- **AND** choosing the highlight action MUST apply highlight at the current caret or selection
+
+#### Scenario: Apply highlight to the current selection
+- **WHEN** the user has selected text in the Markdown editor
+- **AND** the user chooses the highlight action from the Markdown style insertion UI
+- **THEN** the editor MUST preserve the selected text
+- **AND** the serialized Markdown for that text MUST be wrapped with `==` markers
+
+#### Scenario: Prepare an empty highlight insertion for continued typing
+- **WHEN** the user has no selected text in the Markdown editor
+- **AND** the user chooses the highlight action from the Markdown style insertion UI
+- **THEN** the editor MUST prepare an empty highlight so that text typed next is highlighted
+- **AND** in raw-source mode the caret MUST land between the inserted `==` markers
+
+#### Scenario: Render Obsidian-compatible highlight markup as visible highlight styling
+- **WHEN** a Markdown document contains inline text wrapped with `==` markers
+- **THEN** the Markdown viewer/editor rendering pipeline MUST parse that range as highlight content
+- **AND** the rendered output MUST present the wrapped text with visible highlight styling
+- **AND** serializing the rendered document back to Markdown MUST preserve the `==...==` form
+
+#### Scenario: Preserve the viewport when applying highlight in viewer mode
+- **WHEN** the rendered Markdown viewer is scrolled away from the top
+- **AND** the user applies the highlight action to a live selection
+- **THEN** the highlight MUST be applied in place over that selection
+- **AND** the viewer's scroll position MUST remain unchanged
+- **AND** the editor MUST NOT switch to raw-source edit mode to perform the action
 
 ### Requirement: Knowledge workspace MUST support viewer-mode resizing for local Markdown images
 The knowledge workspace Markdown middle-pane viewer MUST let users resize local document images directly from the rendered viewer mode without depending on a new editor-native image sizing contract. The resize interaction MUST persist the chosen Crepe-compatible ratio back into the authored Markdown source and MUST leave unsupported image sources unchanged.
@@ -132,187 +172,335 @@ When a rendered Markdown link resolves to a workspace conversation href, the kno
 - **AND** the workspace MUST NOT corrupt the current conversation or document state
 
 ### Requirement: Knowledge workspace MUST provide a default assistant pane that is bound to the active scope agent
-knowledge workspace的右栏 MUST defaultrender真实的 AI 对话 pane，并将其绑定到current激活文件或directoryresolve得到的生效 Agent 上下文，而不是始终以global固定的通用聊天身份运行。该 pane MUST continue复用现有聊天detailsview，但在currentselected节点为document时，右栏 MUST 先enter该document的关联conversationlist，在currentselected节点为绑定 Agent 的directory时，右栏 MUST 先enter该 Agent 的localconversationlist，再由the userswitch到具体conversationdetails。document关联conversationlist MUST 通过 `IContextProvider` provide的通用conversationquerycapability获取，而directory级 Agent conversationlist MUST 复用current `agentKey` scope下的localconversation聚合result，而不是另起一套list实现。该工作区在从对话模式return时 MUST recovery之前save的selected节点、活动路径与currentconversationdetails，使 Agent 主viewcontinue停留在离开前的上下文上。 #### Scenario: Render the default assistant pane with the active scope agent
+knowledge workspace的右栏 MUST defaultrender真实的 AI 对话 pane，并将其绑定到current激活文件或directoryresolve得到的生效 Agent 上下文，而不是始终以global固定的通用聊天身份运行。该 pane MUST continue复用现有聊天detailsview，但在currentselected节点为document时，右栏 MUST 先enter该document的关联conversationlist，在currentselected节点为绑定 Agent 的directory时，右栏 MUST 先enter该 Agent 的localconversationlist，再由the userswitch到具体conversationdetails。document关联conversationlist MUST 通过 `IContextProvider` provide的通用conversationquerycapability获取，而directory级 Agent conversationlist MUST 复用current `agentKey` scope下的localconversation聚合result，而不是另起一套list实现。该工作区在从对话模式return时 MUST recovery之前save的selected节点、活动路径与currentconversationdetails，使 Agent 主viewcontinue停留在离开前的上下文上。
+
+#### Scenario: Render the default assistant pane with the active scope agent
 - **WHEN** hostenterknowledge workspace且current激活节点已经resolve出一个生效 Agent
 - **THEN** The system MUST 在右栏renderdefault的 `AgentPane`
-- **AND** 该 pane MUST continue复用现有聊天detailsview并通过 `AgentRuntime` 发送current Agent 上下文请求，而不是忽略file treescope #### Scenario: Pass workspace context with assistant requests
+- **AND** 该 pane MUST continue复用现有聊天detailsview并通过 `AgentRuntime` 发送current Agent 上下文请求，而不是忽略file treescope
+
+#### Scenario: Pass workspace context with assistant requests
 - **WHEN** knowledge workspace右栏 Agent 发送一次请求
 - **THEN** The system MUST 将current `activePath`、`contextProvider` 以及可用的 `activeDocument` 一并传给 `AgentRuntime`
-- **AND** 后续文件tool执行 MUST 能使用这组工作区上下文 #### Scenario: Restore the saved Agent view state after returning from chat mode
+- **AND** 后续文件tool执行 MUST 能使用这组工作区上下文
+
+#### Scenario: Restore the saved Agent view state after returning from chat mode
 - **WHEN** the user从对话模式切回knowledge workspace
 - **THEN** The system MUST recoveryswitch前save的selected节点、活动路径和currentconversationdetails
-- **AND** recovery后右栏 MUST continue显示对应节点下的 Agent 对话内容 #### Scenario: Fall back safely when the saved Agent view state is stale
+- **AND** recovery后右栏 MUST continue显示对应节点下的 Agent 对话内容
+
+#### Scenario: Fall back safely when the saved Agent view state is stale
 - **WHEN** save的selected节点或conversation在切回knowledge workspace前已经失效
 - **THEN** The system MUST fallback到最近可用的父节点或根节点
-- **AND** The system MUST keep右栏可continue使用，而不是抛出无法recovery的error态 #### Scenario: Default to a document-scoped conversation list when a document is selected
+- **AND** The system MUST keep右栏可continue使用，而不是抛出无法recovery的error态
+
+#### Scenario: Default to a document-scoped conversation list when a document is selected
 - **WHEN** the user在knowledge workspacecurrentselected一个document节点
 - **THEN** right-side `AgentPane` MUST default显示该document的关联conversationlist，而不是直接enter某条conversationdetails
-- **AND** 该list MUST keepcurrent生效 `agentKey` scope，不得混入其他 Agent 的conversation #### Scenario: Load document-scoped conversations through the context provider
+- **AND** 该list MUST keepcurrent生效 `agentKey` scope，不得混入其他 Agent 的conversation
+
+#### Scenario: Load document-scoped conversations through the context provider
 - **WHEN** right-side `AgentPane` 需要展示currentdocument的关联conversationlist
 - **THEN** The system MUST 通过 `IContextProvider.getConversations({ documentPath })` read该list
-- **AND** UI MUST NOT 直接以local `chatStore.conversations` 作为sole数据源拼装result #### Scenario: Keep assistant detail mode for directory selections
+- **AND** UI MUST NOT 直接以local `chatStore.conversations` 作为sole数据源拼装result
+
+#### Scenario: Keep assistant detail mode for directory selections
 - **WHEN** the usercurrentselected的是directory节点而不是document节点
 - **THEN** right-side `AgentPane` MUST continue显示聊天detailsview
-- **AND** The system MUST NOT 因directoryselected态强制enterdocumentconversationlist #### Scenario: Default to an agent-scoped conversation list when an agent-bound directory is selected
+- **AND** The system MUST NOT 因directoryselected态强制enterdocumentconversationlist
+
+#### Scenario: Default to an agent-scoped conversation list when an agent-bound directory is selected
 - **WHEN** the user在knowledge workspacecurrentselected一个绑定了 Agent 的directory节点
 - **THEN** right-side `AgentPane` MUST default显示属于current `agentKey` 的localconversationlist
-- **AND** 该list MUST NOT 混入其他 Agent scope的conversation #### Scenario: Reuse the existing conversation list component for agent-bound directories
+- **AND** 该list MUST NOT 混入其他 Agent scope的conversation
+
+#### Scenario: Reuse the existing conversation list component for agent-bound directories
 - **WHEN** 系统在right-side `AgentPane` 中展示绑定 Agent 的directory级conversationlist
 - **THEN** The system MUST 复用currentlist/details双态panel中的现有conversationlist组件
-- **AND** The system MUST NOT 为directory级 Agent conversation再create一套独立的right-sidelist交互 #### Scenario: Include the active document only when the provider accepts its MIME type
+- **AND** The system MUST NOT 为directory级 Agent conversation再create一套独立的right-sidelist交互
+
+#### Scenario: Include the active document only when the provider accepts its MIME type
 - **WHEN** currentknowledge workspace节点是一个文件且右栏 Agent 发起请求
 - **THEN** Agent 运行时请求契约 MUST allow程序侧根据model provider 声明的documentcapability决定是否附带该 `activeDocument`
-- **AND** 当 provider 未声明接受current `mimeType` 时，The system MUST NOT 把该document内容作为body或attachment直接注入modelinput #### Scenario: Expose the actual first-turn document input for document association
+- **AND** 当 provider 未声明接受current `mimeType` 时，The system MUST NOT 把该document内容作为body或attachment直接注入modelinput
+
+#### Scenario: Expose the actual first-turn document input for document association
 - **WHEN** 首轮请求真实采纳了currentdocument作为modelinputattachment
 - **THEN** The system MUST 将该document作为真实请求的一部分write backcurrent user message 的history记录
-- **AND** 后续document关联关系 MUST 基于这份真实请求快照建立，而不是only凭 UI selected态推断 #### Scenario: Follow-up turns replay prior document context from history only
+- **AND** 后续document关联关系 MUST 基于这份真实请求快照建立，而不是only凭 UI selected态推断
+
+#### Scenario: Follow-up turns replay prior document context from history only
 - **WHEN** the sameconversationenter后续 follow-up 提问
 - **THEN** The system MUST 优先依赖已持久化的message history 重放先前document上下文
-- **AND** The system MUST NOT only因current工作区仍selectedthe same个文件，就再次automatically附加已经存在于 history 中的旧document #### Scenario: Changing the active node does not retroactively replace conversation context
+- **AND** The system MUST NOT only因current工作区仍selectedthe same个文件，就再次automatically附加已经存在于 history 中的旧document
+
+#### Scenario: Changing the active node does not retroactively replace conversation context
 - **WHEN** the user在conversationcreate后switch了工作区current节点，但没有explicit将新文件添加到对话
 - **THEN** The system MUST NOT automatically用新节点替换currentconversation已经固定下来的document上下文
-- **AND** 后续请求 MUST continue以history中已记录的真实上下文为准 #### Scenario: Fall back to the root default agent in the assistant pane
+- **AND** 后续请求 MUST continue以history中已记录的真实上下文为准
+
+#### Scenario: Fall back to the root default agent in the assistant pane
 - **WHEN** current激活节点及其父directory都不存在 `.agent.json`
 - **THEN** 右栏 AI pane MUST 退回到根目录 `/.agent.json` 中持久化的默认 Agent
 - **AND** 如果根目录 `/.agent.json` 尚未存在，系统 MUST 在首次需要时创建它并继续使用该 pane
-- **AND** the user仍然 MUST 可以continue以普通聊天方式使用该 pane #### Scenario: Selecting a directory updates the effective assistant agent immediately
+- **AND** the user仍然 MUST 可以continue以普通聊天方式使用该 pane
+
+#### Scenario: Selecting a directory updates the effective assistant agent immediately
 - **WHEN** the user在knowledge workspaceleft-side点击一个directory节点，但未打开新文件
 - **THEN** The system MUST 立即以该directory路径重新resolve并switch右栏生效 Agent
-- **AND** The system MUST NOT 要求the user必须先打开该directory下的文件才update右栏身份 #### Scenario: Show manually bound conversations in the agent-scoped list
+- **AND** The system MUST NOT 要求the user必须先打开该directory下的文件才update右栏身份
+
+#### Scenario: Show manually bound conversations in the agent-scoped list
 - **WHEN** the user在普通对话工作台中将一条localconversation手动绑定到currentdirectory对应的 Agent key
 - **THEN** 该conversation MUST 出现在knowledge workspaceright-side `AgentPane` 的current Agent conversationlist中
-- **AND** The system MUST NOT 要求该conversation必须由knowledge workspaceautomaticallycreate或automatically绑定后才visible #### Scenario: Keep an existing conversation bound to its own agent in detail mode
+- **AND** The system MUST NOT 要求该conversation必须由knowledge workspaceautomaticallycreate或automatically绑定后才visible
+
+#### Scenario: Keep an existing conversation bound to its own agent in detail mode
 - **WHEN** the user opens an existing conversation detail in the knowledge workspace and that conversation already persists `conversation.agentKey`
 - **THEN** follow-up sends MUST use the Agent context resolved from that persisted conversation binding
 - **AND** The system MUST NOT override that conversation's Agent tools, instructions, or model selection only because the currently selected tree node resolves to a different Agent
 
 ### Requirement: Knowledge workspace MUST surface file changes with line-level undo and redo
-knowledge workspace MUST 为文件修订resultprovide diff 展示与行级 undo/redo 入口，以supportthe user理解和fallback Agent 写盘后的变更。 #### Scenario: Show the latest file change as a line diff
+knowledge workspace MUST 为文件修订resultprovide diff 展示与行级 undo/redo 入口，以supportthe user理解和fallback Agent 写盘后的变更。
+
+#### Scenario: Show the latest file change as a line diff
 - **WHEN** 某个文件修订tool成功修改current工作区文件
 - **THEN** UI MUST 能根据修改前后text展示 line diff
-- **AND** 该 diff MUST 不依赖 LLM 预先生成补丁数据 #### Scenario: Trigger undo or redo from the workspace UI
+- **AND** 该 diff MUST 不依赖 LLM 预先生成补丁数据
+
+#### Scenario: Trigger undo or redo from the workspace UI
 - **WHEN** the user在工作区中触发文件 undo 或 redo
 - **THEN** The system MUST 通过程序侧文件变更服务write back对应内容
-- **AND** write back后再次read该文件时 MUST 能得到update后的text ### Requirement: Knowledge workspace MUST resolve the main pane by document viewer
-knowledge workspace MUST 先readcurrentdocument，再根据 `mimeType` 通过统一的 `DocumentViewer` registry resolve主显示区行为，而不是continue在 store 或组件里按扩展名硬编码 `.md` / `.pdf` 分支。 #### Scenario: Resolve markdown and plain text with the same text viewer
+- **AND** write back后再次read该文件时 MUST 能得到update后的text
+
+### Requirement: Knowledge workspace MUST resolve the main pane by document viewer
+knowledge workspace MUST 先readcurrentdocument，再根据 `mimeType` 通过统一的 `DocumentViewer` registry resolve主显示区行为，而不是continue在 store 或组件里按扩展名硬编码 `.md` / `.pdf` 分支。
+
+#### Scenario: Resolve markdown and plain text with the same text viewer
 - **WHEN** current激活document的 `mimeType` 为 `text/markdown` 或 `text/plain`
 - **THEN** The system MUST 使用the same个support编辑的text viewer 打开该document
-- **AND** 该 viewer MUST continue复用现有text编辑、automaticallysave、diff 和 undo/redo 链路 #### Scenario: Resolve PDF with a read-only viewer
+- **AND** 该 viewer MUST continue复用现有text编辑、automaticallysave、diff 和 undo/redo 链路
+
+#### Scenario: Resolve PDF with a read-only viewer
 - **WHEN** current激活document的 `mimeType` 为 `application/pdf`
 - **THEN** The system MUST switch到 PDF viewer
-- **AND** 该 viewer MUST 只读显示该document，而不是尝试mounttext编辑器 #### Scenario: Fall back when no viewer matches the MIME type
+- **AND** 该 viewer MUST 只读显示该document，而不是尝试mounttext编辑器
+
+#### Scenario: Fall back when no viewer matches the MIME type
 - **WHEN** current激活document的 `mimeType` 未命中任何已注册 viewer
 - **THEN** The system MUST 显示明确的“不support此document类型”状态
-- **AND** The system MUST NOT 退化为盲目使用 Markdown 编辑器 ### Requirement: Knowledge workspace MUST provide a read-only image viewer
-knowledge workspace MUST 能通过统一的 `DocumentViewer` registry 将常见image MIME 类型resolve到只读image viewer，并在main panel中显示currentimage文件。该 viewer MUST 复用 `IContextProvider.readDocument()` return的 `mimeType` 与 `dataBase64` 载荷，不得要求独立的imagereadinterface。 #### Scenario: Resolve supported image MIME types with the image viewer
+- **AND** The system MUST NOT 退化为盲目使用 Markdown 编辑器
+
+### Requirement: Knowledge workspace MUST provide a read-only image viewer
+knowledge workspace MUST 能通过统一的 `DocumentViewer` registry 将常见image MIME 类型resolve到只读image viewer，并在main panel中显示currentimage文件。该 viewer MUST 复用 `IContextProvider.readDocument()` return的 `mimeType` 与 `dataBase64` 载荷，不得要求独立的imagereadinterface。
+
+#### Scenario: Resolve supported image MIME types with the image viewer
 - **WHEN** current激活document的 `mimeType` 为 `image/png`、`image/jpeg`、`image/gif`、`image/svg+xml` 或 `image/webp`
 - **THEN** The system MUST 将该documentresolve到 `image` viewer
-- **AND** 该 viewer MUST 标记为可查看但不可编辑 #### Scenario: Render the active image document in the main pane
+- **AND** 该 viewer MUST 标记为可查看但不可编辑
+
+#### Scenario: Render the active image document in the main pane
 - **WHEN** the user在knowledge workspace打开一个已support的imagedocument
 - **THEN** main panel MUST 使用currentdocument的 `mimeType` 与 `dataBase64` 构造可显示的image来源
-- **AND** image MUST 在main panelvisible区域内自适应显示，而不是撑破三栏布局 #### Scenario: Keep image documents out of text editing flows
+- **AND** image MUST 在main panelvisible区域内自适应显示，而不是撑破三栏布局
+
+#### Scenario: Keep image documents out of text editing flows
 - **WHEN** current激活document由 `image` viewer 打开
 - **THEN** The system MUST 禁用save入口并keeptext草稿内容为空
-- **AND** The system MUST NOT mount Markdown/text 编辑器、Markdown 模式switch、diff、undo 或 redo 交互 #### Scenario: Preserve unsupported fallback for non-registered image-like files
+- **AND** The system MUST NOT mount Markdown/text 编辑器、Markdown 模式switch、diff、undo 或 redo 交互
+
+#### Scenario: Preserve unsupported fallback for non-registered image-like files
 - **WHEN** current激活document的 `mimeType` 未命中任何已注册 viewer
 - **THEN** The system MUST continue显示明确的“不support此document类型”状态
-- **AND** The system MUST NOT 因文件看起来像image就绕过 MIME registry 强行render ### Requirement: Knowledge workspace MUST provide inline file tree operations
-knowledge workspaceleft-sidefile tree MUST support直接面向current树节点的文件操作，而不是依赖浏览器原生 `prompt/confirm` 或隐式刷新。该交互 MUST support树内原位新建、explicit刷新、带确认的delete和双击改名。 #### Scenario: Create a file or directory inline inside the tree
+- **AND** The system MUST NOT 因文件看起来像image就绕过 MIME registry 强行render
+
+### Requirement: Knowledge workspace MUST provide inline file tree operations
+knowledge workspaceleft-sidefile tree MUST support直接面向current树节点的文件操作，而不是依赖浏览器原生 `prompt/confirm` 或隐式刷新。该交互 MUST support树内原位新建、explicit刷新、带确认的delete和双击改名。
+
+#### Scenario: Create a file or directory inline inside the tree
 - **WHEN** the user点击file tree中的“新建文件”或“新建directory”
 - **THEN** The system MUST 在目标父directory下插入一个临时树节点并直接enter原位编辑
-- **AND** the user MUST 能通过 `Enter` 提交、`Escape` 取消，且空input失焦 MUST 取消该create #### Scenario: Resolve the parent directory for inline creation from the current selection
+- **AND** the user MUST 能通过 `Enter` 提交、`Escape` 取消，且空input失焦 MUST 取消该create
+
+#### Scenario: Resolve the parent directory for inline creation from the current selection
 - **WHEN** the user从file tree触发新建操作
 - **THEN** 若currentselected节点是directory，The system MUST 将新节点create到该directory下
 - **AND** 若currentselected节点是文件，The system MUST 将新节点create到该文件的父directory下
-- **AND** 若currentselected根节点 `/`，The system MUST 将新节点create到工作区根directory #### Scenario: Refresh the file tree explicitly
+- **AND** 若currentselected根节点 `/`，The system MUST 将新节点create到工作区根directory
+
+#### Scenario: Refresh the file tree explicitly
 - **WHEN** the user点击file tree中的刷新按钮
 - **THEN** The system MUST 重新loadcurrent工作区directory树
-- **AND** 刷新后 MUST 尽量保留仍然存在的展开状态与selected状态 #### Scenario: Delete a selected node only after explicit confirmation
+- **AND** 刷新后 MUST 尽量保留仍然存在的展开状态与selected状态
+
+#### Scenario: Delete a selected node only after explicit confirmation
 - **WHEN** the user请求deletecurrentselected的文件或directory
 - **THEN** The system MUST 先显示明确的二次确认
 - **AND** directorydelete确认 MUST 明确prompt会递归delete其内容
-- **AND** 只有在the userexplicit确认后，系统才能执行真实delete #### Scenario: Fall back to the parent scope after deleting the active node
+- **AND** 只有在the userexplicit确认后，系统才能执行真实delete
+
+#### Scenario: Fall back to the parent scope after deleting the active node
 - **WHEN** the userdeletecurrent激活文件，或delete包含current激活文件的directory
 - **THEN** The system MUST 清空失效的document编辑状态与文件变更状态
-- **AND** file treeselected MUST fallback到被删节点的父directory；若父directory不可用，则fallback到根节点 `/` #### Scenario: Rename a file tree node by double click
+- **AND** file treeselected MUST fallback到被删节点的父directory；若父directory不可用，则fallback到根节点 `/`
+
+#### Scenario: Rename a file tree node by double click
 - **WHEN** the user双击一个非根节点的文件或directory
 - **THEN** The system MUST 将该节点switch为原位编辑态，并以current节点名称作为初始值
-- **AND** the user MUST 能通过 `Enter` 提交改名、`Escape` 取消改名 #### Scenario: Keep the active workspace path in sync after rename
+- **AND** the user MUST 能通过 `Enter` 提交改名、`Escape` 取消改名
+
+#### Scenario: Keep the active workspace path in sync after rename
 - **WHEN** the userrenamecurrent激活文件，或rename包含current激活文件的父directory
 - **THEN** The system MUST 将 `selectedNodePath`、`activePath` 以及活动document路径sync到新路径
-- **AND** 后续 `AgentPane` 与工作区上下文resolve MUST 基于rename后的新路径continue工作 ### Requirement: Knowledge workspace MUST surface linked top-level directories in the file tree
-knowledge workspaceleft-sidefile tree MUST 把根directory下通过 `.agent.json` 的 `linkDir` 声明得到的mountdirectory，呈现为top-leveldirectory节点。该节点 MUST 仍然使用mount后的虚拟路径作为 UI 路径语义，而不是把底层真实directory的物理路径直接expose给the user。 #### Scenario: Show a linked directory as a top-level tree entry
+- **AND** 后续 `AgentPane` 与工作区上下文resolve MUST 基于rename后的新路径continue工作
+
+### Requirement: Knowledge workspace MUST surface linked top-level directories in the file tree
+knowledge workspaceleft-sidefile tree MUST 把根directory下通过 `.agent.json` 的 `linkDir` 声明得到的mountdirectory，呈现为top-leveldirectory节点。该节点 MUST 仍然使用mount后的虚拟路径作为 UI 路径语义，而不是把底层真实directory的物理路径直接expose给the user。
+
+#### Scenario: Show a linked directory as a top-level tree entry
 - **WHEN** 根directory下某个空directory声明了 `linkDir`
 - **THEN** file tree MUST 在top-level显示该directory节点
-- **AND** 该节点下的内容 MUST 与mount目标directory一致 #### Scenario: Keep mounted directory paths virtual in the file tree
+- **AND** 该节点下的内容 MUST 与mount目标directory一致
+
+#### Scenario: Keep mounted directory paths virtual in the file tree
 - **WHEN** the user在file tree中查看或选择mountdirectory下的文件
 - **THEN** The system MUST 使用mount后的虚拟路径作为节点路径
-- **AND** file tree MUST NOT expose真实directory的物理路径 ### Requirement: Knowledge workspace MUST route node operations through mounted directory aliases
-knowledge workspace对file tree节点执行的新建、delete、rename和刷新等操作 MUST continue通过统一的 `IContextProvider` 契约执行。对于mountdirectory，UI 层 MUST 只使用虚拟路径发起操作，由上下文provide器负责把这些操作映射到真实目标directory；对mount根节点本身的rename或delete MUST 只影响别名入口，不得直接改动真实目标directory的名称或位置。 #### Scenario: Create a node under a mounted directory
+- **AND** file tree MUST NOT expose真实directory的物理路径
+
+### Requirement: Knowledge workspace MUST route node operations through mounted directory aliases
+knowledge workspace对file tree节点执行的新建、delete、rename和刷新等操作 MUST continue通过统一的 `IContextProvider` 契约执行。对于mountdirectory，UI 层 MUST 只使用虚拟路径发起操作，由上下文provide器负责把这些操作映射到真实目标directory；对mount根节点本身的rename或delete MUST 只影响别名入口，不得直接改动真实目标directory的名称或位置。
+
+#### Scenario: Create a node under a mounted directory
 - **WHEN** the user在mountdirectory下新建文件或directory
 - **THEN** UI MUST 仍然把mount后的虚拟路径传给上下文provide器
-- **AND** 最终create MUST 落到真实目标directory中 #### Scenario: Rename or delete the mounted root only changes the alias entry
+- **AND** 最终create MUST 落到真实目标directory中
+
+#### Scenario: Rename or delete the mounted root only changes the alias entry
 - **WHEN** the userrename或deletemount根节点
 - **THEN** The system MUST 只处理工作区中的别名directory入口
-- **AND** 真实目标directory MUST keep不变 ### Requirement: Knowledge workspace MUST mark agent owner directories in the file tree
-knowledge workspaceleft-sidefile tree MUST 基于节点的 `isAgentOwner` 元数据为directory显示 Agent 标识图标，以帮助the user识别哪些directory直接拥有 `.agent.json`。该标识 MUST 只反映directory是否直接拥有 Agent，不得把only继承父directory Agent 的普通directory标记为 owner。 #### Scenario: Show an agent indicator for owner directories
+- **AND** 真实目标directory MUST keep不变
+
+### Requirement: Knowledge workspace MUST mark agent owner directories in the file tree
+knowledge workspaceleft-sidefile tree MUST 基于节点的 `isAgentOwner` 元数据为directory显示 Agent 标识图标，以帮助the user识别哪些directory直接拥有 `.agent.json`。该标识 MUST 只反映directory是否直接拥有 Agent，不得把only继承父directory Agent 的普通directory标记为 owner。
+
+#### Scenario: Show an agent indicator for owner directories
 - **WHEN** file treerender一个directory节点且该节点的 `isAgentOwner` 为 `true`
 - **THEN** The system MUST 在该directory节点上显示 Agent 标识图标
-- **AND** 该图标 MUST 与directory名称一起visible，而不是依赖额外 hover 才出现 #### Scenario: Do not show an agent indicator for inherited directories
+
+### Requirement: Knowledge workspace MUST provide a workspace-owned node navigation bridge with panel restoration
+The knowledge workspace MUST provide a higher-level navigation bridge that can reopen a workspace node together with workspace-owned panel restoration state. This bridge MUST own route restoration to the knowledge workspace and MUST support optional task-related `tab` and `detailKey` payloads without giving route-switching semantics to the lower-level document workspace store.
+
+#### Scenario: Reopen a workspace node with task panel restoration
+- **WHEN** a caller requests knowledge-workspace navigation for a target workspace path together with task-related `tab` and `detailKey`
+- **THEN** the system MUST restore the knowledge-workspace route before opening that node
+- **AND** it MUST make the requested `tab` and `detailKey` available to the destination workspace state
+
+#### Scenario: Keep lower-level node opening free of route-switching semantics
+- **WHEN** the document workspace store opens a node internally
+- **THEN** that lower-level node-opening operation MUST continue to work without owning route switching
+- **AND** the higher-level knowledge-workspace navigation bridge MUST remain responsible for route restoration
+
+#### Scenario: Keep the agent owner indicator always visible
+- **WHEN** file treerender一个directory节点且该节点的 `isAgentOwner` 为 `true`
+- **THEN** 该图标 MUST 与directory名称一起visible，而不是依赖额外 hover 才出现
+
+#### Scenario: Do not show an agent indicator for inherited directories
 - **WHEN** file treerender一个directory节点且该节点的 `isAgentOwner` 不为 `true`
 - **THEN** The system MUST NOT 显示 Agent owner 标识图标
-- **AND** 即使该节点的 `agentKey` 指向某个继承生效的 Agent，系统也 MUST NOT 将其误标为 owner ### Requirement: Knowledge workspace MUST mount the agent view inside the three-pane layout
-knowledge workspace MUST 在现有三栏布局中mount独立的 `AgentView` capability，而不是把directory级 Agent 资产展示塞进right-side `AgentPane`。当currentselecteddirectory节点为 owner 时，main middle panel MUST 显示 `AgentView`，同时right-side `AgentPane` MUST continue保留。 #### Scenario: Show agent view in the middle pane for an owner directory
+- **AND** 即使该节点的 `agentKey` 指向某个继承生效的 Agent，系统也 MUST NOT 将其误标为 owner
+
+### Requirement: Knowledge workspace MUST mount the agent view inside the three-pane layout
+knowledge workspace MUST 在现有三栏布局中mount独立的 `AgentView` capability，而不是把directory级 Agent 资产展示塞进right-side `AgentPane`。当currentselecteddirectory节点为 owner 时，main middle panel MUST 显示 `AgentView`，同时right-side `AgentPane` MUST continue保留。
+
+#### Scenario: Show agent view in the middle pane for an owner directory
 - **WHEN** the user在knowledge workspaceselected一个 `isAgentOwner === true` 的directory节点
 - **THEN** main middle panel MUST render `AgentView`
-- **AND** right-side `AgentPane` MUST continue显示并使用current节点的 `agentKey` #### Scenario: Keep the file tree and agent pane while agent view is active
+- **AND** right-side `AgentPane` MUST continue显示并使用current节点的 `agentKey`
+
+#### Scenario: Keep the file tree and agent pane while agent view is active
 - **WHEN** `AgentView` 处于显示状态
 - **THEN** left-sidefile tree MUST continuekeep可用
-- **AND** right-side `AgentPane` MUST NOT 因main middle panelswitch而被卸载为其他内容 ### Requirement: Knowledge workspace Markdown viewer SHALL provide viewer and edit modes
-The knowledge workspace main Markdown document viewer SHALL provide a user-visible `viewer` / `edit` mode switch for `text/markdown` documents. The viewer SHALL default to `viewer` mode when opening a Markdown document, and mode switching MUST preserve the current Markdown content, save behavior, and editable document workflow. #### Scenario: Open a Markdown document in viewer mode by default
+- **AND** right-side `AgentPane` MUST NOT 因main middle panelswitch而被卸载为其他内容
+
+### Requirement: Knowledge workspace Markdown viewer SHALL provide viewer and edit modes
+The knowledge workspace main Markdown document viewer SHALL provide a user-visible `viewer` / `edit` mode switch for `text/markdown` documents. The viewer SHALL default to `viewer` mode when opening a Markdown document, and mode switching MUST preserve the current Markdown content, save behavior, and editable document workflow.
+
+#### Scenario: Open a Markdown document in viewer mode by default
 - **WHEN** a user opens a `text/markdown` document in the knowledge workspace main pane
 - **THEN** the system MUST render the document with the Markdown viewer mode set to `viewer`
-- **AND** the mode switch MUST be visible in the main Markdown viewer header #### Scenario: Switch modes without losing edits
+- **AND** the mode switch MUST be visible in the main Markdown viewer header
+
+#### Scenario: Switch modes without losing edits
 - **WHEN** a user edits Markdown content and switches between `viewer` and `edit`
 - **THEN** the system MUST preserve the latest editor Markdown content
-- **AND** the save action MUST continue saving the same document content after the switch #### Scenario: Keep non-Markdown text documents out of Markdown preview controls
+- **AND** the save action MUST continue saving the same document content after the switch
+
+#### Scenario: Keep non-Markdown text documents out of Markdown preview controls
 - **WHEN** the active text viewer document has `mimeType` other than `text/markdown`
-- **THEN** the system MUST NOT require Mermaid or Markdown image preview controls to be shown for that document ### Requirement: Knowledge workspace Markdown viewer SHALL render Mermaid diagrams in viewer mode
-The knowledge workspace main Markdown viewer SHALL render fenced code blocks whose language is `mermaid` as diagrams in `viewer` mode by using the official `mermaid` package. In `edit` mode, those same blocks MUST remain visible as editable source text. #### Scenario: Render a Mermaid code block as a diagram in viewer mode
+- **THEN** the system MUST NOT require Mermaid or Markdown image preview controls to be shown for that document
+
+### Requirement: Knowledge workspace Markdown viewer SHALL render Mermaid diagrams in viewer mode
+The knowledge workspace main Markdown viewer SHALL render fenced code blocks whose language is `mermaid` as diagrams in `viewer` mode by using the official `mermaid` package. In `edit` mode, those same blocks MUST remain visible as editable source text.
+
+#### Scenario: Render a Mermaid code block as a diagram in viewer mode
 - **WHEN** a `text/markdown` document contains a fenced code block marked as `mermaid`
 - **AND** the Markdown viewer mode is `viewer`
 - **THEN** the system MUST display a rendered Mermaid diagram for that block
-- **AND** the normal Markdown editing workflow MUST remain available for other document content #### Scenario: Show Mermaid source in edit mode
+- **AND** the normal Markdown editing workflow MUST remain available for other document content
+
+#### Scenario: Show Mermaid source in edit mode
 - **WHEN** a `text/markdown` document contains a fenced code block marked as `mermaid`
 - **AND** the Markdown viewer mode is `edit`
-- **THEN** the system MUST display the Mermaid block as editable source text #### Scenario: Contain Mermaid render failures
+- **THEN** the system MUST display the Mermaid block as editable source text
+
+#### Scenario: Contain Mermaid render failures
 - **WHEN** Mermaid rendering fails because the diagram source is invalid or rendering throws an exception
 - **THEN** the system MUST keep the document viewer mounted and usable
-- **AND** the system MUST show a bounded preview error or fall back to source/empty preview for that block without crashing the workspace pane ### Requirement: Knowledge workspace Markdown viewer SHALL render existing Markdown image links
-The knowledge workspace main Markdown viewer SHALL display existing Markdown image links as images in `viewer` mode. Supported image sources MUST include remote URLs, `data:image/...` URLs, and local relative paths resolved from the active Markdown document directory. #### Scenario: Render remote Markdown image links
+- **AND** the system MUST show a bounded preview error or fall back to source/empty preview for that block without crashing the workspace pane
+
+### Requirement: Knowledge workspace Markdown viewer SHALL render existing Markdown image links
+The knowledge workspace main Markdown viewer SHALL display existing Markdown image links as images in `viewer` mode. Supported image sources MUST include remote URLs, `data:image/...` URLs, and local relative paths resolved from the active Markdown document directory.
+
+#### Scenario: Render remote Markdown image links
 - **WHEN** a `text/markdown` document contains a Markdown image link whose source is an `http:` or `https:` URL
 - **AND** the Markdown viewer mode is `viewer`
-- **THEN** the system MUST display the linked image in the document body #### Scenario: Render data URL Markdown image links
+- **THEN** the system MUST display the linked image in the document body
+
+#### Scenario: Render data URL Markdown image links
 - **WHEN** a `text/markdown` document contains a Markdown image link whose source starts with `data:image/`
 - **AND** the Markdown viewer mode is `viewer`
-- **THEN** the system MUST display the embedded image in the document body #### Scenario: Resolve relative Markdown image links from the active document directory
+- **THEN** the system MUST display the embedded image in the document body
+
+#### Scenario: Resolve relative Markdown image links from the active document directory
 - **WHEN** a `text/markdown` document at `/notes/guide.md` contains a Markdown image link such as `![diagram](./images/flow.png)`
 - **AND** the Markdown viewer mode is `viewer`
 - **THEN** the system MUST resolve the image path relative to `/notes/`
-- **AND** the system MUST use the workspace document loading path or host-compatible URL path to display the image without exposing unrelated local filesystem paths #### Scenario: Avoid adding image asset management features
+- **AND** the system MUST use the workspace document loading path or host-compatible URL path to display the image without exposing unrelated local filesystem paths
+
+#### Scenario: Avoid adding image asset management features
 - **WHEN** a user views or edits a Markdown document with image links
-- **THEN** the system MUST NOT require new upload, paste-to-file, drag-and-drop import, or standalone image asset management behavior for this change ### Requirement: Knowledge workspace Markdown viewer SHALL render wiki-style PDF embeds as inline previews
-The knowledge workspace main Markdown viewer SHALL display wiki-style PDF embeds (`![[file.pdf]]`) and standard Markdown image syntax pointing to `.pdf` files as inline `<iframe>` PDF previews in the document body in `viewer` mode, matching the Obsidian embed experience. The PDF source MUST be resolved through the same document-relative path resolution used for other assets. #### Scenario: Render a wiki-style PDF embed as an inline iframe in viewer mode
+- **THEN** the system MUST NOT require new upload, paste-to-file, drag-and-drop import, or standalone image asset management behavior for this change
+
+### Requirement: Knowledge workspace Markdown viewer SHALL render wiki-style PDF embeds as inline previews
+The knowledge workspace main Markdown viewer SHALL display wiki-style PDF embeds (`![[file.pdf]]`) and standard Markdown image syntax pointing to `.pdf` files as inline `<iframe>` PDF previews in the document body in `viewer` mode, matching the Obsidian embed experience. The PDF source MUST be resolved through the same document-relative path resolution used for other assets.
+
+#### Scenario: Render a wiki-style PDF embed as an inline iframe in viewer mode
 - **WHEN** a `text/markdown` document contains a wiki-style embed `![[file.pdf]]`
 - **AND** the Markdown viewer mode is `viewer`
 - **THEN** the system MUST render an `<iframe>` in the document body at the position of the embed
-- **AND** the iframe `src` MUST resolve to the correct `document-asset` URL for the PDF file #### Scenario: Render standard Markdown image syntax pointing to a PDF as an inline iframe
+- **AND** the iframe `src` MUST resolve to the correct `document-asset` URL for the PDF file
+
+#### Scenario: Render standard Markdown image syntax pointing to a PDF as an inline iframe
 - **WHEN** a `text/markdown` document contains `![alt](path/to/file.pdf)`
 - **AND** the Markdown viewer mode is `viewer`
-- **THEN** the system MUST render an `<iframe>` in the document body rather than a broken image or plain link #### Scenario: PDF embed does not appear in edit mode
+- **THEN** the system MUST render an `<iframe>` in the document body rather than a broken image or plain link
+
+#### Scenario: PDF embed does not appear in edit mode
 - **WHEN** a `text/markdown` document contains a wiki-style PDF embed or a Markdown image link pointing to a `.pdf` file
 - **AND** the Markdown viewer mode is `edit`
-- **THEN** the system MUST NOT inject inline PDF iframes; the source text remains editable as-is #### Scenario: PDF embed survives external content sync
+- **THEN** the system MUST NOT inject inline PDF iframes; the source text remains editable as-is
+
+#### Scenario: PDF embed survives external content sync
 - **WHEN** an inline PDF embed has been injected into the document body
 - **AND** external content sync causes ProseMirror to reconcile the DOM
 - **THEN** the system MUST re-inject the PDF embed so it remains visible to the user
@@ -331,12 +519,18 @@ The knowledge workspace main Markdown viewer SHALL treat links to other Markdown
 - **THEN** the system MUST keep the existing non-navigation behavior for that link type
 
 ### Requirement: Knowledge workspace Markdown viewer SHALL preserve existing viewer boundaries
-The Mermaid and image preview behavior SHALL apply only to the main knowledge workspace Markdown document viewer. Chat-message Markdown rendering, PDF viewing, unsupported viewer handling, diff display, undo/redo, and document registry resolution MUST keep their existing responsibilities. #### Scenario: Leave chat message Markdown rendering unchanged
+The Mermaid and image preview behavior SHALL apply only to the main knowledge workspace Markdown document viewer. Chat-message Markdown rendering, PDF viewing, unsupported viewer handling, diff display, undo/redo, and document registry resolution MUST keep their existing responsibilities.
+
+#### Scenario: Leave chat message Markdown rendering unchanged
 - **WHEN** a chat message is rendered through the chat Markdown renderer
-- **THEN** this change MUST NOT require the chat message renderer to use the main document viewer Mermaid or image preview implementation #### Scenario: Preserve PDF and unsupported document behavior
+- **THEN** this change MUST NOT require the chat message renderer to use the main document viewer Mermaid or image preview implementation
+
+#### Scenario: Preserve PDF and unsupported document behavior
 - **WHEN** the active document is a PDF or an unsupported MIME type
 - **THEN** the system MUST keep using the existing PDF viewer or unsupported viewer state
-- **AND** the Markdown viewer mode switch MUST NOT replace those viewer paths #### Scenario: Preserve file change diff and undo redo controls
+- **AND** the Markdown viewer mode switch MUST NOT replace those viewer paths
+
+#### Scenario: Preserve file change diff and undo redo controls
 - **WHEN** a Markdown document has a latest file change record
 - **AND** the user switches between `viewer` and `edit`
 - **THEN** the system MUST keep the file change diff and undo/redo controls governed by the existing document pane behavior
@@ -496,3 +690,44 @@ When the knowledge workspace agent conversation surface is showing the conversat
 - **WHEN** the currently selected conversation is missing or is not a locally persisted conversation
 - **THEN** the system MUST NOT expose the list-toolbar rename action
 - **AND** the system MUST NOT enter inline rename mode for that row
+
+### Requirement: Knowledge workspace MUST expose a document import entry alongside document creation
+The knowledge workspace document tree MUST expose a document import entry next to the existing new-document entry so users can start a plugin-driven import flow from their current workspace context.
+
+#### Scenario: Open the import wizard from the document tree
+- **WHEN** the user clicks the document import entry in the document tree toolbar
+- **THEN** the workspace MUST open the document import wizard
+- **AND** the wizard MUST default its target directory to the currently selected directory when one is available
+
+#### Scenario: Change the target directory before import
+- **WHEN** the user is configuring an import in the wizard
+- **THEN** the workspace MUST allow the user to change the target directory before execution
+- **AND** the selected target directory MUST be passed into the invoked import contribution
+
+### Requirement: Knowledge workspace MUST organize transcript and summary outputs according to import result shape
+When a document import produces transcript content only, the workspace MUST create a normal Markdown document in the selected target directory. When a document import produces both transcript and summary content, the workspace MUST treat the summary as the primary document and MUST place the transcript under the primary document's `references/` directory as a referenced resource.
+
+#### Scenario: Persist transcript-only output as a normal document
+- **WHEN** a completed import returns transcript content without summary content
+- **THEN** the workspace MUST create the transcript as a normal Markdown document in the selected target directory
+- **AND** the created transcript document MUST be opened as the primary document after success
+
+#### Scenario: Persist transcript-plus-summary output with transcript as a reference resource
+- **WHEN** a completed import returns both transcript and summary content
+- **THEN** the workspace MUST create the summary document in the selected target directory
+- **AND** the workspace MUST create the transcript under that summary document's `references/` directory as a referenced resource
+- **AND** the summary document MUST link to the transcript resource
+
+### Requirement: Knowledge workspace MUST keep failed imports from leaving user-visible success state
+When an import fails before completion, the knowledge workspace MUST keep the wizard in a failed state, surface an error to the user, and MUST NOT present the import as successful.
+
+#### Scenario: Report transcript-fetch failure without success navigation
+- **WHEN** a Bilibili import fails while fetching transcript data
+- **THEN** the workspace MUST surface an error message for the failed import
+- **AND** the workspace MUST NOT close the wizard as a success case or open a primary document
+
+#### Scenario: Report summary-generation failure without partial-success messaging
+- **WHEN** a summary-enabled import fails while generating summary content
+- **THEN** the workspace MUST surface an error message for the failed stage
+- **AND** the workspace MUST NOT present a success toast for the import
+

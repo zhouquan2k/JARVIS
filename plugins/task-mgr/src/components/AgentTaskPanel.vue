@@ -6,6 +6,7 @@
       :document-path="scope.documentPath"
       :document-id="scope.documentId"
       :agent-key="scope.agentKey"
+      :detail-key="props.workspaceDetailKey ?? null"
       tag="all"
     />
     <p v-else class="agent-task-panel__message" data-testid="agent-task-empty">
@@ -26,6 +27,7 @@ const props = defineProps<{
   selectedNodePath?: string | null;
   activeDocument?: { path: string; documentId?: string } | null;
   contextProvider?: IContextProvider | null;
+  workspaceDetailKey?: string | null;
 }>();
 
 const { t } = useWorkspaceI18n();

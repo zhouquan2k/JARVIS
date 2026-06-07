@@ -35,6 +35,7 @@ export function normalizeTaskRecord(task: Task, fallbackNow: number): Task {
         notes: task.notes ?? '',
         dueAt: task.dueAt ?? null,
         priority: task.priority ?? null,
+        executionState: normalizeTaskExecutionState(task.executionState),
         completed: !!task.completed,
         createdAt: Number.isFinite(task.createdAt) ? task.createdAt : fallbackNow,
         updatedAt: Number.isFinite(task.updatedAt) ? task.updatedAt : fallbackNow,
@@ -45,6 +46,13 @@ export function normalizeTaskRecord(task: Task, fallbackNow: number): Task {
         calendarLastSyncedAt: Number.isFinite(task.calendarLastSyncedAt) ? task.calendarLastSyncedAt : null,
         calendarLastSyncError: task.calendarLastSyncError ?? null
     };
+}
+
+function normalizeTaskExecutionState(value: Task['executionState']): Task['executionState'] {
+    if (value === 'doing' || value === 'morning' || value === 'afternoon' || value === 'evening') {
+        return value;
+    }
+    return null;
 }
 
 export function hasSpecificDueTime(dueAt: number | null): boolean {

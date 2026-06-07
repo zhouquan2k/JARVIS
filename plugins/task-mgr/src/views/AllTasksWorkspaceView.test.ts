@@ -6,7 +6,7 @@ import type { IContextProvider } from '@packages/core/src';
 import AllTasksWorkspaceView from './AllTasksWorkspaceView.vue';
 
 describe('AllTasksWorkspaceView', () => {
-    it('switches between today and planned shortcuts', async () => {
+    it('switches between shortcuts including scheduled and backlog', async () => {
         const wrapper = mount(AllTasksWorkspaceView, {
             props: {
                 contextProvider: { id: 'ctx' } as IContextProvider
@@ -31,6 +31,20 @@ describe('AllTasksWorkspaceView', () => {
         expect(wrapper.get('[data-testid="task-list-stub"]').attributes()).toMatchObject({
             'data-tag': 'planned',
             'data-group-by-date': 'true'
+        });
+
+        await wrapper.get('[data-testid="all-tasks-shortcut-scheduled"]').trigger('click');
+
+        expect(wrapper.get('[data-testid="task-list-stub"]').attributes()).toMatchObject({
+            'data-tag': 'scheduled',
+            'data-group-by-date': 'false'
+        });
+
+        await wrapper.get('[data-testid="all-tasks-shortcut-backlog"]').trigger('click');
+
+        expect(wrapper.get('[data-testid="task-list-stub"]').attributes()).toMatchObject({
+            'data-tag': 'backlog',
+            'data-group-by-date': 'false'
         });
     });
 });

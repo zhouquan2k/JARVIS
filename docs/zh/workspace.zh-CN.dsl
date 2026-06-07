@@ -19,6 +19,13 @@ workspace "ChatPrism" "当前代码库的上下文与容器视图" {
                 uiPackage = component "packages/ui" "跨宿主共享 UI 组件、视图与 store，主要供 Web、Extension、Desktop renderer 复用。" "Workspace package"
                 nodePackage = component "packages/node" "Node-only 适配层与基础设施实现，当前包含 FileSystemContextProvider，供 Desktop main 与 Sync Server 复用。" "Workspace package"
             }
+            uiMarkdownEditing = container "UI: Markdown 编辑" "知识工作区 Markdown 编辑的「一语义命令 + 两原生后端 + 按模式分发」架构。每个插入/格式化操作统一以语义命令表达，在 viewer 模式下调用 ProseMirror live 命令，在 edit 模式下使用源字符串偏移插入。" "Vue, TypeScript, Milkdown/Crepe, ProseMirror" {
+                documentEditorPane = component "DocumentEditorPane" "Markdown 文档插入/格式化命令的调度入口，根据当前活跃模式（viewer / edit）分发到对应的执行面。文件：packages/ui/src/components/DocumentEditorPane.vue" "Vue component"
+                markdownDocumentViewer = component "MarkdownDocumentViewer" "在 viewer 模式下渲染 Crepe/ProseMirror live 编辑器；对外暴露 toggleHighlightInViewer / applyLinkInViewer / insertMarkdownSnippet；按 markdownViewerMode 进行模式分发。文件：packages/ui/src/document-viewers/MarkdownDocumentViewer.vue" "Vue component"
+                markdownViewerCommands = component "MarkdownViewerCommands" "viewer 模式格式化的纯 ProseMirror 命令工具函数：toggleMarkdownHighlightAtViewerSelection、applyMarkdownLinkAtViewerSelection。文件：packages/ui/src/utils/markdownDocument.ts" "Utility module"
+                sourceTextBackend = component "SourceTextBackend" "edit 模式的原始 Markdown textarea 后端，执行源字符串偏移插入，行为与重构前保持不变。" "textarea / string ops"
+                crepeEditor = component "CrepeEditor" "Milkdown Crepe / ProseMirror live 编辑器实例；viewer 模式命令直接作用于 EditorView state 并 dispatch 事务。" "@milkdown/crepe, ProseMirror"
+            }
             coreAbstractions = container "Core Abstractions" "用于表达共享接口、运行时契约与领域对象之间关系的核心抽象层。" "TypeScript interfaces and domain abstractions" {
                 modelProviderRuntime = component "ModelProviderRuntime" "统一解析并提供可用的模型 provider 与模型目录。典型工厂：createProviderRuntime、createDesktopHostRuntime。" "Interface"
                 modelProvider = component "IModelProvider" "统一模型调用契约。典型实现：ChatGPTWebProvider、GeminiApiProvider、DesktopProxyProvider。" "Interface"
@@ -69,6 +76,11 @@ workspace "ChatPrism" "当前代码库的上下文与容器视图" {
         nodePackage -> corePackage "复用 core 契约并提供 Node-only 实现"
         uiPackage -> corePackage "复用共享领域模型与接口"
 
+        documentEditorPane -> markdownDocumentViewer "调用对外暴露的命令（viewer 模式）"
+        markdownDocumentViewer -> markdownViewerCommands "在 viewer 模式下委托格式化"
+        markdownDocumentViewer -> sourceTextBackend "在 edit 模式下委托格式化"
+        markdownViewerCommands -> crepeEditor "在 live selection 上执行 toggleMark / addMark"
+
         modelProviderRuntime -> modelProvider "解析并提供"
         agentCapableProvider -> modelProvider "扩展"
         externalConversationProvider -> conversationModel "返回外部会话"
@@ -108,6 +120,10 @@ workspace "ChatPrism" "当前代码库的上下文与容器视图" {
         }
 
         component coreAbstractions "core-abstractions" {
+            include *
+        }
+
+        component uiMarkdownEditing "ui-markdown-editing" {
             include *
         }
 

@@ -30,7 +30,8 @@ const workspaceRightPaneContributionQuery = {
     ],
     getWorkspaceSelectionViews: () => [],
     getInsertLinkTypes: () => [],
-    getDocumentCreationFlows: () => []
+    getDocumentImports: () => [],
+    getLanguageModels: () => []
 };
 
 describe('WorkspaceRightPane', () => {

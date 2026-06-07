@@ -1,0 +1,12 @@
+{
+  "name": "@plugins/bilibili-import",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "../../packages/ui/node_modules/.bin/vitest run --config ../../packages/ui/vitest.plugins.config.ts"
+  },
+  "dependencies": {
+    "@packages/core": "workspace:*",
+    "vue": "^3.5.29"
+  }
+}

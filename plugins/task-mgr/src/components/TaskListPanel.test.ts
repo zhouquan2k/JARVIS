@@ -2,6 +2,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
+import { workspaceNavigationApiKey } from '@packages/ui/src/plugins/injectionKeys';
 import type { Task, TaskQueryTag, TaskService } from '../../api';
 import TaskListPanel from './TaskListPanel.vue';
 import { resetTaskServiceForTests, setTaskServiceForTests } from '../taskServiceRegistry';
@@ -14,6 +15,7 @@ function createTask(overrides: Partial<Task> = {}): Task {
         completed: false,
         dueAt: null,
         priority: null,
+        executionState: null,
         documentPath: '/docs/guide.md',
         agentKey: null,
         createdAt: 1,
@@ -54,6 +56,14 @@ function createTaskPanelProvider(initialTasks: Task[]): TaskService & {
 
                 if (!tag || tag === 'all') {
                     return true;
+                }
+
+                if (tag === 'scheduled') {
+                    return task.executionState !== null;
+                }
+
+                if (tag === 'backlog') {
+                    return task.dueAt === null && task.executionState === null;
                 }
 
                 if (task.dueAt === null) {
@@ -152,9 +162,36 @@ describe('TaskListPanel', () => {
         const createTaskCall = (provider.createTask as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
         expect(createTaskCall).toEqual(expect.objectContaining({
             documentPath: '/docs/guide.md',
-            agentKey: '/docs/'
+            agentKey: '/docs/',
+            executionState: null
         }));
         resetTaskServiceForTests();
+    });
+
+    it('defaults today drafts to today without forcing a time in the global today view', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(2026, 5, 5, 11, 30, 0, 0));
+        const provider = createTaskPanelProvider([]);
+        setTaskServiceForTests(provider);
+        const wrapper = mount(TaskListPanel, {
+            props: {
+                documentPath: null,
+                agentKey: null,
+                tag: 'today'
+            }
+        });
+
+        await flushPromises();
+        await wrapper.get('[data-testid="agent-task-add"]').trigger('click');
+        await wrapper.get('[data-testid="task-editor-title"]').setValue('Today task');
+        await wrapper.get('[data-testid="task-editor-save"]').trigger('submit');
+        await flushPromises();
+
+        expect((provider.createTask as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+            dueAt: new Date(2026, 5, 5, 0, 0, 0, 0).getTime()
+        }));
+        resetTaskServiceForTests();
+        vi.useRealTimers();
     });
 
     it('toggles completed tasks and supports task deletion', async () => {
@@ -224,6 +261,64 @@ describe('TaskListPanel', () => {
         expect(wrapper.get('[data-testid="agent-task-open-list"]').text()).toContain('Next week');
         resetTaskServiceForTests();
         vi.useRealTimers();
+    });
+
+    it('filters scheduled and backlog shortcuts with the new tag semantics', async () => {
+        const provider = createTaskPanelProvider([
+            createTask({
+                id: 'task-scheduled',
+                title: 'Scheduled task',
+                executionState: 'morning',
+                dueAt: null,
+                documentPath: null,
+                agentKey: '/docs/'
+            }),
+            createTask({
+                id: 'task-backlog',
+                title: 'Backlog task',
+                executionState: null,
+                dueAt: null,
+                documentPath: null,
+                agentKey: '/docs/'
+            }),
+            createTask({
+                id: 'task-dated',
+                title: 'Dated task',
+                executionState: null,
+                dueAt: new Date(2026, 5, 5, 13, 0, 0, 0).getTime(),
+                documentPath: null,
+                agentKey: '/docs/'
+            })
+        ]);
+
+        setTaskServiceForTests(provider);
+        const scheduledWrapper = mount(TaskListPanel, {
+            props: {
+                documentPath: null,
+                agentKey: null,
+                tag: 'scheduled'
+            }
+        });
+
+        await flushPromises();
+        expect(provider.getTasks).toHaveBeenCalledWith(null, null, false, 'scheduled', null);
+        expect(scheduledWrapper.text()).toContain('Scheduled task');
+        expect(scheduledWrapper.text()).not.toContain('Backlog task');
+
+        const backlogWrapper = mount(TaskListPanel, {
+            props: {
+                documentPath: null,
+                agentKey: null,
+                tag: 'backlog'
+            }
+        });
+
+        await flushPromises();
+        expect(provider.getTasks).toHaveBeenCalledWith(null, null, false, 'backlog', null);
+        expect(backlogWrapper.text()).toContain('Backlog task');
+        expect(backlogWrapper.text()).not.toContain('Scheduled task');
+        expect(backlogWrapper.text()).not.toContain('Dated task');
+        resetTaskServiceForTests();
     });
 
     it('loads agent-scoped tasks including tasks that are also bound to documents', async () => {
@@ -337,7 +432,33 @@ describe('TaskListPanel', () => {
         resetTaskServiceForTests();
     });
 
-    it('sorts tasks by dueAt and places undated tasks after dated tasks', async () => {
+    it('renders execution-state metadata separately from scope metadata', async () => {
+        const provider = createTaskPanelProvider([
+            createTask({
+                id: 'task-execution-state',
+                title: 'Execution state task',
+                documentPath: '/docs/guide.md',
+                agentKey: '/docs/',
+                executionState: 'morning'
+            })
+        ]);
+
+        setTaskServiceForTests(provider);
+        const wrapper = mount(TaskListPanel, {
+            props: {
+                documentPath: null,
+                agentKey: null
+            }
+        });
+
+        await flushPromises();
+
+        expect(wrapper.get('[data-testid="agent-task-execution-chip-task-execution-state"]').text()).not.toBe('');
+        expect(wrapper.get('[data-testid="agent-task-scope-meta-footer-task-execution-state"]').text()).toContain('guide');
+        resetTaskServiceForTests();
+    });
+
+    it('sorts tasks by execution state first, then dueAt, and places undated tasks after dated tasks', async () => {
         const provider = createTaskPanelProvider([
             createTask({
                 id: 'task-undated',
@@ -345,6 +466,7 @@ describe('TaskListPanel', () => {
                 documentPath: null,
                 agentKey: '/docs/',
                 dueAt: null,
+                executionState: null,
                 updatedAt: 100
             }),
             createTask({
@@ -353,6 +475,7 @@ describe('TaskListPanel', () => {
                 documentPath: null,
                 agentKey: '/docs/',
                 dueAt: new Date(2026, 4, 28, 9, 0, 0, 0).getTime(),
+                executionState: 'afternoon',
                 updatedAt: 1
             }),
             createTask({
@@ -361,6 +484,7 @@ describe('TaskListPanel', () => {
                 documentPath: null,
                 agentKey: '/docs/',
                 dueAt: new Date(2026, 4, 27, 9, 0, 0, 0).getTime(),
+                executionState: 'doing',
                 updatedAt: 2
             })
         ]);
@@ -380,6 +504,130 @@ describe('TaskListPanel', () => {
         expect(taskRows[0].text()).toContain('Earlier due task');
         expect(taskRows[1].text()).toContain('Later due task');
         expect(taskRows[2].text()).toContain('Undated task');
+        resetTaskServiceForTests();
+    });
+
+    it('keeps the inline editor in the current row instead of a panel-level slot', async () => {
+        const provider = createTaskPanelProvider([
+            createTask({
+                id: 'task-inline-edit',
+                title: 'Inline edit task',
+                agentKey: '/docs/'
+            })
+        ]);
+
+        setTaskServiceForTests(provider);
+        const wrapper = mount(TaskListPanel, {
+            props: {
+                documentPath: '/docs/guide.md',
+                agentKey: '/docs/'
+            }
+        });
+
+        await flushPromises();
+        await wrapper.get('[data-testid="agent-task-content-task-inline-edit"]').trigger('dblclick');
+
+        const taskRow = wrapper.get('[data-testid="agent-task-item-task-inline-edit"]');
+        expect(taskRow.find('[data-testid="task-editor-inline"]').exists()).toBe(true);
+        expect(taskRow.classes()).toContain('task-list-panel__item--editing');
+        resetTaskServiceForTests();
+    });
+
+    it('uses the workspace navigation bridge for global task row clicks', async () => {
+        const provider = createTaskPanelProvider([
+            createTask({
+                id: 'task-nav',
+                title: 'Navigate me',
+                documentPath: '/docs/guide.md',
+                agentKey: '/docs/'
+            })
+        ]);
+        const navigationApi = {
+            openNode: vi.fn(async () => undefined)
+        };
+
+        setTaskServiceForTests(provider);
+        const wrapper = mount(TaskListPanel, {
+            props: {
+                documentPath: null,
+                agentKey: null
+            },
+            global: {
+                provide: {
+                    [workspaceNavigationApiKey as symbol]: navigationApi
+                }
+            }
+        });
+
+        await flushPromises();
+        await wrapper.get('[data-testid="agent-task-content-task-nav"]').trigger('click');
+
+        expect(navigationApi.openNode).toHaveBeenCalledWith('/docs/guide.md', {
+            tab: 'tasks',
+            detailKey: 'task-nav'
+        });
+        resetTaskServiceForTests();
+    });
+
+    it('navigates to agent directory (strips trailing slash from agentKey) when clicking an agent-only task in global view', async () => {
+        const provider = createTaskPanelProvider([
+            createTask({
+                id: 'task-agent-nav',
+                title: 'Agent task',
+                documentPath: null,
+                agentKey: '/myagent/'
+            })
+        ]);
+        const navigationApi = {
+            openNode: vi.fn(async () => undefined)
+        };
+
+        setTaskServiceForTests(provider);
+        const wrapper = mount(TaskListPanel, {
+            props: {
+                documentPath: null,
+                agentKey: null
+            },
+            global: {
+                provide: {
+                    [workspaceNavigationApiKey as symbol]: navigationApi
+                }
+            }
+        });
+
+        await flushPromises();
+        await wrapper.get('[data-testid="agent-task-content-task-agent-nav"]').trigger('click');
+
+        expect(navigationApi.openNode).toHaveBeenCalledWith('/myagent', {
+            tab: 'tasks',
+            detailKey: 'task-agent-nav'
+        });
+        resetTaskServiceForTests();
+    });
+
+    it('opens the requested task in inline edit mode when detailKey is restored from workspace navigation', async () => {
+        const provider = createTaskPanelProvider([
+            createTask({
+                id: 'task-detail',
+                title: 'Detail task',
+                documentPath: '/docs/guide.md',
+                agentKey: '/docs/'
+            })
+        ]);
+
+        setTaskServiceForTests(provider);
+        const wrapper = mount(TaskListPanel, {
+            props: {
+                documentPath: '/docs/guide.md',
+                agentKey: '/docs/',
+                detailKey: 'task-detail'
+            }
+        });
+
+        await flushPromises();
+
+        expect(wrapper.get('[data-testid="task-editor-inline"]').exists()).toBe(true);
+        expect((wrapper.get('[data-testid="task-editor-title"]').element as HTMLInputElement).value).toBe('Detail task');
         resetTaskServiceForTests();
     });
 
@@ -568,6 +816,36 @@ describe('TaskListPanel', () => {
 
         const notesEditor = wrapper.get('[data-testid="task-editor-notes"]');
         expect((notesEditor.element as HTMLTextAreaElement).value).toBe('First line preview\nSecond line details\nThird line details');
+        resetTaskServiceForTests();
+    });
+
+    it('opens inline editor from row menu for an existing task', async () => {
+        const provider = createTaskPanelProvider([
+            createTask({
+                id: 'task-menu-edit',
+                title: 'Menu edit task',
+                documentPath: null,
+                agentKey: null,
+                dueAt: new Date(2026, 5, 5, 0, 0, 0, 0).getTime()
+            })
+        ]);
+
+        setTaskServiceForTests(provider);
+        const wrapper = mount(TaskListPanel, {
+            props: {
+                documentPath: null,
+                agentKey: null,
+                tag: 'today'
+            }
+        });
+
+        await flushPromises();
+        await wrapper.get('[data-testid="agent-task-menu-task-menu-edit"]').trigger('click');
+        await wrapper.get('[data-testid="agent-task-edit-task-menu-edit"]').trigger('click');
+        await flushPromises();
+
+        expect(wrapper.get('[data-testid="task-editor-inline"]').exists()).toBe(true);
+        expect((wrapper.get('[data-testid="task-editor-title"]').element as HTMLInputElement).value).toBe('Menu edit task');
         resetTaskServiceForTests();
     });
 });

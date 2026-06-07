@@ -53,6 +53,16 @@ const shortcutItems = computed(() => [
     tag: 'planned' as const,
     label: t('shared.planned'),
     hint: t('shared.plannedTasksHint')
+  },
+  {
+    tag: 'scheduled' as const,
+    label: t('shared.scheduled'),
+    hint: t('shared.scheduledTasksHint')
+  },
+  {
+    tag: 'backlog' as const,
+    label: t('shared.backlog'),
+    hint: t('shared.backlogTasksHint')
   }
 ]);
 

@@ -1,7 +1,8 @@
 import type {
-    DocumentCreationFlowContribution,
+    DocumentImportContribution,
     GlobalViewContribution,
     InsertLinkTypeContribution,
+    LanguageModelContribution,
     NodePresentationContribution,
     RightPanelTabContribution,
     WorkspaceSelectionViewContribution
@@ -12,6 +13,7 @@ export interface ContributionQuery {
     getRightPanelTabs(): readonly RightPanelTabContribution[];
     getWorkspaceSelectionViews(): readonly WorkspaceSelectionViewContribution[];
     getInsertLinkTypes(): readonly InsertLinkTypeContribution[];
-    getDocumentCreationFlows(): readonly DocumentCreationFlowContribution[];
+    getDocumentImports(): readonly DocumentImportContribution[];
+    getLanguageModels(): readonly LanguageModelContribution[];
     getNodePresentations(): readonly NodePresentationContribution[];
 }

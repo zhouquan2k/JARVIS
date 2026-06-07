@@ -433,3 +433,61 @@ test('desktop host syncs timed tasks to Google Calendar without changing the tas
         await rm(workspaceRoot, { recursive: true, force: true });
     }
 });
+
+test('desktop host opens file chooser for markdown link upload and inserts the uploaded resource link', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'chatprism-desktop-link-upload-'));
+    const documentPath = join(workspaceRoot, 'guide.md');
+    const desktopServer = await startDesktopContextServer({
+        knowledgeRoot: workspaceRoot
+    });
+
+    await writeFile(documentPath, '# Guide\n', 'utf8');
+
+    const { browser, page, electronProcess } = await launchDesktopApp({
+        contextBaseUrl: desktopServer.contextBaseUrl,
+        syncBaseUrl: desktopServer.syncBaseUrl,
+        env: {
+            CHATPRISM_KNOWLEDGE_ROOT: workspaceRoot
+        }
+    });
+
+    try {
+        await page.getByTestId('topbar-workspace-knowledge-workspace').click();
+        await expect(page.getByTestId('document-workspace')).toBeVisible();
+
+        await page.locator('[data-path="/guide.md"]').click();
+        await expect(page.getByTestId('document-editor')).toBeVisible();
+
+        await page.getByTestId('markdown-insert-link').click();
+        await page.getByTestId('markdown-link-tab-resource').click();
+        await expect(page.getByTestId('markdown-resource-upload')).toBeVisible();
+
+        const [fileChooser] = await Promise.all([
+            page.waitForEvent('filechooser'),
+            page.getByTestId('markdown-resource-upload').click()
+        ]);
+
+        await fileChooser.setFiles({
+            name: 'desktop-upload.txt',
+            mimeType: 'text/plain',
+            buffer: Buffer.from('desktop upload')
+        });
+
+        const resourcePath = join(workspaceRoot, 'references', 'desktop-upload.txt');
+        await expect.poll(async () => {
+            try {
+                return await readFile(resourcePath, 'utf8');
+            } catch {
+                return null;
+            }
+        }).toBe('desktop upload');
+
+        await page.getByTestId('markdown-mode-toggle').click();
+        await expect(page.getByTestId('document-editor-input')).toHaveValue(/\[desktop-upload\.txt\]\(references\/desktop-upload\.txt\)/);
+    } finally {
+        await browser.close();
+        killElectron(electronProcess);
+        killProcess(desktopServer.process);
+        await rm(workspaceRoot, { recursive: true, force: true });
+    }
+});

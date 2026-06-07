@@ -16,6 +16,7 @@ function createTask(overrides: Partial<Task> = {}): Task {
         completed: false,
         dueAt: null,
         priority: null,
+        executionState: null,
         documentPath: '/workspace/guide.md',
         agentKey: null,
         createdAt: 0,
@@ -316,6 +317,34 @@ describe('FileSystemTaskProvider', () => {
         ]));
         await expect(provider.getTasks(null, null, false, 'planned')).resolves.not.toEqual(expect.arrayContaining([
             expect.objectContaining({ id: overdueTask.id })
+        ]));
+
+        const scheduledTask = await provider.createTask(createTask({
+            title: 'Scheduled task',
+            documentPath: null,
+            agentKey: '/workspace/',
+            executionState: 'afternoon',
+            dueAt: null
+        }));
+        const backlogTask = await provider.createTask(createTask({
+            title: 'Backlog task',
+            documentPath: null,
+            agentKey: '/workspace/',
+            executionState: null,
+            dueAt: null
+        }));
+
+        await expect(provider.getTasks(null, null, false, 'scheduled')).resolves.toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: scheduledTask.id, title: 'Scheduled task' })
+        ]));
+        await expect(provider.getTasks(null, null, false, 'scheduled')).resolves.not.toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: backlogTask.id })
+        ]));
+        await expect(provider.getTasks(null, null, false, 'backlog')).resolves.toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: backlogTask.id, title: 'Backlog task' })
+        ]));
+        await expect(provider.getTasks(null, null, false, 'backlog')).resolves.not.toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: scheduledTask.id })
         ]));
     });
 

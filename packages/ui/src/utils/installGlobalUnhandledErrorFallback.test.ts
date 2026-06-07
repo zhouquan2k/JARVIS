@@ -47,4 +47,37 @@ describe('installGlobalUnhandledErrorFallback', () => {
 
         expect(reportError).not.toHaveBeenCalled();
     });
+
+    it('ignores and suppresses benign Milkdown context-missing window errors (teardown race)', () => {
+        const reportError = vi.fn();
+        const remove = installGlobalUnhandledErrorFallback({ reportError });
+
+        const event = new ErrorEvent('error', {
+            error: new Error('Context "editorState" not found, do you forget to inject it?'),
+            message: 'Context "editorState" not found, do you forget to inject it?'
+        });
+        const preventDefault = vi.spyOn(event, 'preventDefault');
+        window.dispatchEvent(event);
+        remove();
+
+        expect(reportError).not.toHaveBeenCalled();
+        expect(preventDefault).toHaveBeenCalled();
+    });
+
+    it('ignores and suppresses benign Milkdown context-missing unhandled rejections', () => {
+        const reportError = vi.fn();
+        const remove = installGlobalUnhandledErrorFallback({ reportError });
+
+        const event = new Event('unhandledrejection') as PromiseRejectionEvent;
+        Object.defineProperty(event, 'reason', {
+            value: new Error('Context "editorView" not found, do you forget to inject it?'),
+            configurable: true
+        });
+        const preventDefault = vi.spyOn(event, 'preventDefault');
+        window.dispatchEvent(event);
+        remove();
+
+        expect(reportError).not.toHaveBeenCalled();
+        expect(preventDefault).toHaveBeenCalled();
+    });
 });

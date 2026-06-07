@@ -1,8 +1,9 @@
 import { Crepe, CrepeFeature, type CrepeConfig } from '@milkdown/crepe';
-import { editorViewCtx, parserCtx, remarkCtx } from '@milkdown/kit/core';
-import type { Node as ProseMirrorNode } from '@milkdown/kit/prose/model';
+import { editorViewCtx, parserCtx, remarkCtx, remarkPluginsCtx } from '@milkdown/kit/core';
+import { toggleMark } from '@milkdown/kit/prose/commands';
+import { Slice, type Node as ProseMirrorNode } from '@milkdown/kit/prose/model';
 import { Decoration, DecorationSet, type EditorView as ProseMirrorEditorView } from '@milkdown/kit/prose/view';
-import { replaceAll } from '@milkdown/kit/utils';
+import * as milkdownKitUtils from '@milkdown/kit/utils';
 import { resolveContextBaseUrl } from '@plugins/ai-agent/api';
 import { translateWorkspaceMessage } from '../i18n';
 import { findMarkdownSearchMatches } from './markdownSearch';
@@ -120,6 +121,20 @@ const markdownTablePreviewRenderer: MarkdownBlockRenderer = {
     name: 'markdown-table-preview'
 };
 
+const { replaceAll } = milkdownKitUtils;
+function readMilkdownUtility<T>(key: string, fallback: T): T {
+    try {
+        const value = (milkdownKitUtils as Record<string, unknown>)[key];
+        return (value as T | undefined) ?? fallback;
+    } catch {
+        return fallback;
+    }
+}
+
+const createMilkdownMarkSchema = readMilkdownUtility('$markSchema', (_id: string, _factory: (...args: any[]) => any) => ({
+        mark: () => () => undefined
+    }));
+
 const MARKDOWN_BLOCK_CONFIGS: Record<MarkdownBlockType, MarkdownBlockConfig> = {
     mermaid: {
         viewRenderer: mermaidPreviewRenderer,
@@ -138,6 +153,157 @@ const MARKDOWN_BLOCK_CONFIGS: Record<MarkdownBlockType, MarkdownBlockConfig> = {
         editRenderer: sourceRenderer
     }
 };
+
+const constructsWithoutHighlight = [
+    'autolink',
+    'destinationLiteral',
+    'destinationRaw',
+    'reference',
+    'titleQuote',
+    'titleApostrophe'
+];
+
+function appendMarkdownTextNode(target: any[], value: string): void {
+    if (!value) {
+        return;
+    }
+
+    const lastNode = target.at(-1);
+    if (lastNode?.type === 'text' && typeof lastNode.value === 'string') {
+        lastNode.value += value;
+        return;
+    }
+
+    target.push({ type: 'text', value });
+}
+
+function pushMarkdownNode(target: any[], node: any): void {
+    if (node?.type === 'text' && typeof node.value === 'string') {
+        appendMarkdownTextNode(target, node.value);
+        return;
+    }
+
+    target.push(node);
+}
+
+function normalizeMarkdownHighlightChildren(children: any[]): any[] {
+    const normalizedChildren: any[] = [];
+    let activeHighlightChildren: any[] | null = null;
+
+    const currentTarget = () => activeHighlightChildren ?? normalizedChildren;
+    const closeHighlight = () => {
+        normalizedChildren.push({
+            type: 'highlight',
+            children: activeHighlightChildren ?? []
+        });
+        activeHighlightChildren = null;
+    };
+
+    for (const child of children) {
+        if (child?.type === 'text' && typeof child.value === 'string') {
+            let remainingText = child.value;
+            while (remainingText.length > 0) {
+                const markerIndex = remainingText.indexOf('==');
+                if (markerIndex < 0) {
+                    appendMarkdownTextNode(currentTarget(), remainingText);
+                    break;
+                }
+
+                appendMarkdownTextNode(currentTarget(), remainingText.slice(0, markerIndex));
+                remainingText = remainingText.slice(markerIndex + 2);
+
+                if (activeHighlightChildren) {
+                    closeHighlight();
+                } else {
+                    activeHighlightChildren = [];
+                }
+            }
+            continue;
+        }
+
+        if (Array.isArray(child?.children)) {
+            child.children = normalizeMarkdownHighlightChildren(child.children);
+        }
+
+        pushMarkdownNode(currentTarget(), child);
+    }
+
+    if (activeHighlightChildren) {
+        appendMarkdownTextNode(normalizedChildren, '==');
+        for (const child of activeHighlightChildren) {
+            pushMarkdownNode(normalizedChildren, child);
+        }
+    }
+
+    return normalizedChildren;
+}
+
+function createMarkdownHighlightToMarkdown(): Record<string, unknown> {
+    const handleHighlight = function handleHighlight(node: any, _parent: any, state: any, info: any) {
+        const tracker = state.createTracker(info);
+        const exit = state.enter('highlight');
+        let value = tracker.move('==');
+        value += state.containerPhrasing(node, {
+            ...tracker.current(),
+            before: value,
+            after: '='
+        });
+        value += tracker.move('==');
+        exit();
+        return value;
+    } as any;
+
+    handleHighlight.peek = () => '=';
+
+    return {
+        unsafe: [
+            {
+                character: '=',
+                inConstruct: 'phrasing',
+                notInConstruct: constructsWithoutHighlight
+            }
+        ],
+        handlers: {
+            highlight: handleHighlight
+        }
+    };
+}
+
+function remarkMarkdownHighlight(this: { data: () => Record<string, unknown> }) {
+    const data = this.data() as {
+        toMarkdownExtensions?: unknown[];
+    };
+
+    const toMarkdownExtensions = data.toMarkdownExtensions ?? (data.toMarkdownExtensions = []);
+    toMarkdownExtensions.push(createMarkdownHighlightToMarkdown());
+
+    return (tree: { children?: any[] } | undefined) => {
+        if (!Array.isArray(tree?.children)) {
+            return;
+        }
+
+        tree.children = normalizeMarkdownHighlightChildren(tree.children);
+    };
+}
+
+const markdownHighlightSchema = createMilkdownMarkSchema('highlight', () => ({
+    parseDOM: [{ tag: 'mark' }],
+    toDOM: () => ['mark', { class: 'markdown-highlight' }, 0],
+    parseMarkdown: {
+        match: (node: { type?: string }) => node.type === 'highlight',
+        runner: (state: { openMark: (markType: unknown) => void; next: (children: unknown[]) => void; closeMark: (markType: unknown) => void }, node: { children?: unknown[] }, markType: unknown) => {
+            state.openMark(markType);
+            state.next((node as { children?: unknown[] }).children ?? []);
+            state.closeMark(markType);
+        }
+    },
+    toMarkdown: {
+        match: (mark: { type?: { name?: string } }) => mark.type?.name === 'highlight',
+        runner: (state: { withMark: (mark: unknown, name: string) => void }, mark: unknown) => {
+            state.withMark(mark, 'highlight');
+        }
+    }
+}));
 
 
 export async function createMarkdownEditor(options: CreateMarkdownEditorOptions): Promise<MarkdownEditor> {
@@ -178,6 +344,22 @@ export async function createMarkdownEditor(options: CreateMarkdownEditorOptions)
             }
         }
     });
+    if (typeof editor.editor.config === 'function') {
+        editor.editor.config((ctx) => {
+            ctx.update(remarkPluginsCtx, (plugins) => [
+                ...plugins,
+                {
+                    plugin: remarkMarkdownHighlight,
+                    options: undefined
+                } as never
+            ]);
+        });
+    }
+    if (typeof editor.editor.use === 'function') {
+        editor.editor.use([
+            markdownHighlightSchema
+        ] as any);
+    }
     editor.on((listener) => {
         const handleMarkdownUpdated = (_ctx: unknown, markdown: string) => {
             const fm = editorFrontmatter.get(editor) ?? '';
@@ -194,7 +376,19 @@ export async function createMarkdownEditor(options: CreateMarkdownEditorOptions)
         });
     });
 
-    await editor.create();
+    try {
+        await editor.create();
+    } catch (createError) {
+        console.warn('[markdown-viewer] crepe-create-failed', {
+            documentPath: options.documentPath,
+            mode: options.mode,
+            rootConnected: options.root?.isConnected ?? null,
+            rootChildCount: options.root?.childElementCount ?? null,
+            message: createError instanceof Error ? createError.message : String(createError),
+            stack: createError instanceof Error ? createError.stack : undefined
+        });
+        throw createError;
+    }
     editorFrontmatter.set(editor, initialFrontmatter);
     attachEditorTestIds(options.root);
     queueMicrotask(() => {
@@ -284,9 +478,20 @@ export function insertMarkdownAtViewerSelection(
                 return;
             }
             const { from, to } = view.state.selection;
-            const slice = parsed.slice(0);
-            const tr = view.state.tr.replace(from, to, slice);
-            view.dispatch(tr);
+
+            // Inline content: single paragraph whose children are all inline —
+            // insert the inline nodes directly into the current block so the
+            // snippet flows into the existing paragraph without creating a new one.
+            const isSingleParagraph =
+                parsed.childCount === 1 && parsed.firstChild?.type.name === 'paragraph';
+            if (isSingleParagraph && parsed.firstChild) {
+                const inlineSlice = new Slice(parsed.firstChild.content, 0, 0);
+                view.dispatch(view.state.tr.replace(from, to, inlineSlice));
+            } else {
+                // Block content (code block, image block, multiple paragraphs…):
+                // insert as standalone block node(s).
+                view.dispatch(view.state.tr.replace(from, to, parsed.slice(0)));
+            }
             inserted = true;
         });
     } catch (error) {
@@ -294,6 +499,74 @@ export function insertMarkdownAtViewerSelection(
         return false;
     }
     return inserted;
+}
+
+/**
+ * 原型：在 viewer(WYSIWYG) 模式下，直接对当前 ProseMirror 选区切换 highlight mark。
+ * 不切换到 edit 源码模式、不重建编辑器，因此不会卷屏、也不依赖 DOM 选区到源码偏移的映射。
+ */
+export function toggleMarkdownHighlightAtViewerSelection(editor: MarkdownEditor): boolean {
+    let applied = false;
+    try {
+        editor.editor.action((ctx) => {
+            if (!ctx.isInjected(editorViewCtx)) {
+                console.warn('[markdown-viewer] toggleMarkdownHighlightAtViewerSelection: missing editorViewCtx');
+                return;
+            }
+            const view = ctx.get(editorViewCtx);
+            const markType = view.state.schema.marks.highlight;
+            if (!markType) {
+                console.warn('[markdown-viewer] toggleMarkdownHighlightAtViewerSelection: highlight mark type not found');
+                return;
+            }
+            applied = toggleMark(markType)(view.state, view.dispatch, view);
+        });
+    } catch (error) {
+        console.warn('[markdown-viewer] toggleMarkdownHighlightAtViewerSelection threw', error);
+        return false;
+    }
+    return applied;
+}
+
+/**
+ * 在 viewer(WYSIWYG) 模式下，通过 link mark 直接在当前 ProseMirror 选区应用链接。
+ * 非空选区：对选区范围添加 link mark（href 属性）；光标折叠：插入带 link mark 的 label 文本节点。
+ * 单事务提交，不切换到 edit 源码模式。
+ */
+export function applyMarkdownLinkAtViewerSelection(
+    editor: MarkdownEditor,
+    input: { label: string; href: string }
+): boolean {
+    let applied = false;
+    try {
+        editor.editor.action((ctx) => {
+            if (!ctx.isInjected(editorViewCtx)) {
+                console.warn('[markdown-viewer] applyMarkdownLinkAtViewerSelection: missing editorViewCtx');
+                return;
+            }
+            const view = ctx.get(editorViewCtx);
+            const linkMarkType = view.state.schema.marks.link;
+            if (!linkMarkType) {
+                console.warn('[markdown-viewer] applyMarkdownLinkAtViewerSelection: link mark type not found in schema');
+                return;
+            }
+            const { from, to, empty } = view.state.selection;
+            const linkMark = linkMarkType.create({ href: input.href });
+            const tr = view.state.tr;
+            if (!empty) {
+                tr.addMark(from, to, linkMark);
+            } else {
+                const textNode = view.state.schema.text(input.label, [linkMark]);
+                tr.insert(from, textNode);
+            }
+            view.dispatch(tr);
+            applied = true;
+        });
+    } catch (error) {
+        console.warn('[markdown-viewer] applyMarkdownLinkAtViewerSelection threw', error);
+        return false;
+    }
+    return applied;
 }
 
 export async function destroyMarkdownEditor(editor: MarkdownEditor | null | undefined) {

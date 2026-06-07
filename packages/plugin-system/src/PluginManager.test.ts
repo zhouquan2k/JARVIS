@@ -215,6 +215,19 @@ describe('PluginManager', () => {
                     component: {},
                     matches: () => false
                 });
+                api.registerDocumentImport({
+                    id: 'bilibili-import',
+                    title: 'Bilibili Import',
+                    formComponent: {},
+                    run: async () => ({
+                        primaryDocumentPath: '/guide.md',
+                        createdPaths: ['/guide.md']
+                    })
+                });
+                api.registerLanguageModel({
+                    id: 'default-model',
+                    generateText: async () => 'summary'
+                });
                 api.registerNodePresentation({
                     id: 'task-owner-node',
                     supports: () => false,
@@ -230,10 +243,14 @@ describe('PluginManager', () => {
 
         expect(registry.getRightPanelTabs()).toHaveLength(1);
         expect(registry.getWorkspaceSelectionViews()).toHaveLength(1);
+        expect(registry.getDocumentImports()).toHaveLength(1);
+        expect(registry.getLanguageModels()).toHaveLength(1);
         expect(registry.getNodePresentations()).toHaveLength(1);
         await manager.deactivatePlugin('task-mgr');
         expect(registry.getRightPanelTabs()).toHaveLength(0);
         expect(registry.getWorkspaceSelectionViews()).toHaveLength(0);
+        expect(registry.getDocumentImports()).toHaveLength(0);
+        expect(registry.getLanguageModels()).toHaveLength(0);
         expect(registry.getNodePresentations()).toHaveLength(0);
         expect(dispose).toHaveBeenCalledTimes(1);
     });

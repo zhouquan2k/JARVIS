@@ -1,6 +1,7 @@
 export type TaskPriority = 'low' | 'medium' | 'high';
 export type TaskCalendarSyncStatus = 'synced' | 'failed' | null;
-export type TaskQueryTag = 'all' | 'today' | 'planned';
+export type TaskQueryTag = 'all' | 'today' | 'planned' | 'scheduled' | 'backlog';
+export type TaskExecutionState = 'doing' | 'morning' | 'afternoon' | 'evening' | null;
 
 export interface Task {
     id: string;
@@ -9,6 +10,7 @@ export interface Task {
     completed: boolean;
     dueAt: number | null;
     priority: TaskPriority | null;
+    executionState: TaskExecutionState;
     documentPath: string | null;
     documentId?: string | null;
     agentKey: string | null;

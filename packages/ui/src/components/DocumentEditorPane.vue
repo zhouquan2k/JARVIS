@@ -5,6 +5,36 @@
         <span class="editor-path" data-testid="document-editor-title">{{ editorTitleLabel }}</span>
       </div>
       <div class="editor-actions">
+        <div v-if="showMarkdownStylePicker" class="editor-link-picker">
+          <button
+            type="button"
+            class="save-button save-button--link-picker"
+            data-testid="markdown-style-picker-trigger"
+            :title="t('shared.insertMarkdownStyle')"
+            :aria-label="t('shared.insertMarkdownStyle')"
+            :aria-expanded="isStylePickerOpen ? 'true' : 'false'"
+            @mousedown.prevent
+            @click="toggleMarkdownStylePicker"
+          >
+            <Highlighter class="save-icon" :size="18" aria-hidden="true" />
+          </button>
+          <div
+            v-if="isStylePickerOpen"
+            class="editor-link-menu"
+            data-testid="markdown-style-picker"
+          >
+            <button
+              type="button"
+              class="editor-link-option"
+              data-testid="markdown-style-option-highlight"
+              @mousedown.prevent
+              @click="insertMarkdownStyle('highlight')"
+            >
+              <Highlighter class="editor-link-option-icon" :size="14" aria-hidden="true" />
+              {{ t('shared.markdownStyleHighlight') }}
+            </button>
+          </div>
+        </div>
         <div v-if="showMarkdownLinkPicker" class="editor-link-picker">
           <button
             type="button"
@@ -114,6 +144,17 @@
             </div>
             <div v-else data-testid="markdown-link-panel-resource">
               <button
+                v-if="props.uploadMarkdownLinkResource && props.activePath"
+                type="button"
+                class="editor-link-option editor-link-option--upload"
+                data-testid="markdown-resource-upload"
+                @mousedown.prevent
+                @click="triggerResourceUpload"
+              >
+                <Upload class="editor-link-option-icon" :size="14" aria-hidden="true" />
+                {{ t('shared.uploadLinkResource') }}
+              </button>
+              <button
                 v-for="resource in props.linkableReferenceResources"
                 :key="resource.path"
                 type="button"
@@ -147,6 +188,17 @@
             :size="18"
             aria-hidden="true"
           />
+        </button>
+        <button
+          v-if="props.activePath"
+          type="button"
+          class="save-button"
+          data-testid="document-refresh"
+          :title="t('shared.refreshCurrentDocument')"
+          :aria-label="t('shared.refreshCurrentDocument')"
+          @click="emit('refresh-document')"
+        >
+          <RotateCcw class="save-icon" :size="18" aria-hidden="true" />
         </button>
         <button
           type="button"
@@ -258,11 +310,12 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
-import { Eye, Link2, Maximize2, MessageSquareQuote, Minimize2, PencilLine, Save } from 'lucide-vue-next';
+import { Eye, Highlighter, Link2, Maximize2, MessageSquareQuote, Minimize2, PencilLine, RotateCcw, Save, Upload } from 'lucide-vue-next';
 import type { ContextDocument, ContextNode } from '@packages/core/src';
 import { useWorkspaceI18n } from '../i18n';
 import { resolveDocumentViewer } from '../document-viewers';
 import { buildMarkdownResourceInsertion, buildRelativeMarkdownLinkPath, type MarkdownConversationLinkTarget, type MarkdownViewerMode } from '../utils/markdownDocument';
+import { openSingleFileDialog } from '../utils/fileDialog';
 import type { FileChangeRecord, LineDiffEntry } from '../services/FileChangeService';
 import type { DocumentViewerSearchHandle } from '../document-viewers/types';
 import { getContextNodeDisplayName } from '../utils/contextNodePresentation';
@@ -285,6 +338,12 @@ const props = withDefaults(defineProps<{
     mimeType: string;
     bytes: Uint8Array;
   }) => Promise<{ imagePath: string; markdown: string }>;
+  uploadMarkdownLinkResource?: (input: {
+    documentPath: string;
+    fileName: string;
+    mimeType: string;
+    bytes: Uint8Array;
+  }) => Promise<{ resourcePath: string }>;
   middlePaneMode?: 'default' | 'maximized';
   middlePaneZoom?: number;
   latestFileChange: FileChangeRecord | null;
@@ -308,6 +367,7 @@ const emit = defineEmits<{
   (event: 'redo-change'): void;
   (event: 'open-document-link', path: string): void;
   (event: 'open-conversation-link', target: MarkdownConversationLinkTarget): void;
+  (event: 'refresh-document'): void;
 }>();
 
 const activePathLabel = computed(() => {
@@ -361,13 +421,23 @@ const isMarkdownDocument = computed(() => {
 });
 const markdownViewerMode = ref<MarkdownViewerMode>('viewer');
 const markdownViewerRef = ref<(Partial<DocumentViewerSearchHandle> & {
+  applyLinkInViewer?: (input: { label: string; href: string }) => boolean;
   insertMarkdownLink?: (input: { label: string; href: string }) => boolean;
-  insertMarkdownSnippet?: (input: { markdown?: string; buildReplacement?: (selectedText: string) => string }) => boolean;
+  insertMarkdownSnippet?: (input: {
+    markdown?: string;
+    buildReplacement?: (selectedText: string) => string;
+    resolveCaret?: (input: {
+      selectionStart: number;
+      selectedText: string;
+      replacement: string;
+    }) => { start: number; end: number };
+  }) => boolean;
   insertMarkdownInViewer?: (markdown: string) => boolean;
-  prepareMarkdownSelectionFromViewer?: () => boolean;
+  toggleHighlightInViewer?: () => boolean;
 }) | null>(null);
 const searchInputRef = ref<HTMLInputElement | null>(null);
 const isSearchOpen = ref(false);
+const isStylePickerOpen = ref(false);
 const isLinkPickerOpen = ref(false);
 const activeLinkPickerTab = ref<string>('document');
 const linkInsertionPointMissing = ref(false);
@@ -385,6 +455,9 @@ const supportsViewerSearch = computed(() => props.activeDocument?.mimeType === '
 const showMarkdownLinkPicker = computed(() => {
   return isMarkdownDocument.value;
 });
+const showMarkdownStylePicker = computed(() => {
+  return isMarkdownDocument.value;
+});
 const canInsertMarkdownLink = computed(() => {
   return isMarkdownDocument.value
     && props.linkableMarkdownDocuments.length > 0
@@ -395,13 +468,21 @@ const canInsertReferenceResourceLink = computed(() => {
     && props.linkableReferenceResources.length > 0
     && !!props.activePath;
 });
+const canUploadReferenceResource = computed(() => {
+  return isMarkdownDocument.value
+    && !!props.uploadMarkdownLinkResource
+    && !!props.activePath;
+});
 const canInsertDynamicLink = computed(() => {
   return isMarkdownDocument.value
     && props.insertLinkTypes.some((type) => type.items.length > 0)
     && !!props.activePath;
 });
 const canInsertAnyLink = computed(() => {
-  return canInsertMarkdownLink.value || canInsertReferenceResourceLink.value || canInsertDynamicLink.value;
+  return canInsertMarkdownLink.value
+    || canInsertReferenceResourceLink.value
+    || canUploadReferenceResource.value
+    || canInsertDynamicLink.value;
 });
 const activeInsertLinkType = computed(() => {
   return props.insertLinkTypes.find((type) => type.id === activeLinkPickerTab.value) ?? null;
@@ -421,6 +502,7 @@ watch(
       markdownViewerMode.value = 'viewer';
     }
     isLinkPickerOpen.value = false;
+    isStylePickerOpen.value = false;
     activeLinkPickerTab.value = 'document';
     linkInsertionPointMissing.value = false;
     closeViewerSearch();
@@ -432,6 +514,7 @@ watch(
   () => props.activePath,
   () => {
     isLinkPickerOpen.value = false;
+    isStylePickerOpen.value = false;
     activeLinkPickerTab.value = 'document';
     linkInsertionPointMissing.value = false;
   }
@@ -530,13 +613,14 @@ function goToPreviousSearchMatch() {
 }
 
 function toggleLinkPicker() {
+  isStylePickerOpen.value = false;
   if (!canInsertAnyLink.value) {
     return;
   }
   if (!isLinkPickerOpen.value) {
     if (canInsertMarkdownLink.value) {
       activeLinkPickerTab.value = 'document';
-    } else if (canInsertReferenceResourceLink.value) {
+    } else if (canInsertReferenceResourceLink.value || canUploadReferenceResource.value) {
       activeLinkPickerTab.value = 'resource';
     } else {
       activeLinkPickerTab.value = props.insertLinkTypes[0]?.id ?? 'document';
@@ -546,21 +630,17 @@ function toggleLinkPicker() {
   isLinkPickerOpen.value = !isLinkPickerOpen.value;
 }
 
+function toggleMarkdownStylePicker() {
+  isLinkPickerOpen.value = false;
+  linkInsertionPointMissing.value = false;
+  isStylePickerOpen.value = !isStylePickerOpen.value;
+}
+
 function setLinkPickerTab(tab: string) {
   activeLinkPickerTab.value = tab;
   linkInsertionPointMissing.value = false;
 }
 
-function ensureInsertionPoint(returnToViewer: boolean): boolean {
-  if (!returnToViewer) {
-    linkInsertionPointMissing.value = false;
-    return true;
-  }
-  const prepared = markdownViewerRef.value?.prepareMarkdownSelectionFromViewer?.() === true;
-  console.log('[insert-debug] prepareMarkdownSelectionFromViewer result', { prepared });
-  linkInsertionPointMissing.value = !prepared;
-  return prepared;
-}
 
 function insertMarkdownLink(targetPath: string) {
   if (!props.activePath) {
@@ -574,8 +654,64 @@ function insertMarkdownLink(targetPath: string) {
 
   const href = buildRelativeMarkdownLinkPath(props.activePath, targetPath);
   const label = getContextNodeDisplayName(node.name);
+
+  if (markdownViewerMode.value === 'viewer') {
+    markdownViewerRef.value?.applyLinkInViewer?.({ label, href });
+    isLinkPickerOpen.value = false;
+    return;
+  }
+
   const snippet = `[${label}](${href})`;
   insertMarkdownSnippetIntoDocument(snippet, () => markdownViewerRef.value?.insertMarkdownLink?.({ label, href }));
+}
+
+function insertMarkdownStyle(styleId: 'highlight') {
+  if (styleId !== 'highlight') {
+    return;
+  }
+
+  insertMarkdownStyleSnippetIntoDocument(styleId);
+}
+
+function insertMarkdownStyleSnippetIntoDocument(styleId: 'highlight') {
+  if (styleId !== 'highlight') {
+    return;
+  }
+
+  const buildReplacement = (selectedText: string) => selectedText ? `==${selectedText}==` : '====';
+  const resolveCaret = ({
+    selectionStart,
+    selectedText,
+    replacement
+  }: {
+    selectionStart: number;
+    selectedText: string;
+    replacement: string;
+  }) => {
+    if (selectedText) {
+      const end = selectionStart + replacement.length;
+      return { start: end, end };
+    }
+
+    const caret = selectionStart + 2;
+    return { start: caret, end: caret };
+  };
+
+  const inViewer = markdownViewerMode.value === 'viewer';
+  if (inViewer) {
+    markdownViewerRef.value?.toggleHighlightInViewer?.();
+    isStylePickerOpen.value = false;
+    return;
+  }
+
+  linkInsertionPointMissing.value = false;
+  void runMarkdownInsertion(
+    () => markdownViewerRef.value?.insertMarkdownSnippet?.({
+      buildReplacement,
+      resolveCaret
+    }),
+    { closePicker: 'style' }
+  );
 }
 
 function insertDynamicLinkItem(typeId: string, itemId: string) {
@@ -586,6 +722,13 @@ function insertDynamicLinkItem(typeId: string, itemId: string) {
   }
 
   const snippet = item.markdown;
+
+  if (markdownViewerMode.value === 'viewer') {
+    markdownViewerRef.value?.insertMarkdownInViewer?.(snippet);
+    isLinkPickerOpen.value = false;
+    return;
+  }
+
   insertMarkdownSnippetIntoDocument(
     snippet,
     () => markdownViewerRef.value?.insertMarkdownSnippet?.({ markdown: snippet })
@@ -597,43 +740,65 @@ function insertResourceLink(targetPath: string) {
     return;
   }
 
-  const resource = props.linkableReferenceResources.find((candidate) => candidate.path === targetPath);
-  if (!resource) {
+  const insertion = buildMarkdownResourceInsertion(props.activePath, targetPath);
+
+  if (markdownViewerMode.value === 'viewer') {
+    markdownViewerRef.value?.insertMarkdownInViewer?.(insertion.markdown);
+    isLinkPickerOpen.value = false;
     return;
   }
 
-  const insertion = buildMarkdownResourceInsertion(props.activePath, targetPath);
   insertMarkdownSnippetIntoDocument(
     insertion.markdown,
     () => markdownViewerRef.value?.insertMarkdownSnippet?.({ markdown: insertion.markdown })
   );
 }
 
+async function triggerResourceUpload() {
+  console.log('[resource-upload] triggerResourceUpload entered', {
+    activePath: props.activePath,
+    hasUploadHandler: !!props.uploadMarkdownLinkResource
+  });
+  try {
+    const file = await openSingleFileDialog();
+    console.log('[resource-upload] file dialog resolved', { hasFile: !!file, fileName: file?.name ?? null });
+    if (!file || !props.activePath || !props.uploadMarkdownLinkResource) {
+      console.log('[resource-upload] aborting: missing file/activePath/uploadHandler');
+      return;
+    }
+
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const uploaded = await props.uploadMarkdownLinkResource({
+      documentPath: props.activePath,
+      fileName: file.name,
+      mimeType: file.type || 'application/octet-stream',
+      bytes
+    });
+    console.log('[resource-upload] upload succeeded', { resourcePath: uploaded.resourcePath });
+    insertResourceLink(uploaded.resourcePath);
+  } catch (error) {
+    console.error('[resource-upload] triggerResourceUpload failed', error);
+  }
+}
+
 function insertMarkdownSnippetIntoDocument(snippet: string, editModeAction: () => boolean | undefined) {
-  const inViewer = markdownViewerMode.value === 'viewer';
   console.log('[insert-debug] insertMarkdownSnippetIntoDocument', {
     activeTab: activeLinkPickerTab.value,
-    inViewer,
     snippetPreview: snippet.slice(0, 80)
   });
 
-  if (inViewer) {
-    markdownViewerRef.value?.prepareMarkdownSelectionFromViewer?.();
-  }
-
   linkInsertionPointMissing.value = false;
-  void runMarkdownInsertion(editModeAction, { returnToViewer: inViewer });
+  void runMarkdownInsertion(editModeAction);
 }
 
 async function runMarkdownInsertion(
   action: () => boolean | undefined,
-  options: { returnToViewer: boolean }
+  options: { closePicker?: 'link' | 'style' } = {}
 ) {
   const previousModelValue = props.modelValue;
   console.log('[insert-debug] runMarkdownInsertion BEGIN', {
     activeTab: activeLinkPickerTab.value,
     markdownViewerMode: markdownViewerMode.value,
-    returnToViewer: options.returnToViewer,
     previousModelValueLength: previousModelValue.length
   });
   if (markdownViewerMode.value !== 'edit') {
@@ -675,10 +840,11 @@ async function runMarkdownInsertion(
       }
     }
 
-    isLinkPickerOpen.value = false;
-    if (options.returnToViewer) {
-      await nextTick();
-      markdownViewerMode.value = 'viewer';
+    if (options.closePicker !== 'style') {
+      isLinkPickerOpen.value = false;
+    }
+    if (options.closePicker !== 'link') {
+      isStylePickerOpen.value = false;
     }
     console.log('[insert-debug] runMarkdownInsertion END (success path)', {
       finalModelValueLength: props.modelValue.length,
@@ -883,6 +1049,19 @@ function hideTooltip() {
 .editor-link-option:hover,
 .editor-link-option:focus-visible {
   background: rgba(255, 255, 255, 0.08);
+}
+
+.editor-link-option--upload {
+  margin-bottom: 8px;
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  background: rgba(14, 165, 233, 0.12);
+  color: #bae6fd;
+  font-weight: 600;
+}
+
+.editor-link-option--upload:hover,
+.editor-link-option--upload:focus-visible {
+  background: rgba(14, 165, 233, 0.2);
 }
 
 .editor-link-option-icon {

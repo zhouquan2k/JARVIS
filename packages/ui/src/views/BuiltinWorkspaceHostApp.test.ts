@@ -27,7 +27,8 @@ describe('BuiltinWorkspaceHostApp', () => {
                 getRightPanelTabs: () => [],
                 getWorkspaceSelectionViews: () => [],
                 getInsertLinkTypes: () => [],
-                getDocumentCreationFlows: () => [],
+                getDocumentImports: () => [],
+                getLanguageModels: () => [],
                 getNodePresentations: () => []
             },
             runtimeContext: {

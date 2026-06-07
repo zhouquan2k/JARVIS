@@ -10,6 +10,7 @@ function createTimedTask(overrides: Partial<Task> = {}): Task {
         completed: false,
         dueAt: new Date('2026-05-24T09:00:00-04:00').getTime(),
         priority: 'high',
+        executionState: null,
         documentPath: '/docs/guide.md',
         agentKey: null,
         createdAt: 1,

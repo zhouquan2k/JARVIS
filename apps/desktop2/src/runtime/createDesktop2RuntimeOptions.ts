@@ -18,7 +18,7 @@ export function createDesktop2RuntimeOptions(): CreateBuiltinWorkspaceRuntimeOpt
         mockSyncKeyFallback: 'desktop-e2e',
         pluginEnablement: loadPluginEnablementConfig({
             storage: typeof localStorage !== 'undefined' ? localStorage : undefined,
-            defaultEnabledPluginIds: ['ai-agent', 'task-mgr']
+            defaultEnabledPluginIds: ['ai-agent', 'task-mgr', 'bilibili-import']
         })
     };
 }

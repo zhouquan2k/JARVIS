@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { Hono } from 'hono';
+import { BilibiliTranscriptService } from '../../../packages/node/src/import/BilibiliTranscriptService.ts';
 import { FileSystemContextProvider } from '../../../packages/node/src/context/FileSystemContextProvider.ts';
 import { GoogleCalendarSyncService } from '../../../packages/node/src/context/GoogleCalendarSyncService.ts';
 import { createDatabase, type SyncDatabase } from './db.js';
@@ -8,6 +9,7 @@ import { resolveServerConfig, type ServerConfig } from './config.js';
 import { createCodexRouter } from './routes/codex.js';
 import { createContextRouter } from './routes/context.js';
 import { createHealthRouter } from './routes/health.js';
+import { createImportRouter } from './routes/import.js';
 import { createProviderConfigRouter } from './routes/providerConfigs.js';
 import { createSyncRouter } from './routes/sync.js';
 import { DatabaseContextProvider } from './providers/databaseContextProvider.js';
@@ -24,6 +26,7 @@ export interface CreateAppOptions {
     database?: SyncDatabase;
     contextProvider?: ContextProvider;
     taskService?: TaskService;
+    bilibiliTranscriptService?: BilibiliTranscriptService;
 }
 
 function createContextProvider(config: ServerConfig, repository: SyncRepository): ContextProvider {
@@ -121,6 +124,7 @@ export function createApp(options: CreateAppOptions = {}) {
     const repository = new SyncRepository(database);
     const contextProvider = options.contextProvider ?? createContextProvider(config, repository);
     const taskService = options.taskService ?? resolveTaskService(contextProvider);
+    const bilibiliTranscriptService = options.bilibiliTranscriptService ?? new BilibiliTranscriptService();
     const service = new SyncService(repository);
     const contextService = new HttpContextService(contextProvider, taskService);
     const codexAuthService = new CodexAuthService({
@@ -165,6 +169,10 @@ export function createApp(options: CreateAppOptions = {}) {
         config
     }));
     app.route('/api/context', createContextRouter({ service: contextService, config }));
+    app.route('/api/import', createImportRouter({
+        bilibiliTranscriptService,
+        config
+    }));
     app.route('/api/provider-configs', createProviderConfigRouter());
     app.route('/api/sync', createSyncRouter({ service, config }));
 

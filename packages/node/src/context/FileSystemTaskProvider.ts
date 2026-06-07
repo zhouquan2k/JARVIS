@@ -323,6 +323,14 @@ function matchesTaskTag(task: Task, tag: TaskQueryTag | null | undefined, now: n
         return true;
     }
 
+    if (tag === 'scheduled') {
+        return task.executionState !== null;
+    }
+
+    if (tag === 'backlog') {
+        return task.dueAt === null && task.executionState === null;
+    }
+
     if (task.dueAt === null) {
         return false;
     }

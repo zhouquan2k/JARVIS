@@ -2,6 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { enableAutoUnmount, mount } from '@vue/test-utils';
+import { defineComponent, nextTick, ref } from 'vue';
 
 enableAutoUnmount(afterEach);
 
@@ -23,14 +24,18 @@ const resolveMarkdownSourceSelection = vi.fn();
 const resolveEmptyBlockMarkdownOffset = vi.fn(() => null);
 const resolveEmptyBlockAnchorFallback = vi.fn(() => null);
 const insertMarkdownAtViewerSelection = vi.fn(() => false);
+const applyMarkdownLinkAtViewerSelection = vi.fn(() => true);
+const toggleMarkdownHighlightAtViewerSelection = vi.fn(() => true);
 const rewriteMarkdownImageRatio = vi.fn();
 
 vi.mock('../utils/markdownDocument', () => ({
+    applyMarkdownLinkAtViewerSelection,
     captureRenderableMarkdownSelection,
     createMarkdownEditor,
     destroyMarkdownEditor,
     findResizableMarkdownImageSource,
     insertMarkdownAtViewerSelection,
+    toggleMarkdownHighlightAtViewerSelection,
     insertPastedMarkdownImage,
     normalizeMarkdownViewerContent,
     readMarkdownDocument,
@@ -46,7 +51,14 @@ vi.mock('../utils/markdownDocument', () => ({
 }));
 
 describe('MarkdownDocumentViewer', () => {
+    let originalRequestAnimationFrame: typeof window.requestAnimationFrame;
+
     beforeEach(() => {
+        originalRequestAnimationFrame = window.requestAnimationFrame.bind(window);
+        vi.stubGlobal('requestAnimationFrame', ((callback: FrameRequestCallback) => {
+            callback(0);
+            return 1;
+        }) as typeof window.requestAnimationFrame);
         createMarkdownEditor.mockReset();
         destroyMarkdownEditor.mockReset();
         findResizableMarkdownImageSource.mockReset();
@@ -60,6 +72,13 @@ describe('MarkdownDocumentViewer', () => {
         captureRenderableMarkdownSelection.mockReset();
         resolveMarkdownSourceSelection.mockReset();
         rewriteMarkdownImageRatio.mockReset();
+        applyMarkdownLinkAtViewerSelection.mockReset();
+        applyMarkdownLinkAtViewerSelection.mockReturnValue(true);
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        window.requestAnimationFrame = originalRequestAnimationFrame;
     });
 
     it('enables soft wrapping in markdown edit mode', async () => {
@@ -152,6 +171,180 @@ describe('MarkdownDocumentViewer', () => {
         expect(replaceMarkdownDocument).not.toHaveBeenCalled();
     });
 
+    it('renders parsed markdown highlights with mark styling hooks in viewer mode', async () => {
+        createMarkdownEditor.mockImplementation(async ({ root }: { root: HTMLElement }) => {
+            root.innerHTML = `
+              <div class="milkdown">
+                <div class="ProseMirror">
+                  <p><mark class="markdown-highlight">Alpha</mark></p>
+                </div>
+              </div>
+            `;
+            return { content: '==Alpha==' };
+        });
+
+        const { default: MarkdownDocumentViewer } = await import('./MarkdownDocumentViewer.vue');
+        const wrapper = mount(MarkdownDocumentViewer, {
+            attachTo: document.body,
+            props: {
+                activePath: '/docs/guide.md',
+                activeDocument: {
+                    path: '/docs/guide.md',
+                    mimeType: 'text/markdown',
+                    dataBase64: '',
+                    canWrite: true
+                },
+                modelValue: '==Alpha==',
+                markdownViewerMode: 'viewer',
+                latestFileChange: null,
+                diffEntries: [],
+                canUndo: false,
+                canRedo: false,
+                middlePaneZoom: 1
+            }
+        });
+
+        await Promise.resolve();
+        await wrapper.vm.$nextTick();
+
+        const highlight = wrapper.get('mark.markdown-highlight');
+        expect(highlight.text()).toBe('Alpha');
+    });
+
+    it('preserves viewer scroll position when external content sync replaces the markdown document', async () => {
+        createMarkdownEditor.mockImplementation(async ({ root }: { root: HTMLElement }) => {
+            root.innerHTML = `
+              <div class="milkdown">
+                <div class="ProseMirror">
+                  <p>Alpha</p>
+                </div>
+              </div>
+            `;
+            return { content: 'Alpha' };
+        });
+        replaceMarkdownDocument.mockImplementation(() => {
+            const shell = document.querySelector('[data-testid="document-editor-scroll-shell"]') as HTMLElement | null;
+            if (shell) {
+                shell.scrollTop = 0;
+            }
+        });
+
+        const { default: MarkdownDocumentViewer } = await import('./MarkdownDocumentViewer.vue');
+        const wrapper = mount(MarkdownDocumentViewer, {
+            attachTo: document.body,
+            props: {
+                activePath: '/docs/guide.md',
+                activeDocument: {
+                    path: '/docs/guide.md',
+                    mimeType: 'text/markdown',
+                    dataBase64: '',
+                    canWrite: true
+                },
+                modelValue: 'Alpha',
+                markdownViewerMode: 'viewer',
+                latestFileChange: null,
+                diffEntries: [],
+                canUndo: false,
+                canRedo: false,
+                middlePaneZoom: 1
+            }
+        });
+
+        await Promise.resolve();
+        await wrapper.vm.$nextTick();
+
+        const scrollShell = wrapper.get('[data-testid="document-editor-scroll-shell"]').element as HTMLElement;
+        scrollShell.scrollTop = 240;
+
+        await wrapper.setProps({ modelValue: 'Alpha\n\nBeta' });
+        await Promise.resolve();
+        await wrapper.vm.$nextTick();
+
+        expect(replaceMarkdownDocument).toHaveBeenCalledWith(expect.anything(), 'Alpha\n\nBeta');
+        expect(scrollShell.scrollTop).toBe(240);
+    });
+
+    it('restores viewer scroll position after switching from edit mode back to viewer mode', async () => {
+        const rafQueue: FrameRequestCallback[] = [];
+        vi.stubGlobal('requestAnimationFrame', ((callback: FrameRequestCallback) => {
+            rafQueue.push(callback);
+            return rafQueue.length;
+        }) as typeof window.requestAnimationFrame);
+
+        const flushAnimationFrames = (passes: number) => {
+            for (let index = 0; index < passes; index += 1) {
+                const callbacks = rafQueue.splice(0, rafQueue.length);
+                callbacks.forEach((callback) => callback(0));
+            }
+        };
+
+        let creationCount = 0;
+        createMarkdownEditor.mockImplementation(async ({ root }: { root: HTMLElement }) => {
+            creationCount += 1;
+            root.innerHTML = `
+              <div class="milkdown">
+                <div class="ProseMirror">
+                  <p>Alpha</p>
+                </div>
+              </div>
+            `;
+            if (creationCount === 2) {
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        const shell = root.closest('[data-testid="document-editor-scroll-shell"]') as HTMLElement | null;
+                        if (shell) {
+                            shell.scrollTop = 0;
+                        }
+                    });
+                });
+            }
+            return { content: 'Alpha' };
+        });
+
+        const { default: MarkdownDocumentViewer } = await import('./MarkdownDocumentViewer.vue');
+        const wrapper = mount(MarkdownDocumentViewer, {
+            attachTo: document.body,
+            props: {
+                activePath: '/docs/guide.md',
+                activeDocument: {
+                    path: '/docs/guide.md',
+                    mimeType: 'text/markdown',
+                    dataBase64: '',
+                    canWrite: true
+                },
+                modelValue: 'Alpha',
+                markdownViewerMode: 'viewer',
+                latestFileChange: null,
+                diffEntries: [],
+                canUndo: false,
+                canRedo: false,
+                middlePaneZoom: 1
+            }
+        });
+
+        await Promise.resolve();
+        await wrapper.vm.$nextTick();
+
+        const scrollShell = wrapper.get('[data-testid="document-editor-scroll-shell"]').element as HTMLElement;
+        scrollShell.scrollTop = 240;
+
+        await wrapper.setProps({ markdownViewerMode: 'edit' });
+        await Promise.resolve();
+        await wrapper.vm.$nextTick();
+        await Promise.resolve();
+        await wrapper.vm.$nextTick();
+
+        await wrapper.setProps({ markdownViewerMode: 'viewer' });
+        await Promise.resolve();
+        await wrapper.vm.$nextTick();
+        await Promise.resolve();
+        await wrapper.vm.$nextTick();
+
+        flushAnimationFrames(6);
+
+        expect(scrollShell.scrollTop).toBe(240);
+    });
+
     it('inserts markdown links in edit mode and wraps the current selection', async () => {
         const { default: MarkdownDocumentViewer } = await import('./MarkdownDocumentViewer.vue');
         const wrapper = mount(MarkdownDocumentViewer, {
@@ -187,56 +380,78 @@ describe('MarkdownDocumentViewer', () => {
         ]);
     });
 
-    it('prepares a markdown source selection from a render selection snapshot in viewer mode', async () => {
-        createMarkdownEditor.mockResolvedValue({ content: 'Intro target' });
-        captureRenderableMarkdownSelection.mockReturnValue({
-            blockText: 'Intro target',
-            start: 6,
-            end: 12,
-            selectedText: 'target'
+    it('places the caret inside an empty highlight insertion in edit mode', async () => {
+        const { default: MarkdownDocumentViewer } = await import('./MarkdownDocumentViewer.vue');
+        const Harness = defineComponent({
+            components: { MarkdownDocumentViewer },
+            setup() {
+                const modelValue = ref('Read ');
+                const applyUpdate = async (value: string) => {
+                    await nextTick();
+                    modelValue.value = value;
+                };
+
+                return {
+                    applyUpdate,
+                    modelValue
+                };
+            },
+            template: `
+              <MarkdownDocumentViewer
+                :active-path="'/docs/guide.md'"
+                :active-document="{ path: '/docs/guide.md', mimeType: 'text/markdown', dataBase64: '', canWrite: true }"
+                :model-value="modelValue"
+                markdown-viewer-mode="edit"
+                :latest-file-change="null"
+                :diff-entries="[]"
+                :can-undo="false"
+                :can-redo="false"
+                :middle-pane-zoom="1"
+                @update:model-value="applyUpdate"
+              />
+            `
         });
-        resolveMarkdownSourceSelection.mockReturnValue({
-            start: 6,
-            end: 12
+        const wrapper = mount(Harness, {
+            attachTo: document.body
         });
 
-        const { default: MarkdownDocumentViewer } = await import('./MarkdownDocumentViewer.vue');
-        const wrapper = mount(MarkdownDocumentViewer, {
-            attachTo: document.body,
-            props: {
-                activePath: '/docs/guide.md',
-                activeDocument: {
-                    path: '/docs/guide.md',
-                    mimeType: 'text/markdown',
-                    dataBase64: '',
-                    canWrite: true
-                },
-                modelValue: 'Intro target',
-                markdownViewerMode: 'viewer',
-                latestFileChange: null,
-                diffEntries: [],
-                canUndo: false,
-                canRedo: false,
-                middlePaneZoom: 1
+        await Promise.resolve();
+        await wrapper.vm.$nextTick();
+
+        const viewer = wrapper.findComponent(MarkdownDocumentViewer);
+        const textarea = viewer.get('[data-testid="document-editor-input"]').element as HTMLTextAreaElement;
+        textarea.focus();
+        textarea.setSelectionRange(5, 5);
+        (viewer.vm as unknown as {
+            insertMarkdownSnippet: (input: {
+                buildReplacement: (selectedText: string) => string;
+                resolveCaret: (input: {
+                    selectionStart: number;
+                    selectedText: string;
+                    replacement: string;
+                }) => { start: number; end: number };
+            }) => boolean;
+        }).insertMarkdownSnippet({
+            buildReplacement: (selectedText) => selectedText ? `==${selectedText}==` : '====',
+            resolveCaret: ({ selectionStart, selectedText, replacement }) => {
+                if (selectedText) {
+                    const end = selectionStart + replacement.length;
+                    return { start: end, end };
+                }
+                const caret = selectionStart + 2;
+                return { start: caret, end: caret };
             }
         });
 
         await Promise.resolve();
         await wrapper.vm.$nextTick();
-
-        expect((wrapper.vm as unknown as { prepareMarkdownSelectionFromViewer: () => boolean }).prepareMarkdownSelectionFromViewer()).toBe(true);
-
-        await wrapper.setProps({ markdownViewerMode: 'edit' });
-        await Promise.resolve();
         await wrapper.vm.$nextTick();
 
-        (wrapper.vm as unknown as { insertMarkdownLink: (input: { label: string; href: string }) => boolean })
-            .insertMarkdownLink({ label: 'reference', href: 'reference.md' });
-
-        expect(wrapper.emitted('update:modelValue')).toEqual([
-            ['Intro target[reference](reference.md)']
-        ]);
+        expect((wrapper.vm as unknown as { modelValue: string }).modelValue).toBe('Read ====');
+        expect(textarea.selectionStart).toBe(7);
+        expect(textarea.selectionEnd).toBe(7);
     });
+
 
     it('rewrites markdown source when a viewer image resize resolves to a unique source span', async () => {
         let onResizeMarkdownImage: ((payload: { src: string; ratio: number }) => void) | undefined;
@@ -542,7 +757,7 @@ describe('MarkdownDocumentViewer', () => {
         expect(wrapper.emitted('update:modelValue')?.at(0)).toEqual([updatedMarkdown]);
     });
 
-    it('logs editorView context errors with navigation context while the viewer is tearing down', async () => {
+    it('captures any Milkdown context-missing error (editorView/editorState) with navigation context and a lifecycle dump', async () => {
         let onOpenDocumentLink: ((path: string) => void) | undefined;
         const consoleDebug = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
         createMarkdownEditor.mockImplementation(async (options: { onOpenDocumentLink?: (path: string) => void }) => {
@@ -574,24 +789,106 @@ describe('MarkdownDocumentViewer', () => {
         await Promise.resolve();
 
         onOpenDocumentLink?.('/docs/next.md');
-        window.dispatchEvent(new ErrorEvent('error', {
-            message: 'Context "editorView" not found, do you forget to inject it?'
-        }));
+
+        // The real bug surfaces as a detached unhandledrejection with "editorState".
+        const rejectionEvent = new Event('unhandledrejection') as Event & { reason?: unknown };
+        rejectionEvent.reason = new Error('Context "editorState" not found, do you forget to inject it?');
+        window.dispatchEvent(rejectionEvent);
 
         expect(consoleDebug).toHaveBeenCalledWith(
-            '[markdown-viewer] editor-view-context-missing',
+            '[markdown-viewer] editor-context-missing',
             expect.objectContaining({
-                source: 'error',
+                source: 'unhandledrejection',
+                message: 'Context "editorState" not found, do you forget to inject it?',
                 activePath: '/docs/guide.md',
                 markdownViewerMode: 'viewer',
                 navigatingAway: true,
                 lastNavigationTarget: {
                     kind: 'document',
                     path: '/docs/next.md'
-                }
+                },
+                lifecycleTrace: expect.any(Array)
             })
         );
 
         consoleDebug.mockRestore();
+    });
+
+    it('applyLinkInViewer calls applyMarkdownLinkAtViewerSelection with the editor and input', async () => {
+        const mockEditor = { content: 'mock-editor' };
+        createMarkdownEditor.mockResolvedValue(mockEditor);
+        applyMarkdownLinkAtViewerSelection.mockReturnValue(true);
+
+        const { default: MarkdownDocumentViewer } = await import('./MarkdownDocumentViewer.vue');
+        const wrapper = mount(MarkdownDocumentViewer, {
+            props: {
+                activePath: '/docs/guide.md',
+                activeDocument: {
+                    path: '/docs/guide.md',
+                    mimeType: 'text/markdown',
+                    dataBase64: '',
+                    canWrite: true
+                },
+                modelValue: 'Hello world',
+                markdownViewerMode: 'viewer',
+                latestFileChange: null,
+                diffEntries: [],
+                canUndo: false,
+                canRedo: false,
+                middlePaneZoom: 1
+            }
+        });
+
+        await Promise.resolve();
+        await Promise.resolve();
+
+        const result = (wrapper.vm as unknown as { applyLinkInViewer: (input: { label: string; href: string }) => boolean })
+            .applyLinkInViewer({ label: 'Reference', href: './reference.md' });
+
+        expect(result).toBe(true);
+        expect(applyMarkdownLinkAtViewerSelection).toHaveBeenCalledTimes(1);
+        expect(applyMarkdownLinkAtViewerSelection).toHaveBeenCalledWith(
+            mockEditor,
+            { label: 'Reference', href: './reference.md' }
+        );
+    });
+
+    it('insertMarkdownLink dispatches to applyLinkInViewer in viewer mode', async () => {
+        const mockEditor = { content: 'mock-editor' };
+        createMarkdownEditor.mockResolvedValue(mockEditor);
+        applyMarkdownLinkAtViewerSelection.mockReturnValue(true);
+
+        const { default: MarkdownDocumentViewer } = await import('./MarkdownDocumentViewer.vue');
+        const wrapper = mount(MarkdownDocumentViewer, {
+            props: {
+                activePath: '/docs/guide.md',
+                activeDocument: {
+                    path: '/docs/guide.md',
+                    mimeType: 'text/markdown',
+                    dataBase64: '',
+                    canWrite: true
+                },
+                modelValue: 'Hello world',
+                markdownViewerMode: 'viewer',
+                latestFileChange: null,
+                diffEntries: [],
+                canUndo: false,
+                canRedo: false,
+                middlePaneZoom: 1
+            }
+        });
+
+        await Promise.resolve();
+        await Promise.resolve();
+
+        const result = (wrapper.vm as unknown as { insertMarkdownLink: (input: { label: string; href: string }) => boolean })
+            .insertMarkdownLink({ label: 'Reference', href: './reference.md' });
+
+        expect(result).toBe(true);
+        expect(applyMarkdownLinkAtViewerSelection).toHaveBeenCalledTimes(1);
+        expect(applyMarkdownLinkAtViewerSelection).toHaveBeenCalledWith(
+            mockEditor,
+            { label: 'Reference', href: './reference.md' }
+        );
     });
 });

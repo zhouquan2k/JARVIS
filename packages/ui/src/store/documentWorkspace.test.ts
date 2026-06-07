@@ -1292,4 +1292,109 @@ describe('useDocumentWorkspaceStore', () => {
         await expect(store.flushActiveDocument()).rejects.toThrow('The document version has changed. Please reload and try again.');
         expect(store.currentError).toBe('The document version has changed. Please reload and try again.');
     });
+
+    it('uploads a linkable resource into the current document references directory', async () => {
+        const store = useDocumentWorkspaceStore();
+        const provider = createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' }
+            ],
+            documents: {
+                '/docs/guide.md': '# Guide'
+            }
+        });
+        store.setContextProvider(provider);
+
+        await store.hydrateWorkspace();
+        const uploaded = await store.uploadMarkdownLinkResource({
+            documentPath: '/docs/guide.md',
+            fileName: 'brief.pdf',
+            mimeType: 'application/pdf',
+            bytes: new Uint8Array([1, 2, 3])
+        });
+
+        expect(uploaded.resourcePath).toBe('/docs/references/brief.pdf');
+        expect(store.findNodeByPath('/docs/references/brief.pdf')).toBeTruthy();
+        const resourceDocument = await provider.readDocument('/docs/references/brief.pdf');
+        expect(resourceDocument.mimeType).toBe('application/pdf');
+    });
+
+    it('creates an imported markdown document and refreshes the tree', async () => {
+        const store = useDocumentWorkspaceStore();
+        const provider = createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' }
+            ],
+            documents: {}
+        });
+        store.setContextProvider(provider);
+
+        await store.hydrateWorkspace();
+        await store.createImportedDocument({
+            path: '/docs/imported-note.md',
+            content: '# Imported'
+        });
+
+        const imported = await provider.readDocument('/docs/imported-note.md');
+        expect(decodeTextDocument(imported.dataBase64)).toBe('# Imported');
+        expect(store.findNodeByPath('/docs/imported-note.md')).toBeTruthy();
+    });
+
+    it('creates an imported reference resource and returns a relative owner link path', async () => {
+        const store = useDocumentWorkspaceStore();
+        const provider = createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/docs/summary.md', name: 'summary.md', kind: 'file', parentPath: '/docs' }
+            ],
+            documents: {
+                '/docs/summary.md': '# Summary'
+            }
+        });
+        store.setContextProvider(provider);
+
+        await store.hydrateWorkspace();
+        const result = await store.createImportedReferenceResource({
+            ownerDocumentPath: '/docs/summary.md',
+            fileName: 'transcript.md',
+            content: '# Transcript'
+        });
+
+        expect(result.resourcePath).toBe('/docs/references/transcript.md');
+        expect(result.relativePathFromOwner).toBe('references/transcript.md');
+        const transcript = await provider.readDocument('/docs/references/transcript.md');
+        expect(decodeTextDocument(transcript.dataBase64)).toBe('# Transcript');
+    });
+
+    it('reloads the active document from disk without saving the dirty draft first', async () => {
+        const store = useDocumentWorkspaceStore();
+        const provider = createMockContextProvider({
+            nodes: [
+                { path: '/notes.md', name: 'notes.md', kind: 'file' }
+            ],
+            documents: {
+                '/notes.md': '# Before'
+            }
+        });
+        store.setContextProvider(provider);
+
+        await store.hydrateWorkspace();
+        await store.openNode('/notes.md');
+        store.updateActiveDocument('# Dirty local');
+        expect(store.dirtyPaths['/notes.md']).toBe(true);
+
+        await provider.writeDocument({
+            path: '/notes.md',
+            mimeType: 'text/markdown',
+            dataBase64: Buffer.from('# On disk').toString('base64'),
+            expectedVersion: store.activeDocument?.version
+        });
+
+        await store.reloadActiveDocumentFromDisk();
+
+        expect(decodeTextDocument(store.activeDocument?.dataBase64 ?? '')).toBe('# On disk');
+        expect(store.draftContent).toBe('# On disk');
+        expect(store.dirtyPaths['/notes.md']).toBe(false);
+    });
 });

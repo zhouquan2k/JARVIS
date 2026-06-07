@@ -20,11 +20,17 @@ export function createScopedSetupApi(
         registerInsertLinkType(type) {
             registry.registerInsertLinkType(pluginId, type);
         },
-        registerDocumentCreationFlow(flow) {
-            registry.registerDocumentCreationFlow(pluginId, flow);
+        registerDocumentImport(contribution) {
+            registry.registerDocumentImport(pluginId, contribution);
+        },
+        registerLanguageModel(contribution) {
+            registry.registerLanguageModel(pluginId, contribution);
         },
         registerNodePresentation(contribution) {
             registry.registerNodePresentation(pluginId, contribution);
+        },
+        getContributionQuery() {
+            return registry;
         },
         getRuntimeContext() {
             return runtimeContext;

@@ -17,3 +17,4 @@ docs/.structurizr
 .playwright-mcp
 apps/desktop2/dist
 apps/web2/dist
+apps/desktop2/test-results

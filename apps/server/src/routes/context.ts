@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono';
 import type { ConversationQuery } from '@plugins/ai-agent/api';
-import type { Task, TaskPriority, TaskQueryTag } from '@plugins/task-mgr/api';
+import type { Task, TaskExecutionState, TaskPriority, TaskQueryTag } from '@plugins/task-mgr/api';
 import type { ServerConfig } from '../config.js';
 import { HttpContextService } from '../services/httpContextService.js';
 import type { ContextSearchRequest, CreateContextNodeInput, MoveContextNodeInput, RenameContextNodeInput, WriteContextDocumentInput } from '../types/context.js';
@@ -113,10 +113,10 @@ function normalizeTaskQueryTag(value: unknown): TaskQueryTag | null | undefined 
     if (value === null || value === '') {
         return null;
     }
-    if (value === 'all' || value === 'today' || value === 'planned') {
+    if (value === 'all' || value === 'today' || value === 'planned' || value === 'scheduled' || value === 'backlog') {
         return value;
     }
-    throw new Error('tag must be one of all, today, planned, or null.');
+    throw new Error('tag must be one of all, today, planned, scheduled, backlog, or null.');
 }
 
 function normalizeTaskPriority(value: unknown): TaskPriority | null {
@@ -127,6 +127,16 @@ function normalizeTaskPriority(value: unknown): TaskPriority | null {
         return value;
     }
     throw new Error('priority must be one of low, medium, or high.');
+}
+
+function normalizeTaskExecutionState(value: unknown): TaskExecutionState {
+    if (value === undefined || value === null || value === '') {
+        return null;
+    }
+    if (value === 'doing' || value === 'morning' || value === 'afternoon' || value === 'evening') {
+        return value;
+    }
+    throw new Error('executionState must be one of doing, morning, afternoon, evening, or null.');
 }
 
 function normalizeTask(body: Record<string, unknown>): Task {
@@ -177,6 +187,7 @@ function normalizeTask(body: Record<string, unknown>): Task {
         completed: body.completed,
         dueAt: typeof body.dueAt === 'number' ? body.dueAt : null,
         priority: normalizeTaskPriority(body.priority),
+        executionState: normalizeTaskExecutionState(body.executionState),
         documentPath: normalizeOptionalTaskScopePath(body.documentPath, 'task.documentPath') ?? null,
         documentId: typeof body.documentId === 'string' && body.documentId.trim() ? body.documentId.trim() : null,
         agentKey: normalizeOptionalTaskScopePath(body.agentKey, 'task.agentKey') ?? null,

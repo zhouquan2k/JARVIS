@@ -5,7 +5,7 @@ import { DEFAULT_SCOPED_AGENT_CONFIG, type AgentToolBinding, type AgentInheritan
 import { buildLineDiffEntries, FileChangeService, type FileChangeRecord, type LineDiffEntry } from '../services/FileChangeService';
 import { resolveDocumentViewer } from '../document-viewers';
 import { formatHttpApiError } from '../utils/formatHttpApiError';
-import { buildPastedMarkdownImagePath, buildRelativeMarkdownImageReference, rewriteOutgoingLinks } from '../utils/markdownDocument';
+import { buildPastedMarkdownImagePath, buildRelativeMarkdownImageReference, buildRelativeMarkdownLinkPath, rewriteOutgoingLinks } from '../utils/markdownDocument';
 import { normalizeCreatedFileName, normalizeRenamedFileName } from '../utils/contextNodePresentation';
 
 type ActiveViewerCapabilities = {
@@ -1289,6 +1289,121 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             };
         },
 
+        async uploadMarkdownLinkResource(input: {
+            documentPath: string;
+            fileName: string;
+            mimeType: string;
+            bytes: Uint8Array;
+        }): Promise<{ resourcePath: string }> {
+            if (!this.contextProvider) {
+                throw new Error('Context provider is not available.');
+            }
+
+            const documentDirectory = getParentPath(input.documentPath);
+            const referencesDirectoryPath = documentDirectory === '/' ? '/references' : `${documentDirectory}/references`;
+            const referencesNode = this.findNodeByPath(referencesDirectoryPath);
+
+            if (!referencesNode) {
+                await this.contextProvider.createNode({
+                    parentPath: documentDirectory === '/' ? undefined : documentDirectory,
+                    name: 'references',
+                    kind: 'directory'
+                });
+            }
+
+            const normalizedFileName = normalizeCreatedFileName(input.fileName, 'file');
+            await this.contextProvider.createNode({
+                parentPath: referencesDirectoryPath,
+                name: normalizedFileName,
+                kind: 'file'
+            });
+
+            const resourcePath = `${referencesDirectoryPath}/${normalizedFileName}`;
+            await this.contextProvider.writeDocument({
+                path: resourcePath,
+                mimeType: input.mimeType || 'application/octet-stream',
+                dataBase64: bytesToBase64(input.bytes)
+            });
+
+            await this.refreshTree();
+
+            return { resourcePath };
+        },
+
+        async createImportedDocument(input: {
+            path: string;
+            content: string;
+        }): Promise<void> {
+            if (!this.contextProvider) {
+                throw new Error('Context provider is not available.');
+            }
+
+            const normalizedPath = normalizeDocumentPath(input.path);
+            const parentPath = getParentPath(normalizedPath);
+            const fileName = normalizeCreatedFileName(normalizedPath.split('/').pop() ?? 'imported.md', 'file');
+            const targetPath = parentPath === '/' ? `/${fileName}` : `${parentPath}/${fileName}`;
+
+            if (!this.findNodeByPath(targetPath)) {
+                await this.contextProvider.createNode({
+                    parentPath: parentPath === '/' ? undefined : parentPath,
+                    name: fileName,
+                    kind: 'file'
+                });
+            }
+
+            await this.contextProvider.writeDocument({
+                path: targetPath,
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument(input.content)
+            });
+
+            await this.refreshTree();
+        },
+
+        async createImportedReferenceResource(input: {
+            ownerDocumentPath: string;
+            fileName: string;
+            content: string;
+        }): Promise<{ resourcePath: string; relativePathFromOwner: string }> {
+            if (!this.contextProvider) {
+                throw new Error('Context provider is not available.');
+            }
+
+            const ownerDocumentPath = normalizeDocumentPath(input.ownerDocumentPath);
+            const documentDirectory = getParentPath(ownerDocumentPath);
+            const referencesDirectoryPath = documentDirectory === '/' ? '/references' : `${documentDirectory}/references`;
+            if (!this.findNodeByPath(referencesDirectoryPath)) {
+                await this.contextProvider.createNode({
+                    parentPath: documentDirectory === '/' ? undefined : documentDirectory,
+                    name: 'references',
+                    kind: 'directory'
+                });
+            }
+
+            const normalizedFileName = normalizeCreatedFileName(input.fileName, 'file');
+            const resourcePath = `${referencesDirectoryPath}/${normalizedFileName}`;
+            if (!this.findNodeByPath(resourcePath)) {
+                await this.contextProvider.createNode({
+                    parentPath: referencesDirectoryPath,
+                    name: normalizedFileName,
+                    kind: 'file'
+                });
+            }
+
+            await this.contextProvider.writeDocument({
+                path: resourcePath,
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument(input.content)
+            });
+
+            await this.refreshTree();
+
+            return {
+                resourcePath,
+                relativePathFromOwner: buildRelativeMarkdownLinkPath(ownerDocumentPath, resourcePath)
+            };
+        },
+
         async createNode(input: CreateContextNodeInput) {
             if (!this.contextProvider) {
                 return;
@@ -1577,6 +1692,33 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             this.applyActiveContent(result.content, this.activePath);
             this.applyDocumentWriteMetadata(this.activePath, result.writeResult);
             this.syncActiveFileChange(this.activePath);
+        },
+
+        async reloadActiveDocumentFromDisk() {
+            if (!this.contextProvider || !this.activePath || !this.activeDocument) {
+                return;
+            }
+
+            const path = this.activePath;
+            const refreshedDocument = await this.contextProvider.readDocument(path);
+            const refreshedViewer = resolveDocumentViewer(refreshedDocument);
+
+            this.activeDocument = refreshedDocument;
+            this.activeViewerId = refreshedViewer?.id ?? null;
+            this.activeViewerCapabilities = refreshedViewer?.capabilities ?? null;
+            this.activePaneMode = refreshedViewer ? 'viewer' : 'unsupported';
+            this.draftContent = refreshedViewer?.capabilities.edit && isTextDocumentMimeType(refreshedDocument.mimeType)
+                ? decodeTextDocument(refreshedDocument.dataBase64)
+                : '';
+            this.dirtyPaths = {
+                ...this.dirtyPaths,
+                [path]: false
+            };
+            this.syncActiveFileChange(path);
+            this.applyDocumentWriteMetadata(path, {
+                updatedAt: refreshedDocument.updatedAt,
+                version: refreshedDocument.version
+            });
         },
 
         async refreshDocumentVersion(path: string) {

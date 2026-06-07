@@ -111,6 +111,11 @@ const agentTaskPanelStub = {
     template: '<div data-testid="agent-task-panel-stub" />'
 };
 
+const importFormStub = {
+    props: ['modelValue'],
+    template: '<div data-testid="import-form-stub">{{ modelValue ? "ready" : "empty" }}</div>'
+};
+
 class MockConversationStorage implements IConversationPersistProvider {
     constructor(private conversations: Conversation[]) {}
 
@@ -181,7 +186,8 @@ function createDocumentWorkspaceContributionQuery(workspaceSelectionComponent?: 
             }]
             : [],
         getInsertLinkTypes: () => [],
-        getDocumentCreationFlows: () => []
+        getDocumentImports: () => [],
+        getLanguageModels: () => []
     };
 }
 
@@ -345,6 +351,50 @@ describe('DocumentWorkspaceView', () => {
         expect(wrapper.get('[data-testid="agent-pane"]').attributes('data-agent-name')).toBe('Root Agent');
         expect(wrapper.get('.knowledge-grid').attributes('style')).toContain('100% - 8px');
         expect(wrapper.findAll('.grid-pane')).toHaveLength(3);
+    });
+
+    it('opens the import wizard from the tree and defaults the target directory to the selected directory', async () => {
+        const wrapper = mountDocumentWorkspace({
+            props: {
+                contextProvider: createMockContextProvider({
+                    nodes: [
+                        { path: '/docs', name: 'docs', kind: 'directory' },
+                        { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' }
+                    ],
+                    documents: {
+                        '/docs/guide.md': '# Guide'
+                    }
+                })
+            },
+            global: {
+                provide: {
+                    [contributionQueryKey as symbol]: ref({
+                        ...createDocumentWorkspaceContributionQuery(),
+                        getDocumentImports: () => [{
+                            id: 'bilibili',
+                            title: 'Bilibili',
+                            formComponent: importFormStub,
+                            createInitialParams: () => ({ url: '' }),
+                            async run() {
+                                return {
+                                    primaryDocumentPath: '/docs/guide.md',
+                                    createdPaths: ['/docs/guide.md']
+                                };
+                            }
+                        }]
+                    })
+                }
+            }
+        });
+
+        await flushPromises();
+        await wrapper.get('[data-path="/docs"]').trigger('click');
+        await flushPromises();
+        await wrapper.get('[data-testid="document-import"]').trigger('click');
+        await flushPromises();
+        await wrapper.get('[data-testid="import-wizard-next"]').trigger('click');
+
+        expect((wrapper.get('[data-testid="import-target-directory"]').element as HTMLSelectElement).value).toBe('/docs');
     });
 
     it('keeps AgentView visible and passes owner index document when an agent owner index exists', async () => {
@@ -568,6 +618,78 @@ describe('DocumentWorkspaceView', () => {
         const saved = await contextProvider.readDocument('/notes/index.md');
         expect(Buffer.from(saved.dataBase64, 'base64').toString('utf8')).toBe('# Updated notes index');
         expect(documentStore.dirtyPaths['/notes/index.md']).toBe(false);
+    });
+
+    it('cancels refresh-current-document when the dirty confirmation is declined', async () => {
+        const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+        const contextProvider = createMockContextProvider({
+            nodes: [
+                { path: '/notes.md', name: 'notes.md', kind: 'file' }
+            ],
+            documents: {
+                '/notes.md': '# Before'
+            }
+        });
+        const wrapper = mountDocumentWorkspace({
+            props: { contextProvider },
+            global: {
+                stubs: {
+                    WorkspaceRightPane: { template: '<div data-testid="agent-pane" />' },
+                    DocumentEditorPane: {
+                        template: '<button data-testid="document-refresh" @click="$emit(\'refresh-document\')" />'
+                    }
+                }
+            }
+        });
+
+        await flushPromises();
+        await wrapper.get('[data-path="/notes.md"]').trigger('click');
+        await flushPromises();
+
+        const documentStore = useDocumentWorkspaceStore();
+        documentStore.updateActiveDocument('# Dirty local');
+        const reloadSpy = vi.spyOn(documentStore, 'reloadActiveDocumentFromDisk');
+
+        await wrapper.get('[data-testid="document-refresh"]').trigger('click');
+
+        expect(confirmSpy).toHaveBeenCalledTimes(1);
+        expect(reloadSpy).not.toHaveBeenCalled();
+    });
+
+    it('reloads the current document when the dirty confirmation is accepted', async () => {
+        const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+        const contextProvider = createMockContextProvider({
+            nodes: [
+                { path: '/notes.md', name: 'notes.md', kind: 'file' }
+            ],
+            documents: {
+                '/notes.md': '# Before'
+            }
+        });
+        const wrapper = mountDocumentWorkspace({
+            props: { contextProvider },
+            global: {
+                stubs: {
+                    WorkspaceRightPane: { template: '<div data-testid="agent-pane" />' },
+                    DocumentEditorPane: {
+                        template: '<button data-testid="document-refresh" @click="$emit(\'refresh-document\')" />'
+                    }
+                }
+            }
+        });
+
+        await flushPromises();
+        await wrapper.get('[data-path="/notes.md"]').trigger('click');
+        await flushPromises();
+
+        const documentStore = useDocumentWorkspaceStore();
+        documentStore.updateActiveDocument('# Dirty local');
+        const reloadSpy = vi.spyOn(documentStore, 'reloadActiveDocumentFromDisk').mockResolvedValue();
+
+        await wrapper.get('[data-testid="document-refresh"]').trigger('click');
+
+        expect(confirmSpy).toHaveBeenCalledTimes(1);
+        expect(reloadSpy).toHaveBeenCalledTimes(1);
     });
 
     it('tells the assistant pane to show the agent conversation list for selected owner directories', async () => {

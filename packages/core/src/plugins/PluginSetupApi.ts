@@ -1,8 +1,10 @@
 import type { IHostContext } from '../interfaces/IHostContext';
+import type { ContributionQuery } from './ContributionQuery';
 import type {
-    DocumentCreationFlowContribution,
+    DocumentImportContribution,
     GlobalViewContribution,
     InsertLinkTypeContribution,
+    LanguageModelContribution,
     NodePresentationContribution,
     RightPanelTabContribution,
     WorkspaceSelectionViewContribution
@@ -14,8 +16,10 @@ export interface PluginSetupApi {
     registerRightPanelTab(tab: RightPanelTabContribution): void;
     registerWorkspaceSelectionView(view: WorkspaceSelectionViewContribution): void;
     registerInsertLinkType(type: InsertLinkTypeContribution): void;
-    registerDocumentCreationFlow(flow: DocumentCreationFlowContribution): void;
+    registerDocumentImport(contribution: DocumentImportContribution): void;
+    registerLanguageModel(contribution: LanguageModelContribution): void;
     registerNodePresentation(contribution: NodePresentationContribution): void;
+    getContributionQuery(): ContributionQuery;
     getRuntimeContext(): WorkspaceRuntimeContext;
     getHostContext(): IHostContext;
 }

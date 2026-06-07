@@ -1,6 +1,6 @@
 <template>
   <section class="markdown-viewer" data-testid="markdown-viewer">
-    <div class="editor-scroll-shell" data-testid="document-editor-scroll-shell">
+    <div ref="scrollShellRef" class="editor-scroll-shell" data-testid="document-editor-scroll-shell">
       <div
         v-if="!isMarkdownEditMode"
         ref="editorRoot"
@@ -85,6 +85,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ContextDocument } from '@packages/core/src';
 import { useWorkspaceI18n } from '../i18n';
 import {
+  applyMarkdownLinkAtViewerSelection,
   buildMarkdownConversationLinkHref,
   captureRenderableMarkdownSelection,
   createMarkdownEditor,
@@ -96,13 +97,12 @@ import {
   normalizeMarkdownViewerContent,
   readMarkdownDocument,
   replaceMarkdownDocument,
-  resolveEmptyBlockAnchorFallback,
-  resolveEmptyBlockMarkdownOffset,
   resolveMarkdownSourceSelection,
   rewriteMarkdownImageRatio,
   scrollToMarkdownEditorSearchMatch,
   setMarkdownEditorActiveSearchMatchIndex,
   setMarkdownEditorSearchQuery,
+  toggleMarkdownHighlightAtViewerSelection,
   type MarkdownConversationLinkTarget,
   type MarkdownEditor,
   type MarkdownViewerMode
@@ -145,20 +145,22 @@ const zoomStyle = computed(() => ({
   transform: `scale(${props.middlePaneZoom})`
 }));
 const editorRoot = ref<HTMLElement | null>(null);
+const scrollShellRef = ref<HTMLElement | null>(null);
 const markdownSourceRef = ref<HTMLTextAreaElement | null>(null);
 const searchQuery = ref('');
 const activeSearchMatchIndex = ref(0);
 
 let editor: MarkdownEditor | null = null;
+let isCreatingEditor = false;
 let creationToken = 0;
 let isApplyingExternalSync = false;
 let externalSyncToken = 0;
 let lastKnownMarkdown = '';
 let activeEditorMode: MarkdownViewerMode | null = null;
 let lastMarkdownSelection: { start: number; end: number } | null = null;
-let pendingMarkdownSelectionFromViewer: { start: number; end: number } | null = null;
 let preferRememberedMarkdownSelection = false;
 let pendingViewerScrollTop: number | null = null;
+let pendingModeSwitchViewerScrollTop: number | null = null;
 let viewerPasteAbortController: AbortController | null = null;
 let isNavigatingAwayFromViewer = false;
 let lastViewerNavigationTarget: { kind: 'document'; path: string } | { kind: 'conversation'; conversationId: string } | null = null;
@@ -228,7 +230,6 @@ function resetEditorSyncState(reason: string, payload: Record<string, unknown> =
   const previousApplyingState = isApplyingExternalSync;
   externalSyncToken += 1;
   isApplyingExternalSync = false;
-  pendingMarkdownSelectionFromViewer = null;
   preferRememberedMarkdownSelection = false;
   logMarkdownViewerDebug('external-sync-reset', {
     reason,
@@ -256,6 +257,33 @@ function logMarkdownViewerDebug(event: string, payload: Record<string, unknown>)
   }
 
   console.debug(`[markdown-viewer] ${event}`, payload);
+}
+
+const viewerInstanceId = Math.random().toString(36).slice(2, 8);
+interface EditorLifecycleTraceEntry {
+  seq: number;
+  t: number;
+  event: string;
+  [key: string]: unknown;
+}
+let editorLifecycleSeq = 0;
+const editorLifecycleTrace: EditorLifecycleTraceEntry[] = [];
+function traceEditorLifecycle(event: string, payload: Record<string, unknown> = {}) {
+  const entry: EditorLifecycleTraceEntry = {
+    seq: ++editorLifecycleSeq,
+    t: typeof performance !== 'undefined' ? Math.round(performance.now()) : Date.now(),
+    event,
+    viewer: viewerInstanceId,
+    ...payload
+  };
+  editorLifecycleTrace.push(entry);
+  if (editorLifecycleTrace.length > 80) {
+    editorLifecycleTrace.splice(0, editorLifecycleTrace.length - 80);
+  }
+  logMarkdownViewerDebug(`lifecycle:${event}`, entry);
+}
+function dumpEditorLifecycleTrace(): EditorLifecycleTraceEntry[] {
+  return editorLifecycleTrace.slice(-40);
 }
 
 function isMarkdownImageDebugEnabled(): boolean {
@@ -306,6 +334,31 @@ function isMarkdownViewerDebugEnabled(): boolean {
   }
 }
 
+watch(() => props.markdownViewerMode, (mode, previousMode) => {
+  if (!isMarkdownDocument.value) {
+    return;
+  }
+  if (previousMode === 'viewer' && mode !== 'viewer') {
+    pendingModeSwitchViewerScrollTop = captureViewerScrollTop();
+    logMarkdownViewerDebug('capture-viewer-scroll-top', {
+      previousMode,
+      mode,
+      capturedScrollTop: pendingModeSwitchViewerScrollTop,
+      activePath: props.activePath,
+      documentPath: props.activeDocument?.path ?? props.activePath
+    });
+  }
+}, { flush: 'sync' });
+
+watch(() => [editorRoot.value, props.markdownViewerMode] as const, () => {
+  if (!isMarkdownDocument.value || props.markdownViewerMode !== 'viewer' || !editorRoot.value) {
+    return;
+  }
+  if (pendingModeSwitchViewerScrollTop !== null) {
+    restoreViewerScrollTop(pendingModeSwitchViewerScrollTop, 'mode-switch');
+  }
+}, { flush: 'post' });
+
 watch(() => [
   props.activePath,
   props.activeDocument?.path ?? null,
@@ -354,21 +407,16 @@ watch(() => [
     if (activeEditorMode === 'viewer' && currentMarkdown !== props.modelValue) {
       emit('update:modelValue', currentMarkdown);
     }
-    if (activeEditorMode === 'viewer' && desiredMode === 'edit') {
-      pendingViewerScrollTop = captureViewerScrollTop();
-    }
     await teardownEditor();
     activeEditorMode = desiredMode;
     if (desiredMode === 'edit') {
       lastKnownMarkdown = currentMarkdown;
-      lastMarkdownSelection = pendingMarkdownSelectionFromViewer;
-      preferRememberedMarkdownSelection = !!pendingMarkdownSelectionFromViewer;
-      pendingMarkdownSelectionFromViewer = null;
+      lastMarkdownSelection = null;
+      preferRememberedMarkdownSelection = false;
       return;
     }
     await nextTick();
     await ensureEditor(currentMarkdown);
-    restoreViewerScrollTop();
     return;
   }
 
@@ -376,9 +424,8 @@ watch(() => [
     await teardownEditor();
     activeEditorMode = 'edit';
     lastKnownMarkdown = modelValue;
-    lastMarkdownSelection = pendingMarkdownSelectionFromViewer;
-    preferRememberedMarkdownSelection = !!pendingMarkdownSelectionFromViewer;
-    pendingMarkdownSelectionFromViewer = null;
+    lastMarkdownSelection = null;
+    preferRememberedMarkdownSelection = false;
     return;
   }
 
@@ -408,18 +455,20 @@ onBeforeUnmount(async () => {
   await teardownEditor();
 });
 
-function extractEditorViewContextErrorMessage(value: unknown): string | null {
+const MILKDOWN_CONTEXT_MISSING_PATTERN = /Context "[^"]*" not found/;
+
+function extractMilkdownContextErrorMessage(value: unknown): string | null {
   if (typeof value === 'string') {
-    return value.includes('Context "editorView" not found') ? value : null;
+    return MILKDOWN_CONTEXT_MISSING_PATTERN.test(value) ? value : null;
   }
 
   if (value instanceof Error) {
-    return value.message.includes('Context "editorView" not found') ? value.message : null;
+    return MILKDOWN_CONTEXT_MISSING_PATTERN.test(value.message) ? value.message : null;
   }
 
   if (value && typeof value === 'object' && 'message' in value) {
     const message = (value as { message?: unknown }).message;
-    return typeof message === 'string' && message.includes('Context "editorView" not found')
+    return typeof message === 'string' && MILKDOWN_CONTEXT_MISSING_PATTERN.test(message)
       ? message
       : null;
   }
@@ -427,8 +476,18 @@ function extractEditorViewContextErrorMessage(value: unknown): string | null {
   return null;
 }
 
-function logEditorViewContextError(source: 'error' | 'unhandledrejection', message: string) {
-  logMarkdownViewerDebug('editor-view-context-missing', {
+function logMilkdownContextError(
+  source: 'error' | 'unhandledrejection',
+  message: string,
+  stack: string | undefined
+) {
+  // This is a benign teardown-race artifact from inside Crepe (a detached
+  // requestAnimationFrame dispatching against a destroyed editor) and is
+  // suppressed by installGlobalUnhandledErrorFallback. We only record the
+  // lifecycle timeline when viewer debugging is explicitly enabled so the
+  // production console stays clean.
+  logMarkdownViewerDebug('editor-context-missing', {
+    viewer: viewerInstanceId,
     source,
     message,
     activePath: props.activePath,
@@ -437,39 +496,69 @@ function logEditorViewContextError(source: 'error' | 'unhandledrejection', messa
     activeEditorMode,
     creationToken,
     navigatingAway: isNavigatingAwayFromViewer,
-    lastNavigationTarget: lastViewerNavigationTarget
+    lastNavigationTarget: lastViewerNavigationTarget,
+    stack,
+    lifecycleTrace: dumpEditorLifecycleTrace()
   });
 }
 
 function onWindowError(event: ErrorEvent) {
-  const message = extractEditorViewContextErrorMessage(event.error ?? event.message);
+  const message = extractMilkdownContextErrorMessage(event.error ?? event.message);
   if (!message) {
     return;
   }
 
-  logEditorViewContextError('error', message);
+  logMilkdownContextError('error', message, event.error instanceof Error ? event.error.stack : undefined);
 }
 
 function onWindowUnhandledRejection(event: PromiseRejectionEvent) {
-  const message = extractEditorViewContextErrorMessage(event.reason);
+  const message = extractMilkdownContextErrorMessage(event.reason);
   if (!message) {
     return;
   }
 
-  logEditorViewContextError('unhandledrejection', message);
+  logMilkdownContextError(
+    'unhandledrejection',
+    message,
+    event.reason instanceof Error ? event.reason.stack : undefined
+  );
 }
 
 async function ensureEditor(content: string) {
-  if (editor || !editorRoot.value) {
+  if (editor || !editorRoot.value || isCreatingEditor) {
     return;
   }
 
+  isCreatingEditor = true;
+  try {
+    await createEditorInstance(content);
+  } finally {
+    isCreatingEditor = false;
+  }
+}
+
+async function createEditorInstance(content: string) {
   const token = ++creationToken;
   isNavigatingAwayFromViewer = false;
+  const root = editorRoot.value;
+  if (!root) {
+    throw new Error('Markdown editor root is not available.');
+  }
   const renderedContent = isMarkdownDocument.value && props.markdownViewerMode === 'viewer'
     ? normalizeMarkdownViewerContent(content)
     : content;
   let bootstrappingEditor = true;
+  traceEditorLifecycle('create-begin', {
+    token,
+    creationToken,
+    hasEditor: !!editor,
+    isCreatingEditor,
+    rootConnected: editorRoot.value?.isConnected ?? null,
+    rootChildCount: editorRoot.value?.childElementCount ?? null,
+    mode: props.markdownViewerMode,
+    activePath: props.activePath,
+    documentPath: props.activeDocument?.path ?? props.activePath
+  });
   logMarkdownViewerDebug('ensure-editor-start', {
     token,
     mode: props.markdownViewerMode,
@@ -486,7 +575,7 @@ async function ensureEditor(content: string) {
   let instance: MarkdownEditor;
   try {
     instance = await createMarkdownEditor({
-      root: editorRoot.value,
+      root,
       content: renderedContent,
       mode: isMarkdownDocument.value ? props.markdownViewerMode : 'edit',
       documentPath: props.activeDocument?.path ?? props.activePath,
@@ -568,11 +657,35 @@ async function ensureEditor(content: string) {
         emit('update:modelValue', markdown);
       }
     });
+  } catch (creationError) {
+    const message = creationError instanceof Error ? creationError.message : String(creationError);
+    traceEditorLifecycle('create-failed', {
+      token,
+      creationToken,
+      message,
+      rootConnected: editorRoot.value?.isConnected ?? null,
+      rootChildCount: editorRoot.value?.childElementCount ?? null,
+      activePath: props.activePath
+    });
+    console.warn('[markdown-viewer] editor-create-failed', {
+      viewer: viewerInstanceId,
+      token,
+      creationToken,
+      message,
+      stack: creationError instanceof Error ? creationError.stack : undefined,
+      lifecycleTrace: dumpEditorLifecycleTrace()
+    });
+    throw creationError;
   } finally {
     bootstrappingEditor = false;
   }
 
   if (token !== creationToken || !props.activePath) {
+    traceEditorLifecycle('create-abort', {
+      token,
+      latestToken: creationToken,
+      activePath: props.activePath
+    });
     logMarkdownViewerDebug('ensure-editor-abort', {
       token,
       latestToken: creationToken,
@@ -582,6 +695,11 @@ async function ensureEditor(content: string) {
     return;
   }
 
+  traceEditorLifecycle('create-ready', {
+    token,
+    creationToken,
+    rootChildCount: editorRoot.value?.childElementCount ?? null
+  });
   editor = instance;
   activeEditorMode = isMarkdownDocument.value ? props.markdownViewerMode : 'edit';
   lastKnownMarkdown = content;
@@ -594,6 +712,11 @@ async function ensureEditor(content: string) {
     activePath: props.activePath,
     documentPath: props.activeDocument?.path ?? props.activePath
   });
+  if (pendingModeSwitchViewerScrollTop !== null) {
+    restoreViewerScrollTop(pendingModeSwitchViewerScrollTop, 'mode-switch');
+  } else if (pendingViewerScrollTop !== null) {
+    restoreViewerScrollTop(pendingViewerScrollTop, 'content-sync');
+  }
 }
 
 function syncEditorContent(content: string) {
@@ -616,7 +739,12 @@ function syncEditorContent(content: string) {
     lastKnownPreview: lastKnownMarkdown.slice(0, 240)
   });
   try {
-    replaceMarkdownDocument(editor, renderedContent);
+    preserveViewerScrollDuring(() => {
+      if (!editor) {
+        return;
+      }
+      replaceMarkdownDocument(editor, renderedContent);
+    });
     lastKnownMarkdown = content;
     applyReadonlyCodeBlockLabels(renderedContent);
     applySearchHighlights();
@@ -908,15 +1036,16 @@ function scrollToSearchMatch(index: number) {
 }
 
 defineExpose({
-  prepareMarkdownSelectionFromViewer,
   setSearchQuery,
   setActiveSearchMatchIndex,
   getSearchMatchCount,
   scrollToSearchMatch,
+  applyLinkInViewer,
   insertMarkdownLink,
   insertMarkdownConversationLink,
   insertMarkdownSnippet,
-  insertMarkdownInViewer
+  insertMarkdownInViewer,
+  toggleHighlightInViewer
 });
 
 function insertMarkdownInViewer(markdown: string): boolean {
@@ -927,8 +1056,24 @@ function insertMarkdownInViewer(markdown: string): boolean {
   return insertMarkdownAtViewerSelection(editor, markdown);
 }
 
+function toggleHighlightInViewer(): boolean {
+  if (!editor) {
+    console.warn('[markdown-viewer] toggleHighlightInViewer: no milkdown editor');
+    return false;
+  }
+  return toggleMarkdownHighlightAtViewerSelection(editor);
+}
+
+function applyLinkInViewer(input: { label: string; href: string }): boolean {
+  if (!editor) {
+    console.warn('[markdown-viewer] applyLinkInViewer: no milkdown editor');
+    return false;
+  }
+  return applyMarkdownLinkAtViewerSelection(editor, input);
+}
+
 function getViewerScrollContainer(): HTMLElement | null {
-  return editorRoot.value?.closest('.editor-scroll-shell') as HTMLElement | null;
+  return scrollShellRef.value;
 }
 
 function captureViewerScrollTop(): number | null {
@@ -936,53 +1081,61 @@ function captureViewerScrollTop(): number | null {
   return container ? container.scrollTop : null;
 }
 
-function restoreViewerScrollTop() {
-  if (pendingViewerScrollTop === null) {
+function restoreViewerScrollTop(target = pendingViewerScrollTop, reason: 'mode-switch' | 'content-sync' = 'content-sync') {
+  if (target === null) {
+    logMarkdownViewerDebug('restore-viewer-scroll-top-skipped', {
+      reason: 'no-pending-scroll-top',
+      activePath: props.activePath,
+      documentPath: props.activeDocument?.path ?? props.activePath
+    });
     return;
   }
-  const target = pendingViewerScrollTop;
-  pendingViewerScrollTop = null;
-  requestAnimationFrame(() => {
+  if (pendingViewerScrollTop === target) {
+    pendingViewerScrollTop = null;
+  }
+  if (pendingModeSwitchViewerScrollTop === target) {
+    pendingModeSwitchViewerScrollTop = null;
+  }
+  const applyScrollRestore = (remainingFrames: number) => {
     const container = getViewerScrollContainer();
     if (container) {
       container.scrollTop = target;
     }
+    logMarkdownViewerDebug('restore-viewer-scroll-top', {
+      reason,
+      target,
+      remainingFrames,
+      currentScrollTop: container?.scrollTop ?? null,
+      activePath: props.activePath,
+      documentPath: props.activeDocument?.path ?? props.activePath
+    });
+    if (remainingFrames <= 0) {
+      return;
+    }
+    requestAnimationFrame(() => {
+      applyScrollRestore(remainingFrames - 1);
+    });
+  };
+  requestAnimationFrame(() => {
+    applyScrollRestore(3);
   });
 }
 
-function prepareMarkdownSelectionFromViewer(): boolean {
-  if (!editorRoot.value || !isMarkdownDocument.value || props.markdownViewerMode !== 'viewer') {
-    pendingMarkdownSelectionFromViewer = null;
-    return false;
+function preserveViewerScrollDuring(update: () => void) {
+  if (!isMarkdownDocument.value || props.markdownViewerMode !== 'viewer') {
+    update();
+    return;
   }
 
-  const snapshot = captureRenderableMarkdownSelection(editorRoot.value);
-  console.log('[insert-debug] prepare snapshot=', snapshot);
-  if (!snapshot) {
-    pendingMarkdownSelectionFromViewer = null;
-    return false;
-  }
-
-  let resolved: { start: number; end: number } | null = null;
-  if (snapshot.blockText === '' && typeof snapshot.blockIndex === 'number') {
-    if (editor) {
-      resolved = resolveEmptyBlockMarkdownOffset(editor, props.modelValue, snapshot.blockIndex);
-      console.log('[insert-debug] empty-block mdast offset=', resolved);
-    }
-    if (!resolved) {
-      resolved = resolveEmptyBlockAnchorFallback(editorRoot.value, snapshot, props.modelValue);
-      console.log('[insert-debug] empty-block anchor fallback offset=', resolved);
-    }
-  } else {
-    resolved = resolveMarkdownSourceSelection(props.modelValue, snapshot);
-    console.log('[insert-debug] text-block resolved=', resolved);
-  }
-
-  pendingMarkdownSelectionFromViewer = resolved;
-  return !!resolved;
+  pendingViewerScrollTop = captureViewerScrollTop();
+  update();
+  restoreViewerScrollTop(pendingViewerScrollTop, 'content-sync');
 }
 
 function insertMarkdownLink(input: { label: string; href: string }): boolean {
+  if (props.markdownViewerMode === 'viewer') {
+    return applyLinkInViewer(input);
+  }
   return insertMarkdownSnippet({
     buildReplacement: (selectedText) => {
       const label = selectedText || input.label;
@@ -994,6 +1147,11 @@ function insertMarkdownLink(input: { label: string; href: string }): boolean {
 function insertMarkdownSnippet(input: {
   markdown?: string;
   buildReplacement?: (selectedText: string) => string;
+  resolveCaret?: (input: {
+    selectionStart: number;
+    selectedText: string;
+    replacement: string;
+  }) => { start: number; end: number };
 }): boolean {
   if (!isMarkdownEditMode.value || !markdownSourceRef.value) {
     console.log('[insert-debug] insertMarkdownSnippet SKIPPED', {
@@ -1007,11 +1165,9 @@ function insertMarkdownSnippet(input: {
 
   const textarea = markdownSourceRef.value;
   const hasFocus = document.activeElement === textarea;
-  const pendingSelection = pendingMarkdownSelectionFromViewer;
-  const useRememberedSelection = preferRememberedMarkdownSelection
-    && !!(lastMarkdownSelection ?? pendingSelection);
+  const useRememberedSelection = preferRememberedMarkdownSelection && !!lastMarkdownSelection;
   const rememberedSelection = useRememberedSelection || !hasFocus
-    ? (lastMarkdownSelection ?? pendingSelection)
+    ? lastMarkdownSelection
     : null;
   const selectionStart = rememberedSelection
     ? rememberedSelection.start
@@ -1038,7 +1194,6 @@ function insertMarkdownSnippet(input: {
     hasFocus,
     preferRememberedMarkdownSelection,
     hasLastMarkdownSelection: !!lastMarkdownSelection,
-    hasPendingViewerSelection: !!pendingSelection,
     useRememberedSelection,
     selectionStart,
     selectionEnd,
@@ -1051,18 +1206,28 @@ function insertMarkdownSnippet(input: {
   });
 
   lastKnownMarkdown = nextValue;
-  lastMarkdownSelection = {
+  const nextSelection = input.resolveCaret?.({
+    selectionStart,
+    selectedText,
+    replacement
+  }) ?? {
     start: selectionStart + replacement.length,
     end: selectionStart + replacement.length
   };
-  pendingMarkdownSelectionFromViewer = null;
+  lastMarkdownSelection = nextSelection;
   preferRememberedMarkdownSelection = false;
   emit('update:modelValue', nextValue);
 
-  nextTick(() => {
+  const restoreSelection = () => {
     textarea.focus();
-    const caret = selectionStart + replacement.length;
-    textarea.setSelectionRange(caret, caret);
+    textarea.setSelectionRange(nextSelection.start, nextSelection.end);
+  };
+
+  nextTick(() => {
+    restoreSelection();
+    void nextTick().then(() => {
+      restoreSelection();
+    });
   });
 
   return true;
@@ -1112,6 +1277,13 @@ async function teardownEditor() {
   creationToken += 1;
   const teardownToken = creationToken;
   const currentEditor = editor;
+  traceEditorLifecycle('teardown-begin', {
+    teardownToken,
+    hadEditor: !!currentEditor,
+    isCreatingEditor,
+    rootChildCount: editorRoot.value?.childElementCount ?? null,
+    activePath: props.activePath
+  });
   resetEditorSyncState('teardown-editor', {
     teardownToken,
     hadEditor: !!currentEditor
@@ -1133,6 +1305,11 @@ async function teardownEditor() {
   if (editorRoot.value) {
     editorRoot.value.innerHTML = '';
   }
+  traceEditorLifecycle('teardown-cleared-dom', {
+    teardownToken,
+    isCreatingEditor,
+    rootChildCount: editorRoot.value?.childElementCount ?? null
+  });
   logMarkdownViewerDebug('teardown-editor-done', {
     token: teardownToken,
     activePath: props.activePath,
@@ -1620,6 +1797,15 @@ function requiresMarkdownDocumentPathRebind(content: string): boolean {
 .editor-input :deep(.markdown-search-highlight--active) {
   background: rgba(251, 146, 60, 0.72);
   outline: 1px solid rgba(251, 191, 36, 0.88);
+}
+
+.editor-input :deep(.milkdown .ProseMirror mark),
+.editor-input :deep(.milkdown .ProseMirror .markdown-highlight) {
+  border-radius: 0.2em;
+  padding: 0 0.08em;
+  color: inherit;
+  background: linear-gradient(180deg, rgba(250, 204, 21, 0.78) 0%, rgba(251, 191, 36, 0.58) 100%);
+  box-shadow: inset 0 -1px 0 rgba(120, 53, 15, 0.2);
 }
 
 .editor-input :deep(.markdown-image-resize-frame) {

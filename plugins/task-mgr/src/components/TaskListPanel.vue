@@ -15,14 +15,6 @@
         </svg>
       </button>
     </div>
-
-    <TaskEditorInline
-      v-if="editingTask"
-      :task="editingTask"
-      @save="saveTask"
-      @cancel="cancelEdit"
-    />
-
     <p v-if="loading" class="task-list-panel__message" data-testid="agent-task-loading">
       {{ t('shared.loadingTasks') }}
     </p>
@@ -32,6 +24,17 @@
 
     <template v-else>
       <div class="task-list-panel__list" data-testid="agent-task-open-list">
+        <article
+          v-if="draftTask"
+          class="task-list-panel__item task-list-panel__item--editing"
+          data-testid="agent-task-item-draft-task"
+        >
+          <TaskEditorInline
+            :task="draftTask"
+            @save="saveTask"
+            @cancel="cancelEdit"
+          />
+        </article>
         <template v-if="groupByDate && openTaskGroups.length > 0">
           <section
             v-for="group in openTaskGroups"
@@ -46,19 +49,28 @@
               v-for="task in group.tasks"
               :key="task.id"
               class="task-list-panel__item"
-              :class="{ 'task-list-panel__item--with-meta': Boolean(task.dueAt) }"
+              :class="taskRowClass(task)"
               :data-testid="`agent-task-item-${task.id}`"
             >
+              <TaskEditorInline
+                v-if="editingTaskId === task.id"
+                :task="editingTask!"
+                @save="saveTask"
+                @cancel="cancelEdit"
+              />
               <TaskListRow
+                v-else
                 :task="task"
                 :show-priority="true"
                 :show-edit="true"
                 :open-menu-task-id="openMenuTaskId"
+                :is-navigable="isGlobalAllTasksView"
                 @toggle-completed="toggleTask"
                 @start-edit="startEditTaskFromRow"
                 @open-edit="openEditFromMenu"
                 @delete-task="deleteTaskFromMenu"
                 @toggle-menu="toggleMenu"
+                @open-task="openTaskNode"
               />
             </article>
           </section>
@@ -69,19 +81,28 @@
             v-for="task in visibleOpenTasks"
             :key="task.id"
             class="task-list-panel__item"
-            :class="{ 'task-list-panel__item--with-meta': Boolean(task.dueAt) }"
+            :class="taskRowClass(task)"
             :data-testid="`agent-task-item-${task.id}`"
           >
+            <TaskEditorInline
+              v-if="editingTaskId === task.id"
+              :task="editingTask!"
+              @save="saveTask"
+              @cancel="cancelEdit"
+            />
             <TaskListRow
+              v-else
               :task="task"
               :show-priority="true"
               :show-edit="true"
               :open-menu-task-id="openMenuTaskId"
+              :is-navigable="isGlobalAllTasksView"
               @toggle-completed="toggleTask"
               @start-edit="startEditTaskFromRow"
               @open-edit="openEditFromMenu"
               @delete-task="deleteTaskFromMenu"
               @toggle-menu="toggleMenu"
+              @open-task="openTaskNode"
             />
           </article>
         </template>
@@ -134,9 +155,10 @@
 </template>
 
 <script setup lang="ts">
-import { Fragment, computed, defineComponent, h, onBeforeUnmount, onMounted, ref, watch, type PropType } from 'vue';
-import type { Task, TaskPriority, TaskQueryTag } from '../../api';
+import { Fragment, computed, defineComponent, h, inject, onBeforeUnmount, onMounted, ref, watch, type PropType } from 'vue';
+import type { Task, TaskExecutionState, TaskPriority, TaskQueryTag } from '../../api';
 import { useWorkspaceI18n } from '@packages/ui/src/i18n';
+import { workspaceNavigationApiKey } from '@packages/ui/src/plugins/injectionKeys';
 import TaskEditorInline from './TaskEditorInline.vue';
 import { getTaskService } from '../taskServiceRegistry';
 
@@ -164,9 +186,13 @@ const TaskListRow = defineComponent({
     openMenuTaskId: {
       type: String as PropType<string | null>,
       default: null
+    },
+    isNavigable: {
+      type: Boolean,
+      default: false
     }
   },
-  emits: ['toggle-completed', 'start-edit', 'open-edit', 'delete-task', 'toggle-menu'],
+  emits: ['toggle-completed', 'start-edit', 'open-edit', 'delete-task', 'toggle-menu', 'open-task'],
   setup(rowProps, { emit }) {
     const { t } = useWorkspaceI18n();
 
@@ -183,6 +209,7 @@ const TaskListRow = defineComponent({
       h('div', {
         class: 'task-list-panel__content',
         'data-testid': `agent-task-content-${rowProps.task.id}`,
+        onClick: rowProps.isNavigable ? () => emit('open-task', rowProps.task) : undefined,
         onDblclick: rowProps.task.completed ? undefined : () => emit('start-edit', rowProps.task)
       }, [
         h('div', { class: 'task-list-panel__title-row' }, [
@@ -203,6 +230,17 @@ const TaskListRow = defineComponent({
         rowProps.task.notes ? h('p', { class: 'task-list-panel__notes' }, formatTaskNotesPreview(rowProps.task.notes)) : null
       ]),
       h('div', { class: 'task-list-panel__footer' }, [
+        rowProps.task.executionState
+          ? h('div', {
+            class: 'task-list-panel__execution-meta',
+            'data-testid': `agent-task-execution-meta-${rowProps.task.id}`
+          }, [
+            h('span', {
+              class: ['task-list-panel__execution-chip', `task-list-panel__execution-chip--${rowProps.task.executionState}`],
+              'data-testid': `agent-task-execution-chip-${rowProps.task.id}`
+            }, formatExecutionState(rowProps.task.executionState, t))
+          ])
+          : null,
         buildTaskScopeMeta(rowProps.task).length > 0
           ? h('div', {
             class: 'task-list-panel__scope-meta task-list-panel__scope-meta--footer',
@@ -265,12 +303,14 @@ const props = withDefaults(defineProps<{
   agentKey?: string | null;
   tag?: TaskQueryTag | null;
   groupByDate?: boolean;
+  detailKey?: string | null;
 }>(), {
   documentPath: null,
   documentId: null,
   agentKey: null,
   tag: 'all',
-  groupByDate: false
+  groupByDate: false,
+  detailKey: null
 });
 
 const { t } = useWorkspaceI18n();
@@ -281,16 +321,20 @@ const editingTask = ref<Task | null>(null);
 const completedCollapsed = ref(true);
 const openMenuTaskId = ref<string | null>(null);
 const panelRoot = ref<HTMLElement | null>(null);
+const workspaceNavigationApi = inject(workspaceNavigationApiKey, null);
+const consumedDetailKey = ref<string | null>(null);
 
 const normalizedDocumentPath = computed(() => normalizeScopeValue(props.documentPath));
 const normalizedAgentKey = computed(() => normalizeScopeValue(props.agentKey));
 const editingTaskId = computed(() => editingTask.value?.id ?? null);
-const openTasks = computed(() => sortTasksByDueAt(tasks.value.filter((task) => !task.completed)));
-const completedTasks = computed(() => sortTasksByDueAt(tasks.value.filter((task) => task.completed)));
+const draftTask = computed(() => editingTask.value?.id === 'draft-task' ? editingTask.value : null);
+const isGlobalAllTasksView = computed(() => normalizedDocumentPath.value === null && normalizedAgentKey.value === null);
+const openTasks = computed(() => sortTasks(tasks.value.filter((task) => !task.completed)));
+const completedTasks = computed(() => sortTasks(tasks.value.filter((task) => task.completed)));
 
 defineExpose({ openTaskCount: computed(() => openTasks.value.length) });
-const visibleOpenTasks = computed(() => openTasks.value.filter((task) => task.id !== editingTaskId.value));
-const visibleCompletedTasks = computed(() => completedTasks.value.filter((task) => task.id !== editingTaskId.value));
+const visibleOpenTasks = computed(() => openTasks.value);
+const visibleCompletedTasks = computed(() => completedTasks.value);
 const canCreateTask = computed(() => true);
 const openTaskGroups = computed(() => props.groupByDate ? buildDateGroups(visibleOpenTasks.value) : []);
 
@@ -298,6 +342,34 @@ watch(
   () => [normalizedDocumentPath.value, props.documentId ?? null, normalizedAgentKey.value, props.tag ?? 'all'] as const,
   () => {
     void loadTasks();
+  },
+  { immediate: true }
+);
+
+watch(
+  () => props.detailKey ?? null,
+  (detailKey) => {
+    if (!detailKey) {
+      consumedDetailKey.value = null;
+    }
+  },
+  { immediate: true }
+);
+
+watch(
+  () => [props.detailKey ?? null, tasks.value] as const,
+  ([detailKey, currentTasks]) => {
+    if (!detailKey || consumedDetailKey.value === detailKey) {
+      return;
+    }
+
+    const matchedTask = currentTasks.find((task) => task.id === detailKey);
+    if (!matchedTask || matchedTask.completed) {
+      return;
+    }
+
+    consumedDetailKey.value = detailKey;
+    startEditTask(matchedTask);
   },
   { immediate: true }
 );
@@ -329,13 +401,17 @@ async function loadTasks(): Promise<void> {
 }
 
 function createDraftTask(): Task {
+  const dueAt = isGlobalAllTasksView.value && props.tag === 'today'
+    ? new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate(), 0, 0, 0, 0).getTime()
+    : null;
   return {
     id: 'draft-task',
     title: '',
     notes: '',
     completed: false,
-    dueAt: null,
+    dueAt,
     priority: null,
+    executionState: null,
     documentPath: normalizedDocumentPath.value,
     documentId: props.documentId ?? null,
     agentKey: normalizedAgentKey.value,
@@ -395,6 +471,22 @@ async function toggleTask(task: Task, completed: boolean): Promise<void> {
   await loadTasks();
 }
 
+async function openTaskNode(task: Task): Promise<void> {
+  if (!isGlobalAllTasksView.value || !workspaceNavigationApi) {
+    return;
+  }
+
+  const targetPath = task.documentPath ?? agentKeyToNodePath(task.agentKey);
+  if (!targetPath) {
+    return;
+  }
+
+  await workspaceNavigationApi.openNode(targetPath, {
+    tab: 'tasks',
+    detailKey: task.id
+  });
+}
+
 function toggleMenu(taskId: string): void {
   openMenuTaskId.value = openMenuTaskId.value === taskId ? null : taskId;
 }
@@ -428,9 +520,16 @@ function normalizeScopeValue(value?: string | null): string | null {
   return trimmed ? trimmed : null;
 }
 
+function agentKeyToNodePath(agentKey?: string | null): string | null {
+  const trimmed = agentKey?.trim();
+  if (!trimmed) return null;
+  if (trimmed === '/') return '/';
+  return trimmed.replace(/\/+$/, '');
+}
+
 function buildDateGroups(sourceTasks: Task[]): TaskDateGroup[] {
   const groups = new Map<string, TaskDateGroup>();
-  const sortedTasks = sortTasksByDueAt(sourceTasks);
+  const sortedTasks = sortTasks(sourceTasks);
 
   for (const task of sortedTasks) {
     const key = getDateKey(task.dueAt);
@@ -450,8 +549,13 @@ function buildDateGroups(sourceTasks: Task[]): TaskDateGroup[] {
   return [...groups.values()];
 }
 
-function sortTasksByDueAt(sourceTasks: Task[]): Task[] {
+function sortTasks(sourceTasks: Task[]): Task[] {
   return [...sourceTasks].sort((left, right) => {
+    const executionOrder = compareExecutionState(left, right);
+    if (executionOrder !== 0) {
+      return executionOrder;
+    }
+
     const leftHasDueAt = left.dueAt !== null;
     const rightHasDueAt = right.dueAt !== null;
 
@@ -468,6 +572,23 @@ function sortTasksByDueAt(sourceTasks: Task[]): Task[] {
 
     return right.updatedAt - left.updatedAt;
   });
+}
+
+function compareExecutionState(left: Task, right: Task): number {
+  const leftRank = getExecutionStateRank(left.executionState);
+  const rightRank = getExecutionStateRank(right.executionState);
+  if (leftRank !== rightRank) {
+    return leftRank - rightRank;
+  }
+  return 0;
+}
+
+function getExecutionStateRank(value: TaskExecutionState): number {
+  if (value === 'doing') return 0;
+  if (value === 'morning') return 1;
+  if (value === 'afternoon') return 2;
+  if (value === 'evening') return 3;
+  return 4;
 }
 
 function getDateKey(dueAt: number | null): string {
@@ -505,6 +626,13 @@ function formatPriority(priority: TaskPriority, translate: ReturnType<typeof use
   if (priority === 'high') return translate('shared.taskPriorityHigh');
   if (priority === 'medium') return translate('shared.taskPriorityMedium');
   return translate('shared.taskPriorityLow');
+}
+
+function formatExecutionState(value: Exclude<TaskExecutionState, null>, translate: ReturnType<typeof useWorkspaceI18n>['t']): string {
+  if (value === 'doing') return translate('shared.taskExecutionStateDoing');
+  if (value === 'morning') return translate('shared.taskExecutionStateMorning');
+  if (value === 'afternoon') return translate('shared.taskExecutionStateAfternoon');
+  return translate('shared.taskExecutionStateEvening');
 }
 
 function formatDueAt(value: number): string {
@@ -566,6 +694,15 @@ function formatTaskAgentLabel(agentKey: string): string {
   const segments = normalized.split('/').filter(Boolean);
   return segments[segments.length - 1] ?? normalized;
 }
+
+function taskRowClass(task: Task): Record<string, boolean> {
+  return {
+    'task-list-panel__item--with-meta': Boolean(task.dueAt),
+    'task-list-panel__item--editing': editingTaskId.value === task.id,
+    'task-list-panel__item--active-detail': props.detailKey === task.id,
+    'task-list-panel__item--navigable': isGlobalAllTasksView.value
+  };
+}
 </script>
 
 <style scoped>
@@ -618,6 +755,25 @@ function formatTaskAgentLabel(agentKey: string): string {
 
 .task-list-panel__group + .task-list-panel__group {
   margin-top: 6px;
+}
+
+.task-list-panel__item--active-detail {
+  border-radius: 16px;
+  background: rgba(56, 189, 248, 0.08);
+}
+
+.task-list-panel__item.task-list-panel__item--editing {
+  display: block;
+  grid-template-columns: none;
+  row-gap: 0;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  justify-self: stretch;
+}
+
+.task-list-panel__item--navigable .task-list-panel__content {
+  cursor: pointer;
 }
 
 .task-list-panel__group-title {
@@ -742,6 +898,49 @@ function formatTaskAgentLabel(agentKey: string): string {
   font-size: 11px;
   line-height: 1.2;
   color: rgba(148, 163, 184, 0.78);
+}
+
+:deep(.task-list-panel__execution-meta) {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+:deep(.task-list-panel__execution-chip) {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+:deep(.task-list-panel__execution-chip--doing) {
+  color: #dcfce7;
+  background: rgba(34, 197, 94, 0.28);
+  box-shadow: inset 0 0 0 1px rgba(74, 222, 128, 0.2);
+}
+
+:deep(.task-list-panel__execution-chip--morning) {
+  color: #fef3c7;
+  background: rgba(245, 158, 11, 0.24);
+  box-shadow: inset 0 0 0 1px rgba(251, 191, 36, 0.18);
+}
+
+:deep(.task-list-panel__execution-chip--afternoon) {
+  color: #ffedd5;
+  background: rgba(249, 115, 22, 0.26);
+  box-shadow: inset 0 0 0 1px rgba(251, 146, 60, 0.18);
+}
+
+:deep(.task-list-panel__execution-chip--evening) {
+  color: #dbeafe;
+  background: rgba(59, 130, 246, 0.24);
+  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.18);
 }
 
 :deep(.task-list-panel__scope-chip + .task-list-panel__scope-chip)::before {

@@ -3,11 +3,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import { ref } from 'vue';
+import { defineComponent, h, inject, ref } from 'vue';
 import WorkspaceHostApp from './WorkspaceHostApp.vue';
 import type { WorkspaceRuntimeContext } from '@packages/core/src';
 import { useDocumentWorkspaceStore } from '../store/documentWorkspace';
 import { resetMockChatStore, useMockChatStore } from '../../test-support/mockChatStore';
+import { workspaceNavigationApiKey, type WorkspaceNavigationApi } from '../plugins/injectionKeys';
 
 const defaultAllTasksComponent = {
     props: ['contextProvider'],
@@ -18,6 +19,22 @@ const defaultChatComponent = {
     props: ['contextProvider'],
     template: '<div data-testid="conversation-workspace-stub" :data-context-id="contextProvider?.id || \'\'" />'
 };
+
+const WorkspaceNavigationProbe = defineComponent({
+    name: 'WorkspaceNavigationProbe',
+    setup() {
+        const api = inject(workspaceNavigationApiKey, null) as WorkspaceNavigationApi | null;
+        return () => h('button', {
+            'data-testid': 'workspace-nav-probe',
+            onClick: () => {
+                void api?.openNode('/docs/guide.md', {
+                    tab: 'tasks',
+                    detailKey: 'task-1'
+                });
+            }
+        });
+    }
+});
 
 function createContributionQuery(options?: {
     allTasksComponent?: object;
@@ -43,7 +60,8 @@ function createContributionQuery(options?: {
         getRightPanelTabs: () => [],
         getWorkspaceSelectionViews: () => [],
         getInsertLinkTypes: () => [],
-        getDocumentCreationFlows: () => []
+        getDocumentImports: () => [],
+        getLanguageModels: () => []
     };
 }
 
@@ -292,6 +310,41 @@ describe('WorkspaceHostApp', () => {
 
         expect(wrapper.get('[data-testid="conversation-workspace-stub"]').attributes('data-context-id')).toBe('ctx');
         expect(chatStore.workspaceMode).toBe('conversation');
+    });
+
+    it('provides a workspace navigation bridge that returns to knowledge workspace before opening the node', async () => {
+        setActivePinia(createPinia());
+        const navigateTo = vi.fn();
+        const wrapper = mount(WorkspaceHostApp, {
+            props: {
+                currentRoutePath: '/all-tasks',
+                navigateTo,
+                contextProvider: { id: 'ctx' },
+                contributionQuery: createContributionQuery({
+                    allTasksComponent: {
+                        components: { WorkspaceNavigationProbe },
+                        template: '<div data-testid="all-tasks-workspace-stub"><WorkspaceNavigationProbe /></div>'
+                    }
+                }),
+                runtimeContext: createRuntimeContext()
+            },
+            global: {
+                stubs: {
+                    AppTopBar: {
+                        template: '<div data-testid="topbar-stub" />'
+                    }
+                }
+            }
+        });
+
+        const documentStore = useDocumentWorkspaceStore();
+        const openNodeSpy = vi.spyOn(documentStore, 'openNode').mockResolvedValue(undefined);
+
+        await wrapper.get('[data-testid="workspace-nav-probe"]').trigger('click');
+        await flushPromises();
+
+        expect(navigateTo).toHaveBeenCalledWith('/');
+        expect(openNodeSpy).toHaveBeenCalledWith('/docs/guide.md');
     });
 
     it('does not resave the Agent snapshot when navigating to the current workspace', async () => {

@@ -1,9 +1,10 @@
 import { describe, expectTypeOf, it } from 'vitest';
 import type {
     ContributionQuery,
-    DocumentCreationFlowContribution,
+    DocumentImportContribution,
     GlobalViewContribution,
     InsertLinkTypeContribution,
+    LanguageModelContribution,
     NodePresentationContribution,
     PluginEnablementConfig,
     PluginManifest,
@@ -22,15 +23,18 @@ describe('plugin contracts', () => {
         expectTypeOf<PluginSetupApi['registerRightPanelTab']>().parameters.toEqualTypeOf<[RightPanelTabContribution]>();
         expectTypeOf<PluginSetupApi['registerWorkspaceSelectionView']>().parameters.toEqualTypeOf<[WorkspaceSelectionViewContribution]>();
         expectTypeOf<PluginSetupApi['registerInsertLinkType']>().parameters.toEqualTypeOf<[InsertLinkTypeContribution]>();
-        expectTypeOf<PluginSetupApi['registerDocumentCreationFlow']>().parameters.toEqualTypeOf<[DocumentCreationFlowContribution]>();
+        expectTypeOf<PluginSetupApi['registerDocumentImport']>().parameters.toEqualTypeOf<[DocumentImportContribution]>();
+        expectTypeOf<PluginSetupApi['registerLanguageModel']>().parameters.toEqualTypeOf<[LanguageModelContribution]>();
         expectTypeOf<PluginSetupApi['registerNodePresentation']>().parameters.toEqualTypeOf<[NodePresentationContribution]>();
+        expectTypeOf<PluginSetupApi['getContributionQuery']>().returns.toEqualTypeOf<ContributionQuery>();
         expectTypeOf<PluginSetupApi['getHostContext']>().returns.toBeObject();
 
         expectTypeOf<ContributionQuery['getGlobalViews']>().returns.toEqualTypeOf<readonly GlobalViewContribution[]>();
         expectTypeOf<ContributionQuery['getRightPanelTabs']>().returns.toEqualTypeOf<readonly RightPanelTabContribution[]>();
         expectTypeOf<ContributionQuery['getWorkspaceSelectionViews']>().returns.toEqualTypeOf<readonly WorkspaceSelectionViewContribution[]>();
         expectTypeOf<ContributionQuery['getInsertLinkTypes']>().returns.toEqualTypeOf<readonly InsertLinkTypeContribution[]>();
-        expectTypeOf<ContributionQuery['getDocumentCreationFlows']>().returns.toEqualTypeOf<readonly DocumentCreationFlowContribution[]>();
+        expectTypeOf<ContributionQuery['getDocumentImports']>().returns.toEqualTypeOf<readonly DocumentImportContribution[]>();
+        expectTypeOf<ContributionQuery['getLanguageModels']>().returns.toEqualTypeOf<readonly LanguageModelContribution[]>();
         expectTypeOf<ContributionQuery['getNodePresentations']>().returns.toEqualTypeOf<readonly NodePresentationContribution[]>();
 
         expectTypeOf<PluginManifest['setup']>().parameters.toEqualTypeOf<[PluginSetupApi]>();

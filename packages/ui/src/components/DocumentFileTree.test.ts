@@ -11,7 +11,8 @@ function createContributionQuery(overrides: Partial<ContributionQuery> = {}): Co
         getGlobalViews: () => [],
         getRightPanelTabs: () => [],
         getWorkspaceSelectionViews: () => [],
-        getDocumentCreationFlows: () => [],
+        getDocumentImports: () => [],
+        getLanguageModels: () => [],
         getNodePresentations: () => [],
         ...overrides
     };
@@ -36,6 +37,8 @@ describe('DocumentFileTree', () => {
         expect(wrapper.get('[data-testid="document-convert-directory-to-agent"]').attributes('aria-label')).toBe('Convert to Agent/Project');
         expect(wrapper.get('[data-testid="document-delete-node"]').attributes('title')).toBe('Delete selected node');
         expect(wrapper.get('[data-testid="document-delete-node"]').attributes('aria-label')).toBe('Delete selected node');
+        expect(wrapper.get('[data-testid="document-import"]').attributes('title')).toBe('Import document');
+        expect(wrapper.get('[data-testid="document-import"]').attributes('aria-label')).toBe('Import document');
         expect(wrapper.get('[data-testid="document-new-directory"]').attributes('title')).toBe('New directory');
         expect(wrapper.get('[data-testid="document-new-directory"]').attributes('aria-label')).toBe('New directory');
         expect(wrapper.get('[data-testid="document-node-root"]').text()).toContain('Root');
@@ -138,6 +141,9 @@ describe('DocumentFileTree', () => {
 
         await wrapper.get('[data-testid="document-refresh-tree"]').trigger('click');
         expect(wrapper.emitted('refresh')).toHaveLength(1);
+
+        await wrapper.get('[data-testid="document-import"]').trigger('click');
+        expect(wrapper.emitted('import')).toHaveLength(1);
     });
 
     it('requires confirmation before deleting the selected node', async () => {

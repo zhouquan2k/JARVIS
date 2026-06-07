@@ -238,7 +238,7 @@ The provider stream and final result contracts MUST support optional functional 
 - **AND** the field MUST be optional for providers that do not expose such details
 
 ### Requirement: Core interfaces MUST define a first-class task provider contract
-The system MUST define a shared `Task` model that is independent from the `Conversation` model, and MUST expose task-domain operations through `IContextProvider.getTaskProvider()` rather than flattening task CRUD methods directly into the general context-provider contract. The shared task contract MUST support task querying, creation, update, deletion, explicit completion transitions, and provider-managed calendar synchronization state.
+The system MUST define a shared `Task` model that is independent from the `Conversation` model, and MUST expose task-domain operations through `IContextProvider.getTaskProvider()` rather than flattening task CRUD methods directly into the general context-provider contract. The shared task contract MUST support task querying, creation, update, deletion, explicit completion transitions, and provider-managed calendar synchronization state, and a persisted mutually exclusive execution-state field.
 
 #### Scenario: Represent a document-scoped task
 - **WHEN** the system creates or returns a task associated with a document
@@ -259,6 +259,11 @@ The system MUST define a shared `Task` model that is independent from the `Conve
 - **WHEN** the system creates or returns a task that can participate in calendar synchronization
 - **THEN** the task MUST carry calendar synchronization state as part of the shared `Task` object
 - **AND** callers MUST NOT need a second mapping object to locate the external event or sync status
+
+#### Scenario: Represent execution state on a task
+- **WHEN** the system creates or returns a task that participates in daily execution-state ordering or display
+- **THEN** the task MUST carry its execution-state value as part of the shared `Task` object
+- **AND** callers MUST NOT need a second mapping object to discover whether the task is `doing`, `morning`, `afternoon`, or `evening`
 
 #### Scenario: Resolve task operations from the context provider
 - **WHEN** workspace UI code needs task operations for the current scope
@@ -345,4 +350,3 @@ The `Conversation` type MUST add a `documentIds?: string[]` field as the stable-
 - **AND** only `documentPaths` / `documentPath` is populated
 - **THEN** the system MUST continue to read and display the path-based association
 - **AND** the system MUST migrate the record to `documentIds` / `documentId` on first access
-

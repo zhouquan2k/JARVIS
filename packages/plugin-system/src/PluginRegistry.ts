@@ -1,8 +1,9 @@
 import type {
     ContributionQuery,
-    DocumentCreationFlowContribution,
+    DocumentImportContribution,
     GlobalViewContribution,
     InsertLinkTypeContribution,
+    LanguageModelContribution,
     NodePresentationContribution,
     RightPanelTabContribution,
     WorkspaceSelectionViewContribution
@@ -42,7 +43,9 @@ export class PluginRegistry implements ContributionQuery {
 
     private readonly insertLinkTypes: OwnedContribution<InsertLinkTypeContribution>[] = [];
 
-    private readonly documentCreationFlows: OwnedContribution<DocumentCreationFlowContribution>[] = [];
+    private readonly documentImports: OwnedContribution<DocumentImportContribution>[] = [];
+
+    private readonly languageModels: OwnedContribution<LanguageModelContribution>[] = [];
 
     private readonly nodePresentations: OwnedContribution<NodePresentationContribution>[] = [];
 
@@ -62,8 +65,12 @@ export class PluginRegistry implements ContributionQuery {
         this.registerContribution('insert-link-type', this.insertLinkTypes, pluginId, type);
     }
 
-    public registerDocumentCreationFlow(pluginId: string, flow: DocumentCreationFlowContribution): void {
-        this.registerContribution('document-creation-flow', this.documentCreationFlows, pluginId, flow);
+    public registerDocumentImport(pluginId: string, contribution: DocumentImportContribution): void {
+        this.registerContribution('document-import', this.documentImports, pluginId, contribution);
+    }
+
+    public registerLanguageModel(pluginId: string, contribution: LanguageModelContribution): void {
+        this.registerContribution('language-model', this.languageModels, pluginId, contribution);
     }
 
     public registerNodePresentation(pluginId: string, contribution: NodePresentationContribution): void {
@@ -86,8 +93,12 @@ export class PluginRegistry implements ContributionQuery {
         return sortContributions(this.insertLinkTypes);
     }
 
-    public getDocumentCreationFlows(): readonly DocumentCreationFlowContribution[] {
-        return sortContributions(this.documentCreationFlows);
+    public getDocumentImports(): readonly DocumentImportContribution[] {
+        return sortContributions(this.documentImports);
+    }
+
+    public getLanguageModels(): readonly LanguageModelContribution[] {
+        return sortContributions(this.languageModels);
     }
 
     public getNodePresentations(): readonly NodePresentationContribution[] {
@@ -99,7 +110,8 @@ export class PluginRegistry implements ContributionQuery {
         this.removeOwnedContributions(this.rightPanelTabs, pluginId);
         this.removeOwnedContributions(this.workspaceSelectionViews, pluginId);
         this.removeOwnedContributions(this.insertLinkTypes, pluginId);
-        this.removeOwnedContributions(this.documentCreationFlows, pluginId);
+        this.removeOwnedContributions(this.documentImports, pluginId);
+        this.removeOwnedContributions(this.languageModels, pluginId);
         this.removeOwnedContributions(this.nodePresentations, pluginId);
     }
 

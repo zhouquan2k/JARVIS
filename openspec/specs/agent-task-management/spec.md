@@ -1,3 +1,6 @@
+## Purpose
+Define Agent-scoped task-management behavior in the right-side workspace, including scope-aware task lists, inline editing, completion lifecycle, execution-state presentation, and desktop calendar synchronization.
+
 ## Requirements
 
 ### Requirement: Agent task management MUST expose a task tab in the Agent right panel
@@ -32,7 +35,7 @@ The task tab MUST resolve tasks from exactly one active selection at a time. A t
 - **AND** it MUST NOT mix in tasks from child agent scopes or unrelated agent scopes
 
 ### Requirement: Agent task management MUST support inline task creation and editing
-The task tab MUST let the user create and edit tasks through an inline editor inside the right panel. The editor MUST support task title, notes, due date-time, and priority fields.
+The task tab MUST let the user create and edit tasks through an inline editor inside the right panel. The editor MUST support task title, notes, due date-time, priority, and a mutually exclusive execution-state field.
 
 #### Scenario: Create a task inline for the active scope
 - **WHEN** the user clicks the add-task action from the task tab
@@ -43,6 +46,11 @@ The task tab MUST let the user create and edit tasks through an inline editor in
 - **WHEN** the user starts editing an existing task from the task list
 - **THEN** the system MUST open an inline task editor in the task tab
 - **AND** saving changes MUST update the rendered task content without leaving the right panel
+
+#### Scenario: Set one execution state while editing a task
+- **WHEN** the user edits a task and chooses an execution-state value
+- **THEN** the inline task editor MUST persist exactly one of `doing`, `morning`, `afternoon`, or `evening`
+- **AND** choosing a new execution-state value MUST replace the previous one instead of combining multiple values
 
 ### Requirement: Agent task management MUST support explicit completion lifecycle and completed-task collapse
 The task tab MUST support marking tasks complete, reopening completed tasks, deleting tasks, and collapsing completed tasks by default.
@@ -74,6 +82,19 @@ The task tab MUST visibly display due date-time information for tasks that have 
 - **WHEN** the task list contains a mix of tasks with and without `dueAt`
 - **THEN** tasks with `dueAt` MUST be ordered by ascending due time
 - **AND** tasks without `dueAt` MUST appear after all dated tasks
+
+### Requirement: Agent task management MUST display and prioritize execution-state metadata
+Shared task-list rendering MUST display task execution-state metadata distinctly from document/agent scope metadata. Tasks that have an execution-state value MUST be ordered before tasks that do not, while preserving the existing due-date ordering rules inside each tier.
+
+#### Scenario: Render execution-state metadata separately from scope metadata
+- **WHEN** the task list renders a task whose `executionState` is set
+- **THEN** the row MUST show that execution-state metadata in the task footer
+- **AND** the execution-state metadata MUST remain visually distinct from document or agent scope metadata
+
+#### Scenario: Order execution-state tasks ahead of non-execution-state tasks
+- **WHEN** the task list contains both tasks with and without an `executionState`
+- **THEN** tasks whose `executionState` is set MUST appear before tasks whose `executionState` is null
+- **AND** the existing due-date ordering rules MUST still apply within each of those two groups
 
 ### Requirement: Agent task management MUST treat the today shortcut as due-today plus overdue unfinished work
 The all-tasks `today` shortcut MUST include unfinished tasks whose due time falls on the current day and unfinished tasks whose due time has already passed before today ends. The `planned` shortcut MUST remain reserved for future tasks only.

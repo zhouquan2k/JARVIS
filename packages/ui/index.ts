@@ -13,7 +13,7 @@ export { createWorkspaceHostRouter, type WorkspaceHostRouter, type CreateWorkspa
 export { openConversationImportDialog, parseConversationImportPayload } from './src/utils/externalFileImport';
 export { installGlobalUnhandledErrorFallback } from './src/utils/installGlobalUnhandledErrorFallback';
 export { contributionQueryKey } from './src/plugins/injectionKeys';
-export { useDocumentCreationFlows } from './src/services/documentCreationFlows';
+export { useDocumentImports } from './src/services/documentCreationFlows';
 export {
     createBuiltinWorkspaceRuntime,
     type BuiltinWorkspaceRuntimeResult,

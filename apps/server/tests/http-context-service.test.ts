@@ -18,6 +18,7 @@ function createTaskService(): TaskService {
             completed,
             dueAt: null,
             priority: null,
+            executionState: null,
             documentPath: null,
             agentKey: '/',
             createdAt: 1,

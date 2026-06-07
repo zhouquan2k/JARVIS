@@ -1,6 +1,7 @@
 export type {
     Task,
     TaskCalendarSyncStatus,
+    TaskExecutionState,
     TaskPriority,
     TaskQueryTag,
     TaskService

@@ -1,11 +1,11 @@
 import { computed, inject } from 'vue';
-import type { DocumentCreationFlowContribution } from '@packages/core';
+import type { DocumentImportContribution } from '@packages/core';
 import { contributionQueryKey } from '../plugins/injectionKeys';
 
-export function useDocumentCreationFlows() {
+export function useDocumentImports() {
     const contributionQuery = inject(contributionQueryKey, null);
 
-    return computed<readonly DocumentCreationFlowContribution[]>(() => {
-        return contributionQuery?.value?.getDocumentCreationFlows() ?? [];
+    return computed<readonly DocumentImportContribution[]>(() => {
+        return contributionQuery?.value?.getDocumentImports() ?? [];
     });
 }

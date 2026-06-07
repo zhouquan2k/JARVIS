@@ -48,6 +48,7 @@ function createContextProvider(conversations: Conversation[] = []): IContextProv
             completed,
             dueAt: null,
             priority: null,
+            executionState: null,
             documentPath: null,
             agentKey: '/',
             createdAt: 1,
@@ -502,7 +503,7 @@ describe('AgentConversationPanel', () => {
 
         expect(chatStore.currentConversation).toMatchObject({
             title: 'New Chat',
-            boundNodeName: 'guide.md',
+            boundNodeName: 'guide',
             agentKey: '/docs/',
             documentPaths: ['/docs/guide.md']
         });
