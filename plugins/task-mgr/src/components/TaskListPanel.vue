@@ -209,7 +209,6 @@ const TaskListRow = defineComponent({
       h('div', {
         class: 'task-list-panel__content',
         'data-testid': `agent-task-content-${rowProps.task.id}`,
-        onClick: rowProps.isNavigable ? () => emit('open-task', rowProps.task) : undefined,
         onDblclick: rowProps.task.completed ? undefined : () => emit('start-edit', rowProps.task)
       }, [
         h('div', { class: 'task-list-panel__title-row' }, [
@@ -439,9 +438,13 @@ function startEditTaskFromRow(task: Task): void {
   startEditTask(task);
 }
 
-function openEditFromMenu(task: Task): void {
+async function openEditFromMenu(task: Task): Promise<void> {
   openMenuTaskId.value = null;
-  startEditTask(task);
+  if (isGlobalAllTasksView.value) {
+    await openTaskNode(task);
+  } else {
+    startEditTask(task);
+  }
 }
 
 function cancelEdit(): void {
@@ -772,9 +775,6 @@ function taskRowClass(task: Task): Record<string, boolean> {
   justify-self: stretch;
 }
 
-.task-list-panel__item--navigable .task-list-panel__content {
-  cursor: pointer;
-}
 
 .task-list-panel__group-title {
   font-size: 12px;

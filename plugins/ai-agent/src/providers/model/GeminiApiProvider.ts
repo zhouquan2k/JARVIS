@@ -678,7 +678,9 @@ export class GeminiApiProvider implements IAgentCapableProvider {
     }
 
     async checkAuth(): Promise<boolean> {
-        return !!this.resolveApiKey();
+        const key = this.resolveApiKey();
+        console.log('[GeminiApiProvider] checkAuth: apiKey present =', !!key, '| source:', key ? (this.apiKey ? 'constructor' : 'env-fallback') : 'none');
+        return !!key;
     }
 
     async getDocumentCapability() {

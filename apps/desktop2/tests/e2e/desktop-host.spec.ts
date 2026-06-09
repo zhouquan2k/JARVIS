@@ -343,8 +343,8 @@ test('desktop host keeps chatgpt-codex available in the provider catalog while a
         await page.getByTestId('topbar-workspace-normal-chat').click();
         await expect(page.getByTestId('conversation-workspace')).toBeVisible();
         await expect(page.getByTestId('normal-provider').locator('option')).toContainText(['ChatGPT (Codex)', 'ChatGPT (Web)', 'Gemini (API)']);
-        await expect(page.getByTestId('normal-provider')).toBeDisabled();
         await expect(page.getByTestId('normal-auth-warning')).toContainText('current provider auth is unavailable');
+        await expect(page.getByTestId('normal-input')).toBeDisabled();
 
         await browser.close();
     } finally {

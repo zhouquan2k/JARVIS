@@ -4,6 +4,9 @@ import { ChatGPTCodexProvider } from '../providers/model/ChatGPTCodexProvider';
 import { ChatGPTWebProvider } from '../providers/model/ChatGPTWebProvider';
 import type { ChatGPTCodexProviderOptions, ChatGPTWebProviderOptions } from '../providers/model/providerHostTypes';
 import { GeminiApiProvider } from '../providers/model/GeminiApiProvider';
+import { MultiModelGroupProvider, resolveGroupMembers } from '../providers/model/MultiModelGroupProvider';
+import { DomAutomationProvider, isModelsNotReadyError } from '../providers/model/dom/DomAutomationProvider';
+import { createDomTransport } from '../providers/model/dom/domTransport';
 import type {
     ModelProviderFactory,
     ModelProviderRuntime,
@@ -135,10 +138,21 @@ export function createModelProviderRuntime(options: ModelProviderRuntimeOptions)
     const modelCatalogCache = new Map<string, ProviderModelCatalog>();
     const inflightModelCatalogRequests = new Map<string, Promise<ProviderModelCatalog>>();
 
-    const availableProviders = APP_CONFIG.providers.filter((provider) => {
+    const filteredProviders = APP_CONFIG.providers.filter((provider) => {
         if (provider.enabled === false) return false;
-        return provider.supportedRuntimeModes.includes(options.runtimeMode);
+        if (!provider.supportedRuntimeModes.includes(options.runtimeMode)) return false;
+        return (provider.requiredCapabilities ?? []).every((cap) => {
+            if (cap === 'controlled-page') return options.controlledPageCapability != null;
+            return true;
+        });
     });
+    const defaultProviderId = APP_CONFIG.defaultProvidersByMode[options.runtimeMode];
+    const availableProviders = defaultProviderId
+        ? [
+              ...filteredProviders.filter((p) => p.id === defaultProviderId),
+              ...filteredProviders.filter((p) => p.id !== defaultProviderId)
+          ]
+        : filteredProviders;
 
     return {
         getAvailableProviders() {
@@ -178,7 +192,16 @@ export function createModelProviderRuntime(options: ModelProviderRuntimeOptions)
                     );
                     modelCatalogCache.set(providerId, validatedCatalog);
                     return validatedCatalog;
-                } catch {
+                } catch (error) {
+                    // 模型选择器尚未就绪（DOM provider 页面刚导航/未水合/未登录）：
+                    // 「不缓存」并向上抛出，让 store 应用静态兜底但保持可重试（下次重开 provider 再读）。
+                    if (isModelsNotReadyError(error)) {
+                        console.warn('[ModelProviderRuntime]', JSON.stringify({
+                            stage: 'models-not-ready-retryable',
+                            providerId
+                        }));
+                        throw error;
+                    }
                     modelCatalogCache.set(providerId, fallbackCatalog);
                     return fallbackCatalog;
                 } finally {
@@ -194,6 +217,37 @@ export function createModelProviderRuntime(options: ModelProviderRuntimeOptions)
             const providerConfig = availableProviders.find((item) => item.id === providerId);
             if (!providerConfig) {
                 throw new Error(`Provider '${providerId}' is not available in runtimeMode '${options.runtimeMode}'`);
+            }
+
+            if (providerId === 'group') {
+                const runtime = this;
+                return new MultiModelGroupProvider({
+                    resolveMemberProvider: (id) => runtime.getProvider(id, { fresh: true }),
+                    getGroupConfig: (presetModelId) => ({
+                        members: resolveGroupMembers(presetModelId ?? providerConfig.defaultModel)
+                    })
+                });
+            }
+
+            const domProviderTargetUrls: Record<string, string> = {
+                'chatgpt-dom': options.domProviderUrls?.['chatgpt-dom'] ?? 'https://chatgpt.com',
+                'gemini-dom': options.domProviderUrls?.['gemini-dom'] ?? 'https://gemini.google.com/app'
+            };
+            if (providerId in domProviderTargetUrls && options.controlledPageCapability) {
+                const targetUrl = domProviderTargetUrls[providerId];
+                return new DomAutomationProvider({
+                    id: providerId,
+                    label: providerConfig.name,
+                    // 传递静态 config 中第一个模型的 options/reasoningEffort，
+                    // 使动态获取的模型条目也携带相同选项定义和默认推理档位。
+                    modelOptions: providerConfig.models[0]?.options,
+                    defaultReasoningEffort: providerConfig.models[0]?.reasoningEffort,
+                    transport: createDomTransport({
+                        providerId,
+                        targetUrl,
+                        capability: options.controlledPageCapability
+                    })
+                });
             }
 
             const shouldUseFreshInstance = getProviderOptions?.fresh === true;

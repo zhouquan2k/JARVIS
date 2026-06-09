@@ -33,6 +33,26 @@
               <Highlighter class="editor-link-option-icon" :size="14" aria-hidden="true" />
               {{ t('shared.markdownStyleHighlight') }}
             </button>
+            <button
+              type="button"
+              class="editor-link-option"
+              data-testid="markdown-style-option-bold"
+              @mousedown.prevent
+              @click="insertMarkdownStyle('bold')"
+            >
+              <Bold class="editor-link-option-icon" :size="14" aria-hidden="true" />
+              {{ t('shared.markdownStyleBold') }}
+            </button>
+            <button
+              type="button"
+              class="editor-link-option"
+              data-testid="markdown-style-option-strikethrough"
+              @mousedown.prevent
+              @click="insertMarkdownStyle('strikethrough')"
+            >
+              <Strikethrough class="editor-link-option-icon" :size="14" aria-hidden="true" />
+              {{ t('shared.markdownStyleStrikethrough') }}
+            </button>
           </div>
         </div>
         <div v-if="showMarkdownLinkPicker" class="editor-link-picker">
@@ -310,7 +330,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
-import { Eye, Highlighter, Link2, Maximize2, MessageSquareQuote, Minimize2, PencilLine, RotateCcw, Save, Upload } from 'lucide-vue-next';
+import { Bold, Eye, Highlighter, Link2, Maximize2, MessageSquareQuote, Minimize2, PencilLine, RotateCcw, Save, Strikethrough, Upload } from 'lucide-vue-next';
 import type { ContextDocument, ContextNode } from '@packages/core/src';
 import { useWorkspaceI18n } from '../i18n';
 import { resolveDocumentViewer } from '../document-viewers';
@@ -434,6 +454,7 @@ const markdownViewerRef = ref<(Partial<DocumentViewerSearchHandle> & {
   }) => boolean;
   insertMarkdownInViewer?: (markdown: string) => boolean;
   toggleHighlightInViewer?: () => boolean;
+  toggleMarkInViewer?: (markName: string) => boolean;
 }) | null>(null);
 const searchInputRef = ref<HTMLInputElement | null>(null);
 const isSearchOpen = ref(false);
@@ -665,20 +686,42 @@ function insertMarkdownLink(targetPath: string) {
   insertMarkdownSnippetIntoDocument(snippet, () => markdownViewerRef.value?.insertMarkdownLink?.({ label, href }));
 }
 
-function insertMarkdownStyle(styleId: 'highlight') {
-  if (styleId !== 'highlight') {
-    return;
-  }
+type MarkdownStyleId = 'highlight' | 'bold' | 'strikethrough';
 
-  insertMarkdownStyleSnippetIntoDocument(styleId);
+interface MarkdownStyleDefinition {
+  /** Milkdown/ProseMirror mark 名称，用于 viewer 模式下的原地 toggleMark。 */
+  markName: string;
+  /** edit 模式（纯 textarea）在源字符串上直接 splice 的包裹标记。 */
+  open: string;
+  close: string;
 }
 
-function insertMarkdownStyleSnippetIntoDocument(styleId: 'highlight') {
-  if (styleId !== 'highlight') {
+const markdownStyleDefinitions: Record<MarkdownStyleId, MarkdownStyleDefinition> = {
+  highlight: { markName: 'highlight', open: '==', close: '==' },
+  bold: { markName: 'strong', open: '**', close: '**' },
+  strikethrough: { markName: 'strike_through', open: '~~', close: '~~' }
+};
+
+function insertMarkdownStyle(styleId: MarkdownStyleId) {
+  const definition = markdownStyleDefinitions[styleId];
+
+  // viewer 模式：与高亮原理一致，走 ProseMirror toggleMark 原地切换 mark，
+  // 不切到 edit 源码模式、不做 viewer 光标 → 源码偏移的换算（见 ARCHITECTURE §4.1）。
+  if (markdownViewerMode.value === 'viewer') {
+    if (styleId === 'highlight') {
+      markdownViewerRef.value?.toggleHighlightInViewer?.();
+    } else {
+      markdownViewerRef.value?.toggleMarkInViewer?.(definition.markName);
+    }
+    isStylePickerOpen.value = false;
     return;
   }
 
-  const buildReplacement = (selectedText: string) => selectedText ? `==${selectedText}==` : '====';
+  // edit 模式（纯 textarea）：在源字符串上直接 splice 包裹标记。
+  const { open, close } = definition;
+  const buildReplacement = (selectedText: string) =>
+    selectedText ? `${open}${selectedText}${close}` : `${open}${close}`;
+
   const resolveCaret = ({
     selectionStart,
     selectedText,
@@ -693,16 +736,9 @@ function insertMarkdownStyleSnippetIntoDocument(styleId: 'highlight') {
       return { start: end, end };
     }
 
-    const caret = selectionStart + 2;
+    const caret = selectionStart + open.length;
     return { start: caret, end: caret };
   };
-
-  const inViewer = markdownViewerMode.value === 'viewer';
-  if (inViewer) {
-    markdownViewerRef.value?.toggleHighlightInViewer?.();
-    isStylePickerOpen.value = false;
-    return;
-  }
 
   linkInsertionPointMissing.value = false;
   void runMarkdownInsertion(
@@ -782,11 +818,6 @@ async function triggerResourceUpload() {
 }
 
 function insertMarkdownSnippetIntoDocument(snippet: string, editModeAction: () => boolean | undefined) {
-  console.log('[insert-debug] insertMarkdownSnippetIntoDocument', {
-    activeTab: activeLinkPickerTab.value,
-    snippetPreview: snippet.slice(0, 80)
-  });
-
   linkInsertionPointMissing.value = false;
   void runMarkdownInsertion(editModeAction);
 }
@@ -796,11 +827,6 @@ async function runMarkdownInsertion(
   options: { closePicker?: 'link' | 'style' } = {}
 ) {
   const previousModelValue = props.modelValue;
-  console.log('[insert-debug] runMarkdownInsertion BEGIN', {
-    activeTab: activeLinkPickerTab.value,
-    markdownViewerMode: markdownViewerMode.value,
-    previousModelValueLength: previousModelValue.length
-  });
   if (markdownViewerMode.value !== 'edit') {
     markdownViewerMode.value = 'edit';
   }
@@ -809,13 +835,6 @@ async function runMarkdownInsertion(
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     await nextTick();
     const inserted = action() === true;
-    console.log('[insert-debug] runMarkdownInsertion attempt', {
-      attempt,
-      inserted,
-      markdownViewerMode: markdownViewerMode.value,
-      modelValueLengthAfter: props.modelValue.length,
-      modelValueChanged: props.modelValue !== previousModelValue
-    });
     if (!inserted) {
       continue;
     }
@@ -823,12 +842,6 @@ async function runMarkdownInsertion(
     for (let syncAttempt = 0; syncAttempt < maxAttempts; syncAttempt += 1) {
       await nextTick();
       const changed = props.modelValue !== previousModelValue;
-      console.log('[insert-debug] runMarkdownInsertion sync attempt', {
-        syncAttempt,
-        changed,
-        modelValueLength: props.modelValue.length,
-        previousModelValueLength: previousModelValue.length
-      });
       if (changed) {
         break;
       }
@@ -846,11 +859,6 @@ async function runMarkdownInsertion(
     if (options.closePicker !== 'link') {
       isStylePickerOpen.value = false;
     }
-    console.log('[insert-debug] runMarkdownInsertion END (success path)', {
-      finalModelValueLength: props.modelValue.length,
-      finalModelValuePreview: props.modelValue.slice(0, 80),
-      markdownViewerMode: markdownViewerMode.value
-    });
     return;
   }
 

@@ -94,6 +94,11 @@ export interface ConversationModelSelection {
     modelId: string;
     modelOptions: Record<string, boolean>;
     reasoningEffort?: ReasoningEffort;
+    /**
+     * 用户在模型下拉框中主动选择时为 true。为 true 时该会话的模型选择优先于
+     * 绑定 agent 的默认模型（modelProviderName/modelName）。默认/agent 驱动的选择不置位。
+     */
+    explicit?: boolean;
 }
 
 export interface ConversationArchiveMetadata {
@@ -419,7 +424,8 @@ export function cloneConversation(conversation: Conversation): Conversation {
                 providerId: conversation.modelSelection.providerId,
                 modelId: conversation.modelSelection.modelId,
                 modelOptions: { ...conversation.modelSelection.modelOptions },
-                reasoningEffort: conversation.modelSelection.reasoningEffort
+                reasoningEffort: conversation.modelSelection.reasoningEffort,
+                ...(conversation.modelSelection.explicit ? { explicit: true } : {})
             }
             : undefined,
         compare: conversation.compare
@@ -502,7 +508,8 @@ export function normalizeConversation(conversation: Conversation): Conversation 
                     || modelSelection.reasoningEffort === 'medium'
                     || modelSelection.reasoningEffort === 'high'
                     ? modelSelection.reasoningEffort
-                    : undefined
+                    : undefined,
+                ...(modelSelection.explicit === true ? { explicit: true } : {})
             }
             : undefined,
         compare: conversation.compare

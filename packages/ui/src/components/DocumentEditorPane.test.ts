@@ -32,11 +32,10 @@ const buildMarkdownResourceInsertion = vi.fn((from: string, to: string) => {
     };
 });
 const captureRenderableMarkdownSelection = vi.fn<(root: HTMLElement) => { blockText: string; start: number; end: number; selectedText: string; blockIndex?: number } | null>(() => null);
-const resolveEmptyBlockMarkdownOffset = vi.fn(() => null);
-const resolveEmptyBlockAnchorFallback = vi.fn(() => null);
 const insertMarkdownAtViewerSelection = vi.fn(() => false);
 const applyMarkdownLinkAtViewerSelection = vi.fn(() => true);
 const toggleMarkdownHighlightAtViewerSelection = vi.fn(() => true);
+const toggleMarkAtViewerSelection = vi.fn(() => true);
 const findResizableMarkdownImageSource = vi.fn(() => null);
 const insertPastedMarkdownImage = vi.fn((markdown: string, selection: { start: number; end: number }, imageMarkdown: string) => (
     `${markdown.slice(0, selection.start)}${imageMarkdown}${markdown.slice(selection.end)}`
@@ -92,11 +91,10 @@ vi.mock('../utils/markdownDocument', () => ({
     findResizableMarkdownImageSource,
     insertMarkdownAtViewerSelection,
     toggleMarkdownHighlightAtViewerSelection,
+    toggleMarkAtViewerSelection,
     insertPastedMarkdownImage,
     replaceMarkdownDocument,
     readMarkdownDocument,
-    resolveEmptyBlockAnchorFallback,
-    resolveEmptyBlockMarkdownOffset,
     resolveMarkdownSourceSelection,
     rewriteMarkdownImageRatio,
     destroyMarkdownEditor,
@@ -339,6 +337,44 @@ describe('DocumentEditorPane', () => {
         // 走的是 viewer 直插命令，且不再经过源码偏移映射。
         expect(toggleMarkdownHighlightAtViewerSelection).toHaveBeenCalledTimes(1);
         expect(resolveMarkdownSourceSelection).not.toHaveBeenCalled();
+        expect(wrapper.find('[data-testid="markdown-style-picker"]').exists()).toBe(false);
+    });
+
+    it('toggles bold directly in the viewer with the strong mark without switching to source mode', async () => {
+        // 回归：粗体/删除线在 viewer 模式必须与高亮原理一致，走 ProseMirror toggleMark，
+        // 不得 fallthrough 到 edit 源码模式（曾导致切模式 + 插入位置不准）。
+        toggleMarkAtViewerSelection.mockClear();
+        const wrapper = await mountDocumentEditorWithModelSync({
+            activePath: '/docs/guide.md',
+            activeDocument: {
+                path: '/docs/guide.md',
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('Read this'),
+                canWrite: true
+            },
+            activeViewerId: 'text',
+            activePaneMode: 'viewer',
+            modelValue: 'Read this',
+            isSaving: false,
+            isDirty: false,
+            latestFileChange: null,
+            diffEntries: [],
+            canUndo: false,
+            canRedo: false
+        });
+
+        await wrapper.get('[data-testid="markdown-style-picker-trigger"]').trigger('click');
+        await wrapper.get('[data-testid="markdown-style-option-bold"]').trigger('click');
+        await wrapper.vm.$nextTick();
+        await wrapper.vm.$nextTick();
+        await wrapper.vm.$nextTick();
+
+        // 走 viewer 直插命令、传入 strong mark，不经过源码偏移映射，且保持 viewer 模式。
+        expect(toggleMarkAtViewerSelection).toHaveBeenCalledTimes(1);
+        expect(toggleMarkAtViewerSelection.mock.calls[0]?.[1]).toBe('strong');
+        expect(resolveMarkdownSourceSelection).not.toHaveBeenCalled();
+        expect(wrapper.find('[data-testid="document-editor-input"]').exists()).toBe(false);
+        expect(wrapper.get('[data-testid="markdown-mode-toggle"]').attributes('aria-pressed')).toBe('true');
         expect(wrapper.find('[data-testid="markdown-style-picker"]').exists()).toBe(false);
     });
 

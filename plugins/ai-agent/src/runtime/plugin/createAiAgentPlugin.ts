@@ -251,13 +251,21 @@ function createRuntime(hostContext: IHostContext, options: AiAgentPluginOptions)
     }
 
     const browserAutomation = hostContext.getCapability<BrowserAutomationCapability>('browser-automation');
+    const controlledPage = hostContext.getCapability<ControlledPageCapability>('controlled-page');
     const lightweightModel = resolveLightweightModelSelection(options.runtimeMode);
+
+    const env = options.env ?? {};
+    const domProviderUrls: Partial<Record<'chatgpt-dom' | 'gemini-dom', string>> = {};
+    if (env.CHATPRISM_DOM_CHATGPT_URL) domProviderUrls['chatgpt-dom'] = env.CHATPRISM_DOM_CHATGPT_URL;
+    if (env.CHATPRISM_DOM_GEMINI_URL) domProviderUrls['gemini-dom'] = env.CHATPRISM_DOM_GEMINI_URL;
 
     return createModelProviderRuntime({
         runtimeMode: options.runtimeMode,
         credentials: {
-            geminiApiKey: resolveGeminiApiKey(options.env ?? {})
+            geminiApiKey: resolveGeminiApiKey(env)
         },
+        controlledPageCapability: controlledPage ?? undefined,
+        domProviderUrls: Object.keys(domProviderUrls).length > 0 ? domProviderUrls : undefined,
         providerOptionsResolver(providerId) {
             if (providerId === 'chatgpt-web' && browserAutomation) {
                 return {
@@ -336,6 +344,7 @@ async function initializeAiAgentPlugin(hostContext: IHostContext, options: AiAge
     chatStore.setRuntimeMode(options.runtimeMode);
     chatStore.setModelProviderResolver((providerId: string) => runtime.getProvider(providerId));
     chatStore.setProviderModelsResolver((providerId: string) => runtime.getProviderModels(providerId));
+    chatStore.setControlledPageCapability(hostContext.getCapability<ControlledPageCapability>('controlled-page'));
     chatStore.setProviders(
         runtime.getProvider(providerCatalog[0].id),
         storageProvider

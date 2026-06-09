@@ -625,6 +625,38 @@ describe('useChatStore workspace history flow', () => {
         expect(store.currentModelId).toBe('gpt-5');
     });
 
+    it('keeps a not-ready provider retryable (loaded:false) and reloads on the next ensure', async () => {
+        const store = useChatStore();
+        let calls = 0;
+        store.setProviders(new MockModelProvider(), new MockStorageProvider([]));
+        store.setProviderModelsResolver(async (providerId: string) => {
+            if (providerId !== 'mock-provider') {
+                return { models: [{ id: 'other-dynamic', name: 'Other Dynamic' }], defaultModel: 'other-dynamic' };
+            }
+            calls += 1;
+            if (calls === 1) {
+                const err = new Error('model picker not ready');
+                err.name = 'ModelsNotReadyError';
+                throw err;
+            }
+            return {
+                models: [{ id: 'live-a', name: 'Live A' }, { id: 'live-b', name: 'Live B' }],
+                defaultModel: 'live-a'
+            };
+        });
+
+        await store.initializeProviderCatalog(providerCatalog);
+        // 第一次未就绪：应用静态兜底，但 loaded 保持 false（可重试），不被锁死。
+        expect(store.providerModelStates['mock-provider']?.loaded).toBe(false);
+        expect(calls).toBe(1);
+
+        // 下次 ensure（未 loaded）重新请求 → 读到真实模型。
+        await store.ensureProviderModelsLoaded('mock-provider');
+        expect(store.providerModelStates['mock-provider']?.loaded).toBe(true);
+        expect(store.resolveProviderConfig('mock-provider')?.models.map((m) => m.id)).toEqual(['live-a', 'live-b']);
+        expect(calls).toBe(2);
+    });
+
     it('restores conversation model selection and normalizes conflicting options', async () => {
         const storage = new MockStorageProvider([
             {
@@ -1601,6 +1633,46 @@ describe('useChatStore workspace history flow', () => {
         expect(store.currentError).toBe(
             "Referenced file '@spec.pdf' is not a text document and cannot be injected into the prompt."
         );
+    });
+
+    it('treats @MemberName as a group mention (not a file ref) so it is excluded from file resolution', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const contextProvider = createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' }
+            ],
+            documents: {
+                '/docs/guide.md': '# Docs Guide'
+            }
+        });
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog(providerCatalog);
+        store.setWorkspaceContext({
+            activePath: '/docs/guide.md',
+            activeDocument: null,
+            contextProvider
+        });
+
+        // 非 group：不排除任何 @token。
+        expect(store.resolveActiveGroupMentionNames()).toEqual(new Set());
+
+        // 切到 group 预设（dom-group：ChatGPT + Gemini）。
+        store.currentProviderId = 'group';
+        store.currentModelId = 'dom-group';
+        const excluded = store.resolveActiveGroupMentionNames();
+        expect(excluded).toEqual(new Set(['chatgpt', 'gemini']));
+
+        // 成员定向 @ChatGPT 不会被当作不存在的文件去解析（不抛错、不注入文件）。
+        await expect(
+            store.resolveMentionedContextDocuments('@ChatGPT 帮我看下', { excludedRefs: excluded })
+        ).resolves.toEqual([]);
+
+        // 真实文件引用 @guide.md（非成员名）仍正常解析。
+        const resolved = await store.resolveMentionedContextDocuments('请阅读 @guide.md', { excludedRefs: excluded });
+        expect(resolved.map((file) => file.path)).toEqual(['/docs/guide.md']);
     });
 
     it('applies and groups local conversations by agentKey without overwriting an existing binding', async () => {
@@ -2613,6 +2685,81 @@ describe('useChatStore workspace history flow', () => {
             modelOptions: {},
             reasoningEffort: 'high'
         });
+    });
+
+    it('lets an explicit dropdown selection override the agent-specified model during send', async () => {
+        const defaultProvider = new MockModelProvider();
+        const agentProvider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+
+        store.setProviders(defaultProvider, storage);
+        store.setModelProviderResolver((providerId: string) => {
+            if (providerId === 'other-provider') {
+                agentProvider.id = providerId;
+                return agentProvider;
+            }
+
+            defaultProvider.id = providerId;
+            return defaultProvider;
+        });
+        store.setProviderModelsResolver(async (providerId: string) => {
+            if (providerId === 'other-provider') {
+                return {
+                    models: [{ id: 'other-dynamic', name: 'Other Dynamic' }],
+                    defaultModel: 'other-dynamic'
+                };
+            }
+
+            return {
+                models: [{ id: 'dynamic-model', name: 'Dynamic Model', options: chatgptOptionDefinitions }],
+                defaultModel: 'dynamic-model'
+            };
+        });
+
+        await store.initializeProviderCatalog(providerCatalog);
+        // agent 指定了 other-provider，但用户在下拉框主动选了 mock-provider → 应以下拉框为准。
+        store.setActiveAgentContext({
+            ...scopedAgent,
+            modelProviderName: 'other-provider',
+            modelName: 'other-dynamic'
+        });
+        await store.setCurrentModelProviderByUser('mock-provider');
+        await store.sendMessage('用下拉框显式选择发送');
+
+        expect(agentProvider.promptsUsed).toHaveLength(0);
+        expect(defaultProvider.promptsUsed[0]).toBe('用下拉框显式选择发送');
+        expect(store.currentConversation?.modelSelection).toMatchObject({
+            providerId: 'mock-provider',
+            explicit: true
+        });
+    });
+
+    it('clears the explicit override when an agent context selection is applied', async () => {
+        const defaultProvider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+
+        store.setProviders(defaultProvider, storage);
+        store.setModelProviderResolver((providerId: string) => {
+            defaultProvider.id = providerId;
+            return defaultProvider;
+        });
+        store.setProviderModelsResolver(async () => ({
+            models: [{ id: 'dynamic-model', name: 'Dynamic Model' }, { id: 'other-dynamic', name: 'Other Dynamic' }],
+            defaultModel: 'dynamic-model'
+        }));
+
+        await store.initializeProviderCatalog(providerCatalog);
+        await store.setCurrentModelProviderByUser('mock-provider', 'other-dynamic');
+        expect(store.currentModelSelectionExplicit).toBe(true);
+
+        await store.applyActiveAgentContextSelection({
+            ...scopedAgent,
+            modelProviderName: 'mock-provider',
+            modelName: 'dynamic-model'
+        });
+        expect(store.currentModelSelectionExplicit).toBe(false);
     });
 
     it('imports external files and preserves origin metadata', async () => {

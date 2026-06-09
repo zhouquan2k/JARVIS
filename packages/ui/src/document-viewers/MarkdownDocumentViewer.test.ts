@@ -21,8 +21,7 @@ const getMarkdownEditorSearchMatchCount = vi.fn(() => 0);
 const scrollToMarkdownEditorSearchMatch = vi.fn();
 const captureRenderableMarkdownSelection = vi.fn();
 const resolveMarkdownSourceSelection = vi.fn();
-const resolveEmptyBlockMarkdownOffset = vi.fn(() => null);
-const resolveEmptyBlockAnchorFallback = vi.fn(() => null);
+const toggleMarkAtViewerSelection = vi.fn(() => true);
 const insertMarkdownAtViewerSelection = vi.fn(() => false);
 const applyMarkdownLinkAtViewerSelection = vi.fn(() => true);
 const toggleMarkdownHighlightAtViewerSelection = vi.fn(() => true);
@@ -40,9 +39,8 @@ vi.mock('../utils/markdownDocument', () => ({
     normalizeMarkdownViewerContent,
     readMarkdownDocument,
     replaceMarkdownDocument,
-    resolveEmptyBlockAnchorFallback,
-    resolveEmptyBlockMarkdownOffset,
     resolveMarkdownSourceSelection,
+    toggleMarkAtViewerSelection,
     rewriteMarkdownImageRatio,
     setMarkdownEditorSearchQuery,
     setMarkdownEditorActiveSearchMatchIndex,

@@ -129,3 +129,46 @@ viewer 模式插入入口位于 `packages/ui/src/utils/markdownDocument.ts` 的 
 - Extension 和 Desktop 还会桥接浏览器控制页面以访问 ChatGPT 和 Gemini 历史。
 - Sync Server 与 Desktop 宿主都可以通过文件系统适配层访问知识资料库；知识资料库即使部署在本地也视为外部依赖。
 
+## 6. 多模型协作与 DOM 自动化 Provider
+
+### 6.1 整体定位
+
+本节描述两个彼此正交的新增能力（均借鉴自 openteam）：
+
+- **Group Provider**：在一个 JARVIS 会话内让多个模型并发协作应答。
+- **DOM 自动化 Provider**（仅 desktop）：直接驱动真实 ChatGPT/Gemini 页面，而非逆向其 HTTP 后端，从而对协议变更更具韧性。
+
+二者均通过实现 `IModelProvider` 契约接入系统，store / 持久化 / 发送主链路**完全不变**。
+
+### 6.2 GroupModelProvider
+
+- **实现**：`plugins/ai-agent/src/providers/model/MultiModelGroupProvider.ts`，`id='group'`。
+- **编排语义**：
+  - 无 `@name`：广播，预设内所有成员并发应答（`Promise.all`）。
+  - `@成员名`（可多个）：仅点名成员应答，仍并发；成员名单展示于会话顶部名片栏（`NormalChatView.vue`），点击 chip 自动插入 `@name`。
+  - 同轮各成员看不到对方「本轮」回复；跨轮可见上一轮合并 transcript（经 `options.history` 传入）。
+- **输出**：按成员分段的合并 transcript（`### {成员名}\n{文本}`），作为单条 assistant 消息返回。
+- **成员解析**：`resolveMemberProvider(id) → runtime.getProvider(id, { fresh: true })`，Group 侧无任何 provider 特判。
+- **本期成员**：仅 DOM 预设 `dom-group`（`chatgpt-dom` + `gemini-dom`），`web_search` option 透传给各成员。
+- **注册**：`createModelProviderRuntime.getProvider` 对 `providerId === 'group'` 特判构造，不污染模块级 `DEFAULT_FACTORIES`。
+
+### 6.3 DomAutomationProvider
+
+- **实现**：`plugins/ai-agent/src/providers/model/dom/DomAutomationProvider.ts`，`id='chatgpt-dom'` / `'gemini-dom'`（仅 desktop）。
+- **传输层**：`domTransport.ts` 封装 `controlled-page` 能力（`openControlledPage` / `evaluateInPage` / `subscribeControlledPageEvent`），provider 无站点知识。
+- **联网开关**：`sendMessage` 在 `open()` 后、`injectAndSubmit()` 前调 `transport.setWebSearch(options.modelOptions?.web_search ?? false)`；DOM preload 实现 `window.__jarvisSetWebSearch(enabled)`（异步、幂等）切换页面联网状态。两站点机制不同（经 2026-06 实时探活确认）：
+  - **ChatGPT**：开关位于 composer「+」(`composer-plus-btn`) 菜单内、文本含「网页搜索 / Web search」的 `[role="menuitemradio"]`；打开 Radix 菜单与点击菜单项都需合成 `pointerdown→pointerup→click`；开启态以 composer 内 `button[data-tone="accent"]`（文本含「搜索」）作为可见判定。
+  - **Gemini**：无独立联网开关（Gemini 默认即以 Google 搜索接地），故为有意 no-op；菜单内 Deep Research 是另一套重量级深度研究模式，刻意不与 `web_search` 绑定。
+- **流式回传**：受控页 preload（`chatgptDomPreload.ts` / `geminiDomPreload.ts`）内常驻 `MutationObserver`，经 页→主→渲染 IPC push 事件（`ControlledPageEvent { providerId, requestId, type, text? }`）；`requestId` 防止跨请求串话；超时降级为 `evaluateInPage` 一次性读取。
+- **会话连续性**：首轮（无 history）`reset: true` 强制导航到站点首页开新对话；后续轮 `reset: false` 复用当前受控页继续追问。
+
+### 6.4 受控页事件订阅能力
+
+扩展 `ControlledPageCapability`（`packages/core/src/interfaces/ControlledPageCapability.ts`）：
+
+```
+subscribeControlledPageEvent(providerId, listener): () => void
+```
+
+链路：受控页 preload `ipcRenderer.send(dom-event-from-page)` → main 进程 `controlledPageIpc.ts` 广播 → renderer preload `ipcRenderer.on` → `ControlledPageCapability.subscribeControlledPageEvent` → `DomAutomationProvider`。
+

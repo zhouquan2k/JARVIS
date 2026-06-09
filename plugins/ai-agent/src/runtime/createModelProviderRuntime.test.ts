@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createModelProviderRuntime } from './createModelProviderRuntime';
+import { createModelsNotReadyError } from '../providers/model/dom/DomAutomationProvider';
 import type { IModelProvider, ProviderStreamUpdate, SendMessageOptions } from '../interfaces/IModelProvider';
 
 class CustomGeminiProvider implements IModelProvider {
@@ -269,6 +270,33 @@ describe('createModelProviderRuntime', () => {
 
         expect(catalogA).toEqual(catalogB);
         expect(customProvider.catalogCalls).toBe(1);
+    });
+
+    it('rethrows ModelsNotReadyError without caching, so the next call retries the provider', async () => {
+        const provider = new CustomGeminiProvider();
+        let firstCall = true;
+        provider.getAvailableModels = async () => {
+            provider.catalogCalls += 1;
+            if (firstCall) {
+                firstCall = false;
+                throw createModelsNotReadyError('gemini-api');
+            }
+            return { models: [{ id: 'live-flash', name: 'Live Flash' }], defaultModel: 'live-flash' };
+        };
+        const runtime = createModelProviderRuntime({
+            runtimeMode: 'web',
+            providerFactory(providerId) {
+                return providerId === 'gemini-api' ? provider : undefined;
+            }
+        });
+
+        // 第一次：未就绪 → 向上抛出（让 store 应用兜底并保持可重试），不缓存。
+        await expect(runtime.getProviderModels('gemini-api')).rejects.toMatchObject({ name: 'ModelsNotReadyError' });
+
+        // 第二次：未被锁死，重新调用 provider，读到真实模型。
+        const second = await runtime.getProviderModels('gemini-api');
+        expect(second.models).toEqual([{ id: 'live-flash', name: 'Live Flash' }]);
+        expect(provider.catalogCalls).toBe(2);
     });
 
     it('falls back to static provider catalog when dynamic catalog is invalid', async () => {

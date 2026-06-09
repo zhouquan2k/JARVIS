@@ -68,8 +68,8 @@ test('web2 all-tasks supports inline editing, today defaults, execution ordering
   await page.getByTestId('task-editor-save').click();
 
   await expect(page.getByTestId('agent-task-open-list')).toContainText(documentTaskTitle);
+  await expect(documentRow).toContainText(documentTaskTitle);
   await expect(documentRow).toContainText('Doing');
-  await expect(page.locator('[data-testid^="agent-task-item-"]').first()).toContainText(documentTaskTitle);
 
   await page.getByText(documentTaskTitle, { exact: true }).click();
 

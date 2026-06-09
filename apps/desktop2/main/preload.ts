@@ -21,8 +21,10 @@ import {
     type ProviderLoginEventPayload
 } from '../shared/authBridge';
 import {
+    DESKTOP_CONTROLLED_PAGE_DOM_EVENT_TO_RENDERER_CHANNEL,
     DESKTOP_CONTROLLED_PAGE_EVALUATE_CHANNEL,
     DESKTOP_CONTROLLED_PAGE_OPEN_CHANNEL,
+    type ControlledPageDomEvent,
     type EvaluateInControlledPageRequest,
     type OpenControlledPageRequest
 } from '../shared/controlledPageBridge';
@@ -35,7 +37,10 @@ import {
 
 contextBridge.exposeInMainWorld('chatprismDesktop', {
     runtimeEnv: {
-        contextBaseUrl: process.env.CHATPRISM_CONTEXT_BASE_URL
+        contextBaseUrl: process.env.CHATPRISM_CONTEXT_BASE_URL,
+        domChatGptUrl: process.env.CHATPRISM_DOM_CHATGPT_URL,
+        domGeminiUrl: process.env.CHATPRISM_DOM_GEMINI_URL,
+        geminiApiKey: process.env.CHATPRISM_LLM_API_KEY || process.env.VITE_LLM_API_KEY || process.env.VITE_GEMINI_API_KEY
     },
     initializeContextAccess() {
         return ipcRenderer.invoke(DESKTOP_CONTEXT_INITIALIZE_CHANNEL);
@@ -116,6 +121,16 @@ contextBridge.exposeInMainWorld('chatprismDesktop', {
         ipcRenderer.on(DESKTOP_PROVIDER_LOGIN_CLOSED_CHANNEL, wrapped);
         return () => {
             ipcRenderer.off(DESKTOP_PROVIDER_LOGIN_CLOSED_CHANNEL, wrapped);
+        };
+    },
+    subscribeControlledPageEvent(listener: (event: ControlledPageDomEvent) => void) {
+        const wrapped = (_event: Electron.IpcRendererEvent, payload: ControlledPageDomEvent) => {
+            listener(payload);
+        };
+
+        ipcRenderer.on(DESKTOP_CONTROLLED_PAGE_DOM_EVENT_TO_RENDERER_CHANNEL, wrapped);
+        return () => {
+            ipcRenderer.off(DESKTOP_CONTROLLED_PAGE_DOM_EVENT_TO_RENDERER_CHANNEL, wrapped);
         };
     }
 });

@@ -6,6 +6,22 @@
     <div class="chat-main">
       <div class="chat-thread">
         <div class="chat-messages" ref="messagesRef" data-testid="normal-messages" @scroll="onMessagesScroll">
+          <div
+            v-if="currentGroupMembers.length > 0 && !isPreviewing"
+            class="group-member-banner"
+            data-testid="group-member-banner"
+          >
+            <button
+              v-for="member in currentGroupMembers"
+              :key="member.providerId"
+              type="button"
+              class="group-member-chip"
+              :data-testid="`group-member-chip-${member.providerId}`"
+              @click="insertMention(member.name)"
+            >{{ member.name }}</button>
+            <span class="group-member-hint">{{ t('shared.groupMemberBannerHint') }}</span>
+          </div>
+
           <div v-if="chatStore.isExternalPreviewLoading" class="loading-banner" data-testid="external-preview-loading">
             {{ t('shared.loadingConversation') }}
           </div>
@@ -64,20 +80,42 @@
                   :attachments="resolveMessageAttachments(msg)"
                 />
                 <template v-if="msg.role === 'assistant'">
-                  <template
-                    v-for="block in buildAssistantRenderBlocks(msg)"
-                    :key="block.key"
-                  >
-                    <MarkdownContent
-                      v-if="block.type === 'markdown'"
-                      class="content markdown-body"
-                      :source="block.content"
-                      :annotations="block.annotations"
-                    />
-                    <MessageFunctionalParts
-                      v-else
-                      :parts="block.parts"
-                    />
+                  <template v-if="buildGroupMemberBlocks(msg).length > 0">
+                    <div
+                      v-for="seg in buildGroupMemberBlocks(msg)"
+                      :key="seg.key"
+                      class="group-member-block"
+                    >
+                      <div class="group-member-name">{{ seg.name }}</div>
+                      <MarkdownContent
+                        class="content markdown-body"
+                        :source="seg.content"
+                      />
+                      <a
+                        v-if="seg.isDom"
+                        class="dom-conversation-link"
+                        href="#"
+                        :data-testid="`dom-conversation-link-${seg.providerId}`"
+                        @click.prevent="chatStore.revealControlledPage(seg.providerId)"
+                      >{{ t('shared.viewDomConversation') }}</a>
+                    </div>
+                  </template>
+                  <template v-else>
+                    <template
+                      v-for="block in buildAssistantRenderBlocks(msg)"
+                      :key="block.key"
+                    >
+                      <MarkdownContent
+                        v-if="block.type === 'markdown'"
+                        class="content markdown-body"
+                        :source="block.content"
+                        :annotations="block.annotations"
+                      />
+                      <MessageFunctionalParts
+                        v-else
+                        :parts="block.parts"
+                      />
+                    </template>
                   </template>
                 </template>
               </div>
@@ -137,6 +175,28 @@
       <template v-if="!isPreviewing">
         <div class="toolbar-stack">
           <div
+            v-if="domGroupMembers.length > 0 || currentSingleDomProvider !== null"
+            class="dom-pages-bar"
+            data-testid="dom-pages-bar"
+          >
+            <span class="dom-pages-label">{{ t('shared.openDomPageHint') }}</span>
+            <button
+              v-if="currentSingleDomProvider !== null"
+              type="button"
+              class="dom-page-btn"
+              :data-testid="`dom-page-btn-${currentSingleDomProvider.id}`"
+              @click="chatStore.revealControlledPage(currentSingleDomProvider.id)"
+            >{{ currentSingleDomProvider.name }} ↗</button>
+            <button
+              v-for="member in domGroupMembers"
+              :key="member.providerId"
+              type="button"
+              class="dom-page-btn"
+              :data-testid="`dom-page-btn-${member.providerId}`"
+              @click="chatStore.revealControlledPage(member.providerId)"
+            >{{ member.name }} ↗</button>
+          </div>
+          <div
             v-if="isEditingQuestion"
             class="edit-resend-banner"
             data-testid="edit-resend-banner"
@@ -173,7 +233,7 @@
               :current-provider-id="chatStore.currentProviderId"
               :current-model-id="chatStore.currentModelId"
               :models-loading="chatStore.isCurrentProviderModelsLoading"
-              :disabled="isInputDisabled"
+              :disabled="false"
               @provider-change="onProviderChange"
               @model-change="onModelChange"
             />
@@ -331,6 +391,8 @@ import ProviderModelSelector from '../components/ProviderModelSelector.vue';
 import QuestionIndexPanel from '../components/QuestionIndexPanel.vue';
 import ReasoningEffortSelector from '../components/ReasoningEffortSelector.vue';
 import { useChatStore } from '../store/chat';
+import { resolveGroupMembers } from '../providers/model/MultiModelGroupProvider';
+import type { GroupMember } from '../group/groupTypes';
 import { useAiAgentHostBridge } from '../runtime/plugin/hostBridge';
 import type { ChatRoutePath } from '@packages/ui/src/routes';
 import { isPromptSubmitHotkey } from '@packages/ui/src/utils/promptHotkeys';
@@ -399,6 +461,18 @@ type AssistantRenderBlock =
       type: 'functional-parts';
       parts: MessageFunctionalPart[];
     };
+
+type GroupMemberBlock = {
+  key: string;
+  name: string;
+  providerId: string;
+  content: string;
+  isDom: boolean;
+};
+
+function isDomMember(member: GroupMember): boolean {
+  return member.providerId.endsWith('-dom');
+}
 
 async function refreshAuthStatus() {
   isAuthenticated.value = await chatStore.checkAuth();
@@ -522,6 +596,70 @@ function buildAssistantRenderBlocks(message: ConversationMessage): AssistantRend
 
 const displayConversation = computed(() => chatStore.displayConversation);
 const isPreviewing = computed(() => chatStore.isPreviewing);
+
+// 当前会话若为 group provider，解析其成员（用于把合并回复按成员分段渲染）。
+// 优先用会话已持久化的 modelSelection；新建会话可能尚未同步，回退到当前激活的 provider/model。
+const currentGroupMembers = computed<GroupMember[]>(() => {
+  const selection = displayConversation.value?.modelSelection;
+  let providerId = selection?.providerId;
+  let modelId = selection?.modelId;
+  if (providerId !== 'group' && !isPreviewing.value) {
+    providerId = chatStore.currentProviderId;
+    modelId = chatStore.currentModelId;
+  }
+  if (providerId !== 'group' || !modelId) {
+    return [];
+  }
+  return resolveGroupMembers(modelId);
+});
+const domGroupMembers = computed(() => currentGroupMembers.value.filter(isDomMember));
+const currentSingleDomProvider = computed(() => {
+  const providerId = chatStore.currentProviderId;
+  if (!providerId || providerId === 'group' || !providerId.endsWith('-dom')) {
+    return null;
+  }
+  return chatStore.availableProviders.find((p) => p.id === providerId) ?? null;
+});
+
+/**
+ * 将 group 合并回复（`### {成员名}` 分段拼接）拆成逐成员块。
+ * 对所有 group 启用（group 消息不携带 annotations/functionalParts，分段渲染无损失）：
+ * 每个成员一个样式化标题；仅 dom 成员额外显示「原始会话」链接。非 group 会话返回 []。
+ */
+function buildGroupMemberBlocks(message: ConversationMessage): GroupMemberBlock[] {
+  const members = currentGroupMembers.value;
+  if (members.length === 0) {
+    return [];
+  }
+
+  const memberByName = new Map(members.map((member) => [member.name, member]));
+  const content = message.content || '';
+  const headerPattern = /^### (.+)$/gm;
+  const boundaries: Array<{ member: GroupMember; contentStart: number; headerStart: number }> = [];
+
+  for (const match of content.matchAll(headerPattern)) {
+    const member = memberByName.get(match[1].trim());
+    if (!member || typeof match.index !== 'number') {
+      continue;
+    }
+    boundaries.push({
+      member,
+      headerStart: match.index,
+      contentStart: match.index + match[0].length
+    });
+  }
+
+  return boundaries.map((boundary, index) => {
+    const end = index + 1 < boundaries.length ? boundaries[index + 1].headerStart : content.length;
+    return {
+      key: `group-${message.id}-${index}`,
+      name: boundary.member.name,
+      providerId: boundary.member.providerId,
+      content: content.slice(boundary.contentStart, end).trim(),
+      isDom: isDomMember(boundary.member)
+    };
+  });
+}
 const renderedMessages = computed(() => isPreviewing.value ? displayConversation.value?.messages || [] : chatStore.visibleMessages);
 const modelOptionDefinitions = computed(() => chatStore.currentModelOptionDefinitions);
 const isAgentMode = computed(() => chatStore.workspaceMode === 'agent');
@@ -733,6 +871,26 @@ watch(hasDraftAttachments, (value) => {
     isTopToolbarCollapsed.value = true;
   }
 });
+
+function insertMention(name: string) {
+  const textarea = inputRef.value;
+  const mention = `@${name} `;
+  if (!textarea) {
+    chatStore.setDraftPrompt(draftPrompt.value + mention);
+    return;
+  }
+  const start = textarea.selectionStart ?? draftPrompt.value.length;
+  const end = textarea.selectionEnd ?? start;
+  const before = draftPrompt.value.slice(0, start);
+  const after = draftPrompt.value.slice(end);
+  const newValue = before + mention + after;
+  chatStore.setDraftPrompt(newValue);
+  nextTick(() => {
+    textarea.focus();
+    const cursor = start + mention.length;
+    textarea.setSelectionRange(cursor, cursor);
+  });
+}
 
 watch(() => chatStore.draftFocusRequestKey, () => {
   nextTick(() => {
@@ -957,11 +1115,11 @@ async function onDrop(event: DragEvent) {
 }
 
 async function onProviderChange(providerId: string) {
-  await chatStore.setCurrentModelProvider(providerId);
+  await chatStore.setCurrentModelProviderByUser(providerId);
 }
 
 function onModelChange(modelId: string) {
-  chatStore.setCurrentModel(modelId);
+  chatStore.setCurrentModelByUser(modelId);
 }
 
 function onModelOptionChange(payload: { key: string; enabled: boolean }) {
@@ -1091,6 +1249,40 @@ async function startNewChat() {
   font-size: 13px;
 }
 
+.group-member-banner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  width: min(100%, 840px);
+}
+
+.group-member-chip {
+  padding: 2px 10px;
+  border-radius: 12px;
+  background: rgba(99, 179, 237, 0.15);
+  color: #90cdf4;
+  font-size: 12px;
+  font-weight: 500;
+  border: none;
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+
+.group-member-chip:hover {
+  background: rgba(99, 179, 237, 0.28);
+}
+
+.group-member-hint {
+  color: var(--cp-text-secondary, rgba(255, 255, 255, 0.4));
+  font-size: 12px;
+  margin-left: 4px;
+}
+
 .preview-actions h3 {
   margin: 0;
   color: var(--cp-text-primary);
@@ -1114,6 +1306,82 @@ async function startNewChat() {
 .content {
   word-wrap: break-word;
   color: var(--cp-text-primary);
+}
+
+.group-member-block {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 成员标题做成"分区标签"样式，明显区别于正文：accent 色 + 小字号 + 字距 + 下划线分隔。 */
+.group-member-name {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--cp-accent);
+  margin: 16px 0 6px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid var(--cp-border);
+}
+
+.group-member-name::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--cp-accent);
+}
+
+.group-member-block:first-child .group-member-name {
+  margin-top: 0;
+}
+
+.dom-pages-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.dom-pages-label {
+  font-size: 12px;
+  color: var(--cp-text-muted);
+}
+
+.dom-page-btn {
+  font-size: 12px;
+  padding: 2px 10px;
+  border: 1px solid var(--cp-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--cp-text-muted);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.dom-page-btn:hover {
+  background: var(--cp-sidebar-hover);
+  color: var(--cp-text-primary);
+}
+
+.dom-conversation-link {
+  align-self: flex-start;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--cp-text-faint);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.dom-conversation-link:hover {
+  color: var(--cp-accent);
+  text-decoration: underline;
 }
 
 .question-root {

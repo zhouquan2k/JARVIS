@@ -1,11 +1,23 @@
-import { BrowserWindow, type WebContents } from 'electron';
+import { app, BrowserWindow, type WebContents } from 'electron';
 import { getProviderPartition } from './sessionManager';
+
+// App 退出时才允许受控页窗口真正销毁；用户主动关闭一律转为隐藏，保留真实会话 thread。
+let appQuitting = false;
+app.on('before-quit', () => {
+    appQuitting = true;
+});
 
 export interface ControlledPageOptions {
     targetUrl?: string;
+    /** 仅当受控页当前为空白（全新窗口/about:blank）时才导航到该 URL。 */
+    targetUrlIfBlank?: string;
     visible?: boolean;
     preloadPath?: string;
     forceReload?: boolean;
+}
+
+function isBlankUrl(url: string): boolean {
+    return url === '' || url === 'about:blank';
 }
 
 type BrowserWindowLike = {
@@ -30,7 +42,7 @@ export function createControlledPageManager(options: {
     const pages = new Map<string, { window: BrowserWindowLike; preloadPath?: string }>();
 
     const createWindow = options.createWindow ?? ((providerId: string, visible: boolean, preloadPath?: string) => {
-        return new BrowserWindow({
+        const win = new BrowserWindow({
             show: visible,
             width: 1280,
             height: 900,
@@ -45,7 +57,19 @@ export function createControlledPageManager(options: {
                 // (sidebar expansion, lazy-load scrolling, polling) works while not shown.
                 backgroundThrottling: false
             }
-        }) as BrowserWindowLike;
+        });
+
+        // 用户主动关闭窗口时转为隐藏，避免销毁 webContents 丢失真实会话；
+        // 仅在 App 退出（before-quit）或 dispose() 强制 destroy 时真正销毁。
+        win.on('close', (event) => {
+            if (appQuitting || win.isDestroyed()) {
+                return;
+            }
+            event.preventDefault();
+            win.hide();
+        });
+
+        return win as BrowserWindowLike;
     });
 
     return {
@@ -87,24 +111,27 @@ export function createControlledPageManager(options: {
             }
 
             const currentUrl = page.webContents.getURL();
-            const shouldLoad = Boolean(pageOptions.targetUrl) && (forceReload || currentUrl !== pageOptions.targetUrl);
+            // 优先使用显式 targetUrl；否则在窗口空白时回退到 targetUrlIfBlank（用于登录/查看入口）。
+            const resolvedTargetUrl = pageOptions.targetUrl
+                ?? (pageOptions.targetUrlIfBlank && isBlankUrl(currentUrl) ? pageOptions.targetUrlIfBlank : undefined);
+            const shouldLoad = Boolean(resolvedTargetUrl) && (forceReload || currentUrl !== resolvedTargetUrl);
             console.log('[ControlledPageManager]', JSON.stringify({
                 stage: 'ensure-page',
                 providerId,
                 reused,
                 hasPreload: Boolean(requestedPreloadPath),
-                targetUrl: pageOptions.targetUrl,
+                targetUrl: resolvedTargetUrl,
                 currentUrl,
                 forceReload,
                 willLoad: shouldLoad
             }));
 
-            if (shouldLoad && pageOptions.targetUrl) {
-                await page.loadURL(pageOptions.targetUrl);
+            if (shouldLoad && resolvedTargetUrl) {
+                await page.loadURL(resolvedTargetUrl);
                 console.log('[ControlledPageManager]', JSON.stringify({
                     stage: 'ensure-page-loaded',
                     providerId,
-                    targetUrl: pageOptions.targetUrl,
+                    targetUrl: resolvedTargetUrl,
                     finalUrl: page.webContents.getURL()
                 }));
             }

@@ -63,6 +63,11 @@ function isConfiguredDefaultModelError(error: unknown): error is Error {
     return error instanceof Error && error.name === 'ConfiguredDefaultModelNotFoundError';
 }
 
+// DOM provider 受控页模型选择器尚未就绪（页面刚导航/未水合/未登录）。按 name 跨边界识别。
+function isModelsNotReadyError(error: unknown): error is Error {
+    return error instanceof Error && error.name === 'ModelsNotReadyError';
+}
+
 export const useCompareStore = defineStore('compare', {
     state: (): CompareState => ({
         runtime: null,
@@ -202,6 +207,7 @@ export const useCompareStore = defineStore('compare', {
                     };
 
                 this.applyProviderModelCatalog(providerId, catalog.models, catalog.defaultModel);
+                this.setProviderModelState(providerId, { loading: false, loaded: true });
             } catch (error) {
                 if (isConfiguredDefaultModelError(error)) {
                     this.analysisError = error.message;
@@ -214,8 +220,9 @@ export const useCompareStore = defineStore('compare', {
                     baseProvider.models.map((model) => ({ ...model })),
                     baseProvider.defaultModel
                 );
-            } finally {
-                this.setProviderModelState(providerId, { loading: false, loaded: true });
+                // 模型选择器未就绪：用静态兜底但不标记 loaded，下次重开 provider 时重读真实模型。
+                const ready = !isModelsNotReadyError(error);
+                this.setProviderModelState(providerId, { loading: false, loaded: ready });
             }
 
             return this.resolveProviderConfig(providerId) || null;

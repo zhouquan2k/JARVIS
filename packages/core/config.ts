@@ -31,6 +31,7 @@ export interface ProviderConfig {
     defaultModel: string;
     preferredDefaultModel?: string;
     supportedRuntimeModes: RuntimeMode[];
+    requiredCapabilities?: string[];
     enabled?: boolean;
 }
 
@@ -51,6 +52,12 @@ export interface AnalyzerConfig {
     defaultProvider: string;
     defaultModel: string;
     systemPrompt: string;
+}
+
+export interface GroupMemberConfig {
+    providerId: string;
+    modelId: string;
+    name: string;
 }
 
 export const DEFAULT_SYNC_KEY = '0';
@@ -122,7 +129,13 @@ const DEFAULT_ANALYZER_PROMPT = [
     'Model B output: {outputB}'
 ].join('\n\n');
 
-export const APP_CONFIG: { providers: ProviderConfig[]; analyzer: AnalyzerConfig; lightweightModels: LightweightModelConfig } = {
+export const APP_CONFIG: {
+    providers: ProviderConfig[];
+    defaultProvidersByMode: Partial<Record<RuntimeMode, string>>;
+    analyzer: AnalyzerConfig;
+    lightweightModels: LightweightModelConfig;
+    groupPresets: Record<string, GroupMemberConfig[]>;
+} = {
     providers: [
         {
             id: 'chatgpt-codex',
@@ -365,8 +378,98 @@ export const APP_CONFIG: { providers: ProviderConfig[]; analyzer: AnalyzerConfig
             defaultModel: 'gemini-pro-latest',
             preferredDefaultModel: 'Gemini Pro Latest',
             supportedRuntimeModes: ['extension', 'web', 'desktop']
+        },
+        {
+            id: 'group',
+            name: 'Group (Multi-Model)',
+            models: [
+                {
+                    id: 'dom-group',
+                    name: 'ChatGPT + Gemini (DOM)',
+                    options: [
+                        {
+                            key: 'web_search',
+                            label: 'Web search',
+                            labelKey: 'option.webSearch',
+                            type: 'boolean' as const,
+                            description: 'Enable web search for all group members.',
+                            descriptionKey: 'option.webSearchDescription',
+                            defaultValue: false
+                        }
+                    ]
+                }
+            ],
+            defaultModel: 'dom-group',
+            supportedRuntimeModes: ['desktop'],
+            requiredCapabilities: ['controlled-page']
+        },
+        {
+            id: 'chatgpt-dom',
+            name: 'ChatGPT (DOM)',
+            models: [
+                {
+                    id: 'dom',
+                    name: 'ChatGPT (DOM)',
+                    // __composer-pill 里的 Thinking/Instant 映射为推理档位而非模型，
+                    // 由 setReasoningEffort 驱动；此处 reasoningEffort:'high' 设默认档为 Thinking。
+                    reasoningEffort: 'high' as const,
+                    options: [
+                        {
+                            key: 'web_search',
+                            label: 'Web search',
+                            labelKey: 'option.webSearch',
+                            type: 'boolean' as const,
+                            description: 'Enable web search in ChatGPT.',
+                            descriptionKey: 'option.webSearchDescription',
+                            defaultValue: false
+                        }
+                    ]
+                }
+            ],
+            defaultModel: 'dom',
+            supportedRuntimeModes: ['desktop'],
+            requiredCapabilities: ['controlled-page']
+        },
+        {
+            id: 'gemini-dom',
+            name: 'Gemini (DOM)',
+            models: [
+                {
+                    id: 'dom',
+                    name: 'Gemini (DOM)',
+                    // 思考等级「标准/扩展」映射为推理档位，由 setReasoningEffort 驱动；
+                    // reasoningEffort:'high' 设默认档为「扩展」思考。
+                    reasoningEffort: 'high' as const,
+                    options: [
+                        {
+                            key: 'web_search',
+                            label: 'Web search',
+                            labelKey: 'option.webSearch',
+                            type: 'boolean' as const,
+                            description: 'Enable web search in Gemini.',
+                            descriptionKey: 'option.webSearchDescription',
+                            defaultValue: false
+                        }
+                    ]
+                }
+            ],
+            defaultModel: 'dom',
+            // 动态目录就绪后默认选中 "3.1 Pro"（Gemini 高推理模型）。
+            preferredDefaultModel: '3.1 Pro',
+            supportedRuntimeModes: ['desktop'],
+            requiredCapabilities: ['controlled-page']
         }
     ],
+    defaultProvidersByMode: {
+        web: 'gemini-api',
+        desktop: 'gemini-dom'
+    },
+    groupPresets: {
+        'dom-group': [
+            { providerId: 'chatgpt-dom', modelId: 'dom', name: 'ChatGPT' },
+            { providerId: 'gemini-dom', modelId: 'dom', name: 'Gemini' }
+        ]
+    },
     analyzer: {
         defaultProvider: 'gemini-api',
         defaultModel: 'gemini-pro-latest',

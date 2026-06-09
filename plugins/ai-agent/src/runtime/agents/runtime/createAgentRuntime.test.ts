@@ -358,6 +358,61 @@ describe('createAgentRuntime', () => {
         });
     });
 
+    it('resolves the provider from request.providerId (explicit selection) over the agent default', async () => {
+        const provider = new BasicProvider();
+        const requestedProviderIds: string[] = [];
+        const runtime: ModelProviderRuntime = {
+            getAvailableProviders: () => [],
+            getProviderCatalog: () => [],
+            getProviderModels: async () => ({ models: [{ id: 'mock-model', name: 'Mock Model' }], defaultModel: 'mock-model' }),
+            getProvider: (id: string) => {
+                requestedProviderIds.push(id);
+                return provider;
+            }
+        };
+        const agentRuntime = createAgentRuntime({ modelProviderRuntime: runtime });
+
+        await agentRuntime.run(
+            {
+                prompt: '群聊提问',
+                agent: { ...scopedAgent, modelProviderName: 'gemini-api' },
+                workspace: { activePath: null, contextProvider: null },
+                providerId: 'group',
+                modelId: 'codex-gemini'
+            },
+            () => undefined
+        );
+
+        expect(requestedProviderIds).toContain('group');
+        expect(requestedProviderIds).not.toContain('gemini-api');
+    });
+
+    it('falls back to the agent provider when request.providerId is absent', async () => {
+        const provider = new BasicProvider();
+        const requestedProviderIds: string[] = [];
+        const runtime: ModelProviderRuntime = {
+            getAvailableProviders: () => [],
+            getProviderCatalog: () => [],
+            getProviderModels: async () => ({ models: [{ id: 'mock-model', name: 'Mock Model' }], defaultModel: 'mock-model' }),
+            getProvider: (id: string) => {
+                requestedProviderIds.push(id);
+                return provider;
+            }
+        };
+        const agentRuntime = createAgentRuntime({ modelProviderRuntime: runtime });
+
+        await agentRuntime.run(
+            {
+                prompt: '普通聊天',
+                agent: { ...scopedAgent, modelProviderName: 'gemini-api' },
+                workspace: { activePath: null, contextProvider: null }
+            },
+            () => undefined
+        );
+
+        expect(requestedProviderIds).toContain('gemini-api');
+    });
+
     it('reuses the standard stream/update contracts for non-agent requests', async () => {
         const provider = new BasicProvider();
         const runtime = createAgentRuntime({

@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 
 import type { ContextDocument, ContextNode, ProjectDocumentEntry, ContextSearchMatch, ContextSearchRequest, CreateContextNodeInput, MoveContextNodeInput, WorkspaceContext, WriteContextDocumentInput, WriteContextDocumentResult } from '@packages/core/src';
-import type { EvaluateInControlledPageRequest, OpenControlledPageRequest } from '../shared/controlledPageBridge';
+import type { ControlledPageDomEvent, EvaluateInControlledPageRequest, OpenControlledPageRequest } from '../shared/controlledPageBridge';
 import type {
     BrowserAutomationCookieRequest,
     BrowserAutomationFetchRequest,
@@ -20,6 +20,9 @@ declare global {
         chatprismDesktop?: {
             runtimeEnv?: {
                 contextBaseUrl?: string;
+                domChatGptUrl?: string;
+                domGeminiUrl?: string;
+                geminiApiKey?: string;
             };
             initializeContextAccess(): Promise<void>;
             getContext(): Promise<WorkspaceContext>;
@@ -41,6 +44,7 @@ declare global {
             onProviderLoginWindowOpened(listener: (providerId: string) => void): () => void;
             onProviderLoginCompleted(listener: (providerId: string) => void): () => void;
             onProviderLoginWindowClosed(listener: (providerId: string) => void): () => void;
+            subscribeControlledPageEvent(listener: (event: ControlledPageDomEvent) => void): () => void;
         };
     }
 }

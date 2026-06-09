@@ -205,7 +205,9 @@ export function createAgentRuntime(options: CreateAgentRuntimeOptions): AgentRun
         async run(request, onUpdate) {
             abortRequested = false;
 
-            const providerId = request.agent?.modelProviderName?.trim() || request.providerId;
+            // 信任调用方（chatStore.resolveSendTarget）已解析好的 providerId（已考虑「下拉框显式选择优先于 agent」）；
+            // agent.modelProviderName 仅作为未显式指定 providerId 时的回退，避免在此把显式选择（如 group）覆盖回 agent 模型。
+            const providerId = request.providerId || request.agent?.modelProviderName?.trim();
             if (!providerId) {
                 throw new Error('No active model provider selected.');
             }

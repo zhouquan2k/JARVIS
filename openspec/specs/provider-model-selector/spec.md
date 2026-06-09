@@ -1,19 +1,24 @@
 English | [Chinese](spec.zh-CN.md)
 
-## MODIFIED Requirements
+## Purpose
+Define the visible provider selector and cascading model selector behavior in chat interfaces across supported hosts.
 
-### Requirement: Show Provider Selector in chat interface
-The chat interface MUST provide a visible Provider selection control; in normal chat mode it MUST provide a single Provider selector, and in compare mode it MUST provide separate Provider selectors for A and B. This requirement MUST apply to both the Web host and the extension full-window host.
+## Requirements
+### Requirement: Model selector MUST expose the group provider with team presets
+The provider/model selector SHALL list the `group` provider, and its cascading model list SHALL present the configured team presets as selectable models. Selecting a preset SHALL bind that team preset to the conversation.
 
-#### Scenario: Compare mode renders two independent provider selectors in extension host
-- **WHEN** the user enters the compare chat view in the extension full-window host
-- **THEN** the system MUST render independent Provider selectors for Model A and Model B
-- **AND** each Provider option set MUST come from the list of providers available in extension runtime mode.
+#### Scenario: Group presets appear as model choices
+- **WHEN** the user opens the model selector for the `group` provider
+- **THEN** the cascading model list MUST present each configured team preset as a selectable entry
+- **AND** selecting a preset MUST bind that preset to the conversation
 
-### Requirement: Show a cascading Model selector based on Provider
-Each Provider selector MUST bind a cascading Model selector; when one Provider group changes, that group's Model list MUST refresh independently and select the default model for that Provider without affecting the other group's selection state. This behavior MUST remain independent in the extension host as well.
+### Requirement: Model selector MUST expose desktop-only DOM providers
+The selector SHALL list the `chatgpt-dom` and `gemini-dom` providers when running in the desktop runtime, alongside the existing `chatgpt-web` provider. These DOM providers SHALL NOT appear in web or extension runtimes.
 
-#### Scenario: Changing Provider A updates only Model A options in extension compare mode
-- **WHEN** the user switches the Provider for Model A in the extension compare view
-- **THEN** the system MUST refresh only Model A's model list and automatically select the default model
-- **AND** Model B's Provider and Model selection MUST remain unchanged.
+#### Scenario: DOM providers visible on desktop
+- **WHEN** the selector is opened in the desktop runtime
+- **THEN** `chatgpt-dom` and `gemini-dom` MUST be selectable alongside `chatgpt-web`
+
+#### Scenario: DOM providers hidden off desktop
+- **WHEN** the selector is opened in a web or extension runtime
+- **THEN** `chatgpt-dom` and `gemini-dom` MUST NOT appear

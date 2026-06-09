@@ -102,6 +102,7 @@ import {
   scrollToMarkdownEditorSearchMatch,
   setMarkdownEditorActiveSearchMatchIndex,
   setMarkdownEditorSearchQuery,
+  toggleMarkAtViewerSelection,
   toggleMarkdownHighlightAtViewerSelection,
   type MarkdownConversationLinkTarget,
   type MarkdownEditor,
@@ -1045,15 +1046,33 @@ defineExpose({
   insertMarkdownConversationLink,
   insertMarkdownSnippet,
   insertMarkdownInViewer,
-  toggleHighlightInViewer
+  toggleHighlightInViewer,
+  toggleMarkInViewer
 });
+
+// viewer(WYSIWYG) 原地编辑后，Milkdown 的 markdownUpdated 监听是异步触发的，
+// 若用户在监听回调前就切到源码模式（mode-switch 读的是 props.modelValue），
+// 刚插入的内容会丢失。这里在原地编辑成功后立即把编辑器实时 markdown 同步回
+// modelValue，使其不依赖异步监听的时序。
+function flushViewerEditToModel(applied: boolean): boolean {
+  if (!applied || !editor) {
+    return applied;
+  }
+
+  const next = readMarkdownDocument(editor);
+  if (typeof next === 'string' && next !== props.modelValue) {
+    lastKnownMarkdown = next;
+    emit('update:modelValue', next);
+  }
+  return applied;
+}
 
 function insertMarkdownInViewer(markdown: string): boolean {
   if (!editor) {
     console.warn('[markdown-viewer] insertMarkdownInViewer: no milkdown editor');
     return false;
   }
-  return insertMarkdownAtViewerSelection(editor, markdown);
+  return flushViewerEditToModel(insertMarkdownAtViewerSelection(editor, markdown));
 }
 
 function toggleHighlightInViewer(): boolean {
@@ -1061,7 +1080,15 @@ function toggleHighlightInViewer(): boolean {
     console.warn('[markdown-viewer] toggleHighlightInViewer: no milkdown editor');
     return false;
   }
-  return toggleMarkdownHighlightAtViewerSelection(editor);
+  return flushViewerEditToModel(toggleMarkdownHighlightAtViewerSelection(editor));
+}
+
+function toggleMarkInViewer(markName: string): boolean {
+  if (!editor) {
+    console.warn('[markdown-viewer] toggleMarkInViewer: no milkdown editor');
+    return false;
+  }
+  return flushViewerEditToModel(toggleMarkAtViewerSelection(editor, markName));
 }
 
 function applyLinkInViewer(input: { label: string; href: string }): boolean {
@@ -1069,7 +1096,7 @@ function applyLinkInViewer(input: { label: string; href: string }): boolean {
     console.warn('[markdown-viewer] applyLinkInViewer: no milkdown editor');
     return false;
   }
-  return applyMarkdownLinkAtViewerSelection(editor, input);
+  return flushViewerEditToModel(applyMarkdownLinkAtViewerSelection(editor, input));
 }
 
 function getViewerScrollContainer(): HTMLElement | null {
@@ -1154,12 +1181,6 @@ function insertMarkdownSnippet(input: {
   }) => { start: number; end: number };
 }): boolean {
   if (!isMarkdownEditMode.value || !markdownSourceRef.value) {
-    console.log('[insert-debug] insertMarkdownSnippet SKIPPED', {
-      activePath: props.activePath,
-      mode: props.markdownViewerMode,
-      isMarkdownEditMode: isMarkdownEditMode.value,
-      hasTextarea: !!markdownSourceRef.value
-    });
     return false;
   }
 
@@ -1184,27 +1205,6 @@ function insertMarkdownSnippet(input: {
     ? input.buildReplacement(selectedText)
     : (input.markdown ?? '');
   const nextValue = `${textarea.value.slice(0, selectionStart)}${replacement}${textarea.value.slice(selectionEnd)}`;
-  console.log('[insert-debug] insertMarkdownSnippet APPLY', {
-    activePath: props.activePath,
-    mode: props.markdownViewerMode,
-    textareaValueLength: textarea.value.length,
-    textareaValuePreview: textarea.value.slice(0, 80),
-    propsModelValueLength: props.modelValue.length,
-    textareaMatchesModelValue: textarea.value === props.modelValue,
-    hasFocus,
-    preferRememberedMarkdownSelection,
-    hasLastMarkdownSelection: !!lastMarkdownSelection,
-    useRememberedSelection,
-    selectionStart,
-    selectionEnd,
-    selectedText,
-    replacementLength: replacement.length,
-    replacementPreview: replacement.slice(0, 120),
-    nextValueLength: nextValue.length,
-    nextValueChanged: nextValue !== textarea.value,
-    nextValuePreview: nextValue.slice(0, 120)
-  });
-
   lastKnownMarkdown = nextValue;
   const nextSelection = input.resolveCaret?.({
     selectionStart,
@@ -1613,6 +1613,11 @@ function requiresMarkdownDocumentPathRebind(content: string): boolean {
   color: #22d3ee;
   text-decoration-color: currentColor;
   cursor: pointer;
+}
+
+.editor-input :deep(.milkdown .ProseMirror del) {
+  color: rgba(226, 232, 240, 0.38);
+  text-decoration-color: rgba(226, 232, 240, 0.3);
 }
 
 .editor-input :deep(.milkdown .milkdown-code-block .hidden) {

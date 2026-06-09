@@ -36,6 +36,13 @@ function getCapabilityMap(): Map<HostCapabilityKey, unknown> {
             },
             evaluateInPage(input: Parameters<ControlledPageCapability['evaluateInPage']>[0]) {
                 return window.chatprismDesktop!.evaluateInControlledPage(input);
+            },
+            subscribeControlledPageEvent(providerId, listener) {
+                return window.chatprismDesktop!.subscribeControlledPageEvent((event) => {
+                    if (event.providerId === providerId) {
+                        listener(event);
+                    }
+                });
             }
         } satisfies ControlledPageCapability);
         capabilities.set('provider-login', {

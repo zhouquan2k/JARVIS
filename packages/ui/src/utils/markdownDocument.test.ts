@@ -585,25 +585,6 @@ describe('markdownDocument', () => {
         });
     });
 
-    it('falls back to anchor-based offset for empty blocks when mdast is unavailable', async () => {
-        const { resolveEmptyBlockAnchorFallback } = await import('./markdownDocument');
-        const root = document.createElement('div');
-        root.innerHTML = '<div class="milkdown"><div class="ProseMirror"><p>First</p><p><br></p><p>Third</p></div></div>';
-        document.body.append(root);
-
-        const markdown = 'First\n\nThird\n';
-        const result = resolveEmptyBlockAnchorFallback(
-            root,
-            { blockText: '', start: 0, end: 0, selectedText: '', blockIndex: 1 },
-            markdown
-        );
-
-        expect(result).not.toBeNull();
-        expect(result!.start).toBe(result!.end);
-        expect(result!.start).toBeGreaterThan(markdown.indexOf('First'));
-        expect(result!.start).toBeLessThanOrEqual(markdown.indexOf('Third'));
-    });
-
     it('finds a unique local markdown image source and rewrites the ratio in Crepe markdown image form', async () => {
         const {
             findResizableMarkdownImageSource,

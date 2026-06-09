@@ -38,6 +38,10 @@ workspace "ChatPrism" "Context and container views for the current codebase" {
                 conversationModel = component "Conversation" "Core conversation data model shared by chat, import, and sync flows." "Domain model"
                 resolvedAgentConfig = component "ResolvedAgentConfig" "Agent configuration after workspace scope resolution." "Domain model"
                 compareWorkflowController = component "CompareWorkflowController" "Controller for dual-model comparison workflows. Typical implementation: CompareWorkflowController." "Core service"
+                multiModelGroupProvider = component "MultiModelGroupProvider" "Group provider (id='group') that dispatches a prompt concurrently to a fixed preset of member IModelProviders (broadcast or @mention targeting), merges streaming output into a segmented transcript, and fans out abort. Members resolved via resolveMemberProvider → runtime.getProvider. File: plugins/ai-agent/src/providers/model/MultiModelGroupProvider.ts" "IModelProvider implementation"
+                domAutomationProvider = component "DomAutomationProvider" "Desktop-only IModelProvider (chatgpt-dom / gemini-dom) that drives real ChatGPT/Gemini pages via a hidden BrowserWindow: open controlled page, set web-search toggle, inject prompt, observe DOM streaming reply via MutationObserver push events, resolve on done or timeout-fallback. File: plugins/ai-agent/src/providers/model/dom/DomAutomationProvider.ts" "IModelProvider implementation (desktop only)"
+                domTransport = component "DomTransport" "Thin transport layer over ControlledPageCapability: open/setWebSearch/injectAndSubmit/subscribe. Encapsulates all controlled-page calls; no site-specific knowledge. File: plugins/ai-agent/src/providers/model/dom/domTransport.ts" "Transport abstraction"
+                controlledPageCapability = component "ControlledPageCapability" "Host capability interface for managing per-provider hidden BrowserWindows: openControlledPage, evaluateInPage, subscribeControlledPageEvent. Desktop implementation wires Electron IPC; the subscription method enables push-based DOM event relay (page→main→renderer). File: packages/core/src/interfaces/ControlledPageCapability.ts" "Host capability interface"
             }
         }
 
@@ -95,6 +99,11 @@ workspace "ChatPrism" "Context and container views for the current codebase" {
         conversationWorkflowController -> conversationModel "creates and updates active conversations"
         modelProvider -> conversationModel "consumes message context and produces results"
         compareWorkflowController -> modelProviderRuntime "gets comparison execution providers"
+        multiModelGroupProvider -> modelProvider "implements"
+        multiModelGroupProvider -> modelProviderRuntime "resolves member providers via"
+        domAutomationProvider -> modelProvider "implements"
+        domAutomationProvider -> domTransport "delegates page operations to"
+        domTransport -> controlledPageCapability "uses open/evaluate/subscribe"
     }
 
     views {

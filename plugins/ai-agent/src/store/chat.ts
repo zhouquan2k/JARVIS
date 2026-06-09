@@ -34,6 +34,7 @@ import {
     type ProviderModelCatalog,
     type RuntimeMode
 } from '@packages/core/config';
+import type { ControlledPageCapability } from '@packages/core';
 import { markRaw, toRaw } from 'vue';
 import { translateWorkspaceMessage } from '@packages/ui/src/i18n';
 import { executeConversationArchive, type ArchiveExecutionResult } from '../services/conversationArchive';
@@ -41,6 +42,7 @@ import { buildFallbackConversationTitle, extractNodeNameFromPath, sanitizeConver
 import { formatHttpApiError } from '@packages/ui/src/utils/formatHttpApiError';
 import { augmentPromptWithMentionedFiles, prepareRequestWithActiveDocument } from '../runtime/agents/augmentPromptWithAgentContext';
 import type { AgentRuntime } from '../runtime/agents/runtime/types';
+import { resolveGroupMembers } from '../providers/model/MultiModelGroupProvider';
 
 export type WorkspaceHistorySource = 'local' | 'external';
 export type WorkspaceMode = 'agent' | 'conversation';
@@ -79,6 +81,7 @@ export interface ChatState {
     modelProvider: IModelProvider | null;
     modelProviderResolver: ((providerId: string) => IModelProvider) | null;
     providerModelsResolver: ((providerId: string) => Promise<ProviderModelCatalog>) | null;
+    controlledPageCapability: ControlledPageCapability | null;
     storageProvider: IConversationPersistProvider | null;
     historyProviders: ExternalHistoryProviderEntry[];
     externalFileImportHandler: ExternalFileImportHandler | null;
@@ -114,6 +117,8 @@ export interface ChatState {
     currentModelId: string;
     currentModelOptions: Record<string, boolean>;
     currentReasoningEffort: ReasoningEffort;
+    /** 当前模型选择是否为用户在下拉框主动选择（优先于 agent 默认模型）。 */
+    currentModelSelectionExplicit: boolean;
     questionIndexFilter: QuestionIndexFilter;
     isQuestionIndexPanelOpen: boolean;
     activeQuestionId: string | null;
@@ -141,6 +146,12 @@ export interface ChatState {
     currentConversationArchiveStatus: ConversationArchiveStatus;
     runtimeMode: RuntimeMode;
 }
+
+// dom provider 受控页的站点首页（用于全新窗口的登录/查看导航）。
+const DOM_PROVIDER_SITE_URLS: Record<string, string> = {
+    'chatgpt-dom': 'https://chatgpt.com',
+    'gemini-dom': 'https://gemini.google.com/app'
+};
 
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
 const DEFAULT_REASONING_EFFORT: ReasoningEffort = 'high';
@@ -279,13 +290,15 @@ function extractMentionedFileRefToken(token: string): string | null {
     return trimmed.replace(/^\.?\//u, '');
 }
 
-function extractMentionedFileRefs(prompt: string): string[] {
+function extractMentionedFileRefs(prompt: string, excludedLowerNames?: ReadonlySet<string>): string[] {
     const matches = prompt.matchAll(FILE_REFERENCE_PATTERN);
     const refs: string[] = [];
 
     for (const match of matches) {
         const token = typeof match[2] === 'string' ? extractMentionedFileRefToken(match[2]) : null;
-        if (token) {
+        // group 会话里命中成员名的 @token 是「成员定向」而非文件引用，需从文件解析中排除，
+        // 否则会被当成不存在的文件而抛 "Referenced file '@xxx' was not found"。
+        if (token && !excludedLowerNames?.has(token.toLowerCase())) {
             refs.push(token);
         }
     }
@@ -511,7 +524,8 @@ function buildConversationModelSelection(
     providerId: string,
     modelId: string,
     modelOptions: Record<string, boolean>,
-    reasoningEffort: ReasoningEffort
+    reasoningEffort: ReasoningEffort,
+    explicit = false
 ): ConversationModelSelection | undefined {
     if (!providerId || !modelId) {
         return undefined;
@@ -521,7 +535,9 @@ function buildConversationModelSelection(
         providerId,
         modelId,
         modelOptions: cloneModelOptions(modelOptions),
-        reasoningEffort
+        reasoningEffort,
+        // 仅在用户显式覆盖时携带该字段，保持与历史持久化数据/默认选择的结构一致。
+        ...(explicit ? { explicit: true } : {})
     };
 }
 
@@ -698,6 +714,12 @@ function isConfiguredDefaultModelError(error: unknown): error is Error {
     return error instanceof Error && error.name === 'ConfiguredDefaultModelNotFoundError';
 }
 
+// DOM provider 受控页模型选择器尚未就绪（页面刚导航/未水合/未登录）。
+// 与 DomAutomationProvider.MODELS_NOT_READY_ERROR_NAME 一致，按 name 跨边界识别。
+function isModelsNotReadyError(error: unknown): error is Error {
+    return error instanceof Error && error.name === 'ModelsNotReadyError';
+}
+
 function formatHistoryError(error: unknown): string {
     if (error instanceof ExternalHistoryError) {
         switch (error.code) {
@@ -816,6 +838,7 @@ export const useChatStore = defineStore('chat', {
         modelProvider: null,
         modelProviderResolver: null,
         providerModelsResolver: null,
+        controlledPageCapability: null,
         storageProvider: null,
         historyProviders: [],
         externalFileImportHandler: null,
@@ -847,6 +870,7 @@ export const useChatStore = defineStore('chat', {
         currentModelId: '',
         currentModelOptions: {},
         currentReasoningEffort: DEFAULT_REASONING_EFFORT,
+        currentModelSelectionExplicit: false,
         questionIndexFilter: 'all',
         isQuestionIndexPanelOpen: true,
         activeQuestionId: null,
@@ -938,6 +962,9 @@ export const useChatStore = defineStore('chat', {
         },
 
         attachmentProviderId(state): string {
+            if (state.currentModelSelectionExplicit && state.currentProviderId) {
+                return state.currentProviderId;
+            }
             return state.activeAgentContext?.modelProviderName?.trim() || state.currentProviderId;
         },
 
@@ -996,7 +1023,8 @@ export const useChatStore = defineStore('chat', {
                 this.currentProviderId,
                 this.currentModelId,
                 this.currentModelOptions,
-                this.currentReasoningEffort
+                this.currentReasoningEffort,
+                this.currentModelSelectionExplicit
             );
         },
 
@@ -1024,6 +1052,8 @@ export const useChatStore = defineStore('chat', {
 
             const modelSelection = conversation.modelSelection;
             if (modelSelection?.providerId) {
+                // 恢复该会话持久化的「显式覆盖」标记，供 setCurrentModelProvider 触发的 sync 写回。
+                this.currentModelSelectionExplicit = modelSelection.explicit === true;
                 await this.setCurrentModelProvider(modelSelection.providerId, modelSelection.modelId);
                 this.currentModelOptions = normalizeModelOptions(
                     this.currentModelConfig || undefined,
@@ -1034,6 +1064,7 @@ export const useChatStore = defineStore('chat', {
                 return;
             }
 
+            this.currentModelSelectionExplicit = false;
             if (!this.currentProviderId && this.availableProviders[0]?.id) {
                 await this.setCurrentModelProvider(this.availableProviders[0].id);
                 return;
@@ -1132,6 +1163,24 @@ export const useChatStore = defineStore('chat', {
 
         setProviderModelsResolver(resolver: (providerId: string) => Promise<ProviderModelCatalog>) {
             this.providerModelsResolver = markRaw(resolver);
+        },
+
+        setControlledPageCapability(capability: ControlledPageCapability | null) {
+            this.controlledPageCapability = capability ? markRaw(capability) : null;
+        },
+
+        /**
+         * 显示某个 dom provider 的受控页窗口（真实 chatgpt.com / gemini 页面）。
+         * - 已有真实会话的窗口：仅 show，不重载，保留当前 thread；
+         * - 全新/空白窗口：导航到站点（便于登录、验证登录态、查看）。
+         * 故意不传 targetUrl（只用 targetUrlIfBlank），避免把已有 thread 重载丢失。
+         */
+        async revealControlledPage(providerId: string): Promise<void> {
+            await this.controlledPageCapability?.openControlledPage({
+                providerId,
+                visible: true,
+                targetUrlIfBlank: DOM_PROVIDER_SITE_URLS[providerId]
+            });
         },
 
         setRuntimeMode(runtimeMode: RuntimeMode) {
@@ -1246,7 +1295,9 @@ export const useChatStore = defineStore('chat', {
                     models: baseProvider.models.map(cloneModelConfig),
                     defaultModel: baseProvider.defaultModel
                 });
-                this.setProviderModelState(providerId, { loading: false, loaded: true });
+                // 模型选择器未就绪：先用静态兜底，但不标记 loaded，使下次重开/切换 provider 时重读真实模型。
+                const ready = !isModelsNotReadyError(error);
+                this.setProviderModelState(providerId, { loading: false, loaded: ready });
             }
 
             return this.resolveProviderConfig(providerId) || null;
@@ -1338,6 +1389,17 @@ export const useChatStore = defineStore('chat', {
             this.applyCurrentModelState(modelId, this.currentModelOptions);
         },
 
+        // 用户在下拉框主动切换 provider/model 的入口：标记为显式覆盖，使其优先于 agent 默认模型。
+        async setCurrentModelProviderByUser(providerId: string, modelId?: string) {
+            this.currentModelSelectionExplicit = true;
+            await this.setCurrentModelProvider(providerId, modelId);
+        },
+
+        setCurrentModelByUser(modelId: string) {
+            this.currentModelSelectionExplicit = true;
+            this.setCurrentModel(modelId);
+        },
+
         setCurrentModelOption(key: string, enabled: boolean) {
             const model = this.currentModelConfig || undefined;
             if (!model?.options?.some((option) => option.key === key)) {
@@ -1420,6 +1482,8 @@ export const useChatStore = defineStore('chat', {
                 return;
             }
 
+            // agent 驱动的选择不是用户显式覆盖。
+            this.currentModelSelectionExplicit = false;
             await this.setCurrentModelProvider(providerId, targetAgent.modelName?.trim() || undefined);
         },
 
@@ -1473,6 +1537,8 @@ export const useChatStore = defineStore('chat', {
                 return;
             }
 
+            // agent 驱动的选择不是用户显式覆盖。
+            this.currentModelSelectionExplicit = false;
             await this.setCurrentModelProvider(providerId, agent.modelName?.trim() || undefined);
         },
 
@@ -1544,11 +1610,23 @@ export const useChatStore = defineStore('chat', {
             return resolveAgentContextScopeKey(agentContext ?? this.resolveEffectiveAgentContext());
         },
 
+        /**
+         * group 会话中 `@成员名` 是「成员定向」而非工作区文件引用。
+         * 返回当前 group 预设的成员名（小写）集合，供文件引用解析排除；
+         * 非 group 会话返回空集，文件引用行为完全不变。
+         */
+        resolveActiveGroupMentionNames(): Set<string> {
+            if (this.currentProviderId !== 'group' || !this.currentModelId) {
+                return new Set();
+            }
+            return new Set(resolveGroupMembers(this.currentModelId).map((member) => member.name.toLowerCase()));
+        },
+
         async resolveMentionedContextDocuments(
             prompt: string,
-            options?: { scopePath?: string | null }
+            options?: { scopePath?: string | null; excludedRefs?: ReadonlySet<string> }
         ): Promise<ResolvedMentionedContextDocument[]> {
-            const refs = extractMentionedFileRefs(prompt);
+            const refs = extractMentionedFileRefs(prompt, options?.excludedRefs);
             if (refs.length === 0) {
                 return [];
             }
@@ -1913,7 +1991,12 @@ export const useChatStore = defineStore('chat', {
 
         async resolveSendTarget(agentContext?: ResolvedAgentConfig | null) {
             const effectiveAgentContext = agentContext ?? this.activeAgentContext;
-            const requestedProviderId = effectiveAgentContext?.modelProviderName?.trim() || this.currentProviderId;
+            // 用户在下拉框显式选择时（explicit），会话模型选择优先于 agent 默认模型；
+            // 否则保持既有行为：agent 指定的模型优先于（仅为默认值的）currentProviderId。
+            const explicitOverride = this.currentModelSelectionExplicit && !!this.currentProviderId;
+            const requestedProviderId = explicitOverride
+                ? this.currentProviderId
+                : (effectiveAgentContext?.modelProviderName?.trim() || this.currentProviderId);
             if (!requestedProviderId) {
                 throw new Error('No active model provider selected.');
             }
@@ -1923,7 +2006,8 @@ export const useChatStore = defineStore('chat', {
                 throw new Error(`Provider '${requestedProviderId}' is unavailable.`);
             }
 
-            const requestedModelId = effectiveAgentContext?.modelName?.trim();
+            // 显式覆盖时忽略 agent.modelName，改用下拉框选中的 currentModelId。
+            const requestedModelId = explicitOverride ? undefined : effectiveAgentContext?.modelName?.trim();
             let resolvedModelId = providerConfig.defaultModel;
             if (requestedModelId) {
                 const matchedModelId = resolveProviderModelId(providerConfig, requestedModelId);
@@ -2750,11 +2834,13 @@ export const useChatStore = defineStore('chat', {
                 : this.getActiveAgentContextSnapshot();
             const mentionScopePath = this.resolveMentionContextScopePath(agentContext);
             let mentionedContextDocuments: ResolvedMentionedContextDocument[] = [];
-            const mentionedRefs = extractMentionedFileRefs(trimmedPrompt);
+            const groupMentionNames = this.resolveActiveGroupMentionNames();
+            const mentionedRefs = extractMentionedFileRefs(trimmedPrompt, groupMentionNames);
             if (mentionedRefs.length > 0) {
                 try {
                     mentionedContextDocuments = await this.resolveMentionedContextDocuments(trimmedPrompt, {
-                        scopePath: mentionScopePath
+                        scopePath: mentionScopePath,
+                        excludedRefs: groupMentionNames
                     });
                 } catch (error) {
                     this.currentError = error instanceof Error ? error.message : 'Failed to resolve referenced workspace files.';
@@ -2767,7 +2853,9 @@ export const useChatStore = defineStore('chat', {
                 ? this.activeWorkspaceDocument
                 : null;
             const requestDocumentPath = this.resolveConversationDocumentPath(this.activeWorkspacePath, activeDocumentForRequest);
-            const requestProviderId = agentContext?.modelProviderName?.trim() || this.currentProviderId;
+            const requestProviderId = (this.currentModelSelectionExplicit && this.currentProviderId)
+                ? this.currentProviderId
+                : (agentContext?.modelProviderName?.trim() || this.currentProviderId);
             const requestProvider = requestProviderId
                 ? this.resolveModelProvider(requestProviderId)
                 : null;
@@ -2858,7 +2946,9 @@ export const useChatStore = defineStore('chat', {
                     sendTarget.providerId,
                     sendTarget.modelId,
                     sendTarget.modelOptions,
-                    sendTarget.reasoningEffort
+                    sendTarget.reasoningEffort,
+                    // 显式覆盖时 sendTarget 即下拉框选择，保留该标记以便重开会话仍优先于 agent。
+                    this.currentModelSelectionExplicit && sendTarget.providerId === this.currentProviderId
                 );
                 const onUpdate = (
                     update: {
@@ -3108,7 +3198,11 @@ export const useChatStore = defineStore('chat', {
             if (this.agentRuntime) {
                 this.agentRuntime.abort();
             } else {
-                const provider = this.resolveModelProvider(this.activeAgentContext?.modelProviderName?.trim() || this.currentProviderId);
+                const provider = this.resolveModelProvider(
+                    (this.currentModelSelectionExplicit && this.currentProviderId)
+                        ? this.currentProviderId
+                        : (this.activeAgentContext?.modelProviderName?.trim() || this.currentProviderId)
+                );
                 if (provider) {
                     provider.abort();
                 }

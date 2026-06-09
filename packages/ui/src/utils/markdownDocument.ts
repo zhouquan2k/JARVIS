@@ -505,27 +505,31 @@ export function insertMarkdownAtViewerSelection(
  * 原型：在 viewer(WYSIWYG) 模式下，直接对当前 ProseMirror 选区切换 highlight mark。
  * 不切换到 edit 源码模式、不重建编辑器，因此不会卷屏、也不依赖 DOM 选区到源码偏移的映射。
  */
-export function toggleMarkdownHighlightAtViewerSelection(editor: MarkdownEditor): boolean {
+export function toggleMarkAtViewerSelection(editor: MarkdownEditor, markName: string): boolean {
     let applied = false;
     try {
         editor.editor.action((ctx) => {
             if (!ctx.isInjected(editorViewCtx)) {
-                console.warn('[markdown-viewer] toggleMarkdownHighlightAtViewerSelection: missing editorViewCtx');
+                console.warn(`[markdown-viewer] toggleMarkAtViewerSelection(${markName}): missing editorViewCtx`);
                 return;
             }
             const view = ctx.get(editorViewCtx);
-            const markType = view.state.schema.marks.highlight;
+            const markType = view.state.schema.marks[markName];
             if (!markType) {
-                console.warn('[markdown-viewer] toggleMarkdownHighlightAtViewerSelection: highlight mark type not found');
+                console.warn(`[markdown-viewer] toggleMarkAtViewerSelection: mark type "${markName}" not found`);
                 return;
             }
             applied = toggleMark(markType)(view.state, view.dispatch, view);
         });
     } catch (error) {
-        console.warn('[markdown-viewer] toggleMarkdownHighlightAtViewerSelection threw', error);
+        console.warn(`[markdown-viewer] toggleMarkAtViewerSelection(${markName}) threw`, error);
         return false;
     }
     return applied;
+}
+
+export function toggleMarkdownHighlightAtViewerSelection(editor: MarkdownEditor): boolean {
+    return toggleMarkAtViewerSelection(editor, 'highlight');
 }
 
 /**
@@ -796,153 +800,6 @@ export function captureRenderableMarkdownSelection(root: HTMLElement): RenderSel
         end: Math.max(start, end),
         selectedText: range.toString()
     };
-}
-
-export function resolveEmptyBlockMarkdownOffset(
-    editor: MarkdownEditor,
-    markdown: string,
-    blockIndex: number
-): { start: number; end: number } | null {
-    let offset: number | null = null;
-    let diagnostic: Record<string, unknown> = { reason: 'never-entered' };
-    try {
-        editor.editor.action((ctx) => {
-            if (!ctx.isInjected(remarkCtx)) {
-                diagnostic = { reason: 'remarkCtx-not-injected' };
-                return;
-            }
-            const remark = ctx.get(remarkCtx);
-            const tree = remark.runSync(remark.parse(markdown), markdown) as { children?: Array<{ type?: string; position?: { start?: { offset?: number } } }> };
-            const childrenCount = tree.children?.length ?? 0;
-            const child = tree.children?.[blockIndex];
-            const childOffset = child?.position?.start?.offset;
-            diagnostic = {
-                reason: typeof childOffset === 'number' ? 'ok' : 'no-offset',
-                blockIndex,
-                childrenCount,
-                childType: child?.type,
-                childPositionStart: child?.position?.start,
-                firstFewChildren: tree.children?.slice(0, Math.min(5, childrenCount)).map((c) => ({
-                    type: c?.type,
-                    startOffset: c?.position?.start?.offset
-                }))
-            };
-            if (typeof childOffset === 'number') {
-                offset = childOffset;
-            }
-        });
-    } catch (error) {
-        console.warn('[insert-debug] mdast resolve threw', error);
-        return null;
-    }
-    console.log('[insert-debug] mdast diagnostic=', diagnostic);
-    if (offset === null) {
-        return null;
-    }
-    return { start: offset, end: offset };
-}
-
-export function resolveEmptyBlockAnchorFallback(
-    root: HTMLElement,
-    snapshot: RenderSelectionSnapshot,
-    markdown: string
-): { start: number; end: number } | null {
-    if (typeof snapshot.blockIndex !== 'number') {
-        return null;
-    }
-    const proseMirror = root.querySelector('.ProseMirror');
-    if (!proseMirror) {
-        return null;
-    }
-    const children = Array.from(proseMirror.children) as HTMLElement[];
-    const targetBlock = children[snapshot.blockIndex];
-    if (!targetBlock) {
-        return null;
-    }
-
-    let anchorTextBefore: string | null = null;
-    let gapAfterAnchor = 0;
-    for (let index = snapshot.blockIndex - 1; index >= 0; index -= 1) {
-        const candidate = children[index];
-        const text = candidate?.textContent ?? '';
-        if (text) {
-            anchorTextBefore = text;
-            gapAfterAnchor = snapshot.blockIndex - index;
-            break;
-        }
-    }
-    if (anchorTextBefore !== null) {
-        const blocks = buildSimpleMarkdownRenderBlocks(markdown);
-        for (const block of blocks) {
-            if (block.visibleText !== anchorTextBefore) {
-                continue;
-            }
-            const offset = skipForwardSourceBlocks(markdown, block.sourceEnd, gapAfterAnchor);
-            if (offset !== null) {
-                return { start: offset, end: offset };
-            }
-        }
-    }
-
-    let anchorTextAfter: string | null = null;
-    let gapBeforeAnchor = 0;
-    for (let index = snapshot.blockIndex + 1; index < children.length; index += 1) {
-        const candidate = children[index];
-        const text = candidate?.textContent ?? '';
-        if (text) {
-            anchorTextAfter = text;
-            gapBeforeAnchor = index - snapshot.blockIndex;
-            break;
-        }
-    }
-    if (anchorTextAfter !== null) {
-        const blocks = buildSimpleMarkdownRenderBlocks(markdown);
-        for (const block of blocks) {
-            if (block.visibleText !== anchorTextAfter) {
-                continue;
-            }
-            const offset = skipBackwardSourceBlocks(markdown, block.sourceStart, gapBeforeAnchor);
-            if (offset !== null) {
-                return { start: offset, end: offset };
-            }
-        }
-    }
-
-    return null;
-}
-
-function skipForwardSourceBlocks(markdown: string, startOffset: number, blockCount: number): number | null {
-    if (blockCount <= 0) {
-        return startOffset;
-    }
-    let offset = startOffset;
-    let blocksSkipped = 0;
-    while (blocksSkipped < blockCount && offset < markdown.length) {
-        const nextNewline = markdown.indexOf('\n', offset);
-        if (nextNewline === -1) {
-            return null;
-        }
-        offset = nextNewline + 1;
-        blocksSkipped += 1;
-    }
-    return offset;
-}
-
-function skipBackwardSourceBlocks(markdown: string, endOffset: number, blockCount: number): number | null {
-    if (blockCount <= 0) {
-        return endOffset;
-    }
-    let offset = endOffset;
-    let blocksSkipped = 0;
-    while (blocksSkipped < blockCount && offset > 0) {
-        const previousNewline = markdown.lastIndexOf('\n', offset - 1);
-        if (previousNewline === -1) {
-            return null;
-        }
-        offset = previousNewline;
-        blocksSkipped += 1;
-    }
-    return Math.max(0, offset);
 }
 
 function findTopLevelBlockIndex(startBlock: HTMLElement, root: HTMLElement): number | null {

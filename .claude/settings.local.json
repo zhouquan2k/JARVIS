@@ -10,7 +10,18 @@
       "Bash(pnpm --filter @packages/ui test -- markdownDocument)",
       "Bash(pnpm --filter desktop exec tsc --noEmit)",
       "Bash(pnpm --filter desktop test)",
-      "Bash(pnpm --filter ui test)"
+      "Bash(pnpm --filter ui test)",
+      "Bash(pnpm --filter ai-agent exec vitest run src/providers/model/MultiModelGroupProvider.test.ts src/runtime/createModelProviderRuntime.test.ts)",
+      "Bash(../../packages/ui/node_modules/.bin/vitest --version)",
+      "Bash(packages/ui/node_modules/.bin/vitest run *)",
+      "Bash(node_modules/.bin/vitest run *)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(pnpm test:e2e:desktop)",
+      "Bash(CHATPRISM_SYNC_KEY=desktop-e2e VITE_SYNC_KEY=desktop-e2e VITE_E2E=1 pnpm exec playwright test desktop-host.spec.ts -g \"markdown link upload\" --reporter=list)",
+      "Bash(VITE_E2E=1 pnpm build:renderer)",
+      "Bash(CHATPRISM_SYNC_KEY=desktop-e2e VITE_SYNC_KEY=desktop-e2e VITE_E2E=1 pnpm exec playwright test dom-automation-provider.spec.ts -g \"streams reply via mock page\" --reporter=list)",
+      "Bash(pnpm --filter @packages/ui exec vitest run --config vitest.config.ts src/document-viewers/MarkdownDocumentViewer.test.ts)",
+      "Bash(pnpm typecheck *)"
     ]
   }
 }

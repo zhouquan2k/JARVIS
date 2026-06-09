@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('electron', () => ({
+    app: {
+        on: vi.fn()
+    },
     BrowserWindow: vi.fn(),
     session: {
         fromPartition: vi.fn(() => ({}))

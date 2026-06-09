@@ -16,6 +16,8 @@ const __dirname = dirname(__filename);
 const rendererDistDir = join(__dirname, '../../renderer');
 const preloadPath = join(__dirname, 'preload.cjs');
 const geminiHistoryPreloadPath = join(__dirname, 'gemini-history.preload.cjs');
+const chatgptDomPreloadPath = join(__dirname, 'chatgpt-dom.preload.cjs');
+const geminiDomPreloadPath = join(__dirname, 'gemini-dom.preload.cjs');
 
 function resolveDesktopBrandIconPath(): string {
     const bundledPngIconPath = join(rendererDistDir, 'jarvis.png');
@@ -123,7 +125,11 @@ function wireIpc() {
     disposeBrowserAutomationIpc = registerBrowserAutomationIpc();
     disposeControlledPageIpc = registerControlledPageIpc({
         controlledPageManager,
-        preloadRegistry: { 'gemini-web': geminiHistoryPreloadPath }
+        preloadRegistry: {
+            'gemini-web': geminiHistoryPreloadPath,
+            'chatgpt-dom': chatgptDomPreloadPath,
+            'gemini-dom': geminiDomPreloadPath
+        }
     });
     disposeContextIpc = registerContextIpc({
         contextBaseUrl: process.env.CHATPRISM_CONTEXT_BASE_URL

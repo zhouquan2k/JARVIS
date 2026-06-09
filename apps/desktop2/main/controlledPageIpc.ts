@@ -1,7 +1,10 @@
-import { ipcMain, type IpcMain, type WebContents } from 'electron';
+import { BrowserWindow, ipcMain, type IpcMain, type WebContents } from 'electron';
 import {
+    DESKTOP_CONTROLLED_PAGE_DOM_EVENT_FROM_PAGE_CHANNEL,
+    DESKTOP_CONTROLLED_PAGE_DOM_EVENT_TO_RENDERER_CHANNEL,
     DESKTOP_CONTROLLED_PAGE_EVALUATE_CHANNEL,
     DESKTOP_CONTROLLED_PAGE_OPEN_CHANNEL,
+    type ControlledPageDomEvent,
     type EvaluateInControlledPageRequest,
     type OpenControlledPageRequest
 } from '../shared/controlledPageBridge';
@@ -77,6 +80,7 @@ export function registerControlledPageIpc(options: {
         }));
         const page = await options.controlledPageManager.ensurePage(request.providerId, {
             targetUrl: request.targetUrl,
+            targetUrlIfBlank: request.targetUrlIfBlank,
             visible: request.visible,
             forceReload: request.forceReload,
             preloadPath: resolvePreloadPath(request.providerId)
@@ -132,7 +136,24 @@ export function registerControlledPageIpc(options: {
         }
     });
 
+    const domEventHandler = (_event: Electron.IpcMainEvent, payload: ControlledPageDomEvent) => {
+        console.log('[ControlledPageIpc]', JSON.stringify({
+            stage: payload.type === 'chunk' ? 'dom-event-chunk' : `dom-event-${payload.type}`,
+            providerId: payload.providerId,
+            requestId: payload.requestId,
+            textLength: payload.text?.length ?? 0
+        }));
+        for (const win of BrowserWindow.getAllWindows()) {
+            if (!win.isDestroyed()) {
+                win.webContents.send(DESKTOP_CONTROLLED_PAGE_DOM_EVENT_TO_RENDERER_CHANNEL, payload);
+            }
+        }
+    };
+
+    ipcMain.on(DESKTOP_CONTROLLED_PAGE_DOM_EVENT_FROM_PAGE_CHANNEL, domEventHandler);
+
     return () => {
+        ipcMain.off(DESKTOP_CONTROLLED_PAGE_DOM_EVENT_FROM_PAGE_CHANNEL, domEventHandler);
         ipc.removeHandler?.(DESKTOP_CONTROLLED_PAGE_OPEN_CHANNEL);
         ipc.removeHandler?.(DESKTOP_CONTROLLED_PAGE_EVALUATE_CHANNEL);
     };

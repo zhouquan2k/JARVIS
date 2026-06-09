@@ -38,6 +38,10 @@ workspace "ChatPrism" "当前代码库的上下文与容器视图" {
                 conversationModel = component "Conversation" "聊天、导入和同步流程共用的核心会话数据模型。" "Domain model"
                 resolvedAgentConfig = component "ResolvedAgentConfig" "经过工作区作用域解析后的 Agent 配置。" "Domain model"
                 compareWorkflowController = component "CompareWorkflowController" "双模型对比工作流编排器。典型实现：CompareWorkflowController。" "Core service"
+                multiModelGroupProvider = component "MultiModelGroupProvider" "Group provider（id='group'），把 prompt 并发分发到固定预设中的多个 IModelProvider 成员（广播或 @mention 定向），将流式输出按分段 transcript 合并，并向所有成员透传 abort。成员解析经 resolveMemberProvider → runtime.getProvider。文件：plugins/ai-agent/src/providers/model/MultiModelGroupProvider.ts" "IModelProvider 实现"
+                domAutomationProvider = component "DomAutomationProvider" "仅 desktop 的 IModelProvider（chatgpt-dom / gemini-dom），通过隐藏 BrowserWindow 驱动真实 ChatGPT/Gemini 页面：打开受控页、设置联网开关、注入 prompt、经 MutationObserver push 事件观察 DOM 流式回复，并在 done 或 timeout-fallback 时收尾。文件：plugins/ai-agent/src/providers/model/dom/DomAutomationProvider.ts" "IModelProvider 实现（仅 desktop）"
+                domTransport = component "DomTransport" "基于 ControlledPageCapability 的薄传输层：open/setWebSearch/readFinalText/injectAndSubmit/subscribe。封装所有 controlled-page 调用，不包含站点特有知识。文件：plugins/ai-agent/src/providers/model/dom/domTransport.ts" "Transport abstraction"
+                controlledPageCapability = component "ControlledPageCapability" "宿主能力接口，用于管理按 provider 隔离的隐藏 BrowserWindow：openControlledPage、evaluateInPage、subscribeControlledPageEvent。Desktop 实现通过 Electron IPC 接线；订阅方法启用 push 式 DOM 事件转发（page→main→renderer）。文件：packages/core/src/interfaces/ControlledPageCapability.ts" "Host capability interface"
             }
         }
 
@@ -95,6 +99,11 @@ workspace "ChatPrism" "当前代码库的上下文与容器视图" {
         conversationWorkflowController -> conversationModel "创建并更新当前会话"
         modelProvider -> conversationModel "消费消息上下文并产出结果"
         compareWorkflowController -> modelProviderRuntime "获取对比执行 provider"
+        multiModelGroupProvider -> modelProvider "实现"
+        multiModelGroupProvider -> modelProviderRuntime "通过其解析成员 provider"
+        domAutomationProvider -> modelProvider "实现"
+        domAutomationProvider -> domTransport "将页面操作委托给"
+        domTransport -> controlledPageCapability "使用 open/evaluate/subscribe"
     }
 
     views {
