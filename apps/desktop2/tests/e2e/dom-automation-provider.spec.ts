@@ -78,7 +78,12 @@ async function startContextServer(knowledgeRoot: string): Promise<{
     const port = 8800 + Math.floor(Math.random() * 200);
     const proc = spawn('pnpm', ['--filter', 'server', 'dev'], {
         cwd: appRoot,
-        env: { ...process.env, PORT: String(port), CHATPRISM_KNOWLEDGE_ROOT: knowledgeRoot },
+        env: {
+            ...process.env,
+            PORT: String(port),
+            CHATPRISM_KNOWLEDGE_ROOT: knowledgeRoot,
+            CHATPRISM_RENDERER_DIST: join(appRoot, 'dist/renderer')
+        },
         stdio: 'pipe'
     });
     const deadline = Date.now() + 15_000;
@@ -345,6 +350,165 @@ test('chatgpt-dom provider reuses the same DOM conversation across turns (no rel
         await expect(userMessages).toHaveCount(2, { timeout: 10_000 });
         await expect(userMessages.nth(0)).toContainText('first question from turn one');
         await expect(userMessages.nth(1)).toContainText('second question from turn two');
+
+        await browser.close();
+    } finally {
+        kill(electronProcess);
+        kill(desktopServer.process);
+        mockServer.server.close();
+    }
+});
+
+test('chatgpt-dom reasoning selector updates the ChatGPT pill without changing the current model', async () => {
+    const desktopServer = await startContextServer(appRoot);
+    const mockServer = await startMockChatGptServer();
+    const { browser, page, electronProcess } = await launchDesktopApp({
+        contextBaseUrl: desktopServer.contextBaseUrl,
+        syncBaseUrl: desktopServer.syncBaseUrl,
+        domChatGptUrl: mockServer.url
+    });
+    const rendererLogs: string[] = [];
+    page.on('console', (msg) => {
+        const text = msg.text();
+        if (text.includes('[Dom') || text.includes('[ChatGPT') || text.includes('[Controlled') || text.includes('[ChatStore')) {
+            rendererLogs.push(text);
+        }
+    });
+
+    try {
+        await openDomConversation(page);
+        const controlled = await findControlledPage(browser, mockServer.url);
+        const dumpReasoningDiagnostics = async (label: string) => {
+            const storeState = await page.evaluate(() => {
+                const pinia = (window as unknown as { __pinia?: { _s: Map<string, unknown> } }).__pinia;
+                const store = pinia?._s.get('chat') as
+                    | { currentProviderId: string; currentModelId: string; currentReasoningEffort: string }
+                    | undefined;
+                return store
+                    ? {
+                        currentProviderId: store.currentProviderId,
+                        currentModelId: store.currentModelId,
+                        currentReasoningEffort: store.currentReasoningEffort
+                    }
+                    : { currentProviderId: null, currentModelId: null, currentReasoningEffort: null };
+            }).catch(() => ({ currentProviderId: 'eval-failed', currentModelId: null, currentReasoningEffort: null }));
+            const controlledState = await controlled.evaluate(() => ({
+                currentModel: document.querySelector('[data-testid="mock-chatgpt-current-model"]')?.textContent?.trim() ?? null,
+                currentReasoning: document.querySelector('[data-testid="mock-chatgpt-current-reasoning"]')?.textContent?.trim() ?? null,
+                pillLabel: document.querySelector('button.__composer-pill[aria-haspopup="menu"]')?.textContent?.trim() ?? null
+            })).catch(() => ({ currentModel: 'eval-failed', currentReasoning: null, pillLabel: null }));
+            console.error(`[test-diagnostic:${label}] store state:`, JSON.stringify(storeState));
+            console.error(`[test-diagnostic:${label}] controlled state:`, JSON.stringify(controlledState));
+            console.error(`[test-diagnostic:${label}] renderer logs (${rendererLogs.length}):\n`, rendererLogs.join('\n') || '(none)');
+        };
+        await expect.poll(
+            () => controlled.getByTestId('mock-chatgpt-current-reasoning').textContent(),
+            { timeout: 15_000 }
+        ).toContain('高级');
+        await expect.poll(
+            () => controlled.getByTestId('mock-chatgpt-current-model').textContent(),
+            { timeout: 15_000 }
+        ).toContain('GPT-5.5').catch(async (err: unknown) => {
+            await dumpReasoningDiagnostics('initial-model-sync');
+            throw err;
+        });
+        const initialModelLabel = (await controlled.getByTestId('mock-chatgpt-current-model').textContent())?.trim() ?? '';
+        await expect(controlled.getByTestId('mock-chatgpt-current-model')).toContainText(initialModelLabel);
+
+        await page.getByTestId('reasoning-effort').selectOption('low');
+        await expect.poll(
+            () => controlled.getByTestId('mock-chatgpt-current-reasoning').textContent(),
+            { timeout: 15_000 }
+        ).toContain('极速').catch(async (err: unknown) => {
+            await dumpReasoningDiagnostics('switch-low');
+            throw err;
+        });
+        await expect(controlled.getByTestId('mock-chatgpt-current-model')).toContainText(initialModelLabel);
+
+        await page.getByTestId('reasoning-effort').selectOption('high');
+        await expect.poll(
+            () => controlled.getByTestId('mock-chatgpt-current-reasoning').textContent(),
+            { timeout: 15_000 }
+        ).toContain('高级').catch(async (err: unknown) => {
+            await dumpReasoningDiagnostics('switch-high');
+            throw err;
+        });
+        await expect(controlled.getByTestId('mock-chatgpt-current-model')).toContainText(initialModelLabel);
+
+        await browser.close();
+    } finally {
+        kill(electronProcess);
+        kill(desktopServer.process);
+        mockServer.server.close();
+    }
+});
+
+test('chatgpt-dom model selector updates the ChatGPT submenu model without changing reasoning', async () => {
+    const desktopServer = await startContextServer(appRoot);
+    const mockServer = await startMockChatGptServer();
+    const { browser, page, electronProcess } = await launchDesktopApp({
+        contextBaseUrl: desktopServer.contextBaseUrl,
+        syncBaseUrl: desktopServer.syncBaseUrl,
+        domChatGptUrl: mockServer.url
+    });
+    const rendererLogs: string[] = [];
+    page.on('console', (msg) => {
+        const text = msg.text();
+        if (text.includes('[Dom') || text.includes('[ChatGPT') || text.includes('[Controlled')) {
+            rendererLogs.push(text);
+        }
+    });
+
+    try {
+        await openDomConversation(page);
+        const controlled = await findControlledPage(browser, mockServer.url);
+        await expect.poll(
+            () => controlled.getByTestId('mock-chatgpt-current-model').textContent(),
+            { timeout: 15_000 }
+        ).toContain('GPT-5.5');
+        await expect.poll(
+            () => controlled.getByTestId('mock-chatgpt-current-reasoning').textContent(),
+            { timeout: 15_000 }
+        ).toContain('高级');
+        const initialReasoning = (await controlled.getByTestId('mock-chatgpt-current-reasoning').textContent())?.trim() ?? '';
+
+        await expect(page.getByTestId('normal-model')).toBeEnabled({ timeout: 15_000 });
+        await page.getByTestId('normal-model').selectOption('gpt-5.4');
+        await expect(page.getByTestId('normal-model')).toHaveValue('gpt-5.4');
+        await expect.poll(
+            () => controlled.getByTestId('mock-chatgpt-current-model').textContent(),
+            { timeout: 15_000 }
+        ).toContain('GPT-5.4').catch(async (err: unknown) => {
+            const storeState = await page.evaluate(() => {
+                const pinia = (window as unknown as { __pinia?: { _s: Map<string, unknown> } }).__pinia;
+                const store = pinia?._s.get('chat') as
+                    | { currentProviderId: string; currentModelId: string; currentReasoningEffort: string }
+                    | undefined;
+                return store
+                    ? {
+                        currentProviderId: store.currentProviderId,
+                        currentModelId: store.currentModelId,
+                        currentReasoningEffort: store.currentReasoningEffort
+                    }
+                    : { currentProviderId: null, currentModelId: null, currentReasoningEffort: null };
+            }).catch(() => ({ currentProviderId: 'eval-failed', currentModelId: null, currentReasoningEffort: null }));
+            const controlledState = await controlled.evaluate(() => ({
+                currentModel: document.querySelector('[data-testid="mock-chatgpt-current-model"]')?.textContent?.trim() ?? null,
+                currentReasoning: document.querySelector('[data-testid="mock-chatgpt-current-reasoning"]')?.textContent?.trim() ?? null
+            })).catch(() => ({ currentModel: 'eval-failed', currentReasoning: null }));
+            console.error('[test-diagnostic] store state:', JSON.stringify(storeState));
+            console.error('[test-diagnostic] controlled state:', JSON.stringify(controlledState));
+            console.error('[test-diagnostic] renderer logs (' + rendererLogs.length + '):\n', rendererLogs.join('\n') || '(none)');
+            throw err;
+        });
+        await expect(controlled.getByTestId('mock-chatgpt-current-reasoning')).toContainText(initialReasoning);
+
+        await page.getByTestId('normal-model').selectOption('o3');
+        await expect.poll(
+            () => controlled.getByTestId('mock-chatgpt-current-model').textContent(),
+            { timeout: 15_000 }
+        ).toContain('o3');
+        await expect(controlled.getByTestId('mock-chatgpt-current-reasoning')).toContainText(initialReasoning);
 
         await browser.close();
     } finally {

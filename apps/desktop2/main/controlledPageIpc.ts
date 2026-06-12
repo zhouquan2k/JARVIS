@@ -41,9 +41,16 @@ function forwardControlledPageConsole(page: WebContents, providerId: string): vo
 
     consoleForwardedPages.add(page);
     page.on('console-message', (_event, level, message, line, sourceId) => {
-        if (!message.includes('[ChatPrism][GeminiHistory]')) {
-            return;
-        }
+        // 转发所有 JARVIS 自动化相关日志（Gemini 历史抓取 + Claude/ChatGPT DOM preload）。
+        // 用开放前缀匹配，覆盖 [DomChat]/[DomChatModels]/[DomChatObserver] 等所有变体。
+        const isRelevant = message.includes('[ChatPrism]')
+            || message.includes('[ClaudeDomPreload]')
+            || message.includes('[ChatGPTDomPreload]')
+            || message.includes('[GeminiDomPreload]')
+            || message.includes('[DomChat')
+            || message.includes('[DomAutomationProvider]')
+            || message.includes('[DomTransport]');
+        if (!isRelevant) return;
 
         console.log('[ControlledPageWindow]', message, JSON.stringify({
             providerId,

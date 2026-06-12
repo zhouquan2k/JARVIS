@@ -182,6 +182,10 @@ export function createModelProviderRuntime(options: ModelProviderRuntimeOptions)
 
                 const fallbackCatalog = getStaticProviderCatalog(providerId, availableProviders);
 
+                console.log('[ModelProviderRuntime]', JSON.stringify({
+                    stage: 'getProviderModels-start',
+                    providerId
+                }));
                 try {
                     const provider = this.getProvider(providerId);
                     const dynamicCatalog = await provider.getAvailableModels();
@@ -190,6 +194,12 @@ export function createModelProviderRuntime(options: ModelProviderRuntimeOptions)
                         validateProviderCatalog(providerId, dynamicCatalog),
                         providerConfig
                     );
+                    console.log('[ModelProviderRuntime]', JSON.stringify({
+                        stage: 'getProviderModels-success',
+                        providerId,
+                        count: validatedCatalog.models.length,
+                        defaultModel: validatedCatalog.defaultModel
+                    }));
                     modelCatalogCache.set(providerId, validatedCatalog);
                     return validatedCatalog;
                 } catch (error) {
@@ -202,6 +212,11 @@ export function createModelProviderRuntime(options: ModelProviderRuntimeOptions)
                         }));
                         throw error;
                     }
+                    console.warn('[ModelProviderRuntime]', JSON.stringify({
+                        stage: 'getProviderModels-fallback',
+                        providerId,
+                        error: error instanceof Error ? error.message : String(error)
+                    }));
                     modelCatalogCache.set(providerId, fallbackCatalog);
                     return fallbackCatalog;
                 } finally {
@@ -231,7 +246,8 @@ export function createModelProviderRuntime(options: ModelProviderRuntimeOptions)
 
             const domProviderTargetUrls: Record<string, string> = {
                 'chatgpt-dom': options.domProviderUrls?.['chatgpt-dom'] ?? 'https://chatgpt.com',
-                'gemini-dom': options.domProviderUrls?.['gemini-dom'] ?? 'https://gemini.google.com/app'
+                'gemini-dom': options.domProviderUrls?.['gemini-dom'] ?? 'https://gemini.google.com/app',
+                'claude-dom': options.domProviderUrls?.['claude-dom'] ?? 'https://claude.ai/new'
             };
             if (providerId in domProviderTargetUrls && options.controlledPageCapability) {
                 const targetUrl = domProviderTargetUrls[providerId];

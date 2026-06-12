@@ -240,3 +240,39 @@ Mermaid 和图片预览行为 SHALL 只应用于知识工作区主 Markdown 文�
 - **WHEN** 某个会话已持久化归档元数据，之后又新增了可见消息
 - **THEN** 系统 MUST 将该会话的归档状态标记为 stale
 - **AND** 之前持久化的归档元数据 MUST 继续可供 UI 展示
+
+### 需求：知识工作区 MUST 提供 Markdown 块级插入 UI，用于插入块级结构
+知识工作区 Markdown 编辑器 MUST 在工具栏暴露独立的块级插入 UI，与行内样式选择器区分，用于无法表达为行内标记的块级 Markdown 结构。块级插入 UI 初期 MUST 至少提供任务清单项（checkbox）动作。在渲染 viewer 模式下，插入块 MUST 直接作用于用户当前选区，不切换到原始源码编辑模式。当没有选中文字时，插入的块 MUST 包含占位文本（`task1`），使结果立即可见且可编辑。
+
+#### 场景：从块级插入工具栏插入任务清单项
+- **WHEN** 用户在知识工作区编辑 Markdown 文档
+- **THEN** 编辑器工具栏 MUST 提供独立的块级插入 UI 入口，与行内样式选择器分开
+- **AND** 块级插入 UI MUST 包含"Checkbox"（任务清单项）动作
+
+#### 场景：将选中文字包裹为任务清单项
+- **WHEN** 用户在 Markdown 编辑器中选中了文字
+- **AND** 用户从块级插入 UI 中选择 checkbox 动作
+- **THEN** 选中文字 MUST 成为新任务清单项的内容（`- [ ] <selected text>`）
+- **AND** 生成的 Markdown MUST 为合法的 GFM 任务清单项
+
+#### 场景：无选区时插入占位任务清单项
+- **WHEN** 用户在 Markdown 编辑器中没有选中文字
+- **AND** 用户从块级插入 UI 中选择 checkbox 动作
+- **THEN** 编辑器 MUST 插入带占位文本的任务清单项（`- [ ] task1`）
+
+#### 场景：viewer 模式下插入块不切换到原始源码编辑模式
+- **WHEN** Markdown 编辑器处于渲染 viewer 模式
+- **AND** 用户触发 checkbox 块级插入
+- **THEN** 块 MUST 通过 WYSIWYG ProseMirror 层原地插入
+- **AND** 编辑器 MUST NOT 为执行插入而切换到原始源码编辑模式
+
+### 需求：知识工作区 MUST 支持在 viewer 模式直接切换任务清单 checkbox
+知识工作区 Markdown viewer MUST 允许用户点击已渲染的任务清单 checkbox 来切换其勾选状态，而无需退出 viewer 模式。切换 MUST 立即更新序列化后的 Markdown 源码，使变更得到持久化。
+
+#### 场景：在 viewer 模式点击 checkbox 切换勾选状态
+- **WHEN** Markdown 编辑器处于渲染 viewer 模式
+- **AND** 已渲染的文档包含任务清单项
+- **THEN** 每个任务清单项的 checkbox 控件 MUST 可点击
+- **AND** 点击未勾选项 MUST 在 Markdown 源码中将其标记为已勾选（`- [x]`）
+- **AND** 点击已勾选项 MUST 在 Markdown 源码中将其标记为未勾选（`- [ ]`）
+- **AND** 切换后视口滚动位置 MUST 保持不变

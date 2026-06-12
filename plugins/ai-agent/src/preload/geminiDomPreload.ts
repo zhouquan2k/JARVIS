@@ -7,7 +7,7 @@
  */
 import { contextBridge, ipcRenderer } from 'electron';
 import { injectPrompt, observeReply } from './domChat/domChatObserver';
-import { readAvailableModels, readLatestReply, setActiveModel, setReasoningEffort, setWebSearchEnabled } from './domChat/domChatCore';
+import { readAvailableModels, readLatestReply, setActiveModel, setReasoningEffort, setWebSearchEnabled, type ReasoningEffort } from './domChat/domChatCore';
 
 const DOM_EVENT_CHANNEL = 'desktop:controlled-page:dom-event-from-page';
 const PROVIDER_ID = 'gemini-dom';
@@ -82,9 +82,9 @@ async function setModel(modelId: string): Promise<{ ok: boolean; note: string }>
 
 contextBridge.exposeInMainWorld('__jarvisSetModel', setModel);
 
-async function setReasoningEffortBridge(high: boolean): Promise<{ ok: boolean; note: string }> {
-    console.log('[GeminiDomPreload] set-reasoning-effort', high);
-    const result = await setReasoningEffort(document, PROVIDER, high);
+async function setReasoningEffortBridge(effort: ReasoningEffort): Promise<{ ok: boolean; note: string }> {
+    console.log('[GeminiDomPreload] set-reasoning-effort', effort);
+    const result = await setReasoningEffort(document, PROVIDER, effort);
     console.log('[GeminiDomPreload] set-reasoning-effort-result', JSON.stringify(result));
     return result;
 }

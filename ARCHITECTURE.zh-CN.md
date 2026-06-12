@@ -122,6 +122,25 @@ viewer 模式插入入口位于 `packages/ui/src/utils/markdownDocument.ts` 的 
 
 工具栏写入文档的链接（会话引用、资源嵌入）使用相对于仓库根目录的标准相对路径。`references/` 目录受保护，其内容不受链接重写操作影响。
 
+### 4.3 Server 单独进程 + Renderer 相对路径
+
+**概述**
+
+`apps/server` 是独立进程，是上下文 / 同步 / provider 配置 / codex 的唯一后端。Desktop 不内嵌 HTTP server，依赖方向恒为 **desktop → server**：server 编译期与运行期都不感知 desktop，只接收一个通用静态根目录配置（`CHATPRISM_RENDERER_DIST`），将其等同于 nginx 的 `root`。
+
+**决策**
+
+Desktop renderer 始终与 API **同源**，所有 `/api/*` 一律走**相对路径**，不在 renderer 侧拼接 `http://127.0.0.1:8787` 这类绝对地址。
+
+- **dev**：renderer 由 Vite 托管，`vite.config.ts` 的 `server.proxy` 将 `/api`、`/health` 转发到 server。
+- **prod / e2e**：renderer 由 server 静态托管（`serveStatic` 置于 API 路由前做资源命中、SPA fallback 置于 API 路由后避免遮蔽），renderer 与 API 天然同源。
+- Desktop main 进程仅用绝对 `CHATPRISM_CONTEXT_BASE_URL` 推导 server origin 以加载 renderer；注入给 renderer 的 base URL 全部规约为相对值（`createDesktop2RuntimeOptions` 填充 `/api/context`、`/api/sync`、`/api/codex`、`/api/provider-configs` 默认值）。
+
+**影响**
+
+- 彻底消除跨源 CORS（同源请求不触发），也不再依赖 server 的 CORS allowlist 兜底。
+- CSP 只需 `img-src 'self'` 即可放行 `document-asset` 图片等本地资源，无需为 `http://127.0.0.1:*` 开特例。
+- 相对路径对部署端口 / host 无感知，迁移与打包更稳健。
 
 ## 5. 运行时与外部依赖链路
 

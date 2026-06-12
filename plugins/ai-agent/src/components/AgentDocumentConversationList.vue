@@ -54,10 +54,6 @@
               {{ getConversationDocumentLabel(conversation) }}
             </span>
           </div>
-          <span class="agent-document-list__item-time">
-            <span class="agent-document-list__item-date">{{ formatUpdatedDate(conversation.updatedAt) }}</span>
-            <span class="agent-document-list__item-clock">{{ formatUpdatedTime(conversation.updatedAt) }}</span>
-          </span>
         </button>
         <div v-if="conversation.id === editingConversationId" class="agent-document-list__item-actions">
           <button
@@ -79,6 +75,42 @@
             {{ t('shared.cancel') }}
           </button>
         </div>
+        <div v-else-if="pendingDeleteId === conversation.id" class="agent-document-list__item-actions">
+          <button
+            type="button"
+            class="agent-document-list__action agent-document-list__action--danger"
+            data-testid="agent-document-conversation-delete-confirm"
+            :aria-label="t('shared.confirm')"
+            @click.stop="confirmDelete(conversation.id)"
+          >
+            {{ t('shared.confirm') }}
+          </button>
+          <button
+            type="button"
+            class="agent-document-list__action"
+            data-testid="agent-document-conversation-delete-cancel"
+            :aria-label="t('shared.cancel')"
+            @click.stop="pendingDeleteId = null"
+          >
+            {{ t('shared.cancel') }}
+          </button>
+        </div>
+        <div v-else class="agent-document-list__item-aside">
+          <button
+            type="button"
+            class="agent-document-list__delete-btn"
+            data-testid="agent-document-conversation-delete"
+            :aria-label="t('shared.deleteConversation')"
+            :title="t('shared.deleteConversation')"
+            @click.stop="pendingDeleteId = conversation.id"
+          >
+            <Trash2 :size="13" />
+          </button>
+          <span class="agent-document-list__item-time">
+            <span class="agent-document-list__item-date">{{ formatUpdatedDate(conversation.updatedAt) }}</span>
+            <span class="agent-document-list__item-clock">{{ formatUpdatedTime(conversation.updatedAt) }}</span>
+          </span>
+        </div>
       </div>
     </div>
   </section>
@@ -86,6 +118,7 @@
 
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue';
+import { Trash2 } from 'lucide-vue-next';
 import type { Conversation } from '@plugins/ai-agent/src/internal';
 import { useWorkspaceI18n } from '@packages/ui/src/i18n';
 import { formatConversationTitle } from '../utils/conversationTitle';
@@ -104,10 +137,13 @@ const { t } = useWorkspaceI18n();
 const renameDraft = ref('');
 const renameInputRef = ref<HTMLInputElement | HTMLInputElement[] | null>(null);
 
+const pendingDeleteId = ref<string | null>(null);
+
 const emit = defineEmits<{
   (event: 'open', conversationId: string): void;
   (event: 'rename', payload: { id: string; title: string }): void;
   (event: 'cancel-rename'): void;
+  (event: 'delete', conversationId: string): void;
 }>();
 
 watch(
@@ -178,6 +214,11 @@ function cancelRename(): void {
   emit('cancel-rename');
 }
 
+function confirmDelete(conversationId: string): void {
+  pendingDeleteId.value = null;
+  emit('delete', conversationId);
+}
+
 function formatUpdatedDate(timestamp: number): string {
   return new Intl.DateTimeFormat('zh-CN', {
     month: '2-digit',
@@ -212,7 +253,7 @@ function formatUpdatedTime(timestamp: number): string {
   grid-auto-rows: min-content;
   justify-items: end;
   gap: 4px;
-  flex: 0 0 72px;
+  flex-shrink: 0;
   margin: 0;
   color: #94a3b8;
   font-size: 12px;
@@ -242,10 +283,10 @@ function formatUpdatedTime(timestamp: number): string {
 .agent-document-list__item-main {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
-  width: 100%;
-  padding: 14px 12px 14px 14px;
+  flex: 1;
+  min-width: 0;
+  padding: 14px 0 14px 14px;
   border: 0;
   background: transparent;
   color: inherit;
@@ -342,5 +383,53 @@ function formatUpdatedTime(timestamp: number): string {
 
 .agent-document-list__state--error {
   color: #fecaca;
+}
+
+.agent-document-list__item-aside {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-right: 10px;
+  flex-shrink: 0;
+}
+
+.agent-document-list__item-aside .agent-document-list__delete-btn {
+  opacity: 0;
+  transition: opacity 0.16s ease;
+}
+
+.agent-document-list__item:hover .agent-document-list__item-aside .agent-document-list__delete-btn,
+.agent-document-list__item:focus-within .agent-document-list__item-aside .agent-document-list__delete-btn {
+  opacity: 1;
+}
+
+.agent-document-list__delete-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+
+.agent-document-list__delete-btn:hover,
+.agent-document-list__delete-btn:focus-visible {
+  background: rgba(239, 68, 68, 0.16);
+  color: #fca5a5;
+}
+
+.agent-document-list__action--danger {
+  color: #fca5a5;
+  background: rgba(127, 29, 29, 0.36);
+}
+
+.agent-document-list__action--danger:hover {
+  background: rgba(127, 29, 29, 0.56);
+  color: #ffe4e6;
 }
 </style>

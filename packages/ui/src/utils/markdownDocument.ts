@@ -533,6 +533,37 @@ export function toggleMarkdownHighlightAtViewerSelection(editor: MarkdownEditor)
 }
 
 /**
+ * 在 viewer(WYSIWYG) 模式下，将当前选区内容包裹为任务清单项（- [ ] text）。
+ * 选区有文字时用选区内容作为任务项文本；光标折叠时插入空任务项。
+ */
+export function wrapSelectionAsTaskListItem(editor: MarkdownEditor): boolean {
+    let applied = false;
+    try {
+        editor.editor.action((ctx) => {
+            if (!ctx.isInjected(editorViewCtx) || !ctx.isInjected(parserCtx)) {
+                console.warn('[markdown-viewer] wrapSelectionAsTaskListItem: missing editorViewCtx or parserCtx');
+                return;
+            }
+            const view = ctx.get(editorViewCtx);
+            const parser = ctx.get(parserCtx);
+            const { from, to, empty } = view.state.selection;
+            const selectedText = empty ? 'task1' : view.state.doc.textBetween(from, to, '\n');
+            const parsed = parser(`- [ ] ${selectedText}`);
+            if (!parsed) {
+                console.warn('[markdown-viewer] wrapSelectionAsTaskListItem: parser returned no doc');
+                return;
+            }
+            view.dispatch(view.state.tr.replace(from, to, parsed.slice(0)));
+            applied = true;
+        });
+    } catch (error) {
+        console.warn('[markdown-viewer] wrapSelectionAsTaskListItem threw', error);
+        return false;
+    }
+    return applied;
+}
+
+/**
  * 在 viewer(WYSIWYG) 模式下，通过 link mark 直接在当前 ProseMirror 选区应用链接。
  * 非空选区：对选区范围添加 link mark（href 属性）；光标折叠：插入带 link mark 的 label 文本节点。
  * 单事务提交，不切换到 edit 源码模式。
@@ -1543,9 +1574,16 @@ function buildPastedImageTimestamp(date: Date): string {
 }
 
 function readRuntimeEnv(): Record<string, string | undefined> {
-    return typeof import.meta !== 'undefined' && import.meta.env
+    const viteEnv = (typeof import.meta !== 'undefined' && import.meta.env)
         ? import.meta.env as Record<string, string | undefined>
         : {};
+    const desktopContextBaseUrl = typeof window !== 'undefined'
+        ? (window as { chatprismDesktop?: { runtimeEnv?: { contextBaseUrl?: string } } })
+            .chatprismDesktop?.runtimeEnv?.contextBaseUrl
+        : undefined;
+    return desktopContextBaseUrl
+        ? { ...viteEnv, CHATPRISM_CONTEXT_BASE_URL: desktopContextBaseUrl }
+        : viteEnv;
 }
 
 function installMarkdownSearchDecorations(editor: MarkdownEditor) {

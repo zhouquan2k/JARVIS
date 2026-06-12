@@ -1,6 +1,7 @@
 import type { AnalysisResult } from './AnalysisResult';
 import type { ConversationOrigin } from './IExternalConversationProvider';
 import type { ReasoningEffort } from './IModelProvider';
+import type { GroupMember } from '../group/groupTypes';
 
 export type ConversationRole = 'user' | 'assistant';
 export type MessageAttachmentType = 'image' | 'file';
@@ -99,6 +100,8 @@ export interface ConversationModelSelection {
      * 绑定 agent 的默认模型（modelProviderName/modelName）。默认/agent 驱动的选择不置位。
      */
     explicit?: boolean;
+    /** providerId 为 'group' 时，本会话勾选参与的成员列表（顶部勾选区持久化结果）。 */
+    groupMembers?: GroupMember[];
 }
 
 export interface ConversationArchiveMetadata {
@@ -425,7 +428,10 @@ export function cloneConversation(conversation: Conversation): Conversation {
                 modelId: conversation.modelSelection.modelId,
                 modelOptions: { ...conversation.modelSelection.modelOptions },
                 reasoningEffort: conversation.modelSelection.reasoningEffort,
-                ...(conversation.modelSelection.explicit ? { explicit: true } : {})
+                ...(conversation.modelSelection.explicit ? { explicit: true } : {}),
+                ...(conversation.modelSelection.groupMembers
+                    ? { groupMembers: conversation.modelSelection.groupMembers.map((member) => ({ ...member })) }
+                    : {})
             }
             : undefined,
         compare: conversation.compare
@@ -509,7 +515,23 @@ export function normalizeConversation(conversation: Conversation): Conversation 
                     || modelSelection.reasoningEffort === 'high'
                     ? modelSelection.reasoningEffort
                     : undefined,
-                ...(modelSelection.explicit === true ? { explicit: true } : {})
+                ...(modelSelection.explicit === true ? { explicit: true } : {}),
+                ...(Array.isArray(modelSelection.groupMembers)
+                    ? {
+                        groupMembers: modelSelection.groupMembers
+                            .filter((member): member is GroupMember => {
+                                return Boolean(member)
+                                    && typeof member.providerId === 'string'
+                                    && typeof member.modelId === 'string'
+                                    && typeof member.name === 'string';
+                            })
+                            .map((member) => ({
+                                providerId: member.providerId,
+                                modelId: member.modelId,
+                                name: member.name
+                            }))
+                    }
+                    : {})
             }
             : undefined,
         compare: conversation.compare

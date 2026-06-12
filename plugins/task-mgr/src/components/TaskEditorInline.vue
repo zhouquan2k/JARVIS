@@ -66,6 +66,29 @@
             </svg>
           </div>
         </label>
+        <label class="task-editor-inline__field task-editor-inline__field--paired task-editor-inline__field--recurrence">
+          <span class="task-editor-inline__sr-only">{{ t('shared.taskRecurrence') }}</span>
+          <div
+            class="task-editor-inline__input-shell task-editor-inline__input-shell--select task-editor-inline__input-shell--paired"
+            data-testid="task-editor-recurrence-shell"
+            @click="openRecurrencePicker"
+          >
+            <select
+              ref="recurrenceSelect"
+              v-model="recurrenceValue"
+              class="task-editor-inline__input task-editor-inline__select task-editor-inline__select--recurrence"
+              data-testid="task-editor-recurrence"
+            >
+              <option value="">{{ t('shared.taskRecurrenceNone') }}</option>
+              <option value="daily">{{ t('shared.taskRecurrenceDaily') }}</option>
+              <option value="weekly">{{ t('shared.taskRecurrenceWeekly') }}</option>
+              <option value="monthly">{{ t('shared.taskRecurrenceMonthly') }}</option>
+            </select>
+            <svg class="task-editor-inline__select-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+              <path d="m5.25 7.75 4.75 4.75 4.75-4.75" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" />
+            </svg>
+          </div>
+        </label>
         <label class="task-editor-inline__field task-editor-inline__field--paired task-editor-inline__field--execution-state">
           <span class="task-editor-inline__sr-only">{{ t('shared.taskExecutionState') }}</span>
           <div
@@ -117,7 +140,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
-import type { Task, TaskExecutionState, TaskPriority } from '../../api';
+import type { Task, TaskExecutionState, TaskPriority, TaskRecurrence } from '../../api';
 import { useWorkspaceI18n } from '@packages/ui/src/i18n';
 
 const props = defineProps<{
@@ -135,6 +158,7 @@ const draft = ref<Task>({ ...props.task });
 const notesInput = ref<HTMLTextAreaElement | null>(null);
 const prioritySelect = ref<HTMLSelectElement | null>(null);
 const executionStateSelect = ref<HTMLSelectElement | null>(null);
+const recurrenceSelect = ref<HTMLSelectElement | null>(null);
 const timeEditorVisible = ref(false);
 
 const dueDateInput = computed({
@@ -198,6 +222,13 @@ const executionStateValue = computed({
   get: () => draft.value.executionState ?? '',
   set: (value: string) => {
     draft.value.executionState = (value || null) as TaskExecutionState;
+  }
+});
+
+const recurrenceValue = computed({
+  get: () => draft.value.recurrence ?? '',
+  set: (value: string) => {
+    draft.value.recurrence = (value || null) as TaskRecurrence;
   }
 });
 
@@ -280,6 +311,25 @@ function openExecutionStatePicker(event: MouseEvent): void {
   }
 
   const select = executionStateSelect.value;
+  if (!select) {
+    return;
+  }
+
+  select.focus();
+  if (typeof select.showPicker === 'function') {
+    select.showPicker();
+    return;
+  }
+  select.click();
+}
+
+function openRecurrencePicker(event: MouseEvent): void {
+  const target = event.target as HTMLElement | null;
+  if (target?.closest('select')) {
+    return;
+  }
+
+  const select = recurrenceSelect.value;
   if (!select) {
     return;
   }
@@ -560,6 +610,14 @@ function openExecutionStatePicker(event: MouseEvent): void {
 
 .task-editor-inline__select--execution-state {
   min-width: 56px;
+}
+
+.task-editor-inline__field--recurrence .task-editor-inline__input-shell {
+  min-width: 80px;
+}
+
+.task-editor-inline__select--recurrence {
+  min-width: 64px;
 }
 
 .task-editor-inline__field--paired .task-editor-inline__select:focus {

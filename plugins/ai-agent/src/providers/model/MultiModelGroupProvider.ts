@@ -1,5 +1,5 @@
 import { APP_CONFIG, type ProviderModelCatalog } from '@packages/core/config';
-import type { IModelProvider, ProviderSendResult, ProviderStreamUpdate, SendMessageOptions } from '../../interfaces/IModelProvider';
+import type { IModelProvider, ProviderSendResult, ProviderStreamUpdate, ReasoningEffort, SendMessageOptions } from '../../interfaces/IModelProvider';
 import type { GroupConfig, GroupMember } from '../../group/groupTypes';
 import { parseMentions } from '../../group/mentionParser';
 import { composeMemberPrompt } from '../../group/groupPrompt';
@@ -34,12 +34,40 @@ export class MultiModelGroupProvider implements IModelProvider {
         return true;
     }
 
+    /**
+     * 本轮参与成员：优先用调用方传入的勾选结果（options.groupMembers），
+     * 否则回退到默认预设（deps.getGroupConfig）。
+     */
+    private resolveConfig(options: { modelId?: string; groupMembers?: GroupMember[] }): GroupConfig {
+        if (options.groupMembers && options.groupMembers.length > 0) {
+            return { members: options.groupMembers };
+        }
+        return this.deps.getGroupConfig(options.modelId);
+    }
+
+    /**
+     * 切到 group 时初始化同步：把统一推理档位下发给每个成员受控页面。
+     * 成员各自用自己的 modelId（preset 通常为 'dom'，不切模型只设档位）。best-effort。
+     */
+    async applyPageDefaults(options: { modelId?: string; reasoningEffort?: ReasoningEffort; groupMembers?: GroupMember[] }): Promise<void> {
+        const config = this.resolveConfig(options);
+        await Promise.all(
+            config.members.map(async (member) => {
+                const memberProvider = this.deps.resolveMemberProvider(member.providerId);
+                await memberProvider.applyPageDefaults?.({
+                    modelId: member.modelId,
+                    reasoningEffort: options.reasoningEffort
+                });
+            })
+        );
+    }
+
     async sendMessage(
         prompt: string,
         options: SendMessageOptions,
         onUpdate: (update: ProviderStreamUpdate) => void
     ): Promise<ProviderSendResult> {
-        const config = this.deps.getGroupConfig(options.modelId);
+        const config = this.resolveConfig(options);
         const { targets } = parseMentions(prompt, config.members);
 
         const buffers: Map<string, string> = new Map(targets.map((m) => [m.name, '']));
@@ -108,4 +136,10 @@ export function resolveGroupMembers(
 ): GroupMember[] {
     const groupPresets = APP_CONFIG.groupPresets as Record<string, GroupMember[]> | undefined;
     return groupPresets?.[presetModelId] ?? [];
+}
+
+/** 群聊全部候选成员（顶部勾选区展示用，含默认未勾选项）。 */
+export function resolveGroupCandidates(): GroupMember[] {
+    const candidates = APP_CONFIG.groupCandidates as GroupMember[] | undefined;
+    return (candidates ?? []).map((member) => ({ ...member }));
 }

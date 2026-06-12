@@ -135,6 +135,8 @@ export const APP_CONFIG: {
     analyzer: AnalyzerConfig;
     lightweightModels: LightweightModelConfig;
     groupPresets: Record<string, GroupMemberConfig[]>;
+    /** 群聊可选成员池：顶部勾选区展示的全部候选 DOM 成员（实际可用性再按运行模式过滤）。 */
+    groupCandidates: GroupMemberConfig[];
 } = {
     providers: [
         {
@@ -384,8 +386,10 @@ export const APP_CONFIG: {
             name: 'Group (Multi-Model)',
             models: [
                 {
-                    id: 'dom-group',
-                    name: 'ChatGPT + Gemini (DOM)',
+                    id: 'dom',
+                    name: 'Group (DOM)',
+                    // group 统一档位，由 MultiModelGroupProvider 下发给所有成员；high = Thinking/扩展。
+                    reasoningEffort: 'high' as const,
                     options: [
                         {
                             key: 'web_search',
@@ -399,7 +403,7 @@ export const APP_CONFIG: {
                     ]
                 }
             ],
-            defaultModel: 'dom-group',
+            defaultModel: 'dom',
             supportedRuntimeModes: ['desktop'],
             requiredCapabilities: ['controlled-page']
         },
@@ -427,6 +431,8 @@ export const APP_CONFIG: {
                 }
             ],
             defaultModel: 'dom',
+            // 群聊 DOM 模式下跟随此默认模型（无法逐个手选时的兜底）。
+            preferredDefaultModel: 'GPT-5.5',
             supportedRuntimeModes: ['desktop'],
             requiredCapabilities: ['controlled-page']
         },
@@ -458,6 +464,25 @@ export const APP_CONFIG: {
             preferredDefaultModel: '3.1 Pro',
             supportedRuntimeModes: ['desktop'],
             requiredCapabilities: ['controlled-page']
+        },
+        {
+            id: 'claude-dom',
+            name: 'Claude (DOM)',
+            models: [
+                {
+                    id: 'dom',
+                    name: 'Claude (DOM)',
+                    // Claude extended thinking 由 setReasoningEffort 驱动（选择器待验证）；
+                    // reasoningEffort:'high' 设默认档为「扩展」思考。
+                    reasoningEffort: 'high' as const,
+                    options: []
+                }
+            ],
+            defaultModel: 'dom',
+            // 动态目录就绪后默认选中 "Opus 4.8"（Claude 高能力模型，支持 extended thinking）。
+            preferredDefaultModel: 'Opus 4.8',
+            supportedRuntimeModes: ['desktop'],
+            requiredCapabilities: ['controlled-page']
         }
     ],
     defaultProvidersByMode: {
@@ -465,11 +490,19 @@ export const APP_CONFIG: {
         desktop: 'gemini-dom'
     },
     groupPresets: {
-        'dom-group': [
-            { providerId: 'chatgpt-dom', modelId: 'dom', name: 'ChatGPT' },
-            { providerId: 'gemini-dom', modelId: 'dom', name: 'Gemini' }
+        // 群聊 DOM 模式：各成员使用 provider 的 preferredDefaultModel，无需用户逐个手选。
+        'dom': [
+            { providerId: 'chatgpt-dom', modelId: 'GPT-5.5', name: 'ChatGPT' },
+            { providerId: 'gemini-dom', modelId: '3.1 Pro', name: 'Gemini' }
         ]
     },
+    // 群聊顶部勾选区的候选成员（含默认未勾选项，如 Claude）。
+    // modelId 使用各 provider 的 preferredDefaultModel，使 group 模式下页面自动切换到对应模型。
+    groupCandidates: [
+        { providerId: 'chatgpt-dom', modelId: 'GPT-5.5', name: 'ChatGPT' },
+        { providerId: 'gemini-dom', modelId: '3.1 Pro', name: 'Gemini' },
+        { providerId: 'claude-dom', modelId: 'Opus 4.8', name: 'Claude' }
+    ],
     analyzer: {
         defaultProvider: 'gemini-api',
         defaultModel: 'gemini-pro-latest',

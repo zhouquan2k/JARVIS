@@ -2,6 +2,7 @@ export type TaskPriority = 'low' | 'medium' | 'high';
 export type TaskCalendarSyncStatus = 'synced' | 'failed' | null;
 export type TaskQueryTag = 'all' | 'today' | 'planned' | 'scheduled' | 'backlog';
 export type TaskExecutionState = 'doing' | 'morning' | 'afternoon' | 'evening' | null;
+export type TaskRecurrence = 'daily' | 'weekly' | 'monthly' | null;
 
 export interface Task {
     id: string;
@@ -22,6 +23,7 @@ export interface Task {
     calendarSyncStatus: TaskCalendarSyncStatus;
     calendarLastSyncedAt: number | null;
     calendarLastSyncError: string | null;
+    recurrence?: TaskRecurrence;
 }
 
 export interface TaskService {

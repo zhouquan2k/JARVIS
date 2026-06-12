@@ -7,7 +7,14 @@
  */
 import { contextBridge, ipcRenderer } from 'electron';
 import { injectPrompt, observeReply } from './domChat/domChatObserver';
-import { readAvailableModels, readLatestReply, setReasoningEffort, setWebSearchEnabled } from './domChat/domChatCore';
+import {
+    readAvailableModels,
+    readLatestReply,
+    setActiveModel,
+    setReasoningEffort,
+    setWebSearchEnabled,
+    type ReasoningEffort
+} from './domChat/domChatCore';
 
 const DOM_EVENT_CHANNEL = 'desktop:controlled-page:dom-event-from-page';
 const PROVIDER_ID = 'chatgpt-dom';
@@ -73,9 +80,18 @@ async function getAvailableModels() {
 
 contextBridge.exposeInMainWorld('__jarvisReadAvailableModels', getAvailableModels);
 
-async function setReasoningEffortBridge(high: boolean): Promise<{ ok: boolean; note: string }> {
-    console.log('[ChatGPTDomPreload] set-reasoning-effort', high);
-    const result = await setReasoningEffort(document, PROVIDER, high);
+async function setModelBridge(modelId: string): Promise<{ ok: boolean; note: string }> {
+    console.log('[ChatGPTDomPreload] set-model', modelId);
+    const result = await setActiveModel(document, PROVIDER, modelId);
+    console.log('[ChatGPTDomPreload] set-model-result', JSON.stringify(result));
+    return result;
+}
+
+contextBridge.exposeInMainWorld('__jarvisSetModel', setModelBridge);
+
+async function setReasoningEffortBridge(effort: ReasoningEffort): Promise<{ ok: boolean; note: string }> {
+    console.log('[ChatGPTDomPreload] set-reasoning-effort', effort);
+    const result = await setReasoningEffort(document, PROVIDER, effort);
     console.log('[ChatGPTDomPreload] set-reasoning-effort-result', JSON.stringify(result));
     return result;
 }

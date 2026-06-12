@@ -104,6 +104,7 @@ import {
   setMarkdownEditorSearchQuery,
   toggleMarkAtViewerSelection,
   toggleMarkdownHighlightAtViewerSelection,
+  wrapSelectionAsTaskListItem,
   type MarkdownConversationLinkTarget,
   type MarkdownEditor,
   type MarkdownViewerMode
@@ -1047,7 +1048,8 @@ defineExpose({
   insertMarkdownSnippet,
   insertMarkdownInViewer,
   toggleHighlightInViewer,
-  toggleMarkInViewer
+  toggleMarkInViewer,
+  insertTaskListItemInViewer
 });
 
 // viewer(WYSIWYG) 原地编辑后，Milkdown 的 markdownUpdated 监听是异步触发的，
@@ -1089,6 +1091,14 @@ function toggleMarkInViewer(markName: string): boolean {
     return false;
   }
   return flushViewerEditToModel(toggleMarkAtViewerSelection(editor, markName));
+}
+
+function insertTaskListItemInViewer(): boolean {
+  if (!editor) {
+    console.warn('[markdown-viewer] insertTaskListItemInViewer: no milkdown editor');
+    return false;
+  }
+  return flushViewerEditToModel(wrapSelectionAsTaskListItem(editor));
 }
 
 function applyLinkInViewer(input: { label: string; href: string }): boolean {
@@ -1502,6 +1512,8 @@ function requiresMarkdownDocumentPathRebind(content: string): boolean {
   color: rgba(226, 232, 240, 0.92);
   background: rgba(15, 23, 42, 0.82);
   box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.34);
+  pointer-events: auto;
+  cursor: pointer;
 }
 
 .editor-input :deep(.milkdown .ProseMirror .milkdown-list-item-block .label-wrapper .label.checked) {

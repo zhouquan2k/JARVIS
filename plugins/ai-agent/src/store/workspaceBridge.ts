@@ -2,7 +2,16 @@ import type { ResolvedAgentConfig, WorkspaceRuntimeContext } from '@plugins/ai-a
 import { useChatStore } from './chat';
 
 function scopeMetadataToAgent(metadata: { data: Record<string, unknown> } | null | undefined): ResolvedAgentConfig | null {
-    return metadata ? (metadata.data as unknown as ResolvedAgentConfig) : null;
+    if (!metadata) {
+        return null;
+    }
+
+    const data = metadata.data as unknown as ResolvedAgentConfig;
+    if (!Array.isArray(data.sourcePaths)) {
+        return null;
+    }
+
+    return data;
 }
 
 function matchesSavedSelection(

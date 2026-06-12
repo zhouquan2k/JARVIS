@@ -203,6 +203,7 @@ async function startDesktopContextServer(input: {
                 ...process.env,
                 PORT: String(port),
                 CHATPRISM_KNOWLEDGE_ROOT: input.knowledgeRoot,
+                CHATPRISM_RENDERER_DIST: join(appRoot, 'dist/renderer'),
                 ...input.extraEnv
             },
             stdio: 'pipe'

@@ -10,6 +10,7 @@ export interface ServerConfig {
     contextBackend: 'local-file' | 'database';
     codexCommand: string;
     codexWorkingDirectory: string;
+    rendererDistPath?: string;
 }
 
 const SERVER_ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -47,6 +48,17 @@ export function resolveServerConfig(env: NodeJS.ProcessEnv = process.env): Serve
         knowledgeRoot: env.CHATPRISM_KNOWLEDGE_ROOT?.trim() || undefined,
         contextBackend: parseContextBackend(env.CHATPRISM_CONTEXT_BACKEND),
         codexCommand: env.CHATPRISM_CODEX_COMMAND?.trim() || 'codex',
-        codexWorkingDirectory: env.CHATPRISM_CODEX_CWD?.trim() || process.cwd()
+        codexWorkingDirectory: env.CHATPRISM_CODEX_CWD?.trim() || process.cwd(),
+        rendererDistPath: resolveRendererDistPath(env.CHATPRISM_RENDERER_DIST)
     };
+}
+
+function resolveRendererDistPath(value?: string): string | undefined {
+    const trimmed = value?.trim();
+    if (!trimmed) {
+        return undefined;
+    }
+    // Resolve against the process cwd so relative inputs work regardless of where
+    // serveStatic later re-relativizes them.
+    return path.resolve(trimmed);
 }

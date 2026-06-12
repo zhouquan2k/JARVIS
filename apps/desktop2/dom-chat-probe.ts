@@ -25,14 +25,15 @@ const FIXTURE_DIR = resolve(REPO_ROOT, 'plugins/ai-agent/src/preload/domChat/fix
 
 const SITE_URLS: Record<string, string> = {
     gemini: 'https://gemini.google.com/app',
-    chatgpt: 'https://chatgpt.com'
+    chatgpt: 'https://chatgpt.com',
+    claude: 'https://claude.ai/new'
 };
 
-type Provider = 'gemini' | 'chatgpt';
+type Provider = 'gemini' | 'chatgpt' | 'claude';
 
 function parseArgs() {
     const args = process.argv.slice(2);
-    const provider = (args.find((a) => a === 'gemini' || a === 'chatgpt') ?? 'gemini') as Provider;
+    const provider = (args.find((a) => a === 'gemini' || a === 'chatgpt' || a === 'claude') ?? 'gemini') as Provider;
     const dump = args.includes('--dump');
     const prompt = args.find((a) => !a.startsWith('--') && a !== provider) ?? '美国第二大城市是哪里？';
     return { provider, prompt, dump };
@@ -146,7 +147,9 @@ async function main() {
     if (dump) {
         const sel = provider === 'gemini'
             ? '[data-test-id="model-response"], model-response'
-            : '[data-message-author-role="assistant"]';
+            : provider === 'claude'
+                ? '[data-testid="message-content"]'
+                : '[data-message-author-role="assistant"]';
         const html = await page.evaluate(
             `(() => { const els = document.querySelectorAll(${JSON.stringify(sel)}); return els.length ? els[els.length - 1].outerHTML : ''; })()`
         ) as string;

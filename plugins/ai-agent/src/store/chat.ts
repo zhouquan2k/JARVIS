@@ -42,7 +42,11 @@ import { buildFallbackConversationTitle, extractNodeNameFromPath, sanitizeConver
 import { formatHttpApiError } from '@packages/ui/src/utils/formatHttpApiError';
 import { augmentPromptWithMentionedFiles, prepareRequestWithActiveDocument } from '../runtime/agents/augmentPromptWithAgentContext';
 import type { AgentRuntime } from '../runtime/agents/runtime/types';
-import { resolveGroupMembers } from '../providers/model/MultiModelGroupProvider';
+import { resolveGroupMembers, resolveGroupCandidates } from '../providers/model/MultiModelGroupProvider';
+import type { GroupMember } from '../group/groupTypes';
+
+const GROUP_PROVIDER_ID = 'group';
+const GROUP_DEFAULT_PRESET_ID = 'dom';
 
 export type WorkspaceHistorySource = 'local' | 'external';
 export type WorkspaceMode = 'agent' | 'conversation';
@@ -119,6 +123,8 @@ export interface ChatState {
     currentReasoningEffort: ReasoningEffort;
     /** 当前模型选择是否为用户在下拉框主动选择（优先于 agent 默认模型）。 */
     currentModelSelectionExplicit: boolean;
+    /** group provider 当前勾选参与的成员（顶部勾选区状态，仅 group 模式有意义）。 */
+    currentGroupMembers: GroupMember[];
     questionIndexFilter: QuestionIndexFilter;
     isQuestionIndexPanelOpen: boolean;
     activeQuestionId: string | null;
@@ -246,7 +252,7 @@ function cloneHistoryProviderEntry(entry: ExternalHistoryProviderEntry): Externa
 function cloneResolvedAgentConfig(agent: ResolvedAgentConfig): ResolvedAgentConfig {
     return {
         ...agent,
-        sourcePaths: [...agent.sourcePaths],
+        sourcePaths: Array.isArray(agent.sourcePaths) ? [...agent.sourcePaths] : [],
         tools: agent.tools?.map((tool) => ({ ...tool })),
         skills: agent.skills?.map((skill) => ({ ...skill }))
     };
@@ -525,7 +531,8 @@ function buildConversationModelSelection(
     modelId: string,
     modelOptions: Record<string, boolean>,
     reasoningEffort: ReasoningEffort,
-    explicit = false
+    explicit = false,
+    groupMembers: GroupMember[] = []
 ): ConversationModelSelection | undefined {
     if (!providerId || !modelId) {
         return undefined;
@@ -537,7 +544,11 @@ function buildConversationModelSelection(
         modelOptions: cloneModelOptions(modelOptions),
         reasoningEffort,
         // 仅在用户显式覆盖时携带该字段，保持与历史持久化数据/默认选择的结构一致。
-        ...(explicit ? { explicit: true } : {})
+        ...(explicit ? { explicit: true } : {}),
+        // group provider 才持久化成员勾选结果。
+        ...(providerId === GROUP_PROVIDER_ID && groupMembers.length > 0
+            ? { groupMembers: groupMembers.map((member) => ({ ...member })) }
+            : {})
     };
 }
 
@@ -871,6 +882,7 @@ export const useChatStore = defineStore('chat', {
         currentModelOptions: {},
         currentReasoningEffort: DEFAULT_REASONING_EFFORT,
         currentModelSelectionExplicit: false,
+        currentGroupMembers: [],
         questionIndexFilter: 'all',
         isQuestionIndexPanelOpen: true,
         activeQuestionId: null,
@@ -961,6 +973,12 @@ export const useChatStore = defineStore('chat', {
             return cloneModelOptionDefinitions(this.currentModelConfig?.options) || [];
         },
 
+        /** 群聊候选成员池：config 候选与当前运行模式可用 provider 的交集。 */
+        groupCandidateMembers(state): GroupMember[] {
+            const availableIds = new Set(state.availableProviders.map((provider) => provider.id));
+            return resolveGroupCandidates().filter((member) => availableIds.has(member.providerId));
+        },
+
         attachmentProviderId(state): string {
             if (state.currentModelSelectionExplicit && state.currentProviderId) {
                 return state.currentProviderId;
@@ -1024,7 +1042,8 @@ export const useChatStore = defineStore('chat', {
                 this.currentModelId,
                 this.currentModelOptions,
                 this.currentReasoningEffort,
-                this.currentModelSelectionExplicit
+                this.currentModelSelectionExplicit,
+                this.currentGroupMembers
             );
         },
 
@@ -1273,6 +1292,7 @@ export const useChatStore = defineStore('chat', {
             }
 
             this.setProviderModelState(providerId, { loading: true });
+            console.log('[ChatStore]', JSON.stringify({ stage: 'loadProviderModels-start', providerId }));
 
             try {
                 const catalog = this.providerModelsResolver
@@ -1282,6 +1302,12 @@ export const useChatStore = defineStore('chat', {
                         defaultModel: baseProvider.defaultModel
                     };
 
+                console.log('[ChatStore]', JSON.stringify({
+                    stage: 'loadProviderModels-success',
+                    providerId,
+                    count: catalog.models.length,
+                    modelIds: catalog.models.map((m) => m.id)
+                }));
                 this.applyProviderModelCatalog(providerId, catalog);
                 this.setProviderModelState(providerId, { loading: false, loaded: true });
             } catch (error) {
@@ -1297,6 +1323,13 @@ export const useChatStore = defineStore('chat', {
                 });
                 // 模型选择器未就绪：先用静态兜底，但不标记 loaded，使下次重开/切换 provider 时重读真实模型。
                 const ready = !isModelsNotReadyError(error);
+                console.warn('[ChatStore]', JSON.stringify({
+                    stage: 'loadProviderModels-error',
+                    providerId,
+                    isModelsNotReady: isModelsNotReadyError(error),
+                    loaded: ready,
+                    error: error instanceof Error ? error.message : String(error)
+                }));
                 this.setProviderModelState(providerId, { loading: false, loaded: ready });
             }
 
@@ -1328,6 +1361,8 @@ export const useChatStore = defineStore('chat', {
                     ? this.currentConversation.modelSelection.modelOptions
                     : this.currentModelOptions;
                 this.applyCurrentModelState(provider.defaultModel, sourceOptions);
+                // 模型目录异步就绪（'dom' 兜底 → 真实模型如 opus-4-8）后，把默认模型/档位同步到受控页面。
+                this.applyProviderPageDefaults(providerId);
             }
 
             return provider;
@@ -1373,6 +1408,10 @@ export const useChatStore = defineStore('chat', {
                 : this.currentModelOptions;
 
             this.applyCurrentModelState(nextModelId, sourceOptions);
+            if (providerId === GROUP_PROVIDER_ID) {
+                this.ensureGroupMembersInitialized();
+                this.syncCurrentConversationModelSelection();
+            }
             await this.ensureAttachmentCapabilityLoaded(providerId);
             if (!this.currentProviderSupportsAttachments && this.draftAttachments.length > 0) {
                 this.draftAttachments = [];
@@ -1393,11 +1432,14 @@ export const useChatStore = defineStore('chat', {
         async setCurrentModelProviderByUser(providerId: string, modelId?: string) {
             this.currentModelSelectionExplicit = true;
             await this.setCurrentModelProvider(providerId, modelId);
+            // 用户主动切 provider：把默认模型/档位同步到受控页面（DOM provider），无需等发送。
+            this.applyProviderPageDefaults(providerId);
         },
 
         setCurrentModelByUser(modelId: string) {
             this.currentModelSelectionExplicit = true;
             this.setCurrentModel(modelId);
+            this.applyProviderPageDefaults();
         },
 
         setCurrentModelOption(key: string, enabled: boolean) {
@@ -1417,6 +1459,85 @@ export const useChatStore = defineStore('chat', {
 
             this.currentReasoningEffort = reasoningEffort;
             this.syncCurrentConversationModelSelection();
+            this.applyProviderPageDefaults();
+        },
+
+        /** 默认勾选成员：dom-group 预设与候选池的交集（候选不可用时回退候选首项）。 */
+        resolveDefaultGroupMembers(): GroupMember[] {
+            const candidates = this.groupCandidateMembers;
+            const preset = resolveGroupMembers(GROUP_DEFAULT_PRESET_ID)
+                .filter((member) => candidates.some((candidate) => candidate.providerId === member.providerId))
+                .map((member) => ({ ...member }));
+            if (preset.length > 0) {
+                return preset;
+            }
+            return candidates.length > 0 ? [{ ...candidates[0] }] : [];
+        },
+
+        /**
+         * 切到 group 时初始化勾选成员：优先用会话持久化的 groupMembers（过滤为当前可用候选），
+         * 否则回退默认预设；保证至少 1 个成员。
+         */
+        ensureGroupMembersInitialized() {
+            const candidates = this.groupCandidateMembers;
+            const persisted = this.currentConversation?.modelSelection?.groupMembers;
+            const fromPersisted = Array.isArray(persisted)
+                ? persisted.filter((member) => candidates.some((candidate) => candidate.providerId === member.providerId))
+                : [];
+            // 按候选顺序归一，保证展示稳定。
+            const selectedIds = new Set(
+                (fromPersisted.length > 0 ? fromPersisted : this.resolveDefaultGroupMembers())
+                    .map((member) => member.providerId)
+            );
+            let next = candidates.filter((candidate) => selectedIds.has(candidate.providerId));
+            if (next.length === 0 && candidates.length > 0) {
+                next = [{ ...candidates[0] }];
+            }
+            this.currentGroupMembers = next.map((member) => ({ ...member }));
+        },
+
+        /** 顶部勾选区切换某候选成员的参与状态（保证至少保留 1 个）。 */
+        toggleGroupMember(providerId: string) {
+            const candidates = this.groupCandidateMembers;
+            if (!candidates.some((candidate) => candidate.providerId === providerId)) {
+                return;
+            }
+            const isSelected = this.currentGroupMembers.some((member) => member.providerId === providerId);
+            const selectedIds = new Set(this.currentGroupMembers.map((member) => member.providerId));
+            if (isSelected) {
+                if (this.currentGroupMembers.length <= 1) {
+                    return;
+                }
+                selectedIds.delete(providerId);
+            } else {
+                selectedIds.add(providerId);
+            }
+            // 按候选顺序重排，保证展示稳定。
+            this.currentGroupMembers = candidates
+                .filter((candidate) => selectedIds.has(candidate.providerId))
+                .map((member) => ({ ...member }));
+            this.syncCurrentConversationModelSelection();
+            this.applyProviderPageDefaults(GROUP_PROVIDER_ID);
+        },
+
+        /**
+         * 把当前默认模型与推理档位同步到受控页面（仅 DOM 类 provider 实现 applyPageDefaults）。
+         * 在切换 provider、用户改模型/档位、模型目录就绪等时机调用，使网页状态即时反映 app 选择。
+         * fire-and-forget：best-effort，不阻塞 UI，失败由 provider 内部记录。
+         */
+        applyProviderPageDefaults(providerId?: string): void {
+            const targetProviderId = providerId || this.currentProviderId;
+            if (!targetProviderId) {
+                return;
+            }
+            const provider = this.resolveModelProvider(targetProviderId);
+            void provider?.applyPageDefaults?.({
+                modelId: this.currentModelId,
+                reasoningEffort: this.currentReasoningEffort,
+                ...(targetProviderId === GROUP_PROVIDER_ID
+                    ? { groupMembers: this.currentGroupMembers.map((member) => ({ ...member })) }
+                    : {})
+            });
         },
 
         setDraftPrompt(prompt: string) {
@@ -1616,10 +1737,11 @@ export const useChatStore = defineStore('chat', {
          * 非 group 会话返回空集，文件引用行为完全不变。
          */
         resolveActiveGroupMentionNames(): Set<string> {
-            if (this.currentProviderId !== 'group' || !this.currentModelId) {
+            if (this.currentProviderId !== GROUP_PROVIDER_ID) {
                 return new Set();
             }
-            return new Set(resolveGroupMembers(this.currentModelId).map((member) => member.name.toLowerCase()));
+            // 排除全部候选成员名（含未勾选项），避免 @成员名 被当作文件引用解析。
+            return new Set(resolveGroupCandidates().map((member) => member.name.toLowerCase()));
         },
 
         async resolveMentionedContextDocuments(
@@ -2046,7 +2168,12 @@ export const useChatStore = defineStore('chat', {
                 reasoningEffort: this.currentConversation?.modelSelection?.providerId === requestedProviderId
                     && this.currentConversation.modelSelection.modelId === resolvedModelId
                     ? this.currentConversation.modelSelection.reasoningEffort || DEFAULT_REASONING_EFFORT
-                    : this.currentReasoningEffort || DEFAULT_REASONING_EFFORT
+                    : this.currentReasoningEffort || DEFAULT_REASONING_EFFORT,
+                groupMembers: requestedProviderId === GROUP_PROVIDER_ID
+                    ? (this.currentGroupMembers.length > 0
+                        ? this.currentGroupMembers.map((member) => ({ ...member }))
+                        : this.resolveDefaultGroupMembers())
+                    : undefined
             };
         },
 
@@ -2998,7 +3125,8 @@ export const useChatStore = defineStore('chat', {
                                 attachments: preparedRequest.attachments,
                                 history,
                                 modelOptions: cloneModelOptions(sendTarget.modelOptions),
-                                reasoningEffort: sendTarget.reasoningEffort
+                                reasoningEffort: sendTarget.reasoningEffort,
+                                groupMembers: sendTarget.groupMembers
                             },
                             onUpdate
                         );

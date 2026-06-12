@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Mock ChatGPT</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    #conversation { min-height: 200px; }
+    #prompt-textarea { width: 400px; height: 60px; }
+    button { margin-left: 8px; padding: 6px 14px; }
+    .message { margin: 8px 0; padding: 8px; border: 1px solid #ddd; }
+    .assistant-msg .markdown { white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <div id="conversation"></div>
+
+  <div id="input-area">
+    <textarea id="prompt-textarea" placeholder="Message ChatGPT"></textarea>
+    <button class="__composer-pill" aria-haspopup="menu" type="button">高级</button>
+    <div data-testid="mock-chatgpt-current-model">GPT-5.5</div>
+    <div data-testid="mock-chatgpt-current-reasoning">高级</div>
+    <button data-testid="send-button">Send</button>
+  </div>
+
+  <script>
+    const MOCK_RESPONSE = 'Hello! I am a mock ChatGPT response used for JARVIS e2e testing.';
+    const STREAM_DELAY_MS = 80;
+    const CHUNK_SIZE = 5;
+    const reasoningLevels = ['极速', '均衡', '高级'];
+    const models = ['5.5', '5.4', '5.3', 'o3'];
+
+    let currentAssistantEl = null;
+    let currentReasoning = '极速';
+    let currentModel = 'o3';
+    let modelMenuOpen = false;
+
+    const pillBtn = document.querySelector('button.__composer-pill');
+
+    function formatModelLabel(model) {
+      return /^\d/.test(model) ? `GPT-${model}` : model;
+    }
+
+    function syncStateIndicators() {
+      pillBtn.textContent = currentReasoning;
+      document.querySelector('[data-testid="mock-chatgpt-current-model"]').textContent = formatModelLabel(currentModel);
+      document.querySelector('[data-testid="mock-chatgpt-current-reasoning"]').textContent = currentReasoning;
+    }
+
+    function removeMenus() {
+      document.getElementById('mock-chatgpt-pill-menu')?.remove();
+      document.getElementById('mock-chatgpt-model-menu')?.remove();
+    }
+
+    function closeMenus() {
+      modelMenuOpen = false;
+      removeMenus();
+    }
+
+    function renderMenus() {
+      removeMenus();
+
+      const menu = document.createElement('div');
+      menu.id = 'mock-chatgpt-pill-menu';
+      menu.setAttribute('role', 'menu');
+
+      for (const reasoning of reasoningLevels) {
+        const item = document.createElement('div');
+        item.setAttribute('role', 'menuitemradio');
+        item.setAttribute('aria-checked', reasoning === currentReasoning ? 'true' : 'false');
+        item.textContent = reasoning;
+        item.addEventListener('pointerdown', () => {
+          currentReasoning = reasoning;
+          syncStateIndicators();
+          closeMenus();
+        });
+        menu.appendChild(item);
+      }
+
+      const modelTrigger = document.createElement('div');
+      modelTrigger.setAttribute('role', 'menuitem');
+      modelTrigger.setAttribute('aria-haspopup', 'menu');
+      modelTrigger.setAttribute('aria-controls', 'mock-chatgpt-model-menu');
+      modelTrigger.setAttribute('aria-expanded', modelMenuOpen ? 'true' : 'false');
+      modelTrigger.textContent = formatModelLabel(currentModel);
+      modelTrigger.addEventListener('pointerdown', () => {
+        modelMenuOpen = !modelMenuOpen;
+        renderMenus();
+      });
+      menu.appendChild(modelTrigger);
+
+      document.body.appendChild(menu);
+
+      if (modelMenuOpen) {
+        const submenu = document.createElement('div');
+        submenu.id = 'mock-chatgpt-model-menu';
+        submenu.setAttribute('role', 'menu');
+
+        for (const model of models) {
+          const item = document.createElement('div');
+          item.setAttribute('role', 'menuitemradio');
+          item.setAttribute('aria-checked', model === currentModel ? 'true' : 'false');
+          item.textContent = model;
+          item.addEventListener('pointerdown', () => {
+            currentModel = model;
+            syncStateIndicators();
+            closeMenus();
+          });
+          submenu.appendChild(item);
+        }
+
+        document.body.appendChild(submenu);
+      }
+    }
+
+    pillBtn.addEventListener('pointerdown', () => {
+      if (document.getElementById('mock-chatgpt-pill-menu')) {
+        closeMenus();
+        return;
+      }
+      renderMenus();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') closeMenus();
+    });
+    syncStateIndicators();
+
+    document.querySelector('[data-testid="send-button"]').addEventListener('click', () => {
+      const textarea = document.getElementById('prompt-textarea');
+      const prompt = textarea.value || textarea.textContent;
+      if (!prompt) return;
+
+      // Show user message
+      const userDiv = document.createElement('div');
+      userDiv.className = 'message';
+      userDiv.setAttribute('data-message-author-role', 'user');
+      userDiv.textContent = prompt;
+      document.getElementById('conversation').appendChild(userDiv);
+
+      // Mirror real ChatGPT/Gemini SPA routing: after the first message the URL
+      // changes to a per-conversation path (/c/<id>). This is what made the prod
+      // bug appear (base-url reload started a new chat each turn) but stayed hidden
+      // in e2e — the static mock never changed its URL. Keep it realistic here.
+      if (!location.pathname.startsWith('/c/')) {
+        history.pushState({}, '', '/c/' + Date.now());
+      }
+
+      // Clear input
+      textarea.value = '';
+      textarea.textContent = '';
+
+      // Add stop button to signal generation in progress
+      const stopBtn = document.createElement('button');
+      stopBtn.setAttribute('data-testid', 'stop-button');
+      stopBtn.textContent = 'Stop generating';
+      document.getElementById('input-area').appendChild(stopBtn);
+
+      // Create assistant message container
+      const assistantDiv = document.createElement('div');
+      assistantDiv.className = 'message assistant-msg';
+      assistantDiv.setAttribute('data-message-author-role', 'assistant');
+      const markdownDiv = document.createElement('div');
+      markdownDiv.className = 'markdown';
+      assistantDiv.appendChild(markdownDiv);
+      document.getElementById('conversation').appendChild(assistantDiv);
+      currentAssistantEl = markdownDiv;
+
+      // Stream response in chunks
+      let pos = 0;
+      const interval = setInterval(() => {
+        if (pos >= MOCK_RESPONSE.length) {
+          clearInterval(interval);
+          stopBtn.remove();
+          return;
+        }
+        const end = Math.min(pos + CHUNK_SIZE, MOCK_RESPONSE.length);
+        markdownDiv.innerText = MOCK_RESPONSE.slice(0, end);
+        pos = end;
+      }, STREAM_DELAY_MS);
+    });
+
+    // Also expose __jarvisInjectPrompt in main world if preload hasn't run yet
+    // (graceful fallback for direct page testing)
+    if (!window.__jarvisInjectPrompt) {
+      window.__jarvisInjectPrompt = function(prompt, requestId) {
+        document.getElementById('prompt-textarea').value = prompt;
+        document.querySelector('[data-testid="send-button"]').click();
+      };
+    }
+  </script>
+</body>
+</html>

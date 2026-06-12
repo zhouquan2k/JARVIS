@@ -97,6 +97,42 @@ The knowledge workspace Markdown editor MUST expose a toolbar style insertion UI
 - **AND** the viewer's scroll position MUST remain unchanged
 - **AND** the editor MUST NOT switch to raw-source edit mode to perform the action
 
+### Requirement: Knowledge workspace MUST provide a Markdown block insertion UI for block-level constructs
+The knowledge workspace Markdown editor MUST expose a separate toolbar block insertion UI, distinct from the inline style picker, for block-level Markdown constructs that cannot be expressed as inline marks. The block insertion UI MUST initially provide a task-list item (checkbox) action. In rendered viewer mode, inserting a block MUST act on the user's live selection in place without switching to raw-source edit mode. When no text is selected, the inserted block MUST include a placeholder text (`task1`) so that the result is immediately visible and editable.
+
+#### Scenario: Insert a task-list item from the block insertion toolbar
+- **WHEN** the user is editing a Markdown document in the knowledge workspace
+- **THEN** the editor MUST expose a Markdown block insertion UI entry in the toolbar, separate from the inline style picker
+- **AND** the block insertion UI MUST include a "Checkbox" (task-list item) action
+
+#### Scenario: Wrap selected text in a task-list item
+- **WHEN** the user has selected text in the Markdown editor
+- **AND** the user chooses the checkbox action from the block insertion UI
+- **THEN** the selected text MUST become the content of a new task-list item (`- [ ] <selected text>`)
+- **AND** the resulting Markdown MUST be a valid GFM task-list item
+
+#### Scenario: Insert a placeholder task-list item when there is no selection
+- **WHEN** the user has no selected text in the Markdown editor
+- **AND** the user chooses the checkbox action from the block insertion UI
+- **THEN** the editor MUST insert a task-list item with placeholder text (`- [ ] task1`)
+
+#### Scenario: Insert block without switching to raw-source edit mode in viewer mode
+- **WHEN** the Markdown editor is in rendered viewer mode
+- **AND** the user invokes the checkbox block insertion
+- **THEN** the block MUST be inserted in place via the WYSIWYG ProseMirror layer
+- **AND** the editor MUST NOT switch to raw-source edit mode to perform the insertion
+
+### Requirement: Knowledge workspace MUST allow toggling task-list checkboxes directly in viewer mode
+The knowledge workspace Markdown viewer MUST allow users to click a rendered task-list checkbox to toggle its checked state without leaving viewer mode. The toggle MUST update the serialized Markdown source immediately so the change is persisted.
+
+#### Scenario: Click a checkbox to toggle its checked state in viewer mode
+- **WHEN** the Markdown editor is in rendered viewer mode
+- **AND** the rendered document contains task-list items
+- **THEN** the checkbox affordance for each task-list item MUST be clickable
+- **AND** clicking an unchecked item MUST mark it as checked (`- [x]`) in the Markdown source
+- **AND** clicking a checked item MUST mark it as unchecked (`- [ ]`) in the Markdown source
+- **AND** the viewport scroll position MUST remain unchanged after the toggle
+
 ### Requirement: Knowledge workspace MUST support viewer-mode resizing for local Markdown images
 The knowledge workspace Markdown middle-pane viewer MUST let users resize local document images directly from the rendered viewer mode without depending on a new editor-native image sizing contract. The resize interaction MUST persist the chosen Crepe-compatible ratio back into the authored Markdown source and MUST leave unsupported image sources unchanged.
 

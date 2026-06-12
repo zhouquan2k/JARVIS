@@ -8,6 +8,23 @@ The shared `ITaskProvider` contract MUST treat `documentPath = null` and `agentK
 - **THEN** the provider MUST resolve tasks across all persisted task scopes
 - **AND** it MUST NOT restrict the result to only tasks whose stored ownership fields are null
 
+### Requirement: Task contract MUST support a recurrence field
+Each task MUST carry an optional `recurrence` field with one of the enumerated values `daily`, `weekly`, `monthly`, or `null`. The task editor MUST expose a recurrence selector and persist the chosen value. The server API MUST normalise and accept the `recurrence` field in task payloads. When a task with a non-null recurrence is synced to Google Calendar, the sync service MUST attach the corresponding RRULE to the created event.
+
+#### Scenario: Set a recurring task
+- **WHEN** the user selects a recurrence interval (`daily` / `weekly` / `monthly`) in the task editor
+- **THEN** the task MUST be saved with the corresponding `recurrence` value
+- **AND** the task list MUST display a recurrence chip indicating the interval
+
+#### Scenario: Clear task recurrence
+- **WHEN** the user sets the recurrence selector back to "None"
+- **THEN** the task MUST be saved with `recurrence: null`
+- **AND** the recurrence chip MUST no longer appear in the task list
+
+#### Scenario: Recurrence reflected in Google Calendar sync
+- **WHEN** a task with a non-null `recurrence` value is synced to Google Calendar
+- **THEN** the created calendar event MUST include an RRULE matching the recurrence interval (`RRULE:FREQ=DAILY`, `WEEKLY`, or `MONTHLY`)
+
 ### Requirement: Task provider contract MUST support tag-based task subset filtering
 The shared `ITaskProvider` contract MUST accept a task query tag that distinguishes at least `all`, `today`, and `planned` subsets while keeping the same query method shape across hosts and providers.
 

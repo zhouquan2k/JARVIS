@@ -1119,6 +1119,47 @@ describe('DocumentEditorPane', () => {
         expect(wrapper.emitted('toggle-middle-pane-mode')).toHaveLength(1);
     });
 
+    it('renders the markdown toolbar in three separated groups with the requested button order', async () => {
+        const editor = { content: '# Draft' };
+        createMarkdownEditor.mockResolvedValue(editor);
+        readMarkdownDocument.mockImplementation((value: { content: string }) => value.content);
+
+        const { default: DocumentEditorPane } = await import('./DocumentEditorPane.vue');
+        const wrapper = mount(DocumentEditorPane, {
+            props: {
+                activePath: '/draft.md',
+                activeDocument: {
+                    path: '/draft.md',
+                    mimeType: 'text/markdown',
+                    dataBase64: encodeTextDocument('# Draft'),
+                    canWrite: true
+                },
+                activeViewerId: 'text',
+                activePaneMode: 'viewer',
+                modelValue: '# Draft',
+                isSaving: false,
+                isDirty: false,
+                middlePaneMode: 'default',
+                latestFileChange: null,
+                diffEntries: [],
+                canUndo: false,
+                canRedo: false
+            }
+        });
+
+        await Promise.resolve();
+        await wrapper.vm.$nextTick();
+
+        expect(wrapper.findAll('[data-testid^="document-toolbar-group-"]')).toHaveLength(3);
+        expect(wrapper.get('[data-testid="document-toolbar-group-mode"] [data-testid="markdown-mode-toggle"]').exists()).toBe(true);
+        expect(wrapper.get('[data-testid="document-toolbar-group-insert"] .editor-link-picker:nth-child(1) [data-testid="markdown-insert-link"]').exists()).toBe(true);
+        expect(wrapper.get('[data-testid="document-toolbar-group-insert"] .editor-link-picker:nth-child(2) [data-testid="markdown-style-picker-trigger"]').exists()).toBe(true);
+        expect(wrapper.get('[data-testid="document-toolbar-group-insert"] .editor-link-picker:nth-child(3) [data-testid="markdown-block-picker-trigger"]').exists()).toBe(true);
+        expect(wrapper.get('[data-testid="document-toolbar-group-actions"] .save-button:nth-child(1)').attributes('data-testid')).toBe('document-refresh');
+        expect(wrapper.get('[data-testid="document-toolbar-group-actions"] .save-button:nth-child(2)').attributes('data-testid')).toBe('document-save');
+        expect(wrapper.get('[data-testid="document-toolbar-group-actions"] .save-button:nth-child(3)').attributes('data-testid')).toBe('document-middle-pane-toggle');
+    });
+
     it('keeps the title bar and editor shell outside the zoomed content surface', async () => {
         const editor = { content: '# Draft' };
         createMarkdownEditor.mockResolvedValue(editor);

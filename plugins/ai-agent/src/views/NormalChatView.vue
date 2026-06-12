@@ -7,18 +7,34 @@
       <div class="chat-thread">
         <div class="chat-messages" ref="messagesRef" data-testid="normal-messages" @scroll="onMessagesScroll">
           <div
-            v-if="currentGroupMembers.length > 0 && !isPreviewing"
+            v-if="isLiveGroupConversation && groupCandidateMembers.length > 0"
             class="group-member-banner"
             data-testid="group-member-banner"
           >
-            <button
-              v-for="member in currentGroupMembers"
+            <div
+              v-for="member in groupCandidateMembers"
               :key="member.providerId"
-              type="button"
               class="group-member-chip"
+              :class="{ 'is-selected': isGroupMemberSelected(member.providerId) }"
               :data-testid="`group-member-chip-${member.providerId}`"
-              @click="insertMention(member.name)"
-            >{{ member.name }}</button>
+              :data-selected="isGroupMemberSelected(member.providerId) ? 'true' : 'false'"
+            >
+              <button
+                type="button"
+                class="group-member-toggle"
+                :aria-pressed="isGroupMemberSelected(member.providerId)"
+                :data-testid="`group-member-toggle-${member.providerId}`"
+                @click="onToggleGroupMember(member.providerId)"
+              >
+                <span class="group-member-checkbox" aria-hidden="true">{{ isGroupMemberSelected(member.providerId) ? '☑' : '☐' }}</span>
+              </button>
+              <button
+                type="button"
+                class="group-member-label"
+                :data-testid="`group-member-mention-${member.providerId}`"
+                @click="insertMention(member.name)"
+              >{{ member.name }}</button>
+            </div>
             <span class="group-member-hint">{{ t('shared.groupMemberBannerHint') }}</span>
           </div>
 
@@ -597,22 +613,37 @@ function buildAssistantRenderBlocks(message: ConversationMessage): AssistantRend
 const displayConversation = computed(() => chatStore.displayConversation);
 const isPreviewing = computed(() => chatStore.isPreviewing);
 
-// 当前会话若为 group provider，解析其成员（用于把合并回复按成员分段渲染）。
-// 优先用会话已持久化的 modelSelection；新建会话可能尚未同步，回退到当前激活的 provider/model。
+// 当前会话若为 group provider，解析其参与成员（用于把合并回复按成员分段渲染、底部受控页按钮）。
+// 优先用会话已持久化的 groupMembers；预览态读被预览会话，实时态读 store 勾选状态。
 const currentGroupMembers = computed<GroupMember[]>(() => {
   const selection = displayConversation.value?.modelSelection;
   let providerId = selection?.providerId;
   let modelId = selection?.modelId;
+  let members = selection?.groupMembers;
   if (providerId !== 'group' && !isPreviewing.value) {
     providerId = chatStore.currentProviderId;
     modelId = chatStore.currentModelId;
+    members = chatStore.currentGroupMembers;
   }
-  if (providerId !== 'group' || !modelId) {
+  if (providerId !== 'group') {
     return [];
   }
-  return resolveGroupMembers(modelId);
+  if (Array.isArray(members) && members.length > 0) {
+    return members;
+  }
+  return modelId ? resolveGroupMembers(modelId) : [];
 });
 const domGroupMembers = computed(() => currentGroupMembers.value.filter(isDomMember));
+
+// 顶部勾选区：群聊候选成员池（仅实时编辑当前会话时展示，不用于预览）。
+const isLiveGroupConversation = computed(() => !isPreviewing.value && chatStore.currentProviderId === 'group');
+const groupCandidateMembers = computed<GroupMember[]>(() => chatStore.groupCandidateMembers);
+function isGroupMemberSelected(providerId: string): boolean {
+  return chatStore.currentGroupMembers.some((member) => member.providerId === providerId);
+}
+function onToggleGroupMember(providerId: string) {
+  chatStore.toggleGroupMember(providerId);
+}
 const currentSingleDomProvider = computed(() => {
   const providerId = chatStore.currentProviderId;
   if (!providerId || providerId === 'group' || !providerId.endsWith('-dom')) {
@@ -1262,19 +1293,49 @@ async function startNewChat() {
 }
 
 .group-member-chip {
-  padding: 2px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px 2px 4px;
   border-radius: 12px;
-  background: rgba(99, 179, 237, 0.15);
-  color: #90cdf4;
+  /* 未勾选：置灰 */
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--cp-text-secondary, rgba(255, 255, 255, 0.45));
   font-size: 12px;
   font-weight: 500;
-  border: none;
-  cursor: pointer;
-  transition: background 150ms ease;
+  border: 1px solid transparent;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
 }
 
-.group-member-chip:hover {
-  background: rgba(99, 179, 237, 0.28);
+.group-member-chip.is-selected {
+  background: rgba(99, 179, 237, 0.15);
+  color: #90cdf4;
+  border-color: rgba(99, 179, 237, 0.35);
+}
+
+.group-member-toggle {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.group-member-label {
+  padding: 0 2px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.group-member-chip.is-selected .group-member-label:hover {
+  text-decoration: underline;
 }
 
 .group-member-hint {

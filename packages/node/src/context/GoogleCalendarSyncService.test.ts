@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Task } from '@plugins/task-mgr/api';
-import { GoogleCalendarSyncService, computeReminderMinutes, resolveCalendarDueAt } from './GoogleCalendarSyncService.ts';
+import { GoogleCalendarSyncService, buildRecurrenceRule, computeReminderMinutes, resolveCalendarDueAt } from './GoogleCalendarSyncService.ts';
 
 function createTimedTask(overrides: Partial<Task> = {}): Task {
     return {
@@ -220,6 +220,77 @@ describe('GoogleCalendarSyncService', () => {
             calendarEventId: 'event-1',
             calendarProviderId: 'google-calendar'
         }))).resolves.toBeUndefined();
+        expect(fetchImpl).toHaveBeenCalledTimes(2);
+    });
+});
+
+describe('buildRecurrenceRule', () => {
+    it('returns RRULE:FREQ=DAILY for daily', () => {
+        expect(buildRecurrenceRule('daily')).toBe('RRULE:FREQ=DAILY');
+    });
+
+    it('returns RRULE:FREQ=WEEKLY for weekly', () => {
+        expect(buildRecurrenceRule('weekly')).toBe('RRULE:FREQ=WEEKLY');
+    });
+
+    it('returns RRULE:FREQ=MONTHLY for monthly', () => {
+        expect(buildRecurrenceRule('monthly')).toBe('RRULE:FREQ=MONTHLY');
+    });
+});
+
+describe('GoogleCalendarSyncService recurrence', () => {
+    it('includes RRULE in the event payload when task has a recurrence', async () => {
+        const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+            const url = String(input);
+            if (url === 'https://oauth.example.test/token') {
+                return new Response(JSON.stringify({ access_token: 'token-1', expires_in: 3600 }), { status: 200 });
+            }
+            const payload = JSON.parse(String(init?.body)) as { recurrence?: string[] };
+            expect(payload.recurrence).toEqual(['RRULE:FREQ=WEEKLY']);
+            return new Response(JSON.stringify({ id: 'event-recur-1' }), { status: 200 });
+        });
+
+        const service = new GoogleCalendarSyncService({
+            env: {
+                CHATPRISM_GOOGLE_CALENDAR_CLIENT_ID: 'client-id',
+                CHATPRISM_GOOGLE_CALENDAR_CLIENT_SECRET: 'client-secret',
+                CHATPRISM_GOOGLE_CALENDAR_REFRESH_TOKEN: 'refresh-token',
+                CHATPRISM_GOOGLE_OAUTH_TOKEN_URL: 'https://oauth.example.test/token',
+                CHATPRISM_GOOGLE_CALENDAR_API_BASE_URL: 'https://calendar.example.test/v3'
+            },
+            fetchImpl,
+            now: () => 1_000
+        });
+
+        const result = await service.syncTask(createTimedTask({ recurrence: 'weekly' }));
+        expect(result.eventId).toBe('event-recur-1');
+        expect(fetchImpl).toHaveBeenCalledTimes(2);
+    });
+
+    it('omits recurrence field when task.recurrence is null', async () => {
+        const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+            const url = String(input);
+            if (url === 'https://oauth.example.test/token') {
+                return new Response(JSON.stringify({ access_token: 'token-1', expires_in: 3600 }), { status: 200 });
+            }
+            const payload = JSON.parse(String(init?.body)) as { recurrence?: unknown };
+            expect(payload.recurrence).toBeUndefined();
+            return new Response(JSON.stringify({ id: 'event-no-recur' }), { status: 200 });
+        });
+
+        const service = new GoogleCalendarSyncService({
+            env: {
+                CHATPRISM_GOOGLE_CALENDAR_CLIENT_ID: 'client-id',
+                CHATPRISM_GOOGLE_CALENDAR_CLIENT_SECRET: 'client-secret',
+                CHATPRISM_GOOGLE_CALENDAR_REFRESH_TOKEN: 'refresh-token',
+                CHATPRISM_GOOGLE_OAUTH_TOKEN_URL: 'https://oauth.example.test/token',
+                CHATPRISM_GOOGLE_CALENDAR_API_BASE_URL: 'https://calendar.example.test/v3'
+            },
+            fetchImpl,
+            now: () => 1_000
+        });
+
+        await service.syncTask(createTimedTask({ recurrence: null }));
         expect(fetchImpl).toHaveBeenCalledTimes(2);
     });
 });

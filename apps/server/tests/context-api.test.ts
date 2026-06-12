@@ -387,6 +387,48 @@ describe('context api', () => {
         expect(new Uint8Array(await pdfResponse.arrayBuffer())).toEqual(pdfBytes);
     });
 
+    it('serves the built renderer static files without shadowing api routes', async () => {
+        const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-context-'));
+        tempRoots.push(rootPath);
+        await writeFile(path.join(rootPath, 'welcome.md'), '# Welcome\n');
+
+        const rendererDist = await mkdtemp(path.join(os.tmpdir(), 'chatprism-renderer-'));
+        tempRoots.push(rendererDist);
+        await writeFile(path.join(rendererDist, 'index.html'), '<!doctype html><title>JARVIS</title>');
+        await mkdir(path.join(rendererDist, 'assets'));
+        await writeFile(path.join(rendererDist, 'assets', 'app.js'), 'console.log("app");');
+
+        const app = createApp({
+            config: createConfig({
+                isDevelopment: true,
+                knowledgeRoot: rootPath,
+                rendererDistPath: rendererDist
+            })
+        });
+
+        // index.html at root
+        const indexResponse = await app.request('/', { method: 'GET' });
+        expect(indexResponse.status).toBe(200);
+        expect(await indexResponse.text()).toContain('JARVIS');
+
+        // hashed asset
+        const assetResponse = await app.request('/assets/app.js', { method: 'GET' });
+        expect(assetResponse.status).toBe(200);
+        expect(await assetResponse.text()).toContain('console.log');
+
+        // API route is NOT shadowed by static serving / SPA fallback
+        const apiResponse = await app.request('/api/context/document-asset?path=%2Fwelcome.md', {
+            method: 'GET'
+        });
+        expect(apiResponse.status).toBe(200);
+        expect(await apiResponse.text()).toBe('# Welcome\n');
+
+        // SPA fallback: unknown client route returns index.html, not 404
+        const spaResponse = await app.request('/conversation/abc', { method: 'GET' });
+        expect(spaResponse.status).toBe(200);
+        expect(await spaResponse.text()).toContain('JARVIS');
+    });
+
     it('rejects out-of-root traversal and supports context route cors', async () => {
         const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-context-'));
         tempRoots.push(rootPath);

@@ -149,6 +149,7 @@
       @open="openConversationDetail"
       @rename="submitRenameFromList"
       @cancel-rename="cancelRenameFromList"
+      @delete="deleteConversationFromList"
     />
     <NormalChatView v-else class="agent-conversation-panel__detail" />
   </section>
@@ -492,6 +493,22 @@ function cancelRenameFromList(): void {
 async function submitRenameFromList(payload: { id: string; title: string }): Promise<void> {
   await chatStore.renameLocalConversation(payload.id, payload.title);
   cancelRenameFromList();
+}
+
+async function deleteConversationFromList(conversationId: string): Promise<void> {
+  const isCurrentConversation = chatStore.currentConversation?.id === conversationId;
+  await chatStore.deleteLocalConversation(conversationId);
+  if (isCurrentConversation && activeDocumentPath.value) {
+    await chatStore.startNewConversation({
+      boundNodeName: extractNodeNameFromPath(props.selectedNodePath ?? props.activeDocument?.path ?? props.activePath ?? null),
+      agentKey: props.activeAgentKey ?? null,
+      documentPath: props.activeDocument?.path ?? props.activePath ?? null,
+      activeDocument: props.activeDocument ?? null
+    });
+  }
+  if (activeDocumentPath.value) {
+    void loadDocumentConversations(activeDocumentPath.value);
+  }
 }
 
 async function toggleProjectDocumentPicker(): Promise<void> {

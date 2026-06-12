@@ -18,6 +18,7 @@ const preloadPath = join(__dirname, 'preload.cjs');
 const geminiHistoryPreloadPath = join(__dirname, 'gemini-history.preload.cjs');
 const chatgptDomPreloadPath = join(__dirname, 'chatgpt-dom.preload.cjs');
 const geminiDomPreloadPath = join(__dirname, 'gemini-dom.preload.cjs');
+const claudeDomPreloadPath = join(__dirname, 'claude-dom.preload.cjs');
 
 function resolveDesktopBrandIconPath(): string {
     const bundledPngIconPath = join(rendererDistDir, 'jarvis.png');
@@ -84,13 +85,28 @@ const authWindowManager = createAuthWindowManager({
     }
 });
 
+function deriveServerOrigin(): string {
+    const contextBaseUrl = process.env.CHATPRISM_CONTEXT_BASE_URL?.trim();
+    if (contextBaseUrl) {
+        try {
+            const url = new URL(contextBaseUrl);
+            return `${url.protocol}//${url.host}`;
+        } catch {
+            // fall through
+        }
+    }
+    return 'http://127.0.0.1:8787';
+}
+
 function getRendererEntryUrl(): string {
     const devServerUrl = process.env.CHATPRISM_DESKTOP_DEV_SERVER_URL;
     if (devServerUrl) {
+        process.env.CHATPRISM_RENDERER_CONTEXT_BASE_URL = '/api/context';
         return devServerUrl;
     }
 
-    return `file://${join(rendererDistDir, 'index.html')}`;
+    process.env.CHATPRISM_RENDERER_CONTEXT_BASE_URL = '/api/context';
+    return `${deriveServerOrigin()}/`;
 }
 
 async function createMainWindow() {
@@ -128,7 +144,8 @@ function wireIpc() {
         preloadRegistry: {
             'gemini-web': geminiHistoryPreloadPath,
             'chatgpt-dom': chatgptDomPreloadPath,
-            'gemini-dom': geminiDomPreloadPath
+            'gemini-dom': geminiDomPreloadPath,
+            'claude-dom': claudeDomPreloadPath
         }
     });
     disposeContextIpc = registerContextIpc({

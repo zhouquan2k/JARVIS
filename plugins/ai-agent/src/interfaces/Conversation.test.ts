@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+    cloneConversation,
     cloneConversationMessage,
+    normalizeConversation,
     normalizeConversationMessage,
+    type Conversation,
     type ConversationMessage
 } from './Conversation';
 
@@ -81,6 +84,52 @@ describe('Conversation message functional parts', () => {
                 collapsed: undefined,
                 afterCharIndex: undefined
             }
+        ]);
+    });
+});
+
+describe('Conversation group member selection', () => {
+    const groupConversation: Conversation = {
+        id: 'group-conv',
+        title: 'Group chat',
+        origin: 'local',
+        messages: [],
+        updatedAt: 1,
+        modelSelection: {
+            providerId: 'group',
+            modelId: 'dom',
+            modelOptions: {},
+            groupMembers: [
+                { providerId: 'chatgpt-dom', modelId: 'dom', name: 'ChatGPT' },
+                { providerId: 'claude-dom', modelId: 'dom', name: 'Claude' }
+            ]
+        }
+    };
+
+    it('clones groupMembers without sharing array entries', () => {
+        const cloned = cloneConversation(groupConversation);
+        expect(cloned.modelSelection?.groupMembers).toEqual(groupConversation.modelSelection?.groupMembers);
+        expect(cloned.modelSelection?.groupMembers).not.toBe(groupConversation.modelSelection?.groupMembers);
+        expect(cloned.modelSelection?.groupMembers?.[0]).not.toBe(groupConversation.modelSelection?.groupMembers?.[0]);
+    });
+
+    it('normalizes groupMembers and drops malformed entries', () => {
+        const normalized = normalizeConversation({
+            ...groupConversation,
+            modelSelection: {
+                providerId: 'group',
+                modelId: 'dom',
+                modelOptions: {},
+                groupMembers: [
+                    { providerId: 'chatgpt-dom', modelId: 'dom', name: 'ChatGPT' },
+                    { providerId: 'gemini-dom', name: 'Gemini' },
+                    { modelId: 'dom', name: 'NoProvider' }
+                ]
+            }
+        } as unknown as Conversation);
+
+        expect(normalized.modelSelection?.groupMembers).toEqual([
+            { providerId: 'chatgpt-dom', modelId: 'dom', name: 'ChatGPT' }
         ]);
     });
 });

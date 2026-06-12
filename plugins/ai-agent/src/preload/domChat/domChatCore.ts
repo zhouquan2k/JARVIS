@@ -5,8 +5,11 @@
  * 选择器、输入注入、回复提取、生成态判断都在这里，任何修改都能被独立验证。
  */
 import { extractGeminiMessageText } from '../../providers/history/gemini/geminiMessageSerializer';
+import type { ReasoningEffort } from '../../interfaces/IModelProvider';
 
-export type DomChatProvider = 'chatgpt' | 'gemini';
+export type { ReasoningEffort };
+
+export type DomChatProvider = 'chatgpt' | 'gemini' | 'claude';
 
 export interface DomModelInfo {
     id: string;   // 稳定标识符（来自页面 data 属性，或由名称派生的 slug）
@@ -38,6 +41,18 @@ export const DOM_CHAT_SELECTORS: Record<DomChatProvider, DomChatSelectors> = {
         stopButton: 'button.stop, button[aria-label="Stop response"], button[aria-label*="Stop" i], button[aria-label*="停止"]',
         // 与历史抓取一致的权威 assistant 选择器（GeminiHistoryConfigLoader）。
         responseBubble: '[data-test-id="model-response"], model-response'
+    },
+    // Claude.ai 选择器 — 经浏览器实探（2026-06）验证：
+    //   input:          data-testid="chat-input"（tiptap ProseMirror contenteditable）
+    //   sendButton:     aria-label="Send message"（有文字时出现在 fieldset）
+    //   stopButton:     aria-label="Stop response" + [data-is-streaming="true"] 双保险
+    //                   （Stop response 按钮生成中存在；data-is-streaming="true" 作为回退）
+    //   responseBubble: [data-is-streaming]（每条 assistant 消息一个容器，值 true/false）
+    claude: {
+        input: '[data-testid="chat-input"]',
+        sendButton: 'button[aria-label="Send message"]',
+        stopButton: 'button[aria-label="Stop response"], [data-is-streaming="true"]',
+        responseBubble: '[data-is-streaming]'
     }
 };
 
@@ -48,12 +63,12 @@ export function findInput(doc: Document, provider: DomChatProvider): HTMLElement
 /**
  * 往输入框写入文本。
  * - textarea：直接赋 value；
- * - contenteditable（Quill / ProseMirror）：用 execCommand('insertText') 触发 beforeinput/input，
- *   使编辑器更新内部模型并启用发送按钮（仅设 textContent 往往不被识别）。
+ * - contenteditable（ProseMirror/tiptap）：
+ *   selectAll → delete → insertText，纯用 execCommand，避免 Electron 隔离上下文
+ *   中 window.getSelection() 跨 world 边界失效导致 insertText 前无有效选区的问题。
  */
 export function setInputText(inputEl: HTMLElement, prompt: string): void {
     const doc = inputEl.ownerDocument;
-    const view = doc.defaultView;
     inputEl.focus();
 
     if (typeof HTMLTextAreaElement !== 'undefined' && inputEl instanceof HTMLTextAreaElement) {
@@ -62,19 +77,49 @@ export function setInputText(inputEl: HTMLElement, prompt: string): void {
         return;
     }
 
-    const selection = view?.getSelection?.();
-    if (selection) {
-        selection.selectAllChildren(inputEl);
-        selection.deleteFromDocument();
+    // ContentEditable（ProseMirror/tiptap/Quill）：
+    // 1. execCommand('selectAll') 选中现有内容
+    // 2. execCommand('delete') 清空（比 deleteFromDocument 更兼容隔离上下文）
+    // 3. 逐行 insertText + 行间 insertLineBreak 写入新内容并触发编辑器内部状态更新
+    if (typeof doc.execCommand === 'function') {
+        doc.execCommand('selectAll');
+        doc.execCommand('delete');
+        const inserted = insertContentEditableText(doc, prompt);
+        if (inserted) return;
     }
 
-    const inserted = typeof doc.execCommand === 'function'
-        ? doc.execCommand('insertText', false, prompt)
-        : false;
-    if (!inserted) {
-        inputEl.textContent = prompt;
-        inputEl.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: prompt }));
-    }
+    // 兜底：直接设 textContent + input 事件（普通 contenteditable 有效，tiptap 可能失效）
+    inputEl.textContent = prompt;
+    inputEl.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: prompt }));
+}
+
+/**
+ * 往 contenteditable 写入（可能多行的）文本。
+ * 单行：等价一次 insertText（与历史行为一致，零回归）。
+ * 多行：按 `\n` 切分，逐行 insertText，行间用 insertLineBreak（软换行 `<br>`，等价 Shift+Enter）。
+ *
+ * 为什么必须是 insertLineBreak 而非 insertParagraph 或单次含 `\n` 的 insertText：
+ *   Gemini 的 Quill（.ql-editor）在异步 reconcile 时会丢弃「除第一个块以外」所有块级元素的正文。
+ *   - 单次 insertText 含 `\n` → 浏览器把 `\n` 转成多个块 → 只剩首行（线上实测）。
+ *   - 逐行 + insertParagraph → 同样产生多个块 → 只剩首行（线上实测）。
+ *   - 逐行 + insertLineBreak → 全部留在同一个块内的软换行 → Quill 完整保留（线上实测）。
+ *   ChatGPT 的 ProseMirror 把 insertLineBreak 当 Shift+Enter 的硬换行处理，正文同样完整。
+ *   （验证脚本：apps/desktop2 下对真实 gemini.google.com 注入回读对比 paragraph/single/linebreak。）
+ * 返回是否成功（任一关键 execCommand 失败即 false，触发上层 textContent 兜底）。
+ */
+function insertContentEditableText(doc: Document, prompt: string): boolean {
+    const lines = prompt.split('\n');
+    let ok = true;
+    lines.forEach((line, index) => {
+        if (index > 0) {
+            // 空行（连续 `\n\n`）也保留为一个软换行，维持段落间距。
+            ok = doc.execCommand('insertLineBreak') && ok;
+        }
+        if (line !== '') {
+            ok = doc.execCommand('insertText', false, line) && ok;
+        }
+    });
+    return ok;
 }
 
 /** 找到「可点击」的发送按钮（同时排除 disabled / aria-disabled）。 */
@@ -108,12 +153,18 @@ export function readLatestReply(doc: Document, provider: DomChatProvider): strin
         return stripLeadingSpeakerHeading(extractGeminiMessageText(last, 'assistant'));
     }
 
+    if (provider === 'claude') {
+        // .font-claude-response 是 claude.ai 回复的内容容器（浏览器实探 2026-06 确认）。
+        const content = last.querySelector<HTMLElement>('.font-claude-response') ?? last;
+        return stripLeadingSpeakerHeading((content.innerText ?? content.textContent ?? '').trim());
+    }
+
     const content = last.querySelector<HTMLElement>('.markdown') ?? last;
     return stripLeadingSpeakerHeading((content.innerText ?? content.textContent ?? '').trim());
 }
 
-// 整行只是「Gemini 说 / ChatGPT 说 / Gemini said」之类的发言人标签（可带 markdown 标题号）。
-const SPEAKER_LABEL_LINE = /^#{0,6}\s*(gemini|chatgpt)\s*(说|說|答|回复|回覆|回答|回應|said)?\s*[:：-]?\s*$/i;
+// 整行只是「Gemini 说 / ChatGPT 说 / Claude 说」之类的发言人标签（可带 markdown 标题号）。
+const SPEAKER_LABEL_LINE = /^#{0,6}\s*(gemini|chatgpt|claude)\s*(说|說|答|回复|回覆|回答|回應|said)?\s*[:：-]?\s*$/i;
 
 /**
  * 剥离开头「发言人标签」行（尤其是被渲染成 markdown 标题的 `## Gemini 说`，否则会以超大字号显示）。
@@ -220,35 +271,45 @@ export async function setWebSearchEnabled(doc: Document, provider: DomChatProvid
     if (provider === 'gemini') {
         return { ok: true, note: 'gemini-default-grounded-noop' };
     }
+    if (provider === 'claude') {
+        // Claude.ai 联网搜索为 project/conversation 级别控制，无 composer 开关 → no-op。
+        return { ok: true, note: 'claude-no-composer-web-search-noop' };
+    }
     return setChatgptWebSearch(doc, enabled);
 }
 
 // ─── Model picker & Reasoning effort ─────────────────────────────────────
-// ChatGPT — __composer-pill 菜单里的 Thinking/Instant 是「推理档位」，不是可选模型。
-//   trigger (verified 2026-06): button.__composer-pill[aria-haspopup="menu"]
-//   items:   [role="menuitemradio"][data-testid^="model-switcher"]
-//   Thinking: data-testid="model-switcher-gpt-5-5-thinking"
-//   Instant:  data-testid="model-switcher-gpt-5-5"
+// ChatGPT — __composer-pill 菜单（浏览器实探 2026-06 验证）：
+//   trigger:            button.__composer-pill[aria-haspopup="menu"]
+//   reasoning items:    顶层菜单中的 [role="menuitemradio"]，当前可见档位为「极速 / 均衡 / 高级」
+//   model submenu:      顶层 [role="menuitem"][aria-haspopup="menu"]（当前可见入口如「GPT-5.5」）
+//   model items:        子菜单中的 [role="menuitemradio"]，当前可见项如「5.5 / 5.4 / 5.3 / o3」
 //
-// Gemini — Flash-Lite / Flash / Pro 是真实模型（model picker）；
-//   思考等级「标准/扩展」是推理档位（需浏览器探针验证选择器后更新）。
-//   model trigger (verified): [data-test-id="bard-mode-menu-button"]
-//   model items:  gem-menu-item[role="menuitem"], id attr: data-mode-id
-//   thinking trigger (UNVERIFIED — run probe before shipping):
-//     pnpm --filter desktop2 probe:dom:electron -- gemini
+// Gemini — model 菜单与「思考等级」子菜单分离（浏览器实探 2026-06 验证）：
+//   model/mode trigger: [data-test-id="bard-mode-menu-button"]
+//   top-level items:    gem-menu-item[role="menuitem"]，模型项带 data-mode-id
+//   reasoning trigger:  gem-menu-item[value="thinking_level"]（同一菜单内的子菜单入口）
+//   reasoning options:  子菜单中的 gem-menu-item[role="menuitem"]，当前可见档位为「标准 / 扩展」
+//   model/mode trigger (verified): [data-test-id="bard-mode-menu-button"]
+//   menu (verified): [data-test-id="gem-mode-menu"][role="menu"]
+//   items (verified): gem-menu-item[role="menuitem"]，data-mode-id / data-test-id="bard-mode-option-<id>"
+//     选中项带 class="selected"（元素自身或内部 gem-menu-item-content）；名称在 .label。
 
 const CHATGPT_PILL_BTN = 'button.__composer-pill[aria-haspopup="menu"]';
-const CHATGPT_PILL_ITEM_SEL = '[role="menuitemradio"][data-testid^="model-switcher"]';
-const CHATGPT_THINKING_ID = 'model-switcher-gpt-5-5-thinking';
-const CHATGPT_INSTANT_ID = 'model-switcher-gpt-5-5';
+const CHATGPT_ROOT_MENU_ITEM_SEL = '[role="menuitemradio"], [role="menuitem"][aria-haspopup="menu"]';
+const CHATGPT_MODEL_TRIGGER_SEL = '[role="menuitem"][aria-haspopup="menu"]';
+const CHATGPT_MODEL_ITEM_SEL = '[role="menuitemradio"]';
+const CHATGPT_REASONING_LABELS = {
+    low: ['极速', 'Fast'],
+    medium: ['均衡', 'Balanced'],
+    high: ['高级', 'Thinking', 'Advanced']
+} as const;
 
 const GEMINI_MODEL_BTN = '[data-test-id="bard-mode-menu-button"]';
 const GEMINI_MODEL_ITEM_SEL = 'gem-menu-item[role="menuitem"]';
-// Gemini 思考等级 — 选择器待验证，部署前请先运行浏览器探针确认。
-const GEMINI_THINKING_BTN = '[data-test-id="bard-thinking-budget-button"], ms-thinking-selector button, [data-test-id*="thinking-budget"]';
-const GEMINI_THINKING_ITEM_SEL = '[data-test-id*="thinking-budget-item"], gem-menu-item[data-thinking-budget]';
-const GEMINI_THINKING_EXTENDED = 'extended';
-const GEMINI_THINKING_STANDARD = 'standard';
+const GEMINI_REASONING_TRIGGER = 'gem-menu-item[value="thinking_level"]';
+const GEMINI_REASONING_STANDARD_LABEL = '标准';
+const GEMINI_REASONING_EXTENDED_LABEL = '扩展';
 
 function waitForSelector(doc: Document, selector: string, timeoutMs = 3_000): Promise<Element | null> {
     return new Promise((resolve) => {
@@ -269,6 +330,245 @@ const MODEL_TRIGGER_TIMEOUT_MS = 6_000;
 function logModelRead(provider: DomChatProvider, stage: string, extra?: Record<string, unknown>): void {
     const href = (() => { try { return document?.location?.href ?? ''; } catch { return ''; } })();
     console.log('[DomChatModels]', JSON.stringify({ provider, stage, href, ...extra }));
+}
+
+function closeChatGptMenus(doc: Document): void {
+    doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+}
+
+function getChatGptItemLabel(el: Element | null): string {
+    return (el?.textContent ?? '').trim().replace(/\s+/g, ' ');
+}
+
+function getChatGptPillLabel(doc: Document): string {
+    return getChatGptItemLabel(doc.querySelector(CHATGPT_PILL_BTN));
+}
+
+function isChatGptSelectedItem(el: Element | null): boolean {
+    return el?.getAttribute('aria-checked') === 'true';
+}
+
+function getChatGptReasoningLabels(effort: ReasoningEffort): readonly string[] {
+    return CHATGPT_REASONING_LABELS[effort];
+}
+
+function getChatGptReasoningToken(effort: ReasoningEffort): 'fast' | 'balanced' | 'advanced' {
+    if (effort === 'low') return 'fast';
+    if (effort === 'medium') return 'balanced';
+    return 'advanced';
+}
+
+function getChatGptReasoningIndex(effort: ReasoningEffort): number {
+    if (effort === 'low') return 0;
+    if (effort === 'medium') return 1;
+    return 2;
+}
+
+function isChatGptReasoningLabel(label: string): boolean {
+    return Object.values(CHATGPT_REASONING_LABELS).some((labels) => labels.includes(label));
+}
+
+function chatGptModelLabelToId(label: string): string {
+    const normalized = label.trim();
+    return /^\d/.test(normalized) ? `gpt-${normalized}` : normalized.toLowerCase();
+}
+
+function chatGptModelLabelToName(label: string): string {
+    const normalized = label.trim();
+    return /^\d/.test(normalized) ? `GPT-${normalized}` : normalized;
+}
+
+function chatGptModelMatches(label: string, modelId: string): boolean {
+    return label === modelId
+        || chatGptModelLabelToId(label) === modelId
+        || chatGptModelLabelToName(label) === modelId;
+}
+
+function getChatGptTopLevelReasoningItems(doc: Document): HTMLElement[] {
+    const items = Array.from(doc.querySelectorAll<HTMLElement>(CHATGPT_ROOT_MENU_ITEM_SEL));
+    const reasoningItems: HTMLElement[] = [];
+    for (const item of items) {
+        if (item.getAttribute('aria-haspopup') === 'menu') break;
+        if (item.getAttribute('role') === 'menuitemradio') {
+            reasoningItems.push(item);
+        }
+    }
+    return reasoningItems;
+}
+
+function findChatGptReasoningItem(doc: Document, effort: ReasoningEffort): HTMLElement | null {
+    const labels = getChatGptReasoningLabels(effort);
+    const reasoningItems = getChatGptTopLevelReasoningItems(doc);
+    return reasoningItems.find((el) => labels.includes(getChatGptItemLabel(el)))
+        ?? reasoningItems[getChatGptReasoningIndex(effort)]
+        ?? null;
+}
+
+async function ensureChatGptPillMenuOpen(doc: Document): Promise<{
+    btn: HTMLElement | null;
+    firstItem: Element | null;
+}> {
+    const btn = doc.querySelector<HTMLElement>(CHATGPT_PILL_BTN);
+    if (!btn) return { btn: null, firstItem: null };
+
+    const firstExistingItem = doc.querySelector(CHATGPT_ROOT_MENU_ITEM_SEL);
+    if (firstExistingItem) return { btn, firstItem: firstExistingItem };
+
+    const firstItem = await openMenuRobust(btn, doc, CHATGPT_ROOT_MENU_ITEM_SEL, 3_000);
+    return { btn, firstItem };
+}
+
+function getChatGptModelMenuItemSelector(trigger: Element): string {
+    const controls = trigger.getAttribute('aria-controls');
+    if (!controls) return CHATGPT_MODEL_ITEM_SEL;
+    return `#${CSS.escape(controls)} ${CHATGPT_MODEL_ITEM_SEL}`;
+}
+
+async function ensureChatGptModelMenuOpen(doc: Document): Promise<{
+    trigger: HTMLElement | null;
+    submenuSelector: string;
+    firstItem: Element | null;
+}> {
+    const trigger = doc.querySelector<HTMLElement>(CHATGPT_MODEL_TRIGGER_SEL);
+    if (!trigger) return { trigger: null, submenuSelector: '', firstItem: null };
+
+    const submenuSelector = getChatGptModelMenuItemSelector(trigger);
+    const firstExistingItem = Array.from(doc.querySelectorAll<HTMLElement>(submenuSelector))
+        .find((el) => !isChatGptReasoningLabel(getChatGptItemLabel(el)));
+    if (firstExistingItem) {
+        return { trigger, submenuSelector, firstItem: firstExistingItem };
+    }
+
+    const firstItem = await openMenuRobust(trigger, doc, submenuSelector, 2_000);
+    return { trigger, submenuSelector, firstItem };
+}
+
+async function verifyChatGptReasoningSelected(doc: Document, effort: ReasoningEffort): Promise<boolean> {
+    const targetLabels = getChatGptReasoningLabels(effort);
+    const buttonLabel = await waitForChatGptPillLabel(doc, targetLabels);
+    if (targetLabels.includes(buttonLabel)) {
+        closeChatGptMenus(doc);
+        return true;
+    }
+
+    const { firstItem } = await ensureChatGptPillMenuOpen(doc);
+    if (!firstItem) return false;
+    const target = findChatGptReasoningItem(doc, effort);
+    const selected = isChatGptSelectedItem(target);
+    closeChatGptMenus(doc);
+    return selected;
+}
+
+async function waitForChatGptPillLabel(doc: Document, targetLabels: readonly string[], timeoutMs = 1_200): Promise<string> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        const buttonLabel = getChatGptPillLabel(doc);
+        if (targetLabels.includes(buttonLabel)) return buttonLabel;
+        await delay(50);
+    }
+    return getChatGptPillLabel(doc);
+}
+
+async function verifyChatGptModelSelected(doc: Document, modelId: string): Promise<boolean> {
+    const { firstItem } = await ensureChatGptPillMenuOpen(doc);
+    if (!firstItem) return false;
+    const { firstItem: submenuFirst, submenuSelector } = await ensureChatGptModelMenuOpen(doc);
+    if (!submenuFirst) {
+        closeChatGptMenus(doc);
+        return false;
+    }
+    const target = Array.from(doc.querySelectorAll<HTMLElement>(submenuSelector))
+        .find((el) => chatGptModelMatches(getChatGptItemLabel(el), modelId));
+    const selected = isChatGptSelectedItem(target ?? null);
+    closeChatGptMenus(doc);
+    return selected;
+}
+
+function isGeminiSelectedItem(el: Element | null): boolean {
+    if (!el) return false;
+    return el.classList.contains('selected')
+        || Boolean(el.querySelector('gem-menu-item-content.selected'))
+        || Boolean(el.querySelector('gem-icon[aria-label="Selected"], gem-icon[aria-label="已选中"]'));
+}
+
+function isGeminiDisabledItem(el: Element | null): boolean {
+    if (!el) return false;
+    return el.getAttribute('aria-disabled') === 'true'
+        || el.classList.contains('disabled')
+        || Boolean(el.querySelector('gem-menu-item-content.disabled'));
+}
+
+function getGeminiItemLabel(el: Element | null): string {
+    return (el?.querySelector('.label')?.textContent ?? el?.textContent ?? '').trim();
+}
+
+function closeGeminiMenus(doc: Document): void {
+    doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+}
+
+async function ensureGeminiModeMenuOpen(doc: Document): Promise<{ btn: HTMLElement | null; firstItem: Element | null }> {
+    const btn = doc.querySelector<HTMLElement>(GEMINI_MODEL_BTN);
+    if (!btn) return { btn: null, firstItem: null };
+
+    const firstExistingItem = doc.querySelector(GEMINI_MODEL_ITEM_SEL);
+    if (firstExistingItem) return { btn, firstItem: firstExistingItem };
+
+    const firstItem = await openMenuRobust(btn, doc, GEMINI_MODEL_ITEM_SEL, 3_000);
+    return { btn, firstItem };
+}
+
+function getGeminiReasoningMenuItemSelector(trigger: Element): string {
+    const controls = trigger.getAttribute('aria-controls');
+    if (controls) {
+        return `#${CSS.escape(controls)} gem-menu-item[role="menuitem"]`;
+    }
+    return `${GEMINI_REASONING_TRIGGER} gem-menu-item[role="menuitem"]`;
+}
+
+async function ensureGeminiReasoningMenuOpen(doc: Document): Promise<{
+    trigger: HTMLElement | null;
+    submenuSelector: string;
+    firstItem: Element | null;
+}> {
+    const trigger = doc.querySelector<HTMLElement>(GEMINI_REASONING_TRIGGER);
+    if (!trigger) {
+        return { trigger: null, submenuSelector: '', firstItem: null };
+    }
+
+    const submenuSelector = getGeminiReasoningMenuItemSelector(trigger);
+    const firstExistingItem = doc.querySelector(submenuSelector);
+    if (firstExistingItem) {
+        return { trigger, submenuSelector, firstItem: firstExistingItem };
+    }
+
+    const firstItem = await openMenuRobust(trigger, doc, submenuSelector, 2_000);
+    return { trigger, submenuSelector, firstItem };
+}
+
+async function verifyGeminiModelSelected(doc: Document, modelId: string): Promise<boolean> {
+    const { firstItem } = await ensureGeminiModeMenuOpen(doc);
+    if (!firstItem) return false;
+    const target = doc.querySelector<HTMLElement>(`gem-menu-item[data-mode-id="${CSS.escape(modelId)}"]`);
+    const selected = isGeminiSelectedItem(target);
+    closeGeminiMenus(doc);
+    return selected;
+}
+
+async function verifyGeminiReasoningSelected(doc: Document, targetLabel: string): Promise<boolean> {
+    const { firstItem } = await ensureGeminiModeMenuOpen(doc);
+    if (!firstItem) return false;
+    const { firstItem: submenuFirst, submenuSelector } = await ensureGeminiReasoningMenuOpen(doc);
+    if (!submenuFirst) {
+        closeGeminiMenus(doc);
+        return false;
+    }
+    const target = Array.from(doc.querySelectorAll<HTMLElement>(submenuSelector))
+        .find((el) => getGeminiItemLabel(el) === targetLabel);
+    const selected = isGeminiSelectedItem(target ?? null);
+    closeGeminiMenus(doc);
+    return selected;
 }
 
 async function readGeminiModels(doc: Document): Promise<DomModelInfo[]> {
@@ -304,15 +604,289 @@ async function readGeminiModels(doc: Document): Promise<DomModelInfo[]> {
     return models;
 }
 
+async function readChatGptModels(doc: Document): Promise<DomModelInfo[]> {
+    const btn = (await waitForSelector(doc, CHATGPT_PILL_BTN, MODEL_TRIGGER_TIMEOUT_MS)) as HTMLElement | null;
+    if (!btn) {
+        logModelRead('chatgpt', 'trigger-missing');
+        return [];
+    }
+
+    const firstItem = await openMenuRobust(btn, doc, CHATGPT_ROOT_MENU_ITEM_SEL, 3_000);
+    if (!firstItem) {
+        logModelRead('chatgpt', 'items-missing');
+        closeChatGptMenus(doc);
+        return [];
+    }
+
+    const { trigger, submenuSelector, firstItem: submenuFirst } = await ensureChatGptModelMenuOpen(doc);
+    if (!trigger) {
+        logModelRead('chatgpt', 'model-trigger-missing');
+        closeChatGptMenus(doc);
+        return [];
+    }
+    if (!submenuFirst) {
+        logModelRead('chatgpt', 'model-items-missing');
+        closeChatGptMenus(doc);
+        return [];
+    }
+
+    const models: DomModelInfo[] = [];
+    for (const item of doc.querySelectorAll<HTMLElement>(submenuSelector)) {
+        const label = getChatGptItemLabel(item);
+        if (!label || isChatGptReasoningLabel(label)) continue;
+        const id = chatGptModelLabelToId(label);
+        const name = chatGptModelLabelToName(label);
+        if (!models.some((model) => model.id === id)) {
+            models.push({ id, name });
+        }
+    }
+
+    closeChatGptMenus(doc);
+    await delay(100);
+    logModelRead('chatgpt', 'found', { count: models.length, modelIds: models.map((m) => m.id) });
+    return models;
+}
+
+// ─── Claude 模型选择器 & 思考档位 ────────────────────────────────────────────
+// 选择器经浏览器实探（2026-06）验证：
+//   模型触发器：[data-testid="model-selector-dropdown"]（按钮，显示当前模型+档位）
+//   模型菜单项：[role="menu"] [role="menuitemradio"]
+//   模型名称：  .font-ui 内的直接文本节点（跳过 badge 子元素，如「Included until …」）
+//   ID 派生：   name.toLowerCase().replace(/\s+/g, '-').replace(/\./g, '-')
+//               例："Sonnet 4.6" → "sonnet-4-6"
+//   档位触发器：[data-testid="effort-menu-trigger"]（在模型菜单内）
+//   档位选项：  [data-testid="effort-option-{low|medium|high|max}"]
+
+const CLAUDE_MODEL_TRIGGER = '[data-testid="model-selector-dropdown"]';
+// 模型项用全局 menuitemradio + .font-ui 过滤识别（不限定在单个 [role="menu"]，
+// 因 "More models" 子菜单可能渲染在独立 portal 容器里）。effort 选项无 .font-ui 自动排除。
+const CLAUDE_MODEL_ITEM_SEL = '[role="menuitemradio"]';
+const CLAUDE_EFFORT_TRIGGER = '[data-testid="effort-menu-trigger"]';
+// "More models" 子菜单触发器（精简布局下顶层只直接显示 1 个模型，其余在此子菜单内）。
+const CLAUDE_MORE_MODELS_RE = /more models|更多模型/i;
+// 隐藏受控页冷启动（loadURL 完成后 SPA 仍在水合）时，模型触发器要数秒才出现，
+// 比常规 MODEL_TRIGGER_TIMEOUT_MS 更宽裕，覆盖慢网络/慢机器的首次读取。
+const CLAUDE_COLD_START_TRIGGER_TIMEOUT_MS = 15_000;
+
+/** 从 .font-ui span 提取纯模型名（只取直接文本节点，跳过 badge 子元素）。 */
+function extractClaudeModelName(itemEl: Element): string {
+    const nameEl = itemEl.querySelector('.font-ui');
+    if (!nameEl) return '';
+    return Array.from(nameEl.childNodes)
+        .filter((n) => n.nodeType === Node.TEXT_NODE)
+        .map((n) => (n.textContent ?? '').trim())
+        .filter(Boolean)
+        .join('');
+}
+
+/** 模型名 → 稳定 slug ID（"Sonnet 4.6" → "sonnet-4-6"）。 */
+function claudeModelNameToId(name: string): string {
+    return name.toLowerCase().replace(/\s+/g, '-').replace(/\./g, '-');
+}
+
+/** 收集当前 DOM 中所有「模型」menuitemradio（带 .font-ui 的），去重累加到 into。 */
+function collectClaudeModelItems(doc: Document, into: DomModelInfo[]): void {
+    for (const item of doc.querySelectorAll<HTMLElement>(CLAUDE_MODEL_ITEM_SEL)) {
+        const name = extractClaudeModelName(item);
+        if (!name) continue;
+        const id = claudeModelNameToId(name);
+        if (!into.some((m) => m.id === id)) {
+            into.push({ id, name });
+        }
+    }
+}
+
+/** 找到目标 modelId 对应的 menuitemradio 元素（带 .font-ui 的模型项）。 */
+function findClaudeModelItem(doc: Document, modelId: string): HTMLElement | null {
+    for (const item of doc.querySelectorAll<HTMLElement>(CLAUDE_MODEL_ITEM_SEL)) {
+        const name = extractClaudeModelName(item);
+        if (name && claudeModelNameToId(name) === modelId) {
+            return item;
+        }
+    }
+    return null;
+}
+
+/**
+ * 健壮地"点击元素打开菜单"：先合成 pointer 序列，若 200ms 内未出现期望选择器，
+ * 再回退到原生 el.click()。隐藏/无焦点的 Electron 受控窗口里，Base UI 的下拉触发器
+ * 往往只响应原生 .click()，不响应合成 PointerEvent（浏览器实探 2026-06 验证）。
+ */
+async function openMenuRobust(el: HTMLElement, doc: Document, waitSelector: string, timeoutMs: number): Promise<Element | null> {
+    firePointerClick(el);
+    let found = await waitForSelector(doc, waitSelector, 250);
+    if (found) return found;
+    // 回退：原生 click（隐藏窗口下对 Base UI 触发器更可靠）。
+    if (typeof el.click === 'function') el.click();
+    found = await waitForSelector(doc, waitSelector, timeoutMs);
+    return found;
+}
+
+/**
+ * 健壮地"点击选中一个菜单项"（menuitemradio 等）：合成 pointer + 原生 click 都触发。
+ * radio 项选中是幂等的，双触发不会出问题；隐藏窗口下原生 click 更可靠。
+ */
+function clickItemRobust(el: HTMLElement): void {
+    firePointerClick(el);
+    if (typeof el.click === 'function') el.click();
+}
+
+/**
+ * 展开 "More models" 子菜单（若存在）。精简布局下顶层只直接显示 1 个模型，
+ * 完整列表在此子菜单里。返回是否点开过。
+ */
+async function expandClaudeMoreModels(doc: Document): Promise<boolean> {
+    const moreItem = Array.from(doc.querySelectorAll<HTMLElement>('[role="menuitem"][aria-haspopup="menu"]'))
+        .find((el) => CLAUDE_MORE_MODELS_RE.test(el.textContent ?? ''));
+    if (!moreItem) return false;
+    const before = doc.querySelectorAll(CLAUDE_MODEL_ITEM_SEL).length;
+    // 子菜单可能 hover 或 click 触发；先合成 pointer + hover，再回退原生 click。
+    const hoverOpts: PointerEventInit = { bubbles: true, cancelable: true, pointerId: 1, pointerType: 'mouse', isPrimary: true };
+    moreItem.dispatchEvent(new PointerEvent('pointerover', hoverOpts));
+    moreItem.dispatchEvent(new PointerEvent('pointerenter', hoverOpts));
+    moreItem.dispatchEvent(new PointerEvent('pointermove', hoverOpts));
+    firePointerClick(moreItem);
+    await delay(300);
+    // 若子菜单未增加项，回退原生 click。
+    if (doc.querySelectorAll(CLAUDE_MODEL_ITEM_SEL).length <= before && typeof moreItem.click === 'function') {
+        moreItem.click();
+        await delay(400);
+    }
+    return true;
+}
+
+/** 探测 Claude 受控页当前状态，用于区分「未登录」「未水合」「就绪」。 */
+function probeClaudePageState(doc: Document): Record<string, unknown> {
+    const href = (() => { try { return doc.location?.href ?? ''; } catch { return ''; } })();
+    return {
+        href,
+        readyState: doc.readyState,
+        hasInput: Boolean(doc.querySelector(DOM_CHAT_SELECTORS.claude.input)),
+        hasModelTrigger: Boolean(doc.querySelector(CLAUDE_MODEL_TRIGGER)),
+        // 登录页特征：URL 含 /login 或页面有登录按钮
+        looksLikeLogin: /\/login|\/auth/i.test(href)
+            || Boolean(doc.querySelector('a[href*="login"], button[data-testid*="login"]')),
+        bodyTextLen: (doc.body?.innerText ?? '').length
+    };
+}
+
+async function readClaudeModels(doc: Document): Promise<DomModelInfo[]> {
+    logModelRead('claude', 'read-start', probeClaudePageState(doc));
+    // 等待模型触发器出现：隐藏受控页冷启动导航后 SPA 需数秒水合，
+    // 立即 querySelector 往往为 null。等待可让首次读取拿到真实模型，
+    // 避免「读空 → ModelsNotReadyError → loaded:false → 永久加载」。
+    const btn = (await waitForSelector(doc, CLAUDE_MODEL_TRIGGER, CLAUDE_COLD_START_TRIGGER_TIMEOUT_MS)) as HTMLElement | null;
+    if (!btn) {
+        logModelRead('claude', 'trigger-missing', probeClaudePageState(doc));
+        return [];
+    }
+
+    const firstItem = await openMenuRobust(btn, doc, CLAUDE_MODEL_ITEM_SEL, MODEL_TRIGGER_TIMEOUT_MS);
+    if (!firstItem) {
+        logModelRead('claude', 'items-missing', probeClaudePageState(doc));
+        doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        return [];
+    }
+
+    const models: DomModelInfo[] = [];
+    // 1. 先收集顶层直接可见的模型项（展开布局下这里就有全部）。
+    collectClaudeModelItems(doc, models);
+    const topLevelCount = models.length;
+    // 2. 展开 "More models" 子菜单补全（精简布局下顶层只有 1 个，其余在子菜单内）。
+    const expanded = await expandClaudeMoreModels(doc);
+    if (expanded) {
+        collectClaudeModelItems(doc, models);
+    }
+
+    doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await delay(100);
+    logModelRead('claude', 'found', { count: models.length, topLevelCount, expandedMoreModels: expanded });
+    return models;
+}
+
+async function setClaudeModel(doc: Document, modelId: string): Promise<{ ok: boolean; note: string }> {
+    const btn = (await waitForSelector(doc, CLAUDE_MODEL_TRIGGER, MODEL_TRIGGER_TIMEOUT_MS)) as HTMLElement | null;
+    if (!btn) return { ok: false, note: 'claude-model-trigger-not-found' };
+
+    const firstItem = await openMenuRobust(btn, doc, CLAUDE_MODEL_ITEM_SEL, 3_000);
+    if (!firstItem) {
+        doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        return { ok: false, note: 'claude-model-items-not-found' };
+    }
+
+    // 先在顶层找目标；找不到则展开 "More models" 子菜单再找（精简布局）。
+    let target = findClaudeModelItem(doc, modelId);
+    if (!target) {
+        const expanded = await expandClaudeMoreModels(doc);
+        if (expanded) {
+            target = findClaudeModelItem(doc, modelId);
+        }
+    }
+
+    if (target) {
+        if (target.getAttribute('aria-checked') === 'true') {
+            doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+            return { ok: true, note: 'already-selected' };
+        }
+        clickItemRobust(target);
+        await delay(150);
+        return { ok: true, note: `switched-to:${modelId}` };
+    }
+
+    doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    return { ok: false, note: `claude-model-not-in-picker:${modelId}` };
+}
+
+// Claude 真实档位菜单支持 low/medium/high，直接按 effort 映射到对应 effort-option，不再压缩成二态。
+async function setClaudeReasoningEffort(doc: Document, effort: ReasoningEffort): Promise<{ ok: boolean; note: string }> {
+    const targetLevel = effort;
+    const targetSelector = `[data-testid="effort-option-${targetLevel}"]`;
+
+    const btn = (await waitForSelector(doc, CLAUDE_MODEL_TRIGGER, MODEL_TRIGGER_TIMEOUT_MS)) as HTMLElement | null;
+    if (!btn) return { ok: false, note: 'claude-model-trigger-not-found' };
+
+    // 打开模型菜单（健壮：合成 pointer 失败时回退原生 click），等档位触发器出现
+    const effortTrigger = await openMenuRobust(btn, doc, CLAUDE_EFFORT_TRIGGER, 3_000);
+    if (!effortTrigger) {
+        doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        return { ok: false, note: 'claude-effort-trigger-not-found' };
+    }
+
+    // 若档位选项已在 DOM 中且已选中则直接关闭
+    const alreadySelected = doc.querySelector<HTMLElement>(`${targetSelector}[aria-checked="true"]`);
+    if (alreadySelected) {
+        doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        return { ok: true, note: 'already-selected' };
+    }
+
+    // 打开档位子菜单（同样健壮回退）
+    const targetEl = await openMenuRobust(effortTrigger as HTMLElement, doc, targetSelector, 3_000);
+    if (!targetEl) {
+        doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        return { ok: false, note: `claude-effort-option-not-found:${targetLevel}` };
+    }
+
+    clickItemRobust(targetEl as HTMLElement);
+    await delay(150);
+    // 点击档位选项后子菜单关闭，但父级模型选择器可能仍开着；
+    // 不关闭的话后续 injectPrompt 的焦点可能被菜单 focus-trap 截获，
+    // 导致 execCommand 写入菜单而非输入框，send button 无法出现。
+    doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await delay(150);
+    return { ok: true, note: `set-effort:${targetLevel}` };
+}
+
 /**
  * 从页面模型选择器读取可用模型列表。
- * - chatgpt：__composer-pill 内容是推理档位，不是模型 → 固定返回 []（单一 'dom' 兜底）。
+ * - chatgpt：__composer-pill 顶层仍显示推理档位，但同一菜单内存在模型子菜单，动态读取。
  * - gemini：Flash-Lite / Flash / Pro 是真实模型，动态读取。
+ * - claude：Fable 5 / Opus 4.8 / Sonnet 4.6 / Haiku 4.5 等，动态读取。
  */
 export async function readAvailableModels(doc: Document, provider: DomChatProvider): Promise<DomModelInfo[]> {
-    if (provider === 'chatgpt') return [];
     try {
+        if (provider === 'chatgpt') return await readChatGptModels(doc);
         if (provider === 'gemini') return await readGeminiModels(doc);
+        if (provider === 'claude') return await readClaudeModels(doc);
     } catch {
         // 忽略错误，返回空数组触发调用方回退
     }
@@ -320,137 +894,209 @@ export async function readAvailableModels(doc: Document, provider: DomChatProvid
 }
 
 async function setGeminiModel(doc: Document, modelId: string): Promise<{ ok: boolean; note: string }> {
-    const btn = doc.querySelector<HTMLElement>(GEMINI_MODEL_BTN);
+    const { btn, firstItem } = await ensureGeminiModeMenuOpen(doc);
     if (!btn) return { ok: false, note: 'model-picker-not-found' };
-
-    firePointerClick(btn);
-
-    const firstItem = await waitForSelector(doc, GEMINI_MODEL_ITEM_SEL, 3_000);
     if (!firstItem) {
-        doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        closeGeminiMenus(doc);
         return { ok: false, note: 'picker-items-not-found' };
     }
 
-    // 已经选中（gem-menu-item-content.selected）则关闭菜单直接返回
-    const alreadySelected = doc.querySelector<HTMLElement>(
-        `gem-menu-item[data-mode-id="${CSS.escape(modelId)}"] gem-menu-item-content.selected`
-    );
-    if (alreadySelected) {
-        doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-        return { ok: true, note: 'already-selected' };
-    }
-
-    const target = doc.querySelector<HTMLElement>(`gem-menu-item[data-mode-id="${CSS.escape(modelId)}"]`);
+    // 优先按 data-mode-id 精确匹配；若传入的是显示名（如 '3.1 Pro'），则 fallback 到标签文本匹配。
+    let target = doc.querySelector<HTMLElement>(`gem-menu-item[data-mode-id="${CSS.escape(modelId)}"]`);
+    let resolvedId = modelId;
     if (!target) {
-        doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        const normalizedInput = modelId.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const byLabel = Array.from(doc.querySelectorAll<HTMLElement>(GEMINI_MODEL_ITEM_SEL))
+            .find((el) => {
+                const label = getGeminiItemLabel(el);
+                return label === modelId
+                    || label.toLowerCase().replace(/[^a-z0-9]/g, '') === normalizedInput;
+            });
+        if (byLabel) {
+            target = byLabel;
+            resolvedId = byLabel.getAttribute('data-mode-id') ?? modelId;
+        }
+    }
+    if (!target) {
+        closeGeminiMenus(doc);
         return { ok: false, note: `model-not-in-picker:${modelId}` };
     }
 
-    firePointerClick(target);
-    await delay(150);
+    if (isGeminiSelectedItem(target)) {
+        closeGeminiMenus(doc);
+        return { ok: true, note: 'already-selected' };
+    }
+
+    if (isGeminiDisabledItem(target)) {
+        closeGeminiMenus(doc);
+        return { ok: false, note: `model-disabled:${modelId}` };
+    }
+
+    clickItemRobust(target);
+    await delay(200);
+    if (!(await verifyGeminiModelSelected(doc, resolvedId))) {
+        return { ok: false, note: `model-selection-not-applied:${modelId}` };
+    }
+    return { ok: true, note: `switched-to:${resolvedId}` };
+}
+
+async function setChatGptModel(doc: Document, modelId: string): Promise<{ ok: boolean; note: string }> {
+    const { btn, firstItem } = await ensureChatGptPillMenuOpen(doc);
+    if (!btn) return { ok: false, note: 'chatgpt-model-picker-not-found' };
+    if (!firstItem) {
+        closeChatGptMenus(doc);
+        return { ok: false, note: 'chatgpt-picker-items-not-found' };
+    }
+
+    const { trigger, submenuSelector, firstItem: submenuFirst } = await ensureChatGptModelMenuOpen(doc);
+    if (!trigger) {
+        closeChatGptMenus(doc);
+        return { ok: false, note: 'chatgpt-model-trigger-not-found' };
+    }
+    if (!submenuFirst) {
+        closeChatGptMenus(doc);
+        return { ok: false, note: 'chatgpt-model-items-not-found' };
+    }
+
+    const target = Array.from(doc.querySelectorAll<HTMLElement>(submenuSelector))
+        .find((el) => chatGptModelMatches(getChatGptItemLabel(el), modelId));
+    if (!target) {
+        closeChatGptMenus(doc);
+        return { ok: false, note: `chatgpt-model-not-in-picker:${modelId}` };
+    }
+
+    if (isChatGptSelectedItem(target)) {
+        closeChatGptMenus(doc);
+        return { ok: true, note: 'already-selected' };
+    }
+
+    clickItemRobust(target);
+    await delay(200);
+    if (!(await verifyChatGptModelSelected(doc, modelId))) {
+        return { ok: false, note: `chatgpt-model-selection-not-applied:${modelId}` };
+    }
     return { ok: true, note: `switched-to:${modelId}` };
 }
 
 /**
- * 在页面内切换 Gemini 模型（幂等）。ChatGPT 固定单一模型，直接返回 ok。
+ * 在页面内切换模型（幂等）。
  */
 export async function setActiveModel(
     doc: Document,
     provider: DomChatProvider,
     modelId: string
 ): Promise<{ ok: boolean; note: string }> {
-    if (provider === 'chatgpt') return { ok: true, note: 'chatgpt-single-model-noop' };
     try {
+        if (provider === 'chatgpt') return await setChatGptModel(doc, modelId);
         if (provider === 'gemini') return await setGeminiModel(doc, modelId);
+        if (provider === 'claude') return await setClaudeModel(doc, modelId);
     } catch (err) {
         return { ok: false, note: `error:${String(err)}` };
     }
     return { ok: false, note: 'unknown-provider' };
 }
 
-// ChatGPT 推理档位：high=true → Thinking，high=false → Instant。
-// 复用已验证的 __composer-pill 选择器，仅目标 ID 不同。
-async function setChatGPTReasoningEffort(doc: Document, high: boolean): Promise<{ ok: boolean; note: string }> {
-    const targetId = high ? CHATGPT_THINKING_ID : CHATGPT_INSTANT_ID;
-    const btn = doc.querySelector<HTMLElement>(CHATGPT_PILL_BTN);
+// ChatGPT 推理档位：__composer-pill 顶层菜单中的三态 radio。
+// low/medium/high 至少支持中英文文案，并在缺少稳定文案时按三档顺序兜底。
+async function setChatGPTReasoningEffort(doc: Document, effort: ReasoningEffort): Promise<{ ok: boolean; note: string }> {
+    const targetLabels = getChatGptReasoningLabels(effort);
+    const targetToken = getChatGptReasoningToken(effort);
+    const { btn, firstItem } = await ensureChatGptPillMenuOpen(doc);
     if (!btn) return { ok: false, note: 'reasoning-picker-not-found' };
-
-    firePointerClick(btn);
-
-    const firstItem = await waitForSelector(doc, CHATGPT_PILL_ITEM_SEL, 3_000);
     if (!firstItem) {
-        doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        closeChatGptMenus(doc);
         return { ok: false, note: 'picker-items-not-found' };
     }
 
-    const alreadySelected = doc.querySelector<HTMLElement>(
-        `[role="menuitemradio"][data-testid="${CSS.escape(targetId)}"][aria-checked="true"]`
-    );
-    if (alreadySelected) {
-        doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    const target = findChatGptReasoningItem(doc, effort);
+    if (!target) {
+        closeChatGptMenus(doc);
+        return { ok: false, note: `reasoning-item-not-found:${targetToken}` };
+    }
+
+    if (targetLabels.includes(getChatGptPillLabel(doc)) || isChatGptSelectedItem(target)) {
+        closeChatGptMenus(doc);
         return { ok: true, note: 'already-selected' };
     }
 
-    const target = doc.querySelector<HTMLElement>(`[role="menuitemradio"][data-testid="${CSS.escape(targetId)}"]`);
-    if (!target) {
-        doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-        return { ok: false, note: `reasoning-item-not-found:${targetId}` };
+    clickItemRobust(target);
+    await delay(200);
+    if (!(await verifyChatGptReasoningSelected(doc, effort))) {
+        console.warn('[DomChatReasoning]', JSON.stringify({
+            provider: 'chatgpt',
+            stage: 'selection-not-applied',
+            targetLabels,
+            targetToken,
+            buttonLabel: getChatGptPillLabel(doc)
+        }));
+        return { ok: false, note: `chatgpt-reasoning-selection-not-applied:${targetToken}` };
     }
-
-    firePointerClick(target);
-    await delay(150);
-    return { ok: true, note: `set-reasoning:${high ? 'thinking' : 'instant'}` };
+    return { ok: true, note: `set-reasoning:${targetToken}` };
 }
 
-// Gemini 推理档位：high=true → 扩展（Extended），high=false → 标准（Standard）。
-// 注意：GEMINI_THINKING_BTN / GEMINI_THINKING_ITEM_SEL 尚未经过浏览器探针验证，
-// 部署前请运行：pnpm --filter desktop2 probe:dom:electron -- gemini
-async function setGeminiReasoningEffort(doc: Document, high: boolean): Promise<{ ok: boolean; note: string }> {
-    const btn = doc.querySelector<HTMLElement>(GEMINI_THINKING_BTN);
-    if (!btn) {
-        console.warn('[DomChatModels]', JSON.stringify({ stage: 'gemini-thinking-btn-missing', note: 'selector needs browser verification' }));
-        return { ok: false, note: 'gemini-thinking-btn-missing' };
+// Gemini 推理档位：模型菜单中的「思考等级」子菜单。
+// low/medium → 标准，high → 扩展；不应改动当前模型。
+async function setGeminiReasoningEffort(doc: Document, effort: ReasoningEffort): Promise<{ ok: boolean; note: string }> {
+    const targetLabel = effort === 'high' ? GEMINI_REASONING_EXTENDED_LABEL : GEMINI_REASONING_STANDARD_LABEL;
+    const targetLevel = effort === 'high' ? 'extended' : 'standard';
+
+    const { btn, firstItem } = await ensureGeminiModeMenuOpen(doc);
+    if (!btn) return { ok: false, note: 'gemini-mode-btn-missing' };
+    if (!firstItem) {
+        closeGeminiMenus(doc);
+        return { ok: false, note: 'gemini-mode-items-missing' };
     }
 
-    firePointerClick(btn);
-
-    const firstItem = await waitForSelector(doc, GEMINI_THINKING_ITEM_SEL, 3_000);
-    if (!firstItem) {
-        doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    const { trigger, firstItem: submenuFirst, submenuSelector } = await ensureGeminiReasoningMenuOpen(doc);
+    if (!trigger) {
+        closeGeminiMenus(doc);
+        return { ok: false, note: 'gemini-thinking-trigger-not-found' };
+    }
+    if (!submenuFirst) {
+        closeGeminiMenus(doc);
         return { ok: false, note: 'gemini-thinking-items-missing' };
     }
 
-    const targetId = high ? GEMINI_THINKING_EXTENDED : GEMINI_THINKING_STANDARD;
-    const alreadySelected = doc.querySelector<HTMLElement>(`[data-thinking-budget="${CSS.escape(targetId)}"][aria-checked="true"]`);
-    if (alreadySelected) {
-        doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    const target = Array.from(doc.querySelectorAll<HTMLElement>(submenuSelector))
+        .find((el) => getGeminiItemLabel(el) === targetLabel);
+    if (!target) {
+        closeGeminiMenus(doc);
+        return { ok: false, note: `gemini-thinking-option-not-found:${targetLevel}` };
+    }
+
+    if (isGeminiSelectedItem(target)) {
+        closeGeminiMenus(doc);
         return { ok: true, note: 'already-selected' };
     }
 
-    const target = doc.querySelector<HTMLElement>(`[data-thinking-budget="${CSS.escape(targetId)}"]`);
-    if (!target) {
-        doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-        return { ok: false, note: `gemini-thinking-item-not-found:${targetId}` };
+    if (isGeminiDisabledItem(target)) {
+        closeGeminiMenus(doc);
+        return { ok: false, note: `gemini-thinking-option-disabled:${targetLevel}` };
     }
 
-    firePointerClick(target);
-    await delay(150);
-    return { ok: true, note: `set-reasoning:${high ? 'extended' : 'standard'}` };
+    clickItemRobust(target);
+    await delay(200);
+    if (!(await verifyGeminiReasoningSelected(doc, targetLabel))) {
+        return { ok: false, note: `gemini-thinking-selection-not-applied:${targetLevel}` };
+    }
+    return { ok: true, note: `set-reasoning:${targetLevel}` };
 }
 
 /**
  * 在页面内切换推理档位（幂等）。失败不阻塞发送。
- * - chatgpt: high → Thinking，!high → Instant（via __composer-pill）
- * - gemini:  high → 扩展，!high → 标准（via 思考等级选择器；选择器待浏览器验证）
+ * - chatgpt: low/medium/high → 极速/均衡/高级（via __composer-pill 顶层菜单）
+ * - gemini:  low/medium → 标准，high → 扩展（via 模型菜单中的「思考等级」子菜单）
+ * - claude:  effort 直接映射 effort-{low|medium|high}（via 模型下拉 → 档位子菜单）
  */
 export async function setReasoningEffort(
     doc: Document,
     provider: DomChatProvider,
-    high: boolean
+    effort: ReasoningEffort
 ): Promise<{ ok: boolean; note: string }> {
     try {
-        if (provider === 'chatgpt') return await setChatGPTReasoningEffort(doc, high);
-        if (provider === 'gemini') return await setGeminiReasoningEffort(doc, high);
+        if (provider === 'chatgpt') return await setChatGPTReasoningEffort(doc, effort);
+        if (provider === 'gemini') return await setGeminiReasoningEffort(doc, effort);
+        if (provider === 'claude') return await setClaudeReasoningEffort(doc, effort);
     } catch (err) {
         return { ok: false, note: `error:${String(err)}` };
     }

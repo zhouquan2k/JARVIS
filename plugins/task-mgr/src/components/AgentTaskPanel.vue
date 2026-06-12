@@ -62,6 +62,8 @@ const scope = computed(() => {
 .agent-task-panel {
   padding: 14px;
   color: rgba(226, 232, 240, 0.88);
+  overflow-y: auto;
+  box-sizing: border-box;
 }
 
 .agent-task-panel__message {

@@ -85,10 +85,11 @@ describe('DomAutomationProvider session continuity', () => {
         const { provider, transport } = makeProvider();
 
         const sendPromise = provider.sendMessage('hi', {}, () => {});
-        await Promise.resolve();
-        await Promise.resolve();
-        await Promise.resolve();
-        const requestId = (transport.injectAndSubmit as ReturnType<typeof vi.fn>).mock.calls[0][1] as string;
+        // 等到注入发生（open + syncModelAndReasoning + setWebSearch 的 await 链消费完），
+        // 不依赖固定微任务计数，避免内部 await 层数变化导致脆弱失败。
+        const injectMock = transport.injectAndSubmit as ReturnType<typeof vi.fn>;
+        for (let i = 0; i < 20 && injectMock.mock.calls.length === 0; i++) await Promise.resolve();
+        const requestId = injectMock.mock.calls[0][1] as string;
         transport.emit({ providerId: 'chatgpt-dom', requestId, type: 'error', message: 'observer failed' });
 
         await expect(sendPromise).resolves.toMatchObject({ text: 'final-from-fallback' });
@@ -112,6 +113,22 @@ describe('DomAutomationProvider.getAvailableModels', () => {
     it('throws ModelsNotReadyError when transport returns no models (retryable, not cached as dom)', async () => {
         const { provider } = makeProvider([]);
         await expect(provider.getAvailableModels()).rejects.toMatchObject({ name: 'ModelsNotReadyError' });
+    });
+
+    it('throws plain Error (non-retryable) when supportsModelPicker=false, skips readAvailableModels', async () => {
+        // 仅覆盖 provider 内部的“静态目录兜底”分支；当前真实 DOM provider 均走动态模型目录。
+        const transport = makeTransport([]);
+        const provider = new DomAutomationProvider({
+            id: 'legacy-dom',
+            label: 'Legacy (DOM)',
+            transport,
+            supportsModelPicker: false
+        });
+        const error = await provider.getAvailableModels().catch((e: unknown) => e);
+        expect(error).toBeInstanceOf(Error);
+        expect((error as Error).name).not.toBe('ModelsNotReadyError');
+        // 不应调用 transport.readAvailableModels（无需打开受控页面）
+        expect(transport.readAvailableModels).not.toHaveBeenCalled();
     });
 
     it('attaches modelOptions to each dynamic model', async () => {
@@ -184,28 +201,55 @@ describe('DomAutomationProvider model switching', () => {
 });
 
 describe('DomAutomationProvider reasoning effort', () => {
-    it('calls setReasoningEffort(true) when reasoningEffort is "high"', async () => {
+    it('passes "high" through to setReasoningEffort when reasoningEffort is "high"', async () => {
         const { provider, transport } = makeProvider();
         await driveWithOptions(provider, transport, { reasoningEffort: 'high' });
-        expect(transport.setReasoningEffort).toHaveBeenCalledWith(true);
+        expect(transport.setReasoningEffort).toHaveBeenCalledWith('high');
     });
 
-    it('calls setReasoningEffort(false) when reasoningEffort is "low"', async () => {
+    it('passes "low" through to setReasoningEffort when reasoningEffort is "low"', async () => {
         const { provider, transport } = makeProvider();
         await driveWithOptions(provider, transport, { reasoningEffort: 'low' });
-        expect(transport.setReasoningEffort).toHaveBeenCalledWith(false);
+        expect(transport.setReasoningEffort).toHaveBeenCalledWith('low');
     });
 
-    it('calls setReasoningEffort(false) when reasoningEffort is "medium"', async () => {
+    it('passes "medium" through (no longer collapsed to low) when reasoningEffort is "medium"', async () => {
         const { provider, transport } = makeProvider();
         await driveWithOptions(provider, transport, { reasoningEffort: 'medium' });
-        expect(transport.setReasoningEffort).toHaveBeenCalledWith(false);
+        expect(transport.setReasoningEffort).toHaveBeenCalledWith('medium');
     });
 
-    it('defaults to setReasoningEffort(true) when reasoningEffort is undefined', async () => {
+    it('defaults to "high" when reasoningEffort is undefined and no defaultReasoningEffort', async () => {
         const { provider, transport } = makeProvider();
         await driveWithOptions(provider, transport, {});
-        expect(transport.setReasoningEffort).toHaveBeenCalledWith(true);
+        expect(transport.setReasoningEffort).toHaveBeenCalledWith('high');
+    });
+
+    it('uses defaultReasoningEffort (high) from config when options.reasoningEffort is undefined', async () => {
+        const transport = makeTransport();
+        const provider = new DomAutomationProvider({
+            id: 'chatgpt-dom', label: 'ChatGPT (DOM)', transport, defaultReasoningEffort: 'high'
+        });
+        await driveWithOptions(provider, transport, {});
+        expect(transport.setReasoningEffort).toHaveBeenCalledWith('high');
+    });
+
+    it('uses defaultReasoningEffort (low) from config when options.reasoningEffort is undefined', async () => {
+        const transport = makeTransport();
+        const provider = new DomAutomationProvider({
+            id: 'chatgpt-dom', label: 'ChatGPT (DOM)', transport, defaultReasoningEffort: 'low'
+        });
+        await driveWithOptions(provider, transport, {});
+        expect(transport.setReasoningEffort).toHaveBeenCalledWith('low');
+    });
+
+    it('options.reasoningEffort overrides defaultReasoningEffort from config', async () => {
+        const transport = makeTransport();
+        const provider = new DomAutomationProvider({
+            id: 'chatgpt-dom', label: 'ChatGPT (DOM)', transport, defaultReasoningEffort: 'low'
+        });
+        await driveWithOptions(provider, transport, { reasoningEffort: 'high' });
+        expect(transport.setReasoningEffort).toHaveBeenCalledWith('high');
     });
 
     it('continues sending even if setReasoningEffort fails', async () => {
@@ -214,5 +258,45 @@ describe('DomAutomationProvider reasoning effort', () => {
         const provider = new DomAutomationProvider({ id: 'chatgpt-dom', label: 'ChatGPT (DOM)', transport });
         const result = await driveWithOptions(provider, transport, { reasoningEffort: 'high' });
         expect(result).toMatchObject({ text: 'answer' });
+    });
+});
+
+describe('DomAutomationProvider.applyPageDefaults', () => {
+    it('opens the page (reset:false) and syncs model + reasoning effort without sending', async () => {
+        const transport = makeTransport();
+        const provider = new DomAutomationProvider({ id: 'gemini-dom', label: 'Gemini (DOM)', transport });
+        await provider.applyPageDefaults({ modelId: 'opus-4-8', reasoningEffort: 'high' });
+
+        expect(transport.openCalls[0]).toEqual({ reset: false });
+        expect(transport.setModel).toHaveBeenCalledWith('opus-4-8');
+        expect(transport.setReasoningEffort).toHaveBeenCalledWith('high');
+        // 初始化同步绝不发送消息。
+        expect(transport.injectAndSubmit).not.toHaveBeenCalled();
+    });
+
+    it('skips setModel when modelId is "dom" but still syncs reasoning effort', async () => {
+        const transport = makeTransport();
+        const provider = new DomAutomationProvider({ id: 'claude-dom', label: 'Claude (DOM)', transport });
+        await provider.applyPageDefaults({ modelId: 'dom', reasoningEffort: 'low' });
+
+        expect(transport.setModel).not.toHaveBeenCalled();
+        expect(transport.setReasoningEffort).toHaveBeenCalledWith('low');
+    });
+
+    it('falls back to defaultReasoningEffort from config when reasoningEffort is undefined', async () => {
+        const transport = makeTransport();
+        const provider = new DomAutomationProvider({
+            id: 'claude-dom', label: 'Claude (DOM)', transport, defaultReasoningEffort: 'high'
+        });
+        await provider.applyPageDefaults({ modelId: 'opus-4-8' });
+
+        expect(transport.setReasoningEffort).toHaveBeenCalledWith('high');
+    });
+
+    it('does not throw when transport.open fails (best-effort)', async () => {
+        const transport = makeTransport();
+        (transport.open as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('page-not-ready'));
+        const provider = new DomAutomationProvider({ id: 'claude-dom', label: 'Claude (DOM)', transport });
+        await expect(provider.applyPageDefaults({ modelId: 'opus-4-8', reasoningEffort: 'high' })).resolves.toBeUndefined();
     });
 });

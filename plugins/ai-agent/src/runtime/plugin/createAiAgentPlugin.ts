@@ -255,9 +255,10 @@ function createRuntime(hostContext: IHostContext, options: AiAgentPluginOptions)
     const lightweightModel = resolveLightweightModelSelection(options.runtimeMode);
 
     const env = options.env ?? {};
-    const domProviderUrls: Partial<Record<'chatgpt-dom' | 'gemini-dom', string>> = {};
+    const domProviderUrls: Partial<Record<'chatgpt-dom' | 'gemini-dom' | 'claude-dom', string>> = {};
     if (env.CHATPRISM_DOM_CHATGPT_URL) domProviderUrls['chatgpt-dom'] = env.CHATPRISM_DOM_CHATGPT_URL;
     if (env.CHATPRISM_DOM_GEMINI_URL) domProviderUrls['gemini-dom'] = env.CHATPRISM_DOM_GEMINI_URL;
+    if (env.CHATPRISM_DOM_CLAUDE_URL) domProviderUrls['claude-dom'] = env.CHATPRISM_DOM_CLAUDE_URL;
 
     return createModelProviderRuntime({
         runtimeMode: options.runtimeMode,

@@ -5,75 +5,53 @@
         <span class="editor-path" data-testid="document-editor-title">{{ editorTitleLabel }}</span>
       </div>
       <div class="editor-actions">
-        <div v-if="showMarkdownStylePicker" class="editor-link-picker">
+        <div
+          v-if="isMarkdownDocument"
+          class="editor-action-group"
+          data-testid="document-toolbar-group-mode"
+        >
           <button
             type="button"
-            class="save-button save-button--link-picker"
-            data-testid="markdown-style-picker-trigger"
-            :title="t('shared.insertMarkdownStyle')"
-            :aria-label="t('shared.insertMarkdownStyle')"
-            :aria-expanded="isStylePickerOpen ? 'true' : 'false'"
-            @mousedown.prevent
-            @click="toggleMarkdownStylePicker"
+            class="save-button save-button--mode-toggle"
+            data-testid="markdown-mode-toggle"
+            :class="{ 'save-button--active': markdownViewerMode === 'viewer' }"
+            :title="markdownModeToggleLabel"
+            :aria-label="markdownModeToggleLabel"
+            :aria-pressed="markdownViewerMode === 'viewer'"
+            @click="toggleMarkdownViewerMode"
           >
-            <Highlighter class="save-icon" :size="18" aria-hidden="true" />
+            <component
+              :is="markdownViewerMode === 'viewer' ? PencilLine : Eye"
+              class="save-icon"
+              :size="18"
+              aria-hidden="true"
+            />
           </button>
-          <div
-            v-if="isStylePickerOpen"
-            class="editor-link-menu"
-            data-testid="markdown-style-picker"
-          >
-            <button
-              type="button"
-              class="editor-link-option"
-              data-testid="markdown-style-option-highlight"
-              @mousedown.prevent
-              @click="insertMarkdownStyle('highlight')"
-            >
-              <Highlighter class="editor-link-option-icon" :size="14" aria-hidden="true" />
-              {{ t('shared.markdownStyleHighlight') }}
-            </button>
-            <button
-              type="button"
-              class="editor-link-option"
-              data-testid="markdown-style-option-bold"
-              @mousedown.prevent
-              @click="insertMarkdownStyle('bold')"
-            >
-              <Bold class="editor-link-option-icon" :size="14" aria-hidden="true" />
-              {{ t('shared.markdownStyleBold') }}
-            </button>
-            <button
-              type="button"
-              class="editor-link-option"
-              data-testid="markdown-style-option-strikethrough"
-              @mousedown.prevent
-              @click="insertMarkdownStyle('strikethrough')"
-            >
-              <Strikethrough class="editor-link-option-icon" :size="14" aria-hidden="true" />
-              {{ t('shared.markdownStyleStrikethrough') }}
-            </button>
-          </div>
         </div>
-        <div v-if="showMarkdownLinkPicker" class="editor-link-picker">
-          <button
-            type="button"
-            class="save-button save-button--link-picker"
-            data-testid="markdown-insert-link"
-            :title="t('shared.insertMarkdownLink')"
-            :aria-label="t('shared.insertMarkdownLink')"
-            :aria-expanded="isLinkPickerOpen ? 'true' : 'false'"
-            :disabled="!canInsertAnyLink"
-            @mousedown.prevent
-            @click="toggleLinkPicker"
-          >
-            <Link2 class="save-icon" :size="18" aria-hidden="true" />
-          </button>
-          <div
-            v-if="isLinkPickerOpen"
-            class="editor-link-menu"
-            data-testid="markdown-link-picker"
-          >
+        <div
+          v-if="showMarkdownLinkPicker || showMarkdownStylePicker"
+          class="editor-action-group"
+          data-testid="document-toolbar-group-insert"
+        >
+          <div v-if="showMarkdownLinkPicker" class="editor-link-picker">
+            <button
+              type="button"
+              class="save-button save-button--link-picker"
+              data-testid="markdown-insert-link"
+              :title="t('shared.insertMarkdownLink')"
+              :aria-label="t('shared.insertMarkdownLink')"
+              :aria-expanded="isLinkPickerOpen ? 'true' : 'false'"
+              :disabled="!canInsertAnyLink"
+              @mousedown.prevent
+              @click="toggleLinkPicker"
+            >
+              <Link2 class="save-icon" :size="18" aria-hidden="true" />
+            </button>
+            <div
+              v-if="isLinkPickerOpen"
+              class="editor-link-menu"
+              data-testid="markdown-link-picker"
+            >
             <div class="editor-link-tabs" role="tablist" :aria-label="t('shared.insertMarkdownLink')">
               <button
                 type="button"
@@ -189,68 +167,143 @@
                 {{ t('shared.noMarkdownLinkTargets') }}
               </p>
             </div>
+            </div>
+          </div>
+          <div v-if="showMarkdownStylePicker" class="editor-link-picker">
+            <button
+              type="button"
+              class="save-button save-button--link-picker"
+              data-testid="markdown-style-picker-trigger"
+              :title="t('shared.insertMarkdownStyle')"
+              :aria-label="t('shared.insertMarkdownStyle')"
+              :aria-expanded="isStylePickerOpen ? 'true' : 'false'"
+              @mousedown.prevent
+              @click="toggleMarkdownStylePicker"
+            >
+              <Highlighter class="save-icon" :size="18" aria-hidden="true" />
+            </button>
+            <div
+              v-if="isStylePickerOpen"
+              class="editor-link-menu"
+              data-testid="markdown-style-picker"
+            >
+              <button
+                type="button"
+                class="editor-link-option"
+                data-testid="markdown-style-option-highlight"
+                @mousedown.prevent
+                @click="insertMarkdownStyle('highlight')"
+              >
+                <Highlighter class="editor-link-option-icon" :size="14" aria-hidden="true" />
+                {{ t('shared.markdownStyleHighlight') }}
+              </button>
+              <button
+                type="button"
+                class="editor-link-option"
+                data-testid="markdown-style-option-bold"
+                @mousedown.prevent
+                @click="insertMarkdownStyle('bold')"
+              >
+                <Bold class="editor-link-option-icon" :size="14" aria-hidden="true" />
+                {{ t('shared.markdownStyleBold') }}
+              </button>
+              <button
+                type="button"
+                class="editor-link-option"
+                data-testid="markdown-style-option-strikethrough"
+                @mousedown.prevent
+                @click="insertMarkdownStyle('strikethrough')"
+              >
+                <Strikethrough class="editor-link-option-icon" :size="14" aria-hidden="true" />
+                {{ t('shared.markdownStyleStrikethrough') }}
+              </button>
+            </div>
+          </div>
+          <div v-if="showMarkdownStylePicker" class="editor-link-picker">
+            <button
+              type="button"
+              class="save-button save-button--link-picker"
+              data-testid="markdown-block-picker-trigger"
+              :title="t('shared.insertMarkdownBlock')"
+              :aria-label="t('shared.insertMarkdownBlock')"
+              :aria-expanded="isBlockPickerOpen ? 'true' : 'false'"
+              @mousedown.prevent
+              @click="toggleMarkdownBlockPicker"
+            >
+              <LayoutList class="save-icon" :size="18" aria-hidden="true" />
+            </button>
+            <div
+              v-if="isBlockPickerOpen"
+              class="editor-link-menu"
+              data-testid="markdown-block-picker"
+            >
+              <button
+                type="button"
+                class="editor-link-option"
+                data-testid="markdown-block-option-checkbox"
+                @mousedown.prevent
+                @click="insertMarkdownBlock('checkbox')"
+              >
+                <SquareCheck class="editor-link-option-icon" :size="14" aria-hidden="true" />
+                {{ t('shared.markdownBlockCheckbox') }}
+              </button>
+              <button
+                type="button"
+                class="editor-link-option"
+                data-testid="markdown-block-option-table"
+                @mousedown.prevent
+                @click="insertMarkdownBlock('table')"
+              >
+                <Table class="editor-link-option-icon" :size="14" aria-hidden="true" />
+                {{ t('shared.markdownBlockTable') }}
+              </button>
+            </div>
           </div>
         </div>
-        <button
-          v-if="isMarkdownDocument"
-          type="button"
-          class="save-button save-button--mode-toggle"
-          data-testid="markdown-mode-toggle"
-          :class="{ 'save-button--active': markdownViewerMode === 'viewer' }"
-          :title="markdownModeToggleLabel"
-          :aria-label="markdownModeToggleLabel"
-          :aria-pressed="markdownViewerMode === 'viewer'"
-          @click="toggleMarkdownViewerMode"
-        >
-          <component
-            :is="markdownViewerMode === 'viewer' ? PencilLine : Eye"
-            class="save-icon"
-            :size="18"
-            aria-hidden="true"
-          />
-        </button>
-        <button
-          v-if="props.activePath"
-          type="button"
-          class="save-button"
-          data-testid="document-refresh"
-          :title="t('shared.refreshCurrentDocument')"
-          :aria-label="t('shared.refreshCurrentDocument')"
-          @click="emit('refresh-document')"
-        >
-          <RotateCcw class="save-icon" :size="18" aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          class="save-button"
-          :class="{ 'save-button--dirty': isDirty, 'save-button--saving': isSaving }"
-          data-testid="document-save"
-          :title="saveButtonLabel"
-          :aria-label="saveButtonLabel"
-          :disabled="!canSave || isSaving"
-          @mouseenter="showTooltip($event, saveButtonLabel)"
-          @mouseleave="hideTooltip"
-          @focus="showTooltip($event, saveButtonLabel)"
-          @blur="hideTooltip"
-          @click="emit('save')"
-        >
-          <Save class="save-icon" :size="18" aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          class="save-button save-button--pane-toggle"
-          data-testid="document-middle-pane-toggle"
-          :title="middlePaneToggleLabel"
-          :aria-label="middlePaneToggleLabel"
-          @click="emit('toggle-middle-pane-mode')"
-        >
-          <component
-            :is="props.middlePaneMode === 'maximized' ? Minimize2 : Maximize2"
-            class="save-icon"
-            :size="18"
-            aria-hidden="true"
-          />
-        </button>
+        <div class="editor-action-group" data-testid="document-toolbar-group-actions">
+          <button
+            v-if="props.activePath"
+            type="button"
+            class="save-button"
+            data-testid="document-refresh"
+            :title="t('shared.refreshCurrentDocument')"
+            :aria-label="t('shared.refreshCurrentDocument')"
+            @click="emit('refresh-document')"
+          >
+            <RotateCcw class="save-icon" :size="18" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            class="save-button"
+            :class="{ 'save-button--dirty': isDirty, 'save-button--saving': isSaving }"
+            data-testid="document-save"
+            :title="saveButtonLabel"
+            :aria-label="saveButtonLabel"
+            :disabled="!canSave || isSaving"
+            @mouseenter="showTooltip($event, saveButtonLabel)"
+            @mouseleave="hideTooltip"
+            @focus="showTooltip($event, saveButtonLabel)"
+            @blur="hideTooltip"
+            @click="emit('save')"
+          >
+            <Save class="save-icon" :size="18" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            class="save-button save-button--pane-toggle"
+            data-testid="document-middle-pane-toggle"
+            :title="middlePaneToggleLabel"
+            :aria-label="middlePaneToggleLabel"
+            @click="emit('toggle-middle-pane-mode')"
+          >
+            <component
+              :is="props.middlePaneMode === 'maximized' ? Minimize2 : Maximize2"
+              class="save-icon"
+              :size="18"
+              aria-hidden="true"
+            />
+          </button>
+        </div>
       </div>
     </header>
 
@@ -330,7 +383,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
-import { Bold, Eye, Highlighter, Link2, Maximize2, MessageSquareQuote, Minimize2, PencilLine, RotateCcw, Save, Strikethrough, Upload } from 'lucide-vue-next';
+import { Bold, Eye, Highlighter, LayoutList, Link2, Maximize2, MessageSquareQuote, Minimize2, PencilLine, RotateCcw, Save, SquareCheck, Strikethrough, Table, Upload } from 'lucide-vue-next';
 import type { ContextDocument, ContextNode } from '@packages/core/src';
 import { useWorkspaceI18n } from '../i18n';
 import { resolveDocumentViewer } from '../document-viewers';
@@ -455,10 +508,12 @@ const markdownViewerRef = ref<(Partial<DocumentViewerSearchHandle> & {
   insertMarkdownInViewer?: (markdown: string) => boolean;
   toggleHighlightInViewer?: () => boolean;
   toggleMarkInViewer?: (markName: string) => boolean;
+  insertTaskListItemInViewer?: () => boolean;
 }) | null>(null);
 const searchInputRef = ref<HTMLInputElement | null>(null);
 const isSearchOpen = ref(false);
 const isStylePickerOpen = ref(false);
+const isBlockPickerOpen = ref(false);
 const isLinkPickerOpen = ref(false);
 const activeLinkPickerTab = ref<string>('document');
 const linkInsertionPointMissing = ref(false);
@@ -635,6 +690,7 @@ function goToPreviousSearchMatch() {
 
 function toggleLinkPicker() {
   isStylePickerOpen.value = false;
+  isBlockPickerOpen.value = false;
   if (!canInsertAnyLink.value) {
     return;
   }
@@ -653,8 +709,16 @@ function toggleLinkPicker() {
 
 function toggleMarkdownStylePicker() {
   isLinkPickerOpen.value = false;
+  isBlockPickerOpen.value = false;
   linkInsertionPointMissing.value = false;
   isStylePickerOpen.value = !isStylePickerOpen.value;
+}
+
+function toggleMarkdownBlockPicker() {
+  isLinkPickerOpen.value = false;
+  isStylePickerOpen.value = false;
+  linkInsertionPointMissing.value = false;
+  isBlockPickerOpen.value = !isBlockPickerOpen.value;
 }
 
 function setLinkPickerTab(tab: string) {
@@ -750,6 +814,40 @@ function insertMarkdownStyle(styleId: MarkdownStyleId) {
   );
 }
 
+type MarkdownBlockId = 'checkbox' | 'table';
+
+function insertMarkdownBlock(blockId: MarkdownBlockId) {
+  if (blockId === 'checkbox') {
+    if (markdownViewerMode.value === 'viewer') {
+      markdownViewerRef.value?.insertTaskListItemInViewer?.();
+      isBlockPickerOpen.value = false;
+      return;
+    }
+
+    linkInsertionPointMissing.value = false;
+    void runMarkdownInsertion(
+      () => markdownViewerRef.value?.insertMarkdownSnippet?.({
+        buildReplacement: (selectedText) => `- [ ] ${selectedText || 'task1'}`
+      }),
+      { closePicker: 'block' }
+    );
+  } else if (blockId === 'table') {
+    const tableMarkdown = `| 列1 | 列2 | 列3 |\n| --- | --- | --- |\n| 单元格 | 单元格 | 单元格 |\n| 单元格 | 单元格 | 单元格 |`;
+
+    if (markdownViewerMode.value === 'viewer') {
+      markdownViewerRef.value?.insertMarkdownInViewer?.(tableMarkdown);
+      isBlockPickerOpen.value = false;
+      return;
+    }
+
+    linkInsertionPointMissing.value = false;
+    void runMarkdownInsertion(
+      () => markdownViewerRef.value?.insertMarkdownSnippet?.({ markdown: tableMarkdown }),
+      { closePicker: 'block' }
+    );
+  }
+}
+
 function insertDynamicLinkItem(typeId: string, itemId: string) {
   const insertLinkType = props.insertLinkTypes.find((candidate) => candidate.id === typeId);
   const item = insertLinkType?.items.find((candidate) => candidate.id === itemId);
@@ -824,7 +922,7 @@ function insertMarkdownSnippetIntoDocument(snippet: string, editModeAction: () =
 
 async function runMarkdownInsertion(
   action: () => boolean | undefined,
-  options: { closePicker?: 'link' | 'style' } = {}
+  options: { closePicker?: 'link' | 'style' | 'block' } = {}
 ) {
   const previousModelValue = props.modelValue;
   if (markdownViewerMode.value !== 'edit') {
@@ -858,6 +956,9 @@ async function runMarkdownInsertion(
     }
     if (options.closePicker !== 'link') {
       isStylePickerOpen.value = false;
+    }
+    if (options.closePicker !== 'block') {
+      isBlockPickerOpen.value = false;
     }
     return;
   }
@@ -938,8 +1039,29 @@ function hideTooltip() {
 .editor-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
   flex-shrink: 0;
+}
+
+.editor-action-group {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.editor-action-group + .editor-action-group {
+  margin-left: 10px;
+  padding-left: 11px;
+}
+
+.editor-action-group + .editor-action-group::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 5px;
+  bottom: 5px;
+  width: 1px;
+  background: rgba(148, 163, 184, 0.22);
 }
 
 .editor-link-picker {

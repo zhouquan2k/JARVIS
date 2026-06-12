@@ -121,6 +121,26 @@ All context queries follow a **`documentId`-first** approach:
 
 Links written into documents by the toolbar (conversation references, asset embeds) use standard relative paths relative to the repository root. The `references/` directory is protected and its contents are not affected by link rewriting operations.
 
+### 4.3 Standalone Server + Relative-Path Renderer
+
+**Overview**
+
+`apps/server` is a standalone process and the sole backend for context / sync / provider-config / codex. Desktop does not embed its own HTTP server; the dependency direction is always **desktop → server**: the server is unaware of desktop at both compile and runtime, receiving only a generic static-root config (`CHATPRISM_RENDERER_DIST`) treated like nginx's `root`.
+
+**Decision**
+
+The desktop renderer is always **same-origin** with the API, and every `/api/*` call uses a **relative path** — the renderer never builds absolute URLs like `http://127.0.0.1:8787`.
+
+- **dev**: the renderer is served by Vite; `server.proxy` in `vite.config.ts` forwards `/api` and `/health` to the server.
+- **prod / e2e**: the renderer is served statically by the server (`serveStatic` registered before API routes for asset hits, SPA fallback registered after API routes so it never shadows them), making renderer and API same-origin by construction.
+- The desktop main process uses the absolute `CHATPRISM_CONTEXT_BASE_URL` only to derive the server origin for loading the renderer; all base URLs injected into the renderer are normalized to relative values (`createDesktop2RuntimeOptions` fills `/api/context`, `/api/sync`, `/api/codex`, `/api/provider-configs` defaults).
+
+**Consequences**
+
+- Eliminates cross-origin CORS entirely (same-origin requests don't trigger it) and removes reliance on the server's CORS allowlist as a fallback.
+- CSP only needs `img-src 'self'` to allow local resources such as `document-asset` images — no special-case for `http://127.0.0.1:*`.
+- Relative paths are agnostic to deployment port / host, making migration and packaging more robust.
+
 ## 5. Runtime and External Dependency Chain
 
 - Web, Extension, and Desktop call external model providers through shared runtime contracts.

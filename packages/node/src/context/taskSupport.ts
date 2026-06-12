@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type { Task } from '@plugins/task-mgr/api';
+import type { Task, TaskRecurrence } from '@plugins/task-mgr/api';
 
 export const TASK_STORAGE_DIRECTORY = '.chatprism';
 export const TASK_STORAGE_FILE = 'tasks.json';
@@ -44,8 +44,16 @@ export function normalizeTaskRecord(task: Task, fallbackNow: number): Task {
         calendarEventId: task.calendarEventId ?? null,
         calendarSyncStatus: task.calendarSyncStatus ?? null,
         calendarLastSyncedAt: Number.isFinite(task.calendarLastSyncedAt) ? task.calendarLastSyncedAt : null,
-        calendarLastSyncError: task.calendarLastSyncError ?? null
+        calendarLastSyncError: task.calendarLastSyncError ?? null,
+        recurrence: normalizeTaskRecurrence(task.recurrence)
     };
+}
+
+export function normalizeTaskRecurrence(value: unknown): TaskRecurrence {
+    if (value === 'daily' || value === 'weekly' || value === 'monthly') {
+        return value;
+    }
+    return null;
 }
 
 function normalizeTaskExecutionState(value: Task['executionState']): Task['executionState'] {

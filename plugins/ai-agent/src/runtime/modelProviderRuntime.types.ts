@@ -19,7 +19,7 @@ export interface ModelProviderRuntimeOptions {
     providerOptionsResolver?: ModelProviderOptionsResolver;
     controlledPageCapability?: ControlledPageCapability;
     /** Override target URLs for DOM providers (e.g. point to a local mock in tests). */
-    domProviderUrls?: Partial<Record<'chatgpt-dom' | 'gemini-dom', string>>;
+    domProviderUrls?: Partial<Record<'chatgpt-dom' | 'gemini-dom' | 'claude-dom', string>>;
 }
 
 export interface ModelProviderRuntime {

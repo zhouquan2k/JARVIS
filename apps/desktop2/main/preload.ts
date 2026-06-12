@@ -37,7 +37,7 @@ import {
 
 contextBridge.exposeInMainWorld('chatprismDesktop', {
     runtimeEnv: {
-        contextBaseUrl: process.env.CHATPRISM_CONTEXT_BASE_URL,
+        contextBaseUrl: process.env.CHATPRISM_RENDERER_CONTEXT_BASE_URL ?? process.env.CHATPRISM_CONTEXT_BASE_URL,
         domChatGptUrl: process.env.CHATPRISM_DOM_CHATGPT_URL,
         domGeminiUrl: process.env.CHATPRISM_DOM_GEMINI_URL,
         geminiApiKey: process.env.CHATPRISM_LLM_API_KEY || process.env.VITE_LLM_API_KEY || process.env.VITE_GEMINI_API_KEY

@@ -6,6 +6,12 @@ export default defineConfig({
     base: './',
     plugins: [vue()],
     envPrefix: ['VITE_', 'CHATPRISM_'],
+    server: {
+        proxy: {
+            '/api': 'http://127.0.0.1:8787',
+            '/health': 'http://127.0.0.1:8787'
+        }
+    },
     build: {
         outDir: 'dist/renderer',
         emptyOutDir: true

@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Mock Gemini</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    #conversation { min-height: 200px; }
+    .ql-editor { width: 400px; min-height: 40px; border: 1px solid #ccc; padding: 8px; }
+    button { margin-left: 8px; padding: 6px 14px; }
+    .message { margin: 8px 0; padding: 8px; border: 1px solid #ddd; }
+    .mode-bar { margin: 12px 0; display: flex; align-items: center; gap: 8px; }
+    .mode-menu, .thinking-menu { margin-top: 8px; border: 1px solid #ccc; width: 340px; padding: 8px; background: #fff; }
+    gem-menu-item { display: block; padding: 6px 8px; cursor: pointer; }
+    gem-menu-item.selected { background: #e8f0fe; }
+    gem-menu-item-content.selected .label::before { content: "✓ "; }
+    .label { font-weight: 600; }
+    .sublabel { color: #666; font-size: 12px; }
+    [data-testid="mock-gemini-state"] { margin-left: 8px; color: #444; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div id="conversation"></div>
+
+  <div id="input-area">
+    <rich-textarea>
+      <div class="ql-editor" contenteditable="true" data-placeholder="Message Gemini"></div>
+    </rich-textarea>
+    <button class="send-button" aria-label="Send message">Send</button>
+  </div>
+
+  <div class="mode-bar">
+    <button data-test-id="bard-mode-menu-button" type="button">Flash</button>
+    <span data-testid="mock-gemini-state">
+      mode=<span data-testid="mock-gemini-mode-label">Flash</span>,
+      thinking=<span data-testid="mock-gemini-thinking-level">标准</span>
+    </span>
+  </div>
+
+  <script>
+    const MOCK_RESPONSE = 'Hello! I am a mock Gemini response used for JARVIS e2e testing.';
+    const STREAM_DELAY_MS = 80;
+    const CHUNK_SIZE = 5;
+    const MODELS = [
+      { id: 'cf41b0e0dd7d53e5', name: '3.1 Flash-Lite', triggerLabel: 'Flash-Lite', sublabel: '极速回答' },
+      { id: 'fbb127bbb056c959', name: '3.5 Flash', triggerLabel: 'Flash', sublabel: '全方位帮助' },
+      { id: '9d8ca3786ebdfbea', name: '3.1 Pro', triggerLabel: 'Pro', sublabel: '高等数学与代码' }
+    ];
+    let currentModeId = 'fbb127bbb056c959';
+    let currentThinkingLevel = '标准';
+
+    function currentMode() {
+      return MODELS.find((m) => m.id === currentModeId) || MODELS[1];
+    }
+
+    function syncModeIndicators() {
+      document.querySelector('[data-test-id="bard-mode-menu-button"]').textContent = currentMode().triggerLabel;
+      document.querySelector('[data-testid="mock-gemini-mode-label"]').textContent = currentMode().triggerLabel;
+      document.querySelector('[data-testid="mock-gemini-thinking-level"]').textContent = currentThinkingLevel;
+    }
+
+    function removeMenus() {
+      document.querySelector('[data-testid="mock-gemini-mode-menu"]')?.remove();
+      document.getElementById('gem-thinking-menu')?.remove();
+    }
+
+    function buildGemMenuItem({ labelText, sublabelText, selected, attrs = {}, onPointerDown }) {
+      const item = document.createElement('gem-menu-item');
+      item.setAttribute('role', 'menuitem');
+      item.setAttribute('aria-disabled', 'false');
+      Object.entries(attrs).forEach(([key, value]) => item.setAttribute(key, value));
+      const content = document.createElement('gem-menu-item-content');
+      content.className = selected ? 'selected checkmark-only' : 'checkmark-only';
+      if (selected) item.classList.add('selected');
+      const label = document.createElement('span');
+      label.className = 'label';
+      label.textContent = ` ${labelText} `;
+      content.appendChild(label);
+      if (sublabelText) {
+        const sublabel = document.createElement('div');
+        sublabel.className = 'sublabel';
+        sublabel.textContent = sublabelText;
+        content.appendChild(sublabel);
+      }
+      item.appendChild(content);
+      item.addEventListener('pointerdown', onPointerDown);
+      return item;
+    }
+
+    function renderThinkingMenu() {
+      document.getElementById('gem-thinking-menu')?.remove();
+      const menu = document.createElement('div');
+      menu.id = 'gem-thinking-menu';
+      menu.className = 'thinking-menu';
+      menu.appendChild(buildGemMenuItem({
+        labelText: '标准',
+        sublabelText: '最适合回答大多数问题',
+        selected: currentThinkingLevel === '标准',
+        onPointerDown: () => {
+          currentThinkingLevel = '标准';
+          removeMenus();
+          syncModeIndicators();
+        }
+      }));
+      menu.appendChild(buildGemMenuItem({
+        labelText: '扩展',
+        sublabelText: '擅长解决复杂问题',
+        selected: currentThinkingLevel === '扩展',
+        onPointerDown: () => {
+          currentThinkingLevel = '扩展';
+          removeMenus();
+          syncModeIndicators();
+        }
+      }));
+      document.body.appendChild(menu);
+    }
+
+    function renderModeMenu() {
+      removeMenus();
+      const menu = document.createElement('div');
+      menu.className = 'mode-menu';
+      menu.setAttribute('data-testid', 'mock-gemini-mode-menu');
+
+      for (const model of MODELS) {
+        menu.appendChild(buildGemMenuItem({
+          labelText: model.name,
+          sublabelText: model.sublabel,
+          selected: currentModeId === model.id,
+          attrs: { 'data-mode-id': model.id },
+          onPointerDown: () => {
+            currentModeId = model.id;
+            removeMenus();
+            syncModeIndicators();
+          }
+        }));
+      }
+
+      const separator = document.createElement('hr');
+      menu.appendChild(separator);
+
+      menu.appendChild(buildGemMenuItem({
+        labelText: '思考等级',
+        sublabelText: currentThinkingLevel,
+        selected: false,
+        attrs: {
+          value: 'thinking_level',
+          'aria-haspopup': 'true',
+          'aria-controls': 'gem-thinking-menu',
+          'aria-expanded': 'false'
+        },
+        onPointerDown: () => {
+          renderThinkingMenu();
+          const trigger = document.querySelector('gem-menu-item[value="thinking_level"]');
+          if (trigger) trigger.setAttribute('aria-expanded', 'true');
+        }
+      }));
+
+      document.body.appendChild(menu);
+    }
+
+    document.querySelector('[data-test-id="bard-mode-menu-button"]').addEventListener('pointerdown', () => {
+      if (document.querySelector('[data-testid="mock-gemini-mode-menu"]')) {
+        removeMenus();
+        return;
+      }
+      renderModeMenu();
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        removeMenus();
+      }
+    });
+
+    syncModeIndicators();
+
+    document.querySelector('.send-button').addEventListener('click', () => {
+      const editor = document.querySelector('.ql-editor');
+      const prompt = editor.textContent || editor.innerText;
+      if (!prompt) return;
+
+      const userDiv = document.createElement('div');
+      userDiv.className = 'message';
+      userDiv.setAttribute('data-message-author-role', 'user');
+      userDiv.textContent = prompt;
+      document.getElementById('conversation').appendChild(userDiv);
+
+      // Mirror Gemini SPA routing: URL changes after first message
+      if (!location.pathname.startsWith('/app/')) {
+        history.pushState({}, '', '/app/' + Date.now());
+      }
+
+      editor.textContent = '';
+
+      const stopBtn = document.createElement('button');
+      stopBtn.className = 'stop';
+      stopBtn.setAttribute('aria-label', 'Stop response');
+      stopBtn.textContent = 'Stop';
+      document.getElementById('input-area').appendChild(stopBtn);
+
+      // Gemini uses model-response custom element with nested paragraph
+      const modelResponse = document.createElement('model-response');
+      modelResponse.setAttribute('data-test-id', 'model-response');
+      const para = document.createElement('p');
+      modelResponse.appendChild(para);
+      document.getElementById('conversation').appendChild(modelResponse);
+
+      let pos = 0;
+      const interval = setInterval(() => {
+        if (pos >= MOCK_RESPONSE.length) {
+          clearInterval(interval);
+          stopBtn.remove();
+          return;
+        }
+        const end = Math.min(pos + CHUNK_SIZE, MOCK_RESPONSE.length);
+        para.innerText = MOCK_RESPONSE.slice(0, end);
+        pos = end;
+      }, STREAM_DELAY_MS);
+    });
+
+    if (!window.__jarvisInjectPrompt) {
+      window.__jarvisInjectPrompt = function(prompt, requestId) {
+        const editor = document.querySelector('.ql-editor');
+        editor.textContent = prompt;
+        editor.dispatchEvent(new InputEvent('input', { bubbles: true }));
+        document.querySelector('.send-button').click();
+      };
+    }
+  </script>
+</body>
+</html>

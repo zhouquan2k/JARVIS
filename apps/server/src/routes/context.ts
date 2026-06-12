@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono';
 import type { ConversationQuery } from '@plugins/ai-agent/api';
-import type { Task, TaskExecutionState, TaskPriority, TaskQueryTag } from '@plugins/task-mgr/api';
+import type { Task, TaskExecutionState, TaskPriority, TaskQueryTag, TaskRecurrence } from '@plugins/task-mgr/api';
 import type { ServerConfig } from '../config.js';
 import { HttpContextService } from '../services/httpContextService.js';
 import type { ContextSearchRequest, CreateContextNodeInput, MoveContextNodeInput, RenameContextNodeInput, WriteContextDocumentInput } from '../types/context.js';
@@ -139,6 +139,13 @@ function normalizeTaskExecutionState(value: unknown): TaskExecutionState {
     throw new Error('executionState must be one of doing, morning, afternoon, evening, or null.');
 }
 
+function normalizeTaskRecurrence(value: unknown): TaskRecurrence {
+    if (value === 'daily' || value === 'weekly' || value === 'monthly') {
+        return value;
+    }
+    return null;
+}
+
 function normalizeTask(body: Record<string, unknown>): Task {
     if (typeof body.id !== 'string') {
         throw new Error('task.id must be a string.');
@@ -200,7 +207,8 @@ function normalizeTask(body: Record<string, unknown>): Task {
             ? body.calendarSyncStatus
             : null,
         calendarLastSyncedAt: typeof body.calendarLastSyncedAt === 'number' ? body.calendarLastSyncedAt : null,
-        calendarLastSyncError: typeof body.calendarLastSyncError === 'string' ? body.calendarLastSyncError : null
+        calendarLastSyncError: typeof body.calendarLastSyncError === 'string' ? body.calendarLastSyncError : null,
+        recurrence: normalizeTaskRecurrence(body.recurrence)
     };
 }
 

@@ -1,5 +1,6 @@
 import type { ControlledPageCapability, ControlledPageEvent } from '@packages/core/src/interfaces/ControlledPageCapability';
 import type { DomModelInfo } from '../../../preload/domChat/domChatCore';
+import type { ReasoningEffort } from '../../../interfaces/IModelProvider';
 
 export interface DomTransportOptions {
     providerId: string;
@@ -26,8 +27,8 @@ export interface DomTransport {
     readAvailableModels(): Promise<DomModelInfo[]>;
     /** 在页面内切换到指定模型（仅 Gemini）。失败时记录日志但不抛出。 */
     setModel(modelId: string): Promise<void>;
-    /** 在页面内切换推理档位（high=true → ChatGPT Thinking / Gemini 扩展）。失败时记录日志但不抛出。 */
-    setReasoningEffort(high: boolean): Promise<void>;
+    /** 在页面内切换推理档位（透传真实档位 low/medium/high，各 provider 内部映射）。失败时记录日志但不抛出。 */
+    setReasoningEffort(effort: ReasoningEffort): Promise<void>;
 }
 
 export function createDomTransport(options: DomTransportOptions): DomTransport {
@@ -84,6 +85,34 @@ export function createDomTransport(options: DomTransportOptions): DomTransport {
             console.log('[DomTransport]', JSON.stringify({ stage: 'read-available-models', providerId }));
             // 仅当受控页为空白时导航，不重置已有会话。
             await capability.openControlledPage({ providerId, targetUrlIfBlank: targetUrl });
+
+            // 主动诊断：复刻 readClaudeModels 的开菜单流程，分别报告
+            // 「合成点击 / 原生点击 / 展开 More models」各步骤的菜单项计数与提取出的模型名，
+            // 直接在渲染端 DevTools 可见，定位到底卡在哪一步。
+            const probeScript = `(async () => {
+                const q = (sel) => { try { return document.querySelectorAll(sel).length; } catch { return -1; } };
+                const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+                const ITEM = '[role="menuitemradio"]';
+                const nameOf = (el) => { const f = el.querySelector('.font-ui'); if (!f) return ''; return Array.from(f.childNodes).filter(n=>n.nodeType===3).map(n=>(n.textContent||'').trim()).filter(Boolean).join(''); };
+                const names = () => Array.from(document.querySelectorAll(ITEM)).map(nameOf).filter(Boolean);
+                const fire = (el) => { const o={bubbles:true,cancelable:true,button:0,pointerId:1,pointerType:'mouse',isPrimary:true}; el.dispatchEvent(new PointerEvent('pointerdown',o)); el.dispatchEvent(new PointerEvent('pointerup',o)); el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,button:0})); };
+                const out = { hasBridge: typeof window.__jarvisReadAvailableModels === 'function', href: location.href };
+                const trigger = document.querySelector('[data-testid="model-selector-dropdown"]');
+                if (!trigger) { out.noTrigger = true; return out; }
+                fire(trigger); await sleep(350);
+                out.nAfterSynthetic = q(ITEM);
+                if (out.nAfterSynthetic === 0 && typeof trigger.click === 'function') { trigger.click(); await sleep(350); out.nAfterNative = q(ITEM); }
+                out.namesTopLevel = names();
+                const more = Array.from(document.querySelectorAll('[role="menuitem"][aria-haspopup="menu"]')).find(el => /more models|更多模型/i.test(el.textContent||''));
+                if (more) { const ho={bubbles:true,cancelable:true,pointerId:1,pointerType:'mouse',isPrimary:true}; more.dispatchEvent(new PointerEvent('pointerover',ho)); fire(more); await sleep(350); if (q(ITEM) <= out.namesTopLevel.length && typeof more.click==='function'){ more.click(); await sleep(400);} out.hasMoreModels = true; }
+                out.namesAfterExpand = names();
+                document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+                document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+                return out;
+            })()`;
+            const probe = await capability.evaluateInPage<Record<string, unknown>>({ providerId, script: probeScript });
+            console.log('[DomTransport]', JSON.stringify({ stage: 'read-available-models-probe', providerId, ...probe }));
+
             const raw = await capability.evaluateInPage<DomModelInfo[] | null>({
                 providerId,
                 script: 'window.__jarvisReadAvailableModels?.() ?? []'
@@ -100,15 +129,21 @@ export function createDomTransport(options: DomTransportOptions): DomTransport {
                 script: `window.__jarvisSetModel?.(${JSON.stringify(modelId)})`
             });
             console.log('[DomTransport]', JSON.stringify({ stage: 'set-model-done', providerId, modelId, result }));
+            if (!result?.ok) {
+                throw new Error(result?.note || `set-model failed for ${providerId}:${modelId}`);
+            }
         },
 
-        async setReasoningEffort(high: boolean): Promise<void> {
-            console.log('[DomTransport]', JSON.stringify({ stage: 'set-reasoning-effort', providerId, high }));
+        async setReasoningEffort(effort: ReasoningEffort): Promise<void> {
+            console.log('[DomTransport]', JSON.stringify({ stage: 'set-reasoning-effort', providerId, effort }));
             const result = await capability.evaluateInPage<{ ok: boolean; note: string }>({
                 providerId,
-                script: `window.__jarvisSetReasoningEffort?.(${high})`
+                script: `window.__jarvisSetReasoningEffort?.(${JSON.stringify(effort)})`
             });
-            console.log('[DomTransport]', JSON.stringify({ stage: 'set-reasoning-effort-done', providerId, high, result }));
+            console.log('[DomTransport]', JSON.stringify({ stage: 'set-reasoning-effort-done', providerId, effort, result }));
+            if (!result?.ok) {
+                throw new Error(result?.note || `set-reasoning-effort failed for ${providerId}:${effort}`);
+            }
         }
     };
 }

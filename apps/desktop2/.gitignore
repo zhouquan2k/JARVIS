@@ -1,3 +1,4 @@
 
-# DOM probe (standalone verifier) persistent profile
+# DOM probe (standalone verifier) persistent profile & dumped page DOM
 .dom-probe-profile/
+.dom-probe-out/

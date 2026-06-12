@@ -13,7 +13,8 @@ import {
     setActiveModel,
     setReasoningEffort,
     type DomChatProvider,
-    type DomModelInfo
+    type DomModelInfo,
+    type ReasoningEffort
 } from './domChatCore';
 
 declare global {
@@ -27,7 +28,7 @@ declare global {
             findEnabledSendButton: typeof findEnabledSendButton;
             readAvailableModels: (provider: DomChatProvider) => Promise<DomModelInfo[]>;
             setActiveModel: (provider: DomChatProvider, modelId: string) => Promise<{ ok: boolean; note: string }>;
-            setReasoningEffort: (provider: DomChatProvider, high: boolean) => Promise<{ ok: boolean; note: string }>;
+            setReasoningEffort: (provider: DomChatProvider, effort: ReasoningEffort) => Promise<{ ok: boolean; note: string }>;
         };
         /** 探针专用：启动观察循环，把流式快照/结束回调桥接到 Playwright exposeFunction。 */
         __domChatObserve?: (provider: DomChatProvider) => void;
@@ -45,7 +46,7 @@ window.__domChat = {
     findEnabledSendButton,
     readAvailableModels: (provider: DomChatProvider) => readAvailableModels(document, provider),
     setActiveModel: (provider: DomChatProvider, modelId: string) => setActiveModel(document, provider, modelId),
-    setReasoningEffort: (provider: DomChatProvider, high: boolean) => setReasoningEffort(document, provider, high)
+    setReasoningEffort: (provider: DomChatProvider, effort: ReasoningEffort) => setReasoningEffort(document, provider, effort)
 };
 
 // 页面内驱动逻辑放在这个干净打包的入口里（避免 tsx 把内联 evaluate 函数注入 __name 辅助）。

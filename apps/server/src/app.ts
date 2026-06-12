@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { Hono } from 'hono';
+import { serveStatic } from '@hono/node-server/serve-static';
 import { BilibiliTranscriptService } from '../../../packages/node/src/import/BilibiliTranscriptService.ts';
 import { FileSystemContextProvider } from '../../../packages/node/src/context/FileSystemContextProvider.ts';
 import { GoogleCalendarSyncService } from '../../../packages/node/src/context/GoogleCalendarSyncService.ts';
@@ -162,6 +163,16 @@ export function createApp(options: CreateAppOptions = {}) {
         );
     });
 
+    const rendererRoot = config.rendererDistPath
+        ? (path.relative(process.cwd(), config.rendererDistPath) || '.')
+        : null;
+
+    // Serve built renderer static assets (index.html, /assets/*). Falls through
+    // to API routes on a miss, so API paths are never shadowed by static files.
+    if (rendererRoot) {
+        app.use('*', serveStatic({ root: rendererRoot }));
+    }
+
     app.route('/health', createHealthRouter());
     app.route('/api/codex', createCodexRouter({
         authService: codexAuthService,
@@ -175,6 +186,12 @@ export function createApp(options: CreateAppOptions = {}) {
     }));
     app.route('/api/provider-configs', createProviderConfigRouter());
     app.route('/api/sync', createSyncRouter({ service, config }));
+
+    // SPA fallback: any non-API, non-asset GET serves index.html so client-side
+    // routing works. Registered AFTER API routes so it never intercepts them.
+    if (rendererRoot) {
+        app.get('*', serveStatic({ root: rendererRoot, path: 'index.html' }));
+    }
 
     if (config.contextBackend !== 'database' && config.knowledgeRoot) {
         setImmediate(() => {

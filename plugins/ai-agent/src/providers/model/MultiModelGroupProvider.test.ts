@@ -13,6 +13,7 @@ function makeMockProvider(id: string, responseText: string): IModelProvider & { 
             onUpdate({ text: responseText });
             return { text: responseText, conversationId: id, messageId: `${id}-msg` };
         }),
+        applyPageDefaults: vi.fn().mockResolvedValue(undefined),
         abort: vi.fn(() => { mock.abortCalled = true; })
     };
     return mock;
@@ -144,7 +145,7 @@ describe('MultiModelGroupProvider', () => {
     it('resolves members from the selected preset (options.modelId)', async () => {
         const presets: Record<string, GroupConfig> = {
             'codex-gemini': { members },
-            'dom-group': {
+            'dom': {
                 members: [
                     { providerId: 'chatgpt-dom', modelId: 'dom', name: 'ChatGPT' },
                     { providerId: 'gemini-dom', modelId: 'dom', name: 'Gemini' }
@@ -161,13 +162,62 @@ describe('MultiModelGroupProvider', () => {
             getGroupConfig
         });
 
-        const result = await group.sendMessage('Tell me something', { modelId: 'dom-group' }, () => {});
+        const result = await group.sendMessage('Tell me something', { modelId: 'dom' }, () => {});
 
-        expect(getGroupConfig).toHaveBeenCalledWith('dom-group');
+        expect(getGroupConfig).toHaveBeenCalledWith('dom');
         expect(providers['chatgpt-dom'].sendMessage).toHaveBeenCalledTimes(1);
         expect(providers['gemini-dom'].sendMessage).toHaveBeenCalledTimes(1);
         expect(result.text).toContain('Hello from ChatGPT DOM');
         expect(result.text).toContain('Hello from Gemini DOM');
+    });
+
+    it('prefers options.groupMembers over the preset (dynamic checkbox selection)', async () => {
+        const getGroupConfig = vi.fn(() => ({ members }));
+        const providers: Record<string, ReturnType<typeof makeMockProvider>> = {
+            'chatgpt-dom': makeMockProvider('chatgpt-dom', 'Hello from ChatGPT DOM'),
+            'claude-dom': makeMockProvider('claude-dom', 'Hello from Claude DOM')
+        };
+        const group = new MultiModelGroupProvider({
+            resolveMemberProvider: (id) => providers[id],
+            getGroupConfig
+        });
+
+        const dynamicMembers = [
+            { providerId: 'chatgpt-dom', modelId: 'dom', name: 'ChatGPT' },
+            { providerId: 'claude-dom', modelId: 'dom', name: 'Claude' }
+        ];
+        const result = await group.sendMessage('Tell me something', { groupMembers: dynamicMembers }, () => {});
+
+        // 勾选结果优先：不回退到 getGroupConfig 预设。
+        expect(getGroupConfig).not.toHaveBeenCalled();
+        expect(providers['chatgpt-dom'].sendMessage).toHaveBeenCalledTimes(1);
+        expect(providers['claude-dom'].sendMessage).toHaveBeenCalledTimes(1);
+        expect(result.text).toContain('### Claude');
+        expect(result.text).toContain('Hello from Claude DOM');
+    });
+
+    it('applyPageDefaults — prefers options.groupMembers over the preset', async () => {
+        const getGroupConfig = vi.fn(() => ({ members }));
+        const providers: Record<string, ReturnType<typeof makeMockProvider>> = {
+            'chatgpt-dom': makeMockProvider('chatgpt-dom', 'x'),
+            'claude-dom': makeMockProvider('claude-dom', 'y')
+        };
+        const group = new MultiModelGroupProvider({
+            resolveMemberProvider: (id) => providers[id],
+            getGroupConfig
+        });
+
+        await group.applyPageDefaults({
+            reasoningEffort: 'high',
+            groupMembers: [
+                { providerId: 'chatgpt-dom', modelId: 'dom', name: 'ChatGPT' },
+                { providerId: 'claude-dom', modelId: 'dom', name: 'Claude' }
+            ]
+        });
+
+        expect(getGroupConfig).not.toHaveBeenCalled();
+        expect(providers['chatgpt-dom'].applyPageDefaults).toHaveBeenCalledWith({ modelId: 'dom', reasoningEffort: 'high' });
+        expect(providers['claude-dom'].applyPageDefaults).toHaveBeenCalledWith({ modelId: 'dom', reasoningEffort: 'high' });
     });
 
     it('passes same history to all members', async () => {
@@ -202,6 +252,41 @@ describe('MultiModelGroupProvider', () => {
 
         const geminiPrompt = (providers['gemini-api'].sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
         expect(geminiPrompt).toContain('你的身份是「Gemini」。');
+    });
+
+    it('applyPageDefaults — fans out to all members with each member modelId and the shared reasoning effort', async () => {
+        const { group, providers } = makeProvider({ members });
+        await group.applyPageDefaults({ modelId: 'dom', reasoningEffort: 'high' });
+
+        // 统一档位下发；成员各自用自己的 modelId。
+        expect(providers['chatgpt-codex'].applyPageDefaults).toHaveBeenCalledWith({ modelId: 'auto', reasoningEffort: 'high' });
+        expect(providers['gemini-api'].applyPageDefaults).toHaveBeenCalledWith({ modelId: 'gemini-2.5-flash', reasoningEffort: 'high' });
+    });
+
+    it('applyPageDefaults — resolves members from the selected preset (options.modelId)', async () => {
+        const presets: Record<string, GroupConfig> = {
+            'dom': {
+                members: [
+                    { providerId: 'chatgpt-dom', modelId: 'dom', name: 'ChatGPT' },
+                    { providerId: 'gemini-dom', modelId: 'dom', name: 'Gemini' }
+                ]
+            }
+        };
+        const getGroupConfig = vi.fn((presetModelId?: string) => presets[presetModelId ?? 'dom']);
+        const providers: Record<string, ReturnType<typeof makeMockProvider>> = {
+            'chatgpt-dom': makeMockProvider('chatgpt-dom', 'x'),
+            'gemini-dom': makeMockProvider('gemini-dom', 'y')
+        };
+        const group = new MultiModelGroupProvider({
+            resolveMemberProvider: (id) => providers[id],
+            getGroupConfig
+        });
+
+        await group.applyPageDefaults({ modelId: 'dom', reasoningEffort: 'high' });
+
+        expect(getGroupConfig).toHaveBeenCalledWith('dom');
+        expect(providers['chatgpt-dom'].applyPageDefaults).toHaveBeenCalledWith({ modelId: 'dom', reasoningEffort: 'high' });
+        expect(providers['gemini-dom'].applyPageDefaults).toHaveBeenCalledWith({ modelId: 'dom', reasoningEffort: 'high' });
     });
 
     it('feeds previous-round replies from other members (cross-round visibility)', async () => {

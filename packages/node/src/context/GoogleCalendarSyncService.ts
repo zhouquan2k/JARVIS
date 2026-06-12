@@ -1,4 +1,4 @@
-import type { Task } from '@plugins/task-mgr/api';
+import type { Task, TaskRecurrence } from '@plugins/task-mgr/api';
 import type { ITaskCalendarSyncService, TaskCalendarSyncResult } from './ITaskCalendarSyncService.ts';
 
 const GOOGLE_CALENDAR_PROVIDER_ID = 'google-calendar';
@@ -68,7 +68,8 @@ export class GoogleCalendarSyncService implements ITaskCalendarSyncService {
         const timeZone = resolveLocalTimeZone();
         const startDate = new Date(calendarDueAt);
         const endDate = new Date(calendarDueAt + 60_000);
-        const payload = {
+        const recurrenceRule = task.recurrence ? buildRecurrenceRule(task.recurrence) : null;
+        const payload: Record<string, unknown> = {
             summary: task.title,
             description: task.notes,
             start: {
@@ -88,6 +89,9 @@ export class GoogleCalendarSyncService implements ITaskCalendarSyncService {
                 }))
             }
         };
+        if (recurrenceRule) {
+            payload.recurrence = [recurrenceRule];
+        }
 
         const isUpdate = Boolean(task.calendarEventId);
         const requestUrl = isUpdate
@@ -99,6 +103,7 @@ export class GoogleCalendarSyncService implements ITaskCalendarSyncService {
             requestUrl,
             reminderMinutes,
             timeZone,
+            recurrence: task.recurrence ?? null,
             payload
         });
         const response = await this.fetchImpl(requestUrl, {
@@ -386,4 +391,13 @@ function extractGoogleErrorDetails(responseJson: GoogleCalendarEventResponse): A
         location: item.location,
         locationType: item.locationType
     }));
+}
+
+export function buildRecurrenceRule(recurrence: NonNullable<TaskRecurrence>): string {
+    const freqMap: Record<NonNullable<TaskRecurrence>, string> = {
+        daily: 'DAILY',
+        weekly: 'WEEKLY',
+        monthly: 'MONTHLY'
+    };
+    return `RRULE:FREQ=${freqMap[recurrence]}`;
 }

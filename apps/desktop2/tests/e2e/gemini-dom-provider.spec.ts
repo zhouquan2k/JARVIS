@@ -54,6 +54,22 @@ function kill(p: ChildProcess) {
     if (!p.killed) p.kill('SIGTERM');
 }
 
+async function findControlledPage(
+    browser: Awaited<ReturnType<typeof chromium.connectOverCDP>>,
+    urlPrefix: string
+) {
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+        for (const ctx of browser.contexts()) {
+            for (const pg of ctx.pages()) {
+                if (pg.url().startsWith(urlPrefix)) return pg;
+            }
+        }
+        await new Promise((r) => setTimeout(r, 250));
+    }
+    throw new Error(`Timed out waiting for controlled page with prefix ${urlPrefix}`);
+}
+
 async function startContextServer(knowledgeRoot: string): Promise<{
     process: ChildProcess;
     contextBaseUrl: string;
@@ -62,7 +78,12 @@ async function startContextServer(knowledgeRoot: string): Promise<{
     const port = 8800 + Math.floor(Math.random() * 200);
     const proc = spawn('pnpm', ['--filter', 'server', 'dev'], {
         cwd: appRoot,
-        env: { ...process.env, PORT: String(port), CHATPRISM_KNOWLEDGE_ROOT: knowledgeRoot },
+        env: {
+            ...process.env,
+            PORT: String(port),
+            CHATPRISM_KNOWLEDGE_ROOT: knowledgeRoot,
+            CHATPRISM_RENDERER_DIST: join(appRoot, 'dist/renderer')
+        },
         stdio: 'pipe'
     });
     const deadline = Date.now() + 15_000;
@@ -233,6 +254,48 @@ test('gemini-dom provider streams reply via mock page and shows assistant messag
             console.error('[test-diagnostic] main IPC logs:\n', mainLogs || '(none)');
             throw err;
         });
+
+        await browser.close();
+    } finally {
+        kill(electronProcess);
+        kill(desktopServer.process);
+        mockServer.server.close();
+    }
+});
+
+test('gemini-dom reasoning selector updates Gemini thinking level without changing the current model', async () => {
+    const desktopServer = await startContextServer(appRoot);
+    const mockServer = await startMockGeminiServer();
+    const { browser, page, electronProcess } = await launchDesktopApp({
+        contextBaseUrl: desktopServer.contextBaseUrl,
+        syncBaseUrl: desktopServer.syncBaseUrl,
+        domGeminiUrl: mockServer.url
+    });
+
+    try {
+        await openGeminiDomConversation(page);
+        const controlled = await findControlledPage(browser, mockServer.url);
+        const initialModeLabel = (await controlled.getByTestId('mock-gemini-mode-label').textContent())?.trim() ?? '';
+
+        await expect.poll(
+            () => controlled.getByTestId('mock-gemini-thinking-level').textContent(),
+            { timeout: 15_000 }
+        ).toContain('扩展');
+        await expect(controlled.getByTestId('mock-gemini-mode-label')).toContainText(initialModeLabel);
+
+        await page.getByTestId('reasoning-effort').selectOption('low');
+        await expect.poll(
+            () => controlled.getByTestId('mock-gemini-thinking-level').textContent(),
+            { timeout: 15_000 }
+        ).toContain('标准');
+        await expect(controlled.getByTestId('mock-gemini-mode-label')).toContainText(initialModeLabel);
+
+        await page.getByTestId('reasoning-effort').selectOption('high');
+        await expect.poll(
+            () => controlled.getByTestId('mock-gemini-thinking-level').textContent(),
+            { timeout: 15_000 }
+        ).toContain('扩展');
+        await expect(controlled.getByTestId('mock-gemini-mode-label')).toContainText(initialModeLabel);
 
         await browser.close();
     } finally {

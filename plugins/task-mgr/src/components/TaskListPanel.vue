@@ -250,6 +250,12 @@ const TaskListRow = defineComponent({
             'data-testid': `agent-task-scope-footer-${item.key}-${rowProps.task.id}`
           }, item.label)))
           : null,
+        rowProps.task.recurrence
+          ? h('span', {
+            class: 'task-list-panel__recurrence-chip',
+            'data-testid': `agent-task-recurrence-${rowProps.task.id}`
+          }, formatRecurrence(rowProps.task.recurrence, t))
+          : null,
         rowProps.task.dueAt ? h('p', {
           class: [
             'task-list-panel__meta',
@@ -421,7 +427,8 @@ function createDraftTask(): Task {
     calendarEventId: null,
     calendarSyncStatus: null,
     calendarLastSyncedAt: null,
-    calendarLastSyncError: null
+    calendarLastSyncError: null,
+    recurrence: null
   };
 }
 
@@ -587,10 +594,10 @@ function compareExecutionState(left: Task, right: Task): number {
 }
 
 function getExecutionStateRank(value: TaskExecutionState): number {
-  if (value === 'doing') return 0;
-  if (value === 'morning') return 1;
-  if (value === 'afternoon') return 2;
-  if (value === 'evening') return 3;
+  if (value === 'morning') return 0;
+  if (value === 'afternoon') return 1;
+  if (value === 'evening') return 2;
+  if (value === 'doing') return 3;
   return 4;
 }
 
@@ -636,6 +643,12 @@ function formatExecutionState(value: Exclude<TaskExecutionState, null>, translat
   if (value === 'morning') return translate('shared.taskExecutionStateMorning');
   if (value === 'afternoon') return translate('shared.taskExecutionStateAfternoon');
   return translate('shared.taskExecutionStateEvening');
+}
+
+function formatRecurrence(value: NonNullable<Task['recurrence']>, translate: ReturnType<typeof useWorkspaceI18n>['t']): string {
+  if (value === 'daily') return `↻ ${translate('shared.taskRecurrenceDaily')}`;
+  if (value === 'weekly') return `↻ ${translate('shared.taskRecurrenceWeekly')}`;
+  return `↻ ${translate('shared.taskRecurrenceMonthly')}`;
 }
 
 function formatDueAt(value: number): string {
@@ -947,6 +960,22 @@ function taskRowClass(task: Task): Record<string, boolean> {
   content: '·';
   margin-right: 6px;
   color: rgba(100, 116, 139, 0.72);
+}
+
+:deep(.task-list-panel__recurrence-chip) {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  min-height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  color: #e9d5ff;
+  background: rgba(139, 92, 246, 0.22);
+  box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.18);
 }
 
 :deep(.task-list-panel__meta) {

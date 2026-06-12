@@ -1659,11 +1659,11 @@ describe('useChatStore workspace history flow', () => {
         // 非 group：不排除任何 @token。
         expect(store.resolveActiveGroupMentionNames()).toEqual(new Set());
 
-        // 切到 group 预设（dom-group：ChatGPT + Gemini）。
+        // 切到 group：排除全部候选成员名（ChatGPT + Gemini + Claude），含未勾选项。
         store.currentProviderId = 'group';
-        store.currentModelId = 'dom-group';
+        store.currentModelId = 'dom';
         const excluded = store.resolveActiveGroupMentionNames();
-        expect(excluded).toEqual(new Set(['chatgpt', 'gemini']));
+        expect(excluded).toEqual(new Set(['chatgpt', 'gemini', 'claude']));
 
         // 成员定向 @ChatGPT 不会被当作不存在的文件去解析（不抛错、不注入文件）。
         await expect(
@@ -1673,6 +1673,83 @@ describe('useChatStore workspace history flow', () => {
         // 真实文件引用 @guide.md（非成员名）仍正常解析。
         const resolved = await store.resolveMentionedContextDocuments('请阅读 @guide.md', { excludedRefs: excluded });
         expect(resolved.map((file) => file.path)).toEqual(['/docs/guide.md']);
+    });
+
+    it('group: toggles members from the candidate pool, keeps >=1, and persists the selection', async () => {
+        const store = useChatStore();
+        // 候选池来自 config 与 availableProviders 的交集：直接注入三个 DOM provider。
+        store.availableProviders = [
+            { id: 'chatgpt-dom' },
+            { id: 'gemini-dom' },
+            { id: 'claude-dom' }
+        ] as unknown as typeof store.availableProviders;
+        store.currentProviderId = 'group';
+        store.currentModelId = 'dom';
+        store.currentConversation = {
+            id: 'group-conv',
+            title: 'Group chat',
+            origin: 'local',
+            messages: [],
+            updatedAt: 1
+        } as unknown as typeof store.currentConversation;
+
+        // 候选池含未勾选的 Claude。
+        expect(store.groupCandidateMembers.map((m) => m.providerId)).toEqual([
+            'chatgpt-dom',
+            'gemini-dom',
+            'claude-dom'
+        ]);
+
+        // 默认勾选 = dom 预设（ChatGPT + Gemini）。
+        store.ensureGroupMembersInitialized();
+        expect(store.currentGroupMembers.map((m) => m.name)).toEqual(['ChatGPT', 'Gemini']);
+
+        // 勾选 Claude：按候选顺序追加。
+        store.toggleGroupMember('claude-dom');
+        expect(store.currentGroupMembers.map((m) => m.name)).toEqual(['ChatGPT', 'Gemini', 'Claude']);
+        expect(store.currentConversation?.modelSelection?.groupMembers?.map((m) => m.name))
+            .toEqual(['ChatGPT', 'Gemini', 'Claude']);
+
+        // 取消 ChatGPT：保持候选顺序。
+        store.toggleGroupMember('chatgpt-dom');
+        expect(store.currentGroupMembers.map((m) => m.name)).toEqual(['Gemini', 'Claude']);
+
+        // 减到 1 个后再取消无效（至少保留 1 个）。
+        store.toggleGroupMember('claude-dom');
+        expect(store.currentGroupMembers.map((m) => m.name)).toEqual(['Gemini']);
+        store.toggleGroupMember('gemini-dom');
+        expect(store.currentGroupMembers.map((m) => m.name)).toEqual(['Gemini']);
+    });
+
+    it('group: restores persisted member selection on conversation load', async () => {
+        const store = useChatStore();
+        store.availableProviders = [
+            { id: 'chatgpt-dom' },
+            { id: 'gemini-dom' },
+            { id: 'claude-dom' }
+        ] as unknown as typeof store.availableProviders;
+        store.currentProviderId = 'group';
+        store.currentModelId = 'dom';
+        store.currentConversation = {
+            id: 'group-conv',
+            title: 'Group chat',
+            origin: 'local',
+            messages: [],
+            updatedAt: 1,
+            modelSelection: {
+                providerId: 'group',
+                modelId: 'dom',
+                modelOptions: {},
+                groupMembers: [
+                    { providerId: 'gemini-dom', modelId: 'dom', name: 'Gemini' },
+                    { providerId: 'claude-dom', modelId: 'dom', name: 'Claude' }
+                ]
+            }
+        } as unknown as typeof store.currentConversation;
+
+        store.ensureGroupMembersInitialized();
+        // 从持久化恢复（过滤为候选并按候选顺序归一）。
+        expect(store.currentGroupMembers.map((m) => m.name)).toEqual(['Gemini', 'Claude']);
     });
 
     it('applies and groups local conversations by agentKey without overwriting an existing binding', async () => {
