@@ -4,10 +4,7 @@
  * 由 desktop2 构建工具编译为独立 CJS bundle 并注入受控 Gemini 页面。
  */
 import { contextBridge } from 'electron';
-import { handleRequest } from './geminiHistoryCore';
+import { installGeminiHistoryBridge } from './bridges/installGeminiHistoryBridge';
 
-export * from './geminiHistoryCore';
-
-contextBridge.exposeInMainWorld('chatprismGeminiHistory', {
-    request: handleRequest
-});
+export * from '../providers/history/gemini/geminiHistoryBridgeCore';
+installGeminiHistoryBridge({ contextBridge });

@@ -184,6 +184,22 @@ function serializeNode(node: DomNodeLike, listDepth = 0): string {
             : `\`${normalizeMarkdownishText(node.textContent || '')}\``;
     }
 
+    if (tagName === 'STRONG' || tagName === 'B') {
+        const inner = serializeChildren(node, listDepth);
+        return inner.trim() ? `**${inner}**` : inner;
+    }
+
+    if (tagName === 'EM' || tagName === 'I') {
+        const inner = serializeChildren(node, listDepth);
+        return inner.trim() ? `*${inner}*` : inner;
+    }
+
+    if (tagName === 'A') {
+        const inner = serializeChildren(node, listDepth);
+        const href = node.getAttribute('href');
+        return href && inner.trim() ? `[${inner}](${href})` : inner;
+    }
+
     if (tagName === 'UL') {
         return serializeList(node, false, listDepth);
     }
@@ -266,7 +282,17 @@ export function cleanupGeminiAssistantText(value: string): string {
     return text;
 }
 
+/**
+ * 通用 HTML→Markdown 序列化：把一个渲染后的 DOM 子树还原为 markdown 文本。
+ * 与 `extractGeminiMessageText` 共用同一套 `serializeNode` 规则（标题/列表/代码块/
+ * 表格/引用 + 行内 strong/em/a/code），但不含 Gemini 专有的发言人前缀清理，
+ * 供 ChatGPT / Claude 等其它 DOM provider 复用，避免再退回到丢格式的 innerText。
+ */
+export function serializeDomToMarkdown(element: Element): string {
+    return normalizeMarkdownishText(serializeNode(element as unknown as DomNodeLike));
+}
+
 export function extractGeminiMessageText(element: Element, role: GeminiMessageRole): string {
-    const serialized = normalizeMarkdownishText(serializeNode(element as unknown as DomNodeLike));
+    const serialized = serializeDomToMarkdown(element);
     return role === 'user' ? cleanupGeminiUserText(serialized) : cleanupGeminiAssistantText(serialized);
 }

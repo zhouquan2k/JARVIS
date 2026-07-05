@@ -194,6 +194,26 @@ async function onGoForwardNodeHistory(): Promise<void> {
   await documentStore.goForwardNodeHistory();
 }
 
+// Document follow-on: when conversation changes and has associated documentIds,
+// auto-open the first document in the workspace.
+watch(
+  () => props.runtimeContext?.currentConversationDocumentIds,
+  async (documentIds) => {
+    if (!documentIds?.length) return;
+    const firstId = documentIds[0];
+    if (!firstId) return;
+    try {
+      const resolved = await props.contextProvider.resolveDocumentIds([firstId]);
+      const node = resolved.get(firstId);
+      if (node?.path && node.path !== documentStore.activePath) {
+        await documentStore.openNode(node.path);
+      }
+    } catch {
+      // silently ignore - document may not exist
+    }
+  }
+);
+
 </script>
 
 <style scoped>

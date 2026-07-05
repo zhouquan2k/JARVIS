@@ -188,11 +188,9 @@ import { type AgentInheritanceMode, type AgentToolBinding, type ContextDocument,
 import type { ProviderConfig } from '@packages/core/config';
 import { DEFAULT_SCOPED_AGENT_CONFIG } from '../runtime/agents/config/resolveScopedAgentConfig';
 import type { AgentToolDefinition } from '../runtime/agents/tools/types';
-import DocumentEditorPane from '@packages/ui/src/components/DocumentEditorPane.vue';
+import { DocumentEditorPane } from '@packages/ui';
 import ProviderModelSelector from './ProviderModelSelector.vue';
-import { useWorkspaceI18n } from '@packages/ui/src/i18n';
-import type { LinkableConversationEntry, MarkdownConversationLinkTarget } from '@packages/ui/src/types/conversationLink';
-import type { ResolvedInsertLinkType } from '@packages/ui/src/types/insertLink';
+import { useWorkspaceI18n, type LinkableConversationEntry, type MarkdownConversationLinkTarget, type ResolvedInsertLinkType } from '@packages/ui';
 
 export type AgentConfigEditPayload = {
   description?: string;

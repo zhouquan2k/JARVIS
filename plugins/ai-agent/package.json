@@ -3,7 +3,14 @@
   "version": "1.0.0",
   "main": "src/index.ts",
   "scripts": {
-    "test": "../../packages/ui/node_modules/.bin/vitest run --config ../../packages/ui/vitest.plugins.config.ts"
+    "test": "../../packages/ui/node_modules/.bin/vitest run --config ../../packages/ui/vitest.plugins.config.ts",
+    "build:debug:gemini": "../../apps/desktop2/node_modules/.bin/esbuild scripts/debugGeminiHistoryScraper.ts --bundle --platform=node --format=esm --target=node18 --outfile=dist/scripts/debug-gemini-history-scraper.mjs --external:electron --alias:@packages/core=../../packages/core --alias:@packages/ui=../../packages/ui",
+    "debug:gemini": "pnpm build:debug:gemini && ../../apps/desktop2/node_modules/.bin/electron dist/scripts/debug-gemini-history-scraper.mjs",
+    "debug:gemini:watch": "pnpm build:debug:gemini && ../../apps/desktop2/node_modules/.bin/electron dist/scripts/debug-gemini-history-scraper.mjs -- --watch",
+    "probe:dom": "../../apps/server/node_modules/.bin/tsx scripts/domChatProbe.ts",
+    "probe:reasoning": "../../apps/server/node_modules/.bin/tsx scripts/domReasoningProbe.ts",
+    "build:probe:dom:electron": "../../apps/desktop2/node_modules/.bin/esbuild scripts/domChatProbeElectron.ts --bundle --platform=node --format=esm --target=node18 --outfile=dist/scripts/dom-chat-probe-electron.mjs --external:electron --alias:@packages/core=../../packages/core --alias:@packages/ui=../../packages/ui",
+    "probe:dom:electron": "pnpm build:probe:dom:electron && ../../apps/desktop2/node_modules/.bin/electron dist/scripts/dom-chat-probe-electron.mjs --"
   },
   "dependencies": {
     "@packages/core": "workspace:*",

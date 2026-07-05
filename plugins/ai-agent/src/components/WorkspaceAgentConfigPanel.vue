@@ -1,16 +1,16 @@
 <template>
   <AgentView
-    v-if="selectedOwnerNode && documentStore.activeAgent && documentStore.activeAgentKey"
-    :agent-key="documentStore.activeAgentKey"
-    :agent="documentStore.activeAgent"
+    v-if="selectedOwnerNode && resolvedScopeConfig && documentStore.activeScopeKey"
+    :agent-key="documentStore.activeScopeKey"
+    :agent="resolvedScopeConfig"
     :owner-node="selectedOwnerNode"
-    :index-path="documentStore.agentIndexPath"
-    :index-document="documentStore.agentIndexDocument"
-    :index-draft-content="documentStore.agentIndexDraftContent"
-    :index-viewer-id="documentStore.agentIndexViewerId"
-    :index-pane-mode="documentStore.agentIndexPaneMode"
-    :index-is-saving="documentStore.agentIndexIsSaving"
-    :index-is-dirty="!!(documentStore.agentIndexPath && documentStore.dirtyPaths[documentStore.agentIndexPath])"
+    :index-path="documentStore.scopeIndexPath"
+    :index-document="documentStore.scopeIndexDocument"
+    :index-draft-content="documentStore.scopeIndexDraftContent"
+    :index-viewer-id="documentStore.scopeIndexViewerId"
+    :index-pane-mode="documentStore.scopeIndexPaneMode"
+    :index-is-saving="documentStore.scopeIndexIsSaving"
+    :index-is-dirty="!!(documentStore.scopeIndexPath && documentStore.dirtyPaths[documentStore.scopeIndexPath])"
     :providers="chatStore.availableProviders"
     :builtin-tools="builtinTools"
     :model-load-states="chatStore.providerModelStates"
@@ -19,8 +19,8 @@
     :linkable-reference-resources="agentIndexLinkableReferenceResources"
     @load-provider-models="chatStore.ensureProviderModelsLoaded"
     @save-agent-config="saveSelectedAgentConfig"
-    @update-index-content="documentStore.updateAgentIndexDocument"
-    @save-index-document="documentStore.flushAgentIndexDocument"
+    @update-index-content="documentStore.updateScopeIndexDocument"
+    @save-index-document="documentStore.flushScopeIndexDocument"
     @open-document-link="emit('open-document-link', $event)"
     @open-conversation-link="emit('open-conversation-link', $event)"
   />
@@ -30,13 +30,14 @@
 import { computed } from 'vue';
 import {
     DEFAULT_WORKSPACE_SCOPE_KEY as DEFAULT_WORKSPACE_AGENT_KEY,
+    type ResolvedAgentConfig,
     type AgentInheritanceMode,
     type ContextNode
 } from '@plugins/ai-agent/src/internal';
 import { useChatStore } from '../store/chat';
-import { useDocumentWorkspaceStore } from '@packages/ui/src/store/documentWorkspace';
-import type { MarkdownConversationLinkTarget } from '@packages/ui/src/types/conversationLink';
-import { buildLinkableConversationEntries } from '@packages/ui/src/utils/conversationLink';
+import { useDocumentWorkspaceStore, type MarkdownConversationLinkTarget } from '@packages/ui';
+import { buildLinkableConversationEntries } from '../utils/conversationLink';
+import { resolveScopedAgentConfigFromWorkspaceContext } from '../runtime/agents/config/resolveScopedAgentConfig';
 import AgentView from './AgentView.vue';
 import { createBuiltinWorkspaceToolDefinitions } from '../runtime/agents/tools/builtinWorkspaceTools';
 
@@ -50,12 +51,12 @@ const emit = defineEmits<{
 }>();
 
 const selectedOwnerNode = computed<ContextNode | null>(() => {
-    if (documentStore.selectedNodePath === '/' && documentStore.activeAgent) {
+    if (documentStore.selectedNodePath === '/' && documentStore.activeScopeData) {
         return {
             path: '/',
             name: 'Root',
             kind: 'directory',
-            scopeKey: documentStore.activeAgentKey ?? DEFAULT_WORKSPACE_AGENT_KEY,
+            scopeKey: documentStore.activeScopeKey ?? DEFAULT_WORKSPACE_AGENT_KEY,
             ownsMetadata: true
         };
     }
@@ -64,16 +65,23 @@ const selectedOwnerNode = computed<ContextNode | null>(() => {
     return activeNode?.kind === 'directory' && activeNode.ownsMetadata ? activeNode : null;
 });
 
+const resolvedScopeConfig = computed<ResolvedAgentConfig | null>(() => {
+    return resolveScopedAgentConfigFromWorkspaceContext(
+        documentStore.context,
+        documentStore.activeScopeKey
+    );
+});
+
 const agentIndexLinkableMarkdownDocuments = computed(() => {
-    return documentStore.getLinkableMarkdownDocuments(documentStore.agentIndexPath);
+    return documentStore.getLinkableMarkdownDocuments(documentStore.scopeIndexPath);
 });
 
 const agentIndexLinkableReferenceResources = computed(() => {
-    return documentStore.getLinkableReferenceResources(documentStore.agentIndexPath);
+    return documentStore.getLinkableReferenceResources(documentStore.scopeIndexPath);
 });
 
 const agentIndexLinkableConversations = computed(() => {
-    const agentKey = documentStore.activeAgentKey;
+    const agentKey = documentStore.activeScopeKey;
     return agentKey ? buildLinkableConversationEntries(chatStore.getConversationsByAgent(agentKey)) : [];
 });
 
@@ -90,9 +98,36 @@ async function saveSelectedAgentConfig(patch: {
         return;
     }
 
-    await documentStore.saveAgentConfig({
+    const nextPatch: Record<string, unknown> = {};
+    const clearedFields: string[] = [];
+
+    if (patch.description !== undefined) {
+        nextPatch.description = patch.description.trim();
+    }
+    if (patch.instructions !== undefined) {
+        nextPatch.instructions = patch.instructions.trim();
+    }
+    if (patch.modelProviderName !== undefined) {
+        nextPatch.modelProviderName = patch.modelProviderName.trim();
+    }
+    if (patch.modelName !== undefined) {
+        nextPatch.modelName = patch.modelName.trim();
+    }
+    if (patch.inheritance === 'override') {
+        nextPatch.inheritance = 'override';
+    } else if (patch.inheritance !== undefined) {
+        clearedFields.push('inheritance');
+    }
+    if (patch.inheritTools === true) {
+        clearedFields.push('tools');
+    } else if (patch.tools !== undefined) {
+        nextPatch.tools = patch.tools;
+    }
+
+    await documentStore.saveFolderMetadata({
         ownerPath: selectedOwnerNode.value.path,
-        patch
+        patch: nextPatch,
+        clearedFields
     });
 }
 </script>

@@ -3,6 +3,8 @@ import type { GroupMember } from '../group/groupTypes';
 import type { AgentModelTurn, AgentToolCall } from './IAgentCapableProvider';
 import type {
   ConversationRole,
+  GroupMemberPart,
+  GroupSummaryPart,
   MessageAnnotation,
   MessageAttachment,
   MessageFunctionalPart,
@@ -33,6 +35,8 @@ export interface ProviderStreamUpdate {
   annotations?: MessageAnnotation[];
   toolCalls?: AgentToolCall[];
   functionalParts?: MessageFunctionalPart[];
+  groupMembers?: GroupMemberPart[];
+  groupSummary?: GroupSummaryPart;
 }
 
 export interface ProviderSendResult {
@@ -44,6 +48,8 @@ export interface ProviderSendResult {
   modelTurn?: AgentModelTurn;
   requestSnapshot?: MessageRequestSnapshot;
   functionalParts?: MessageFunctionalPart[];
+  groupMembers?: GroupMemberPart[];
+  groupSummary?: GroupSummaryPart;
 }
 
 export interface ProviderDocumentCapability {

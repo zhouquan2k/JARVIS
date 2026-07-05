@@ -1,4 +1,4 @@
-import { APP_CONFIG, type ModelConfig, type ProviderConfig, type ProviderModelCatalog } from '@packages/core/config';
+import { APP_CONFIG, type GroupSummarizerConfig, type ModelConfig, type ProviderConfig, type ProviderModelCatalog } from '@packages/core/config';
 import { IModelProvider } from '../interfaces/IModelProvider';
 import { ChatGPTCodexProvider } from '../providers/model/ChatGPTCodexProvider';
 import { ChatGPTWebProvider } from '../providers/model/ChatGPTWebProvider';
@@ -40,6 +40,21 @@ function createProviderInstance(
         throw new Error(`No provider factory registered for '${providerId}'`);
     }
     return factory(options);
+}
+
+function resolveInternalProviderConfig(providerId: string, availableProviders: ProviderConfig[]): ProviderConfig | null {
+    if (providerId === 'gemini-dom-summary') {
+        const baseProvider = availableProviders.find((item) => item.id === 'gemini-dom');
+        if (!baseProvider) {
+            return null;
+        }
+        return {
+            ...baseProvider,
+            id: 'gemini-dom-summary',
+            name: 'Gemini (DOM Summary)'
+        };
+    }
+    return availableProviders.find((item) => item.id === providerId) ?? null;
 }
 
 function getStaticProviderCatalog(providerId: string, availableProviders: ProviderConfig[]): ProviderModelCatalog {
@@ -175,7 +190,7 @@ export function createModelProviderRuntime(options: ModelProviderRuntimeOptions)
             }
 
             const request = (async () => {
-                const providerConfig = availableProviders.find((item) => item.id === providerId);
+                const providerConfig = resolveInternalProviderConfig(providerId, availableProviders);
                 if (!providerConfig) {
                     throw new Error(`Provider '${providerId}' is not available in runtimeMode '${options.runtimeMode}'`);
                 }
@@ -229,24 +244,51 @@ export function createModelProviderRuntime(options: ModelProviderRuntimeOptions)
         },
 
         getProvider(providerId: string, getProviderOptions?: { fresh?: boolean }) {
-            const providerConfig = availableProviders.find((item) => item.id === providerId);
+            const providerConfig = resolveInternalProviderConfig(providerId, availableProviders);
             if (!providerConfig) {
                 throw new Error(`Provider '${providerId}' is not available in runtimeMode '${options.runtimeMode}'`);
             }
 
             if (providerId === 'group') {
                 const runtime = this;
+
+                const getSummarizerConfig = (presetModelId?: string): GroupSummarizerConfig | null => {
+                    const key = presetModelId ?? providerConfig.defaultModel;
+                    return APP_CONFIG.groupSummarizers[key] ?? null;
+                };
+
+                const resolveSummarizer = (presetModelId?: string): IModelProvider | null => {
+                    const summarizerConfig = getSummarizerConfig(presetModelId);
+                    if (!summarizerConfig) {
+                        return null;
+                    }
+                    try {
+                        const provider = runtime.getProvider(summarizerConfig.providerId);
+                        // 普通 DOM provider 不适合作为总结器；当前仅允许专用的 gemini-dom-summary。
+                        if (summarizerConfig.providerId.endsWith('-dom') && summarizerConfig.providerId !== 'gemini-dom-summary') {
+                            console.warn('[MultiModelGroupProvider] Summarizer provider is a DOM provider; skipping summarization.');
+                            return null;
+                        }
+                        return provider;
+                    } catch {
+                        return null;
+                    }
+                };
+
                 return new MultiModelGroupProvider({
                     resolveMemberProvider: (id) => runtime.getProvider(id, { fresh: true }),
                     getGroupConfig: (presetModelId) => ({
                         members: resolveGroupMembers(presetModelId ?? providerConfig.defaultModel)
-                    })
+                    }),
+                    resolveSummarizer,
+                    getSummarizerConfig
                 });
             }
 
             const domProviderTargetUrls: Record<string, string> = {
                 'chatgpt-dom': options.domProviderUrls?.['chatgpt-dom'] ?? 'https://chatgpt.com',
                 'gemini-dom': options.domProviderUrls?.['gemini-dom'] ?? 'https://gemini.google.com/app',
+                'gemini-dom-summary': options.domProviderUrls?.['gemini-dom-summary'] ?? options.domProviderUrls?.['gemini-dom'] ?? 'https://gemini.google.com/app',
                 'claude-dom': options.domProviderUrls?.['claude-dom'] ?? 'https://claude.ai/new'
             };
             if (providerId in domProviderTargetUrls && options.controlledPageCapability) {

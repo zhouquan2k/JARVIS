@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cleanupGeminiAssistantText, cleanupGeminiUserText, extractGeminiMessageText } from './geminiMessageSerializer';
+import { cleanupGeminiAssistantText, cleanupGeminiUserText, extractGeminiMessageText, serializeDomToMarkdown } from './geminiMessageSerializer';
 
 const TEXT_NODE = 3;
 const ELEMENT_NODE = 1;
@@ -147,5 +147,32 @@ describe('extractGeminiMessageText', () => {
             '1. 先检查元数据层',
             '2. 再检查物理存储层'
         ].join('\n'));
+    });
+});
+
+describe('serializeDomToMarkdown — inline formatting', () => {
+    it('restores strong / em / link markdown syntax', () => {
+        const element = new MockElement('DIV', [
+            new MockElement('P', [
+                new MockTextNode('请优先 '),
+                new MockElement('STRONG', [new MockTextNode('立即')]),
+                new MockTextNode(' 处理，参考 '),
+                new MockElement('A', [new MockTextNode('文档')], { href: 'https://example.com' }),
+                new MockTextNode(' 与 '),
+                new MockElement('EM', [new MockTextNode('附录')]),
+                new MockTextNode('。')
+            ])
+        ]);
+
+        expect(serializeDomToMarkdown(element as unknown as Element)).toBe(
+            '请优先 **立即** 处理，参考 [文档](https://example.com) 与 *附录*。'
+        );
+    });
+
+    it('keeps anchor text when href is missing', () => {
+        const element = new MockElement('P', [
+            new MockElement('A', [new MockTextNode('裸链接文本')])
+        ]);
+        expect(serializeDomToMarkdown(element as unknown as Element)).toBe('裸链接文本');
     });
 });

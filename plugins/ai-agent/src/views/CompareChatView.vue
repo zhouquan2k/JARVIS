@@ -91,10 +91,9 @@
 import { computed, ref } from 'vue';
 import AnalysisGrid from '../components/AnalysisGrid.vue';
 import CompareModelSelectors from '../components/CompareModelSelectors.vue';
-import MarkdownContent from '@packages/ui/src/components/MarkdownContent.vue';
+import { MarkdownContent } from '@packages/ui';
 import { useCompareStore } from '../store/compare';
-import { isPromptSubmitHotkey } from '@packages/ui/src/utils/promptHotkeys';
-import { useWorkspaceI18n } from '@packages/ui/src/i18n';
+import { isPromptSubmitHotkey, useWorkspaceI18n } from '@packages/ui';
 
 const compareStore = useCompareStore();
 const inputPrompt = ref('');

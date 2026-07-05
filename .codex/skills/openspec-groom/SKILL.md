@@ -58,6 +58,7 @@ Follow these phases in sequence. **User must explicitly confirm (e.g., "确认")
 #### Phase 3: Implementation Approach
 **Now consider implementation and feasibility.**
 - Assess technical feasibility of the refined requirement
+- Refer to the ARCHITECTURE document and ensure the discussion does not violate its design constraints or introduce any illegal dependencies defined there
 - Discuss recommended architecture and design
 - Include modules, classes, interfaces, responsibilities
 - Identify important relationships and impacts

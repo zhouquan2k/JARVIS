@@ -34,7 +34,7 @@
 </template>
 
 <script setup lang="ts">
-import { useWorkspaceI18n } from '@packages/ui/src/i18n';
+import { useWorkspaceI18n } from '@packages/ui';
 
 defineProps<{
   modelValue: string;

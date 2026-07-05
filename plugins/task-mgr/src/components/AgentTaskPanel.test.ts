@@ -9,7 +9,7 @@ describe('AgentTaskPanel', () => {
     it('passes document scope through to TaskListPanel', () => {
         const wrapper = mount(AgentTaskPanel, {
             props: {
-                activeAgentKey: '/docs/',
+                activeScopeKey: '/docs/',
                 activeDocument: { path: '/docs/guide.md' },
                 contextProvider: { id: 'ctx' } as IContextProvider
             },
@@ -33,7 +33,7 @@ describe('AgentTaskPanel', () => {
     it('passes agent scope through when no active document exists', () => {
         const wrapper = mount(AgentTaskPanel, {
             props: {
-                activeAgentKey: '/docs/',
+                activeScopeKey: '/docs/',
                 contextProvider: { id: 'ctx' } as IContextProvider
             },
             global: {

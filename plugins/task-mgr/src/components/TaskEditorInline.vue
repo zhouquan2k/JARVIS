@@ -141,7 +141,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import type { Task, TaskExecutionState, TaskPriority, TaskRecurrence } from '../../api';
-import { useWorkspaceI18n } from '@packages/ui/src/i18n';
+import { useWorkspaceI18n } from '@packages/ui';
 
 const props = defineProps<{
   task: Task;

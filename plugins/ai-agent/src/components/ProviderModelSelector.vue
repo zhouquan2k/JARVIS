@@ -39,7 +39,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import type { ProviderConfig } from '@packages/core/config';
-import { useWorkspaceI18n } from '@packages/ui/src/i18n';
+import { useWorkspaceI18n } from '@packages/ui';
 
 const props = withDefaults(defineProps<{
   providers: ProviderConfig[];

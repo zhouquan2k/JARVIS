@@ -8,6 +8,7 @@
   "dependencies": {
     "@packages/core": "workspace:*",
     "@packages/ui": "workspace:*",
+    "localforage": "^1.10.0",
     "vue": "^3.5.29"
   }
 }

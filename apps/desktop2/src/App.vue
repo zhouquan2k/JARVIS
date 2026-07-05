@@ -14,9 +14,7 @@ import { currentRoute, navigateTo } from './router';
 import { createDesktop2ContextProvider } from './context/createDesktop2ContextProvider';
 import { createDesktop2RuntimeOptions } from './runtime/createDesktop2RuntimeOptions';
 
-const contextProvider = createDesktop2ContextProvider({
-  env: import.meta.env as Record<string, string | undefined>
-});
+const contextProvider = createDesktop2ContextProvider();
 const runtimeOptions = createDesktop2RuntimeOptions();
 </script>
 

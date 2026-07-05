@@ -157,7 +157,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useChatStore } from '../store/chat';
-import { useWorkspaceI18n } from '@packages/ui/src/i18n';
+import { useWorkspaceI18n } from '@packages/ui';
 
 const chatStore = useChatStore();
 const pendingDeleteId = ref<string | null>(null);

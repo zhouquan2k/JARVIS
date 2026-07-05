@@ -1,3 +1,4 @@
 {
-  "migrateNeeded": false
+  "migrateNeeded": false,
+  "taskSyncMigrationNeeded": false
 }

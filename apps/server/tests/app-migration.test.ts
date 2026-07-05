@@ -99,4 +99,131 @@ describe('app migration startup', () => {
         await new Promise((resolve) => setTimeout(resolve, 30));
         expect(provider.initializeAccess).not.toHaveBeenCalled();
     });
+
+    it('imports tasks.json into sync_tasks exactly once on startup', async () => {
+        const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-server-migration-'));
+        tempRoots.push(rootPath);
+        await mkdir(path.join(rootPath, '.chatprism'), { recursive: true });
+        await writeFile(path.join(rootPath, '.chatprism', 'tasks.json'), JSON.stringify({
+            tasks: [
+                {
+                    id: 'task-1',
+                    title: 'Review hub sync',
+                    notes: '',
+                    completed: false,
+                    dueAt: null,
+                    priority: 'medium',
+                    executionState: null,
+                    documentPath: '/docs/guide.md',
+                    documentId: 'doc-1',
+                    agentKey: '/',
+                    createdAt: 100,
+                    updatedAt: 100,
+                    completedAt: null,
+                    calendarProviderId: null,
+                    calendarEventId: null,
+                    calendarSyncStatus: null,
+                    calendarLastSyncedAt: null,
+                    calendarLastSyncError: null,
+                    recurrence: null
+                }
+            ]
+        }, null, 2) + '\n', 'utf8');
+
+        const app = createApp({
+            config: createConfig({
+                isDevelopment: true,
+                knowledgeRoot: rootPath,
+                syncKey: 'dev-local'
+            }),
+            contextProvider: {
+                initializeAccess: vi.fn(async () => undefined),
+                getDocumentId: vi.fn(async () => 'doc-1')
+            } as unknown as ContextProvider,
+            taskService
+        });
+
+        await waitForCondition(async () => {
+            const pullResponse = await app.request('/api/sync/tasks/pull', {
+                method: 'POST',
+                headers: {
+                    'content-type': 'application/json',
+                    'x-sync-key': 'dev-local'
+                },
+                body: JSON.stringify({ cursor: null })
+            });
+            expect(pullResponse.status).toBe(200);
+            await expect(pullResponse.json()).resolves.toMatchObject({
+                tasks: [expect.objectContaining({ id: 'task-1', title: 'Review hub sync' })]
+            });
+
+            const meta = JSON.parse(await readFile(path.join(rootPath, '.jarvis-meta.json'), 'utf8')) as Record<string, unknown>;
+            expect(meta.taskSyncMigrationNeeded).toBe(false);
+        });
+    });
+
+    it('defers task migration until the first task sync request when startup syncKey is not configured', async () => {
+        const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-server-migration-'));
+        tempRoots.push(rootPath);
+        await mkdir(path.join(rootPath, '.chatprism'), { recursive: true });
+        await writeFile(path.join(rootPath, '.jarvis-meta.json'), JSON.stringify({ taskSyncMigrationNeeded: true }, null, 2) + '\n', 'utf8');
+        await writeFile(path.join(rootPath, '.chatprism', 'tasks.json'), JSON.stringify({
+            tasks: [
+                {
+                    id: 'task-lazy-1',
+                    title: 'Lazy import task',
+                    notes: '',
+                    completed: false,
+                    dueAt: null,
+                    priority: 'medium',
+                    executionState: null,
+                    documentPath: '/docs/lazy.md',
+                    documentId: 'doc-lazy-1',
+                    agentKey: '/',
+                    createdAt: 100,
+                    updatedAt: 100,
+                    completedAt: null,
+                    calendarProviderId: null,
+                    calendarEventId: null,
+                    calendarSyncStatus: null,
+                    calendarLastSyncedAt: null,
+                    calendarLastSyncError: null,
+                    recurrence: null
+                }
+            ]
+        }, null, 2) + '\n', 'utf8');
+
+        const app = createApp({
+            config: createConfig({
+                isDevelopment: true,
+                knowledgeRoot: rootPath
+            }),
+            contextProvider: {
+                initializeAccess: vi.fn(async () => undefined),
+                getDocumentId: vi.fn(async () => 'doc-1')
+            } as unknown as ContextProvider,
+            taskService
+        });
+
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        const metaBefore = JSON.parse(await readFile(path.join(rootPath, '.jarvis-meta.json'), 'utf8')) as Record<string, unknown>;
+        expect(metaBefore.taskSyncMigrationNeeded).toBe(true);
+
+        const pullResponse = await app.request('/api/sync/tasks/pull', {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                'x-sync-key': 'workspace-lazy'
+            },
+            body: JSON.stringify({ cursor: null })
+        });
+
+        expect(pullResponse.status).toBe(200);
+        await expect(pullResponse.json()).resolves.toMatchObject({
+            tasks: [expect.objectContaining({ id: 'task-lazy-1', title: 'Lazy import task' })]
+        });
+
+        const metaAfter = JSON.parse(await readFile(path.join(rootPath, '.jarvis-meta.json'), 'utf8')) as Record<string, unknown>;
+        expect(metaAfter.taskSyncMigrationNeeded).toBe(false);
+    });
 });

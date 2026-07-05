@@ -96,7 +96,22 @@
                   :attachments="resolveMessageAttachments(msg)"
                 />
                 <template v-if="msg.role === 'assistant'">
-                  <template v-if="buildGroupMemberBlocks(msg).length > 0">
+                  <!-- New structured group message: ≥2 members → tabbed view -->
+                  <template v-if="msg.groupMembers && msg.groupMembers.length > 1">
+                    <GroupMessageTabs
+                      :group-members="msg.groupMembers"
+                      :group-summary="msg.groupSummary"
+                    />
+                  </template>
+                  <!-- Single-member group message → plain bubble -->
+                  <template v-else-if="msg.groupMembers && msg.groupMembers.length === 1">
+                    <MarkdownContent
+                      class="content markdown-body"
+                      :source="msg.groupMembers[0].content"
+                    />
+                  </template>
+                  <!-- Legacy group message (old ### heading format) -->
+                  <template v-else-if="buildGroupMemberBlocks(msg).length > 0">
                     <div
                       v-for="seg in buildGroupMemberBlocks(msg)"
                       :key="seg.key"
@@ -107,15 +122,9 @@
                         class="content markdown-body"
                         :source="seg.content"
                       />
-                      <a
-                        v-if="seg.isDom"
-                        class="dom-conversation-link"
-                        href="#"
-                        :data-testid="`dom-conversation-link-${seg.providerId}`"
-                        @click.prevent="chatStore.revealControlledPage(seg.providerId)"
-                      >{{ t('shared.viewDomConversation') }}</a>
                     </div>
                   </template>
+                  <!-- Normal message -->
                   <template v-else>
                     <template
                       v-for="block in buildAssistantRenderBlocks(msg)"
@@ -196,6 +205,13 @@
             data-testid="dom-pages-bar"
           >
             <span class="dom-pages-label">{{ t('shared.openDomPageHint') }}</span>
+            <button
+              v-if="summaryDomPageButton"
+              type="button"
+              class="dom-page-btn"
+              :data-testid="`dom-page-btn-${summaryDomPageButton.id}`"
+              @click="chatStore.revealControlledPage(summaryDomPageButton.id)"
+            >{{ summaryDomPageButton.label }}</button>
             <button
               v-if="currentSingleDomProvider !== null"
               type="button"
@@ -313,11 +329,11 @@
                 type="button"
                 class="secondary-action-btn"
                 data-testid="workspace-restore"
-                :title="t('shared.restoreWorkspace')"
-                :aria-label="t('shared.restoreWorkspace')"
+                :title="t('shared.collapseToPanel')"
+                :aria-label="t('shared.collapseToPanel')"
                 @click="requestWorkspaceSwitch('/')"
               >
-                <PanelLeftOpen class="action-icon" :size="16" aria-hidden="true" />
+                <PanelRightClose class="action-icon" :size="16" aria-hidden="true" />
               </button>
               <button
                 v-if="isAgentMode"
@@ -397,11 +413,12 @@
 <script setup lang="ts">
 import type { ConversationMessage, MessageAnnotation, MessageFunctionalPart } from '@plugins/ai-agent/src/internal';
 import { computed, nextTick, onMounted, ref, watch, type PropType } from 'vue';
-import { ArrowUp, PanelLeftOpen, PanelTopOpen, SquarePen } from 'lucide-vue-next';
+import { ArrowUp, PanelRightClose, PanelTopOpen, SquarePen } from 'lucide-vue-next';
 import AttachmentComposer from '../components/AttachmentComposer.vue';
-import MarkdownContent from '@packages/ui/src/components/MarkdownContent.vue';
+import GroupMessageTabs from '../components/GroupMessageTabs.vue';
+import { MarkdownContent } from '@packages/ui';
 import MessageAttachmentStrip from '../components/MessageAttachmentStrip.vue';
-import MessageFunctionalParts from '@packages/ui/src/components/MessageFunctionalParts.vue';
+import { MessageFunctionalParts } from '@packages/ui';
 import ModelOptionToggleGroup from '../components/ModelOptionToggleGroup.vue';
 import ProviderModelSelector from '../components/ProviderModelSelector.vue';
 import QuestionIndexPanel from '../components/QuestionIndexPanel.vue';
@@ -410,9 +427,8 @@ import { useChatStore } from '../store/chat';
 import { resolveGroupMembers } from '../providers/model/MultiModelGroupProvider';
 import type { GroupMember } from '../group/groupTypes';
 import { useAiAgentHostBridge } from '../runtime/plugin/hostBridge';
-import type { ChatRoutePath } from '@packages/ui/src/routes';
-import { isPromptSubmitHotkey } from '@packages/ui/src/utils/promptHotkeys';
-import { useWorkspaceI18n, translateWorkspaceMessage } from '@packages/ui/src/i18n';
+import type { ChatRoutePath } from '@packages/ui';
+import { isPromptSubmitHotkey, useWorkspaceI18n, translateWorkspaceMessage } from '@packages/ui';
 
 const props = defineProps({
   showQuestionIndex: {
@@ -614,26 +630,26 @@ const displayConversation = computed(() => chatStore.displayConversation);
 const isPreviewing = computed(() => chatStore.isPreviewing);
 
 // 当前会话若为 group provider，解析其参与成员（用于把合并回复按成员分段渲染、底部受控页按钮）。
-// 优先用会话已持久化的 groupMembers；预览态读被预览会话，实时态读 store 勾选状态。
+// 实时态（非预览）始终读 store 勾选状态，与 sendMessage 使用同一数据源，确保底部按钮与发送成员一致；
+// 预览态读被预览会话的持久化 groupMembers（历史存档）。
 const currentGroupMembers = computed<GroupMember[]>(() => {
+  if (!isPreviewing.value) {
+    const providerId = chatStore.currentProviderId;
+    if (providerId !== 'group') return [];
+    const members = chatStore.currentGroupMembers;
+    if (Array.isArray(members) && members.length > 0) return members;
+    return chatStore.currentModelId ? resolveGroupMembers(chatStore.currentModelId) : [];
+  }
   const selection = displayConversation.value?.modelSelection;
-  let providerId = selection?.providerId;
-  let modelId = selection?.modelId;
-  let members = selection?.groupMembers;
-  if (providerId !== 'group' && !isPreviewing.value) {
-    providerId = chatStore.currentProviderId;
-    modelId = chatStore.currentModelId;
-    members = chatStore.currentGroupMembers;
-  }
-  if (providerId !== 'group') {
-    return [];
-  }
-  if (Array.isArray(members) && members.length > 0) {
-    return members;
-  }
+  const providerId = selection?.providerId;
+  const modelId = selection?.modelId;
+  const members = selection?.groupMembers;
+  if (providerId !== 'group') return [];
+  if (Array.isArray(members) && members.length > 0) return members;
   return modelId ? resolveGroupMembers(modelId) : [];
 });
 const domGroupMembers = computed(() => currentGroupMembers.value.filter(isDomMember));
+const SUMMARY_DOM_PROVIDER_ID = 'gemini-dom-summary';
 
 // 顶部勾选区：群聊候选成员池（仅实时编辑当前会话时展示，不用于预览）。
 const isLiveGroupConversation = computed(() => !isPreviewing.value && chatStore.currentProviderId === 'group');
@@ -650,6 +666,15 @@ const currentSingleDomProvider = computed(() => {
     return null;
   }
   return chatStore.availableProviders.find((p) => p.id === providerId) ?? null;
+});
+const summaryDomPageButton = computed(() => {
+  if (domGroupMembers.value.length === 0) {
+    return null;
+  }
+  return {
+    id: SUMMARY_DOM_PROVIDER_ID,
+    label: t('shared.openSummaryDomPage')
+  };
 });
 
 /**

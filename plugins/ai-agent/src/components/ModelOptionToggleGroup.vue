@@ -41,7 +41,7 @@
 
 <script setup lang="ts">
 import type { ModelOptionDefinition } from '@packages/core/config';
-import { useWorkspaceI18n } from '@packages/ui/src/i18n';
+import { useWorkspaceI18n } from '@packages/ui';
 
 defineProps<{
   options: ModelOptionDefinition[];

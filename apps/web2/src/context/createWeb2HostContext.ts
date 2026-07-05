@@ -1,6 +1,14 @@
 import type { HostCapabilityKey, IHostContext } from '@packages/core';
 import { resolveContextBaseUrl, type ResolveContextBaseUrlOptions } from '@packages/core/config';
 
+function resolveBrowserFetch(): typeof fetch | undefined {
+    if (typeof globalThis.fetch !== 'function') {
+        return undefined;
+    }
+
+    return globalThis.fetch.bind(globalThis);
+}
+
 function getCapabilityMap(): Map<HostCapabilityKey, unknown> {
     const capabilities = new Map<HostCapabilityKey, unknown>();
 
@@ -8,8 +16,9 @@ function getCapabilityMap(): Map<HostCapabilityKey, unknown> {
         capabilities.set('storage', localStorage);
     }
 
-    if (typeof fetch === 'function') {
-        capabilities.set('http-client', fetch);
+    const browserFetch = resolveBrowserFetch();
+    if (browserFetch) {
+        capabilities.set('http-client', browserFetch);
     }
 
     return capabilities;

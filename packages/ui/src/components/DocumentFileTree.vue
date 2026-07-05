@@ -19,15 +19,15 @@
         <button
           type="button"
           class="tree-icon-button"
-          data-testid="document-convert-directory-to-agent"
-          :title="t('shared.convertDirectoryToAgent')"
-          :aria-label="t('shared.convertDirectoryToAgent')"
-          :disabled="!canConvertSelectedDirectoryToAgent"
-          @mouseenter="showTooltip($event, t('shared.convertDirectoryToAgent'))"
+          data-testid="document-enable-directory-metadata"
+          :title="t('shared.enableDirectoryMetadata')"
+          :aria-label="t('shared.enableDirectoryMetadata')"
+          :disabled="!canEnableSelectedDirectoryMetadata"
+          @mouseenter="showTooltip($event, t('shared.enableDirectoryMetadata'))"
           @mouseleave="hideTooltip"
-          @focus="showTooltip($event, t('shared.convertDirectoryToAgent'))"
+          @focus="showTooltip($event, t('shared.enableDirectoryMetadata'))"
           @blur="hideTooltip"
-          @click="convertSelectedDirectoryToAgent"
+          @click="enableSelectedDirectoryMetadata"
         >
           <Bot class="tree-icon" :size="18" aria-hidden="true" />
         </button>
@@ -114,6 +114,65 @@
     </div>
 
     <div v-else class="tree-list">
+      <section
+        v-if="recentNodes.length > 0"
+        class="tree-recent-section"
+        data-testid="document-recent-section"
+      >
+        <button
+          type="button"
+          class="tree-row tree-row--section-toggle"
+          :class="{ directory: true }"
+          data-testid="document-recent-toggle"
+          @click="toggleRecentSection"
+        >
+          <span class="tree-toggle" aria-hidden="true">
+            {{ recentSectionExpanded ? '▾' : '▸' }}
+          </span>
+          <span class="tree-label">{{ t('shared.recentNodes') }}</span>
+        </button>
+        <button
+          v-for="node in recentSectionExpanded ? recentNodes : []"
+          :key="`recent:${node.path}`"
+          type="button"
+          class="tree-row tree-row--recent"
+          :class="{
+            active: node.path === activePath,
+            directory: node.kind === 'directory'
+          }"
+          data-testid="document-recent-node"
+          :data-path="node.path"
+          :title="node.path"
+          @click="onRecentNodeClick(node)"
+        >
+          <span class="tree-toggle" aria-hidden="true" />
+          <span class="tree-label-group">
+            <span
+              v-if="resolveNodePresentation(node)?.icon === 'bot'"
+              :data-testid="node.ownsMetadata ? 'document-node-metadata-owner' : undefined"
+              class="tree-scope-icon-wrap"
+            >
+              <Bot
+                class="tree-scope-icon"
+                :size="14"
+                aria-hidden="true"
+                data-testid="document-node-presentation-icon"
+                data-icon-id="bot"
+              />
+            </span>
+            <component
+              :is="resolveNodeIcon(node)"
+              v-if="resolveNodeIcon(node)"
+              class="tree-file-icon"
+              :size="14"
+              aria-hidden="true"
+              data-testid="document-node-file-icon"
+              :data-icon-kind="getContextNodeIconKind(node) ?? undefined"
+            />
+            <span class="tree-label">{{ getNodeLabel(node) }}</span>
+          </span>
+        </button>
+      </section>
       <button
         v-for="item in visibleNodes"
         :key="item.node.path"
@@ -157,11 +216,11 @@
         <span v-else class="tree-label-group">
           <span
             v-if="resolveNodePresentation(item.node)?.icon === 'bot'"
-            :data-testid="item.node.ownsMetadata ? 'document-node-agent-owner' : undefined"
-            class="tree-agent-icon-wrap"
+            :data-testid="item.node.ownsMetadata ? 'document-node-metadata-owner' : undefined"
+            class="tree-scope-icon-wrap"
           >
             <Bot
-              class="tree-agent-icon"
+              class="tree-scope-icon"
               :size="14"
               aria-hidden="true"
               data-testid="document-node-presentation-icon"
@@ -216,18 +275,21 @@ import { useWorkspaceI18n } from '../i18n';
 import { contributionQueryKey } from '../plugins/injectionKeys';
 import { getContextNodeDisplayName, getContextNodeIconKind, isMarkdownDisplayName } from '../utils/contextNodePresentation';
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   nodes: ContextNode[];
+  recentNodes?: ContextNode[];
   expandedPaths: string[];
   activePath: string | null;
   currentError: string | null;
-}>();
+}>(), {
+  recentNodes: () => []
+});
 
 const emit = defineEmits<{
   (event: 'open', path: string): void;
   (event: 'toggle-expand', path: string): void;
   (event: 'create', input: { parentPath?: string; name: string; kind: 'file' | 'directory' }): void;
-  (event: 'convert-to-agent', path: string): void;
+  (event: 'enable-directory-metadata', path: string): void;
   (event: 'delete', path: string): void;
   (event: 'rename', input: { path: string; name: string }): void;
   (event: 'move', input: { path: string; targetParentPath?: string }): void;
@@ -235,7 +297,10 @@ const emit = defineEmits<{
   (event: 'import'): void;
 }>();
 
+const RECENT_SECTION_EXPANDED_STORAGE_KEY = 'jarvis:knowledge-workspace:recent-section-expanded';
+
 const pendingInputRef = ref<HTMLInputElement | HTMLInputElement[] | null>(null);
+const recentSectionExpanded = ref(readRecentSectionExpanded());
 const inlineEdit = reactive<{
   active: boolean;
   mode: 'create' | 'rename';
@@ -273,7 +338,7 @@ const activeNode = computed(() => {
 });
 
 const canDeleteSelectedNode = computed(() => !!activeNode.value);
-const canConvertSelectedDirectoryToAgent = computed(() => {
+const canEnableSelectedDirectoryMetadata = computed(() => {
   return activeNode.value?.kind === 'directory' && activeNode.value.ownsMetadata !== true;
 });
 
@@ -418,6 +483,42 @@ function onNodeClick(node: ContextNode) {
   emit('open', node.path);
 }
 
+function onRecentNodeClick(node: ContextNode) {
+  emit('open', node.path);
+}
+
+function readRecentSectionExpanded(): boolean {
+  if (typeof globalThis === 'undefined' || !('localStorage' in globalThis)) {
+    return false;
+  }
+
+  try {
+    return globalThis.localStorage.getItem(RECENT_SECTION_EXPANDED_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function persistRecentSectionExpanded() {
+  if (typeof globalThis === 'undefined' || !('localStorage' in globalThis)) {
+    return;
+  }
+
+  try {
+    globalThis.localStorage.setItem(
+      RECENT_SECTION_EXPANDED_STORAGE_KEY,
+      recentSectionExpanded.value ? 'true' : 'false'
+    );
+  } catch {
+    // Ignore storage availability failures and keep the tree interactive.
+  }
+}
+
+function toggleRecentSection() {
+  recentSectionExpanded.value = !recentSectionExpanded.value;
+  persistRecentSectionExpanded();
+}
+
 function onToggleClick(node: ContextNode) {
   if (node.kind === 'directory') {
     emit('toggle-expand', node.path);
@@ -548,12 +649,12 @@ function beginDeleteConfirmation() {
     : t('shared.confirmDeleteFile', { name: activeNode.value.name });
 }
 
-function convertSelectedDirectoryToAgent() {
-  if (!canConvertSelectedDirectoryToAgent.value || !activeNode.value) {
+function enableSelectedDirectoryMetadata() {
+  if (!canEnableSelectedDirectoryMetadata.value || !activeNode.value) {
     return;
   }
 
-  emit('convert-to-agent', activeNode.value.path);
+  emit('enable-directory-metadata', activeNode.value.path);
 }
 
 function confirmDelete() {
@@ -772,6 +873,13 @@ function resolveNodeIcon(node: ContextNode) {
   padding: 8px 0 12px;
 }
 
+.tree-recent-section {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  margin: 0;
+}
+
 .tree-confirm {
   margin: 10px 12px 0;
   padding: 10px 12px;
@@ -830,6 +938,15 @@ function resolveNodeIcon(node: ContextNode) {
   color: #e2e8f0;
 }
 
+.tree-row--recent {
+  min-height: 34px;
+  padding-left: 30px;
+}
+
+.tree-row--section-toggle {
+  padding-left: 12px;
+}
+
 .tree-toggle {
   width: 16px;
   color: #94a3b8;
@@ -868,7 +985,7 @@ function resolveNodeIcon(node: ContextNode) {
   box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.35);
 }
 
-.tree-agent-icon {
+.tree-scope-icon {
   color: #38bdf8;
   flex: 0 0 auto;
 }

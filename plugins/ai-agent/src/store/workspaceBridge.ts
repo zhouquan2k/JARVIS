@@ -1,37 +1,85 @@
-import type { ResolvedAgentConfig, WorkspaceRuntimeContext } from '@plugins/ai-agent/src/internal';
+import type { Conversation, ResolvedAgentConfig, WorkspaceRuntimeContext } from '@plugins/ai-agent/src/internal';
+import { useDocumentWorkspaceStore } from '@packages/ui';
+import { resolveScopedAgentConfigFromWorkspaceContext } from '../runtime/agents/config/resolveScopedAgentConfig';
 import { useChatStore } from './chat';
 
-function scopeMetadataToAgent(metadata: { data: Record<string, unknown> } | null | undefined): ResolvedAgentConfig | null {
-    if (!metadata) {
+function scopeMetadataToAgent(input: {
+    scopeKey?: string | null;
+    metadata?: { scopeKey?: string; data: Record<string, unknown> } | null;
+    context?: { folderMetadata: Record<string, { scopeKey: string; data: Record<string, unknown> }> } | null;
+}): ResolvedAgentConfig | null {
+    const metadata = input.metadata;
+    if (!metadata && !input.scopeKey) {
         return null;
     }
 
-    const data = metadata.data as unknown as ResolvedAgentConfig;
-    if (!Array.isArray(data.sourcePaths)) {
-        return null;
+    const scopeKey = input.scopeKey?.trim() || metadata?.scopeKey?.trim() || null;
+    if (scopeKey && input.context) {
+        return resolveScopedAgentConfigFromWorkspaceContext(input.context as any, scopeKey);
     }
 
-    return data;
+    const data = metadata?.data as unknown;
+    return data && Array.isArray((data as ResolvedAgentConfig).sourcePaths)
+        ? (data as ResolvedAgentConfig)
+        : null;
 }
 
-function matchesSavedSelection(
-    input: {
-        selectedNodePath: string | null;
-        activePath: string | null;
-    },
-    savedStatus: ReturnType<ReturnType<typeof useChatStore>['restoreAgentViewStatus']>
-): boolean {
-    if (!savedStatus) {
-        return false;
+function normalizeWorkspaceNodePath(path: string | null | undefined): string | null {
+    if (!path) {
+        return null;
     }
 
-    return savedStatus.activePath
-        ? input.activePath === savedStatus.activePath
-        : input.selectedNodePath === savedStatus.selectedNodePath;
+    const trimmed = path.trim();
+    if (!trimmed) {
+        return null;
+    }
+
+    if (trimmed === '/' || trimmed === '/.agent.json') {
+        return '/';
+    }
+
+    if (trimmed.endsWith('/')) {
+        return trimmed.slice(0, -1) || '/';
+    }
+
+    if (trimmed.endsWith('/.agent.json')) {
+        const ownerPath = trimmed.slice(0, -'/.agent.json'.length);
+        return ownerPath || '/';
+    }
+
+    return trimmed;
+}
+
+function resolveWorkspaceTargetFromConversation(conversation: Conversation | null | undefined): {
+    selectedNodePath: string | null;
+    activePath: string | null;
+} | null {
+    if (!conversation) {
+        return null;
+    }
+
+    const primaryDocumentPath = normalizeWorkspaceNodePath(conversation.documentPaths?.[0] ?? null);
+    if (primaryDocumentPath) {
+        return {
+            selectedNodePath: primaryDocumentPath,
+            activePath: primaryDocumentPath
+        };
+    }
+
+    const agentOwnerPath = normalizeWorkspaceNodePath(conversation.agentKey ?? null);
+    if (agentOwnerPath) {
+        return {
+            selectedNodePath: agentOwnerPath,
+            activePath: null
+        };
+    }
+
+    return null;
 }
 
 export function registerAiAgentWorkspaceRuntimeBridge(runtimeContext: WorkspaceRuntimeContext): void {
     const chatStore = useChatStore();
+    const documentStore = useDocumentWorkspaceStore();
 
     runtimeContext.registerCurrentErrorSource({
         getCurrentError() {
@@ -42,16 +90,27 @@ export function registerAiAgentWorkspaceRuntimeBridge(runtimeContext: WorkspaceR
         }
     });
 
+    runtimeContext.registerConversationDocumentIdsSource({
+        getDocumentIds() {
+            return chatStore.currentConversation?.documentIds ?? null;
+        }
+    });
+
     runtimeContext.registerBeforeRouteNavigateHandler(async (input) => {
         const currentConversationId = chatStore.currentConversation?.id ?? null;
         chatStore.setWorkspaceMode(input.nextRoutePath === '/' ? 'agent' : 'conversation');
         if (input.nextRoutePath === '/chat' && input.nextRoutePath !== input.currentRoutePath) {
+            // 切换前持久化当前对话的模型选择，保证已有对话重新打开时沿用上次使用的模型。
+            await chatStore.persistCurrentConversation();
             chatStore.saveAgentViewStatus({
                 selectedNodePath: input.selectedNodePath,
                 activePath: input.activePath,
                 activeConversationId: currentConversationId
             });
-            const routeActiveAgent = scopeMetadataToAgent(input.activeScopeMetadata);
+            const routeActiveAgent = scopeMetadataToAgent({
+                metadata: input.activeScopeMetadata,
+                context: documentStore.context
+            });
             if (routeActiveAgent) {
                 chatStore.saveWorkspaceAgentContext(routeActiveAgent);
             }
@@ -60,9 +119,15 @@ export function registerAiAgentWorkspaceRuntimeBridge(runtimeContext: WorkspaceR
         }
 
         if (input.nextRoutePath === '/' && input.currentRoutePath === '/chat') {
-            const savedAgentViewStatus = chatStore.restoreAgentViewStatus();
-            if (savedAgentViewStatus && (savedAgentViewStatus.selectedNodePath || savedAgentViewStatus.activePath)) {
-                chatStore.saveAgentViewStatus(savedAgentViewStatus);
+            // 切换前持久化当前对话的模型选择，保证已有对话重新打开时沿用上次使用的模型。
+            await chatStore.persistCurrentConversation();
+            const currentConversationTarget = resolveWorkspaceTargetFromConversation(chatStore.currentConversation);
+            if (currentConversationTarget) {
+                chatStore.saveAgentViewStatus({
+                    selectedNodePath: currentConversationTarget.selectedNodePath,
+                    activePath: currentConversationTarget.activePath,
+                    activeConversationId: currentConversationId
+                });
             }
         }
     });
@@ -83,38 +148,18 @@ export function registerAiAgentWorkspaceRuntimeBridge(runtimeContext: WorkspaceR
         });
 
         if (input.activeScopeMetadata !== undefined) {
-            chatStore.saveWorkspaceAgentContext(scopeMetadataToAgent(input.activeScopeMetadata));
+            chatStore.saveWorkspaceAgentContext(scopeMetadataToAgent({
+                scopeKey: input.activeScopeKey,
+                metadata: input.activeScopeMetadata,
+                context: documentStore.context
+            }));
         }
 
-        const savedAgentViewStatus = chatStore.restoreAgentViewStatus();
-        const sameSelection = matchesSavedSelection({
-            selectedNodePath: input.selectedNodePath ?? null,
-            activePath: input.activePath
-        }, savedAgentViewStatus);
         const sameWorkspaceSelection = previousSelection.activeAgentKey === (input.activeScopeKey ?? null)
             && previousSelection.selectedNodePath === (input.selectedNodePath ?? null)
             && previousSelection.activePath === input.activePath;
-
-        if (sameSelection || sameWorkspaceSelection) {
-            if (!savedAgentViewStatus?.activeConversationId) {
-                if (chatStore.currentConversation && !sameWorkspaceSelection) {
-                    chatStore.clearWorkspaceConversationSelection();
-                }
-                return;
-            }
-
-            if (chatStore.currentConversation?.id !== savedAgentViewStatus.activeConversationId) {
-                try {
-                    await chatStore.selectLocalConversation(savedAgentViewStatus.activeConversationId);
-                } catch {
-                    chatStore.clearWorkspaceConversationSelection();
-                }
-            }
+        if (sameWorkspaceSelection) {
             return;
-        }
-
-        if (chatStore.currentConversation) {
-            chatStore.clearWorkspaceConversationSelection();
         }
     });
 }

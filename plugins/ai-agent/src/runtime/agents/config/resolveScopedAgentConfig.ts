@@ -4,7 +4,8 @@ import type {
     AgentInheritanceMode,
     AgentSkillBinding,
     AgentToolBinding,
-    ResolvedAgentConfig
+    ResolvedAgentConfig,
+    WorkspaceContext
 } from '@plugins/ai-agent/src/internal';
 import { decodeTextDocument } from '@plugins/ai-agent/src/internal';
 
@@ -61,6 +62,29 @@ function getParentScopePath(path: string): string | null {
 
 function getConfigPath(scopePath: string): string {
     return scopePath === '/' ? '/.agent.json' : `${scopePath}/.agent.json`;
+}
+
+function normalizeScopeKey(scopeKey: string): string {
+    const normalized = normalizePath(scopeKey);
+    return normalized === '/' ? '/' : `${normalized}/`;
+}
+
+function scopeKeyToScopePath(scopeKey: string): string {
+    const normalized = normalizeScopeKey(scopeKey);
+    return normalized === '/' ? '/' : normalized.slice(0, -1);
+}
+
+function buildScopeKeyHierarchy(scopeKey: string): string[] {
+    const normalizedScopePath = scopeKeyToScopePath(scopeKey);
+    const hierarchy: string[] = [];
+    let cursor: string | null = normalizedScopePath;
+
+    while (cursor) {
+        hierarchy.push(normalizeScopeKey(cursor));
+        cursor = getParentScopePath(cursor);
+    }
+
+    return hierarchy.reverse();
 }
 
 function cloneBindings<T extends AgentBinding>(bindings?: T[]): T[] | undefined {
@@ -223,16 +247,7 @@ function parseInheritance(value: unknown, configPath: string): AgentInheritanceM
     throw new Error(`Invalid agent config in ${configPath}: "inheritance" must be "merge" or "override".`);
 }
 
-function parseAgentConfig(content: string, configPath: string): AgentConfig {
-    let parsed: unknown;
-
-    try {
-        parsed = JSON.parse(content.replace(/^\uFEFF/, ''));
-    } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        throw new Error(`Failed to parse ${configPath}: ${reason}`);
-    }
-
+function parseAgentConfigValue(parsed: unknown, configPath: string): AgentConfig {
     if (!isPlainObject(parsed)) {
         throw new Error(`Invalid agent config in ${configPath}: expected a JSON object.`);
     }
@@ -270,6 +285,19 @@ function parseAgentConfig(content: string, configPath: string): AgentConfig {
         skills: parseBindings<AgentSkillBinding>(parsed.skills, configPath, 'skills'),
         inheritance
     };
+}
+
+function parseAgentConfig(content: string, configPath: string): AgentConfig {
+    let parsed: unknown;
+
+    try {
+        parsed = JSON.parse(content.replace(/^\uFEFF/, ''));
+    } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new Error(`Failed to parse ${configPath}: ${reason}`);
+    }
+
+    return parseAgentConfigValue(parsed, configPath);
 }
 
 async function determineStartScopePath(provider: IContextProvider, targetPath: string): Promise<string> {
@@ -311,6 +339,65 @@ async function readScopedAgentMatch(provider: IContextProvider, scopePath: strin
 
         throw error;
     }
+}
+
+export function isResolvedAgentConfig(value: unknown): value is ResolvedAgentConfig {
+    if (!isPlainObject(value)) {
+        return false;
+    }
+
+    return Array.isArray(value.sourcePaths) && typeof value.effectiveInstructions === 'string';
+}
+
+export function resolveScopedAgentConfigFromWorkspaceContext(
+    context: WorkspaceContext | null | undefined,
+    targetScopeKey: string | null | undefined,
+    fallback: AgentConfig = DEFAULT_SCOPED_AGENT_CONFIG
+): ResolvedAgentConfig | null {
+    if (!context || !targetScopeKey?.trim()) {
+        return null;
+    }
+
+    const folderMetadata = context.folderMetadata ?? {};
+    const normalizedTargetScopeKey = normalizeScopeKey(targetScopeKey);
+    const orderedMatches = buildScopeKeyHierarchy(normalizedTargetScopeKey)
+        .map((scopeKey) => {
+            const metadata = folderMetadata[scopeKey];
+            if (!metadata) {
+                return null;
+            }
+
+            const scopePath = scopeKeyToScopePath(scopeKey);
+            const configPath = getConfigPath(scopePath);
+            return {
+                scopePath,
+                configPath,
+                config: parseAgentConfigValue(metadata.data, configPath)
+            } satisfies ScopedAgentMatch;
+        })
+        .filter((match): match is ScopedAgentMatch => match !== null);
+
+    const fallbackResolved = createResolvedAgentConfig(scopeKeyToScopePath(normalizedTargetScopeKey), [], fallback);
+    return orderedMatches.reduce<ResolvedAgentConfig>((current, match) => {
+        return resolveChildAgentConfig(current, match.scopePath, match.configPath, match.config);
+    }, fallbackResolved);
+}
+
+export function resolveAllScopedAgentConfigsFromWorkspaceContext(
+    context: WorkspaceContext | null | undefined,
+    fallback: AgentConfig = DEFAULT_SCOPED_AGENT_CONFIG
+): Record<string, ResolvedAgentConfig> {
+    if (!context) {
+        return {};
+    }
+
+    const folderMetadata = context.folderMetadata ?? {};
+    return Object.fromEntries(
+        Object.keys(folderMetadata).map((scopeKey) => [
+            scopeKey,
+            resolveScopedAgentConfigFromWorkspaceContext(context, scopeKey, fallback)
+        ]).filter((entry): entry is [string, ResolvedAgentConfig] => entry[1] !== null)
+    );
 }
 
 export async function resolveScopedAgentConfig(

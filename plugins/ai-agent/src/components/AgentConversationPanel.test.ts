@@ -107,11 +107,11 @@ describe('AgentConversationPanel', () => {
 
         const wrapper = mount(AgentConversationPanel, {
             props: {
-                activeAgentKey: '/docs/',
+                activeScopeKey: '/docs/',
                 activePath: null,
                 selectedNodePath: '/docs',
                 activeDocument: null,
-                showAgentConversationList: true,
+                showScopeConversationList: true,
                 contextProvider: createContextProvider()
             },
             global: {
@@ -150,11 +150,11 @@ describe('AgentConversationPanel', () => {
 
         const wrapper = mount(AgentConversationPanel, {
             props: {
-                activeAgentKey: '/docs/',
+                activeScopeKey: '/docs/',
                 activePath: null,
                 selectedNodePath: '/docs',
                 activeDocument: null,
-                showAgentConversationList: true,
+                showScopeConversationList: true,
                 contextProvider: createContextProvider()
             },
             global: {
@@ -196,11 +196,11 @@ describe('AgentConversationPanel', () => {
 
         const wrapper = mount(AgentConversationPanel, {
             props: {
-                activeAgentKey: '/docs/',
+                activeScopeKey: '/docs/',
                 activePath: null,
                 selectedNodePath: '/docs',
                 activeDocument: null,
-                showAgentConversationList: true,
+                showScopeConversationList: true,
                 contextProvider: createContextProvider()
             },
             global: {
@@ -239,11 +239,11 @@ describe('AgentConversationPanel', () => {
 
         const wrapper = mount(AgentConversationPanel, {
             props: {
-                activeAgentKey: '/docs/',
+                activeScopeKey: '/docs/',
                 activePath: null,
                 selectedNodePath: '/docs',
                 activeDocument: null,
-                showAgentConversationList: true,
+                showScopeConversationList: true,
                 contextProvider: createContextProvider()
             },
             global: {
@@ -280,11 +280,11 @@ describe('AgentConversationPanel', () => {
 
         const wrapper = mount(AgentConversationPanel, {
             props: {
-                activeAgentKey: '/docs/',
+                activeScopeKey: '/docs/',
                 activePath: null,
                 selectedNodePath: '/docs',
                 activeDocument: null,
-                showAgentConversationList: true,
+                showScopeConversationList: true,
                 contextProvider: createContextProvider()
             },
             global: {
@@ -319,11 +319,11 @@ describe('AgentConversationPanel', () => {
 
         const wrapper = mount(AgentConversationPanel, {
             props: {
-                activeAgentKey: '/docs/',
+                activeScopeKey: '/docs/',
                 activePath: null,
                 selectedNodePath: '/docs',
                 activeDocument: null,
-                showAgentConversationList: true,
+                showScopeConversationList: true,
                 contextProvider: createContextProvider()
             },
             global: {
@@ -373,11 +373,11 @@ describe('AgentConversationPanel', () => {
 
         const wrapper = mount(AgentConversationPanel, {
             props: {
-                activeAgentKey: '/docs/',
+                activeScopeKey: '/docs/',
                 activePath: null,
                 selectedNodePath: '/docs',
                 activeDocument: null,
-                showAgentConversationList: true,
+                showScopeConversationList: true,
                 contextProvider: createContextProvider()
             },
             global: {
@@ -434,7 +434,7 @@ describe('AgentConversationPanel', () => {
 
         const wrapper = mount(AgentConversationPanel, {
             props: {
-                activeAgentKey: '/docs/',
+                activeScopeKey: '/docs/',
                 activePath: '/docs/guide.md',
                 selectedNodePath: '/docs/guide.md',
                 activeDocument: {
@@ -442,7 +442,7 @@ describe('AgentConversationPanel', () => {
                     mimeType: 'text/markdown',
                     dataBase64: ''
                 },
-                showAgentConversationList: false,
+                showScopeConversationList: false,
                 contextProvider: createContextProvider([contextConversation])
             },
             global: {
@@ -477,7 +477,7 @@ describe('AgentConversationPanel', () => {
 
         const wrapper = mount(AgentConversationPanel, {
             props: {
-                activeAgentKey: '/docs/.agent.json',
+                activeScopeKey: '/docs/.agent.json',
                 activePath: '/docs/guide.md',
                 selectedNodePath: '/docs/guide.md',
                 activeDocument: {
@@ -485,7 +485,7 @@ describe('AgentConversationPanel', () => {
                     mimeType: 'text/markdown',
                     dataBase64: ''
                 },
-                showAgentConversationList: false,
+                showScopeConversationList: false,
                 contextProvider: createContextProvider()
             },
             global: {
@@ -525,7 +525,7 @@ describe('AgentConversationPanel', () => {
 
         const wrapper = mount(AgentConversationPanel, {
             props: {
-                activeAgentKey: '/docs/',
+                activeScopeKey: '/docs/',
                 activePath: '/docs/guide.md',
                 selectedNodePath: '/docs',
                 activeDocument: {
@@ -533,7 +533,7 @@ describe('AgentConversationPanel', () => {
                     mimeType: 'text/markdown',
                     dataBase64: ''
                 },
-                showAgentConversationList: false,
+                showScopeConversationList: false,
                 contextProvider: createContextProvider()
             },
             global: {
@@ -574,7 +574,7 @@ describe('AgentConversationPanel', () => {
 
         const wrapper = mount(AgentConversationPanel, {
             props: {
-                activeAgentKey: '/docs/',
+                activeScopeKey: '/docs/',
                 activePath: '/docs/guide.md',
                 selectedNodePath: '/docs',
                 activeDocument: {
@@ -582,7 +582,7 @@ describe('AgentConversationPanel', () => {
                     mimeType: 'text/markdown',
                     dataBase64: ''
                 },
-                showAgentConversationList: false,
+                showScopeConversationList: false,
                 contextProvider: createContextProvider()
             },
             global: {
@@ -615,7 +615,7 @@ describe('AgentConversationPanel', () => {
 
         const wrapper = mount(AgentConversationPanel, {
             props: {
-                activeAgentKey: '/docs/',
+                activeScopeKey: '/docs/',
                 activePath: '/docs/guide.md',
                 selectedNodePath: '/docs',
                 activeDocument: {
@@ -623,7 +623,7 @@ describe('AgentConversationPanel', () => {
                     mimeType: 'text/markdown',
                     dataBase64: ''
                 },
-                showAgentConversationList: false,
+                showScopeConversationList: false,
                 contextProvider: createContextProvider()
             },
             global: {
@@ -661,7 +661,7 @@ describe('AgentConversationPanel', () => {
 
         const wrapper = mount(AgentConversationPanel, {
             props: {
-                activeAgentKey: '/docs/',
+                activeScopeKey: '/docs/',
                 activePath: '/docs/guide.md',
                 selectedNodePath: '/docs/guide.md',
                 activeDocument: {
@@ -669,7 +669,7 @@ describe('AgentConversationPanel', () => {
                     mimeType: 'text/markdown',
                     dataBase64: ''
                 },
-                showAgentConversationList: false,
+                showScopeConversationList: false,
                 contextProvider: createContextProvider()
             },
             global: {
@@ -711,7 +711,7 @@ describe('AgentConversationPanel', () => {
 
         const wrapper = mount(AgentConversationPanel, {
             props: {
-                activeAgentKey: '/docs/',
+                activeScopeKey: '/docs/',
                 activePath: '/docs/guide.md',
                 selectedNodePath: '/docs/guide.md',
                 activeDocument: {
@@ -719,7 +719,7 @@ describe('AgentConversationPanel', () => {
                     mimeType: 'text/markdown',
                     dataBase64: ''
                 },
-                showAgentConversationList: false,
+                showScopeConversationList: false,
                 contextProvider: createContextProvider()
             },
             global: {

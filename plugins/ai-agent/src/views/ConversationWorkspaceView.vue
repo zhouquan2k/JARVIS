@@ -1,5 +1,9 @@
 <template>
-  <section class="workspace-shell" data-testid="conversation-workspace">
+  <section
+    class="workspace-shell"
+    :class="{ 'workspace-shell--list-open': !chatStore.sidebarCollapsed }"
+    data-testid="conversation-workspace"
+  >
     <ConversationSidebar
       :collapsed="chatStore.sidebarCollapsed"
       :history-source="chatStore.historySource"
@@ -64,7 +68,8 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch, type PropType } from 'vue';
-import '@packages/ui/src/theme/chatgpt-dark.css';
+import '@packages/ui/theme/chatgpt-dark.css';
+import { useIsNarrowViewport } from '@packages/ui';
 import CompareChatView from './CompareChatView.vue';
 import ConversationSidebar from '../components/ConversationSidebar.vue';
 import NormalChatView from './NormalChatView.vue';
@@ -77,8 +82,9 @@ import {
   type ResolvedAgentConfig,
   type WorkspaceContext
 } from '@plugins/ai-agent/src/internal';
-import type { ChatRoutePath } from '@packages/ui/src/routes';
-import { useWorkspaceI18n } from '@packages/ui/src/i18n';
+import type { ChatRoutePath } from '@packages/ui';
+import { useWorkspaceI18n } from '@packages/ui';
+import { resolveAllScopedAgentConfigsFromWorkspaceContext } from '../runtime/agents/config/resolveScopedAgentConfig';
 
 type AgentBindingOption = {
   key: string | null;
@@ -136,6 +142,7 @@ const emit = defineEmits<{
 }>();
 
 const chatStore = useChatStore();
+const isNarrowViewport = useIsNarrowViewport();
 const compareStore = useCompareStore();
 const { t } = useWorkspaceI18n();
 const activeExternalProviderFeatures = computed(() => chatStore.activeExternalProvider?.features || null);
@@ -169,9 +176,8 @@ function resolveAgentBindingTitle(agent: ResolvedAgentConfig, key: string): stri
 }
 
 function buildAgentBindingOptions(context: WorkspaceContext): AgentBindingOption[] {
-  const entries = Object.entries(context.folderMetadata)
-    .map(([key, meta]) => [key, meta.data as unknown as ResolvedAgentConfig] as [string, ResolvedAgentConfig])
-    .filter((entry): entry is [string, ResolvedAgentConfig] => !!entry[1])
+  const resolvedConfigs = resolveAllScopedAgentConfigsFromWorkspaceContext(context);
+  const entries = Object.entries(resolvedConfigs)
     .sort(([leftKey, leftAgent], [rightKey, rightAgent]) => {
       const leftScope = leftAgent.scopePath || leftKey;
       const rightScope = rightAgent.scopePath || rightKey;
@@ -186,7 +192,7 @@ function buildAgentBindingOptions(context: WorkspaceContext): AgentBindingOption
     }
   ];
 
-  const rootAgent = context.folderMetadata[DEFAULT_WORKSPACE_AGENT_KEY]?.data as unknown as ResolvedAgentConfig | undefined;
+  const rootAgent = resolvedConfigs[DEFAULT_WORKSPACE_AGENT_KEY];
   if (rootAgent) {
     options.push({
       key: DEFAULT_WORKSPACE_AGENT_KEY,
@@ -279,6 +285,13 @@ async function onSelectLocal(id: string) {
     requestWorkspaceSwitch('/chat');
   }
   await chatStore.selectLocalConversation(id);
+  collapseSidebarOnNarrow();
+}
+
+function collapseSidebarOnNarrow() {
+  if (isNarrowViewport.value) {
+    chatStore.setSidebarCollapsed(true);
+  }
 }
 
 async function onDeleteLocal(id: string) {
@@ -300,6 +313,7 @@ async function onSelectExternal(id: string) {
     requestWorkspaceSwitch('/chat');
   }
   await chatStore.previewExternalConversation(chatStore.activeExternalProviderId, id);
+  collapseSidebarOnNarrow();
 }
 
 async function onSelectExternalProvider(providerId: ExternalHistoryProviderId) {
@@ -314,6 +328,7 @@ async function onNewChat() {
     requestWorkspaceSwitch('/chat');
   }
   await chatStore.startNewConversation({ boundNodeName: null });
+  collapseSidebarOnNarrow();
 }
 
 function onNewCompare() {
@@ -408,6 +423,17 @@ onBeforeUnmount(() => {
 @media (max-width: 920px) {
   .workspace-shell {
     flex-direction: column;
+  }
+
+  /* Expanded sidebar acts as the full-screen list page on narrow layouts. */
+  .workspace-shell--list-open .workspace-main {
+    display: none;
+  }
+
+  /* Collapsed sidebar shrinks to a slim bar so the chat gets the space. */
+  .workspace-shell:not(.workspace-shell--list-open) :deep(.workspace-sidebar) {
+    flex: 0 0 auto;
+    height: auto;
   }
 }
 </style>

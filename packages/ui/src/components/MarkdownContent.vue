@@ -7,12 +7,14 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { MessageAnnotation } from '@plugins/ai-agent/api';
 import MessageAnnotationLayer from './MessageAnnotationLayer.vue';
+import type { WorkspaceCiteAnnotation, WorkspaceMessageAnnotation } from '../types/messageAnnotations';
 
 const props = defineProps<{
   source: string;
-  annotations?: MessageAnnotation[];
+  annotations?: WorkspaceMessageAnnotation[];
+  /** 需要渲染为可点击 chip 的 @成员名列表（group summary 专用）。 */
+  mentions?: string[];
 }>();
 
 const CODE_TOKEN_PREFIX = '__MD_CODE_BLOCK_';
@@ -20,13 +22,13 @@ const CITE_TOKEN_PREFIX = '__MD_CITE_';
 
 const citeAnnotations = computed(() => (
   props.annotations || []
-).filter((annotation): annotation is Extract<MessageAnnotation, { kind: 'cite' }> => annotation.kind === 'cite'));
+).filter((annotation): annotation is WorkspaceCiteAnnotation => annotation.kind === 'cite'));
 
 const nonCiteAnnotations = computed(() => (
   props.annotations || []
 ).filter((annotation) => annotation.kind !== 'cite'));
 
-const renderedHtml = computed(() => renderMarkdown(props.source, citeAnnotations.value));
+const renderedHtml = computed(() => renderMarkdown(props.source, citeAnnotations.value, props.mentions));
 
 function escapeHtml(input: string): string {
   return input
@@ -46,7 +48,7 @@ function renderInline(raw: string): string {
   return text;
 }
 
-function buildCiteHtml(label: string, annotation: Extract<MessageAnnotation, { kind: 'cite' }>): string {
+function buildCiteHtml(label: string, annotation: WorkspaceCiteAnnotation): string {
   const safeLabel = escapeHtml(label || annotation.payload.label);
   const safeTitle = escapeHtml(annotation.payload.title || annotation.payload.refId);
   const safeSnippet = annotation.payload.snippet ? escapeHtml(annotation.payload.snippet) : '';
@@ -73,7 +75,7 @@ function buildCiteHtml(label: string, annotation: Extract<MessageAnnotation, { k
 
 function injectCitationTokens(
   input: string,
-  annotations: Array<Extract<MessageAnnotation, { kind: 'cite' }>>
+  annotations: WorkspaceCiteAnnotation[]
 ): { text: string; cites: string[] } {
   if (annotations.length === 0) {
     return { text: input, cites: [] };
@@ -142,7 +144,8 @@ function isTableSeparatorRow(line: string, columnCount: number): boolean {
 
 function renderMarkdown(
   input: string,
-  annotations: Array<Extract<MessageAnnotation, { kind: 'cite' }>> = []
+  annotations: WorkspaceCiteAnnotation[] = [],
+  mentions: string[] = []
 ): string {
   if (!input) return '';
 
@@ -272,7 +275,18 @@ function renderMarkdown(
   }
 
   closeLists();
-  return restoreCitations(htmlParts.join('\n'), withCitationTokens.cites);
+  let result = restoreCitations(htmlParts.join('\n'), withCitationTokens.cites);
+
+  if (mentions.length > 0) {
+    const escapedNames = mentions.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    const mentionPattern = new RegExp(`@(${escapedNames.join('|')})\\b`, 'g');
+    result = result.replace(mentionPattern, (_m, name: string) => {
+      const safeName = escapeHtml(name);
+      return `<button type="button" class="md-mention" data-member="${safeName}">@${safeName}</button>`;
+    });
+  }
+
+  return result;
 }
 </script>
 
@@ -465,5 +479,23 @@ function renderMarkdown(
   border: none;
   height: 1px;
   background: var(--cp-border);
+}
+
+.markdown-content :deep(.md-mention) {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--cp-accent-muted, rgba(99, 179, 237, 0.15));
+  color: var(--cp-accent, #63b3ed);
+  font-size: 0.85em;
+  font-weight: 500;
+  border: none;
+  cursor: pointer;
+  line-height: 1.4;
+  vertical-align: baseline;
+}
+
+.markdown-content :deep(.md-mention:hover) {
+  background: var(--cp-accent-muted, rgba(99, 179, 237, 0.25));
 }
 </style>

@@ -115,7 +115,7 @@ const localeLabel = computed(() => {
   return locale.value === 'en' ? t('topBar.localeEnglish') : t('topBar.localeChinese');
 });
 
-const brandIconSrc = '/jarvis.png';
+const brandIconSrc = './jarvis.png';
 
 function navigateWorkspace(path: string): void {
   emit('navigate-workspace', path as ChatRoutePath, path === '/chat' ? { revealSidebar: true } : undefined);

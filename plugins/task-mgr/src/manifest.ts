@@ -3,8 +3,36 @@ import AgentTaskPanel from './components/AgentTaskPanel.vue';
 import AllTasksWorkspaceView from './views/AllTasksWorkspaceView.vue';
 import { getTaskService, registerTaskService } from './taskServiceRegistry';
 
+type DesktopTaskRuntimeBridge = {
+    runtimeEnv?: {
+        syncKey?: string;
+    };
+};
+
 function resolveTaskContextBaseUrl(api: Parameters<PluginManifest['setup']>[0]): string | undefined {
     return api.getHostContext().environment.contextBaseUrl?.trim() || undefined;
+}
+
+function resolveTaskSyncBaseUrl(api: Parameters<PluginManifest['setup']>[0]): string | undefined {
+    const contextBaseUrl = resolveTaskContextBaseUrl(api);
+    if (!contextBaseUrl?.endsWith('/api/context')) {
+        return undefined;
+    }
+
+    return `${contextBaseUrl.slice(0, -'/api/context'.length)}/api/sync`;
+}
+
+function resolveTaskRuntimeEnv(api: Parameters<PluginManifest['setup']>[0]): Record<string, string | undefined> | undefined {
+    const bridge = api.getHostContext().getCapability<DesktopTaskRuntimeBridge>('message-port');
+    const syncKey = bridge?.runtimeEnv?.syncKey?.trim();
+
+    if (!syncKey) {
+        return undefined;
+    }
+
+    return {
+        CHATPRISM_SYNC_KEY: syncKey
+    };
 }
 
 export const taskMgrPlugin: PluginManifest = {
@@ -13,8 +41,12 @@ export const taskMgrPlugin: PluginManifest = {
     version: '1.0.0',
     defaultEnabled: true,
     setup(api) {
+        const fetchImpl = api.getHostContext().getCapability<typeof fetch>('http-client') ?? undefined;
         registerTaskService({
-            baseUrl: resolveTaskContextBaseUrl(api)
+            baseUrl: resolveTaskContextBaseUrl(api),
+            syncBaseUrl: resolveTaskSyncBaseUrl(api),
+            env: resolveTaskRuntimeEnv(api),
+            fetchImpl
         });
         api.registerGlobalView({
             id: 'all-tasks',

@@ -22,8 +22,11 @@
       <TaskListPanel
         :document-path="null"
         :agent-key="null"
-        :tag="selectedTag"
+        :tag="panelTag"
         :group-by-date="selectedTag === 'planned'"
+        :include-tomorrow="selectedTag === 'today'"
+        :show-completed-section="false"
+        :completed-only="selectedTag === 'completed'"
       />
     </div>
   </section>
@@ -33,36 +36,45 @@
 import { computed, ref } from 'vue';
 import type { IContextProvider } from '@packages/core/src';
 import type { TaskQueryTag } from '../../api';
-import { useWorkspaceI18n } from '@packages/ui/src/i18n';
+import { useWorkspaceI18n } from '@packages/ui';
 import TaskListPanel from '../components/TaskListPanel.vue';
+
+type ViewTag = TaskQueryTag | 'completed';
 
 const props = defineProps<{
   contextProvider: IContextProvider;
 }>();
 
 const { t } = useWorkspaceI18n();
-const selectedTag = ref<TaskQueryTag>('today');
+const selectedTag = ref<ViewTag>('today');
+
+const panelTag = computed<TaskQueryTag>(() => selectedTag.value === 'completed' ? 'all' : selectedTag.value);
 
 const shortcutItems = computed(() => [
   {
-    tag: 'today' as const,
+    tag: 'today' as ViewTag,
     label: t('shared.today'),
     hint: t('shared.todayTasksHint')
   },
   {
-    tag: 'planned' as const,
+    tag: 'planned' as ViewTag,
     label: t('shared.planned'),
     hint: t('shared.plannedTasksHint')
   },
   {
-    tag: 'scheduled' as const,
+    tag: 'scheduled' as ViewTag,
     label: t('shared.scheduled'),
     hint: t('shared.scheduledTasksHint')
   },
   {
-    tag: 'backlog' as const,
+    tag: 'backlog' as ViewTag,
     label: t('shared.backlog'),
     hint: t('shared.backlogTasksHint')
+  },
+  {
+    tag: 'completed' as ViewTag,
+    label: t('shared.completedTasksTab'),
+    hint: t('shared.completedTasksHint')
   }
 ]);
 

@@ -2,7 +2,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
-import { workspaceNavigationApiKey } from '@packages/ui/src/plugins/injectionKeys';
+import { workspaceNavigationApiKey } from '@packages/ui';
 import type { Task, TaskQueryTag, TaskService } from '../../api';
 import TaskListPanel from './TaskListPanel.vue';
 import { resetTaskServiceForTests, setTaskServiceForTests } from '../taskServiceRegistry';

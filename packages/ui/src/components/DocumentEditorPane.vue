@@ -343,6 +343,15 @@
       </button>
     </div>
 
+    <div
+      v-if="isReadOnlyDeferred"
+      class="document-readonly-banner"
+      data-testid="document-readonly-banner"
+      role="status"
+    >
+      {{ t('shared.documentEditingRequiresConnection') }}
+    </div>
+
     <div class="editor-content">
       <div v-if="activePaneMode === 'empty'" class="empty-state" data-testid="document-editor-empty">
         {{ t('shared.selectFile') }}
@@ -396,7 +405,6 @@ import type { ResolvedInsertLinkType } from '../types/insertLink';
 
 const props = withDefaults(defineProps<{
   activePath: string | null;
-  activeAgentName?: string | null;
   activeDocument: ContextDocument | null;
   activeViewerId: string | null;
   activePaneMode: 'empty' | 'viewer' | 'unsupported';
@@ -452,23 +460,23 @@ const activePathLabel = computed(() => {
   return getContextNodeDisplayName(segments[segments.length - 1] ?? props.activePath);
 });
 const editorTitleLabel = computed(() => {
-  const activeAgentName = props.activeAgentName?.trim() || '';
-  if (!activeAgentName) {
-    return activePathLabel.value;
-  }
-
-  if (!props.activePath) {
-    return activeAgentName;
-  }
-
-  return `${activeAgentName} / ${activePathLabel.value}`;
+  return activePathLabel.value;
 });
 const canSave = computed(() => {
   return props.activeViewerId === 'text'
     && !!props.activePath
     && props.activeDocument?.canWrite !== false;
 });
+const isReadOnlyDeferred = computed(() => {
+  return props.activeViewerId === 'text'
+    && !!props.activePath
+    && props.activeDocument?.canWrite === false;
+});
 const saveButtonLabel = computed(() => {
+  if (isReadOnlyDeferred.value) {
+    return t('shared.documentEditingRequiresConnection');
+  }
+
   if (!canSave.value) {
     return t('shared.unsavedDocument');
   }
@@ -1066,6 +1074,16 @@ function hideTooltip() {
 
 .editor-link-picker {
   position: relative;
+}
+
+.document-readonly-banner {
+  margin: 8px 16px 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(191, 145, 0, 0.35);
+  background: rgba(255, 244, 204, 0.9);
+  color: #7a5600;
+  font-size: 0.92rem;
 }
 
 .save-button {

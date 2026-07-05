@@ -33,16 +33,16 @@
 </template>
 
 <script setup lang="ts">
-import type { MessageFunctionalPart, MessageFunctionalPartKind } from '@plugins/ai-agent/api';
 import { useWorkspaceI18n } from '../i18n';
+import type { WorkspaceMessageFunctionalPart, WorkspaceMessageFunctionalPartKind } from '../types/messageFunctionalParts';
 
 defineProps<{
-  parts: MessageFunctionalPart[];
+  parts: WorkspaceMessageFunctionalPart[];
 }>();
 
 const { t } = useWorkspaceI18n();
 
-function kindLabel(kind: MessageFunctionalPartKind): string {
+function kindLabel(kind: WorkspaceMessageFunctionalPartKind): string {
   switch (kind) {
     case 'tool_exchange':
       return t('shared.functionalPartToolExchange');

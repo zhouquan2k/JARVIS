@@ -36,7 +36,7 @@ import { createMockSyncTransport } from '../../testing/createMockSyncTransport';
 import { createMockRuntime as createBuiltinMockRuntime } from '../../testing/createMockRuntime';
 import { createMockHistoryProvider as createBuiltinMockHistoryProvider } from '../../testing/createMockHistoryProvider';
 import { toConversationQueryProvider } from '../../providers/context/HttpConversationQueryProvider';
-import { openConversationImportDialog } from '@packages/ui';
+import { openConversationImportDialog } from '../../utils/externalFileImport';
 import AgentConversationPanel from '../../components/AgentConversationPanel.vue';
 import WorkspaceAgentConfigPanel from '../../components/WorkspaceAgentConfigPanel.vue';
 import { useCompareStore } from '../../store/compare';
@@ -49,6 +49,11 @@ import { registerAiAgentWorkspaceRuntimeBridge } from '../../store/workspaceBrid
 type RuntimeMode = 'web' | 'desktop' | 'extension';
 type AppEnv = Record<string, string | undefined>;
 type HostHistoryProviderId = Exclude<ExternalHistoryProviderId, 'external-file'>;
+type E2EBridgeWindow = Window & {
+    __JARVIS_E2E__?: {
+        patchLastAssistantMessage: (patch: Record<string, unknown>) => void;
+    };
+};
 
 export interface AiAgentPluginOptions {
     runtimeMode: RuntimeMode;
@@ -128,6 +133,7 @@ function createHistoryProviders(
     runtime: ModelProviderRuntime,
     options: AiAgentPluginOptions
 ): ExternalHistoryProviderEntry[] {
+    const httpClient = hostContext.getCapability<typeof fetch>('http-client') ?? options.fetchImpl;
     const createProvider = (providerId: HostHistoryProviderId): IExternalConversationProvider | null => {
         if (options.useMockHistoryProviders) {
             return createBuiltinMockHistoryProvider(providerId);
@@ -147,7 +153,8 @@ function createHistoryProviders(
                                 storage.setItem(key, value);
                             }
                         },
-                        env: options.env ?? {}
+                        env: options.env ?? {},
+                        fetchImpl: httpClient
                     }),
                     tabBridge: new ControlledPageGeminiHistoryBridge(controlledPage)
                 });
@@ -213,6 +220,7 @@ function createConversationStorageProvider(
     options: AiAgentPluginOptions
 ): SyncStorageProvider {
     const env = options.env ?? {};
+    const httpClient = hostContext.getCapability<typeof fetch>('http-client') ?? options.fetchImpl;
     const storage = hostContext.getCapability<Pick<Storage, 'getItem' | 'setItem'>>('storage')
         ?? options.storage
         ?? (typeof localStorage !== 'undefined' ? localStorage : undefined);
@@ -235,7 +243,7 @@ function createConversationStorageProvider(
             : new FetchSyncTransport({
                 syncKey,
                 baseUrl: resolveSyncBaseUrl({ env: syncEnv }),
-                fetchImpl: options.fetchImpl
+                fetchImpl: httpClient
             }),
         syncKey
     });
@@ -381,6 +389,51 @@ function initializeAiAgentRuntimeBridge(
     }, runtimeContext);
 }
 
+function registerAiAgentE2EBridge(options: AiAgentPluginOptions): void {
+    if (options.env?.VITE_E2E !== '1' || typeof window === 'undefined') {
+        return;
+    }
+
+    const bridgeWindow = window as E2EBridgeWindow;
+    const chatStore = useChatStore();
+    bridgeWindow.__JARVIS_E2E__ = {
+        patchLastAssistantMessage(patch: Record<string, unknown>) {
+            const currentConversation = chatStore.currentConversation;
+            if (!currentConversation) {
+                throw new Error('No current conversation available.');
+            }
+
+            let replaced = false;
+            const nextMessages = currentConversation.messages.map((message, index, allMessages) => {
+                const isLast = index === allMessages.length - 1;
+                if (!isLast || message.role !== 'assistant') {
+                    return message;
+                }
+
+                replaced = true;
+                return {
+                    ...message,
+                    ...patch
+                };
+            });
+
+            if (!replaced) {
+                throw new Error('No assistant message available to patch.');
+            }
+
+            const nextConversation = {
+                ...currentConversation,
+                updatedAt: Date.now(),
+                messages: nextMessages
+            };
+            chatStore.currentConversation = nextConversation;
+            chatStore.conversations = chatStore.conversations.map((conversation) => (
+                conversation.id === nextConversation.id ? nextConversation : conversation
+            ));
+        }
+    };
+}
+
 export function createAiAgentPlugin(options: AiAgentPluginOptions): PluginManifest {
     let initializationPromise: Promise<ModelProviderRuntime | null> | null = null;
 
@@ -404,6 +457,7 @@ export function createAiAgentPlugin(options: AiAgentPluginOptions): PluginManife
 
             await initializationPromise;
             initializeAiAgentRuntimeBridge(api.getRuntimeContext(), hostContext, options);
+            registerAiAgentE2EBridge(options);
             const chatStore = useChatStore();
             api.registerLanguageModel({
                 id: 'ai-agent-default-language-model',
@@ -464,7 +518,7 @@ export function createAiAgentPlugin(options: AiAgentPluginOptions): PluginManife
                         }
                     }
 
-                    if (activeAgentKey && input.showAgentConversationList) {
+                    if (activeAgentKey && input.showScopeConversationList) {
                         return chatStore.getConversationsByAgent(activeAgentKey).length;
                     }
 
@@ -472,7 +526,7 @@ export function createAiAgentPlugin(options: AiAgentPluginOptions): PluginManife
                 },
                 shouldAutoActivate(input) {
                     const hasConversationContext = !!input.activeDocument?.path
-                        || (!!input.activeScopeKey && input.showAgentConversationList === true);
+                        || (!!input.activeScopeKey && input.showScopeConversationList === true);
                     if (!hasConversationContext) {
                         return false;
                     }

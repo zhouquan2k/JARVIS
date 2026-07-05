@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createApp } from '../src/app.js';
 import type { ServerConfig } from '../src/config.js';
 
@@ -243,6 +243,62 @@ describe('sync api', () => {
         });
     });
 
+    it('preserves the group model selection across push and pull', async () => {
+        const app = createApp({ config: createConfig({ isDevelopment: true }) });
+
+        const pushResponse = await app.request('/api/sync/push', {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                'x-sync-key': 'workspace-group'
+            },
+            body: JSON.stringify({
+                conversations: [
+                    createConversationPayload('conv-group', 100, {
+                        modelSelection: {
+                            providerId: 'group',
+                            modelId: 'dom',
+                            modelOptions: { web_search: true },
+                            reasoningEffort: 'high',
+                            explicit: true,
+                            groupMembers: [
+                                { providerId: 'chatgpt-dom', modelId: 'dom', name: 'ChatGPT' },
+                                { providerId: 'claude-dom', modelId: 'dom', name: 'Claude' }
+                            ]
+                        }
+                    })
+                ]
+            })
+        });
+
+        expect(pushResponse.status).toBe(200);
+
+        const pullResponse = await app.request('/api/sync/pull', {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                'x-sync-key': 'workspace-group'
+            },
+            body: JSON.stringify({ cursor: null })
+        });
+
+        expect(pullResponse.status).toBe(200);
+        const pulled = await pullResponse.json() as {
+            conversations: Array<{ modelSelection?: unknown }>;
+        };
+        expect(pulled.conversations[0].modelSelection).toEqual({
+            providerId: 'group',
+            modelId: 'dom',
+            modelOptions: { web_search: true },
+            reasoningEffort: 'high',
+            explicit: true,
+            groupMembers: [
+                { providerId: 'chatgpt-dom', modelId: 'dom', name: 'ChatGPT' },
+                { providerId: 'claude-dom', modelId: 'dom', name: 'Claude' }
+            ]
+        });
+    });
+
     it('preserves message attachments and annotations across push and pull', async () => {
         const app = createApp({ config: createConfig({ isDevelopment: true }) });
 
@@ -352,6 +408,288 @@ describe('sync api', () => {
             ],
             deletedConversations: [],
             nextCursor: 1
+        });
+    });
+
+    it('supports task sync endpoints with incremental pull and independent cursors', async () => {
+        const app = createApp({ config: createConfig({ isDevelopment: true }) });
+
+        const pushResponse = await app.request('/api/sync/tasks/push', {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                'x-sync-key': 'workspace-task'
+            },
+            body: JSON.stringify({
+                tasks: [
+                    {
+                        id: 'task-1',
+                        title: 'Review sync design',
+                        notes: '',
+                        completed: false,
+                        dueAt: null,
+                        priority: 'medium',
+                        executionState: null,
+                        documentPath: '/docs/design.md',
+                        documentId: 'doc-1',
+                        agentKey: '/',
+                        createdAt: 100,
+                        updatedAt: 100,
+                        completedAt: null,
+                        calendarProviderId: null,
+                        calendarEventId: null,
+                        calendarSyncStatus: null,
+                        calendarLastSyncedAt: null,
+                        calendarLastSyncError: null,
+                        recurrence: null,
+                        unknownField: 'drop-me'
+                    }
+                ]
+            })
+        });
+
+        expect(pushResponse.status).toBe(200);
+        await expect(pushResponse.json()).resolves.toEqual({
+            processedIds: ['task-1'],
+            processedDeletedIds: [],
+            nextCursor: 1
+        });
+
+        const pullResponse = await app.request('/api/sync/tasks/pull', {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                'x-sync-key': 'workspace-task'
+            },
+            body: JSON.stringify({ cursor: null })
+        });
+
+        expect(pullResponse.status).toBe(200);
+        await expect(pullResponse.json()).resolves.toEqual({
+            tasks: [
+                {
+                    id: 'task-1',
+                    title: 'Review sync design',
+                    notes: '',
+                    completed: false,
+                    dueAt: null,
+                    priority: 'medium',
+                    executionState: null,
+                    documentPath: '/docs/design.md',
+                    documentId: 'doc-1',
+                    agentKey: '/',
+                    createdAt: 100,
+                    updatedAt: 100,
+                    completedAt: null,
+                    calendarProviderId: null,
+                    calendarEventId: null,
+                    calendarSyncStatus: null,
+                    calendarLastSyncedAt: null,
+                    calendarLastSyncError: null,
+                    recurrence: null
+                }
+            ],
+            deletedTasks: [],
+            nextCursor: 1
+        });
+
+        const incrementalPull = await app.request('/api/sync/tasks/pull', {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                'x-sync-key': 'workspace-task'
+            },
+            body: JSON.stringify({ cursor: 1 })
+        });
+
+        expect(incrementalPull.status).toBe(200);
+        await expect(incrementalPull.json()).resolves.toEqual({
+            tasks: [],
+            deletedTasks: [],
+            nextCursor: 1
+        });
+    });
+
+    it('syncs timed tasks through /api/sync/tasks/push when Google Calendar config is present', async () => {
+        process.env.CHATPRISM_GOOGLE_CALENDAR_CLIENT_ID = 'client-id';
+        process.env.CHATPRISM_GOOGLE_CALENDAR_CLIENT_SECRET = 'client-secret';
+        process.env.CHATPRISM_GOOGLE_CALENDAR_REFRESH_TOKEN = 'refresh-token';
+        process.env.CHATPRISM_GOOGLE_CALENDAR_ID = 'primary';
+        process.env.CHATPRISM_GOOGLE_OAUTH_TOKEN_URL = 'https://oauth.example.test/token';
+        process.env.CHATPRISM_GOOGLE_CALENDAR_API_BASE_URL = 'https://calendar.example.test/v3';
+
+        const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+            const url = String(input);
+            if (url === 'https://oauth.example.test/token') {
+                return new Response(JSON.stringify({
+                    access_token: 'token-1',
+                    expires_in: 3600
+                }), { status: 200 });
+            }
+
+            if (url === 'https://calendar.example.test/v3/calendars/primary/events') {
+                return new Response(JSON.stringify({ id: 'event-1' }), { status: 200 });
+            }
+
+            throw new Error(`unexpected request: ${url}`);
+        });
+        vi.stubGlobal('fetch', fetchImpl);
+
+        const app = createApp({ config: createConfig({ isDevelopment: true }) });
+
+        const dueAt = new Date('2026-05-24T00:00:00').getTime();
+        const pushResponse = await app.request('/api/sync/tasks/push', {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                'x-sync-key': 'workspace-calendar'
+            },
+            body: JSON.stringify({
+                tasks: [
+                    {
+                        id: 'task-calendar-1',
+                        title: 'Review sync design',
+                        notes: 'Bring agenda',
+                        completed: false,
+                        dueAt,
+                        priority: 'medium',
+                        executionState: null,
+                        documentPath: '/docs/design.md',
+                        documentId: 'doc-1',
+                        agentKey: '/',
+                        createdAt: 100,
+                        updatedAt: 100,
+                        completedAt: null,
+                        calendarProviderId: null,
+                        calendarEventId: null,
+                        calendarSyncStatus: null,
+                        calendarLastSyncedAt: null,
+                        calendarLastSyncError: null,
+                        recurrence: null
+                    }
+                ]
+            })
+        });
+
+        expect(pushResponse.status).toBe(200);
+        await expect(pushResponse.json()).resolves.toEqual({
+            processedIds: ['task-calendar-1'],
+            processedDeletedIds: [],
+            nextCursor: 1
+        });
+
+        const pullResponse = await app.request('/api/sync/tasks/pull', {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                'x-sync-key': 'workspace-calendar'
+            },
+            body: JSON.stringify({ cursor: null })
+        });
+
+        expect(pullResponse.status).toBe(200);
+        await expect(pullResponse.json()).resolves.toEqual({
+            tasks: [
+                expect.objectContaining({
+                    id: 'task-calendar-1',
+                    calendarProviderId: 'google-calendar',
+                    calendarEventId: 'event-1',
+                    calendarSyncStatus: 'synced',
+                    calendarLastSyncedAt: expect.any(Number),
+                    calendarLastSyncError: null
+                })
+            ],
+            deletedTasks: [],
+            nextCursor: 1
+        });
+        expect(fetchImpl).toHaveBeenCalledWith('https://oauth.example.test/token', expect.anything());
+        expect(fetchImpl).toHaveBeenCalledWith('https://calendar.example.test/v3/calendars/primary/events', expect.anything());
+    });
+
+    it('preserves group member parts and summary across push and pull', async () => {
+        const app = createApp({ config: createConfig({ isDevelopment: true }) });
+
+        const pushResponse = await app.request('/api/sync/push', {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                'x-sync-key': 'workspace-group'
+            },
+            body: JSON.stringify({
+                conversations: [
+                    createConversationPayload('conv-group', 100, {
+                        messages: [
+                            {
+                                id: 'conv-group-m1',
+                                role: 'user',
+                                content: 'compare these'
+                            },
+                            {
+                                id: 'conv-group-m2',
+                                role: 'assistant',
+                                content: '### GPT\nfrom gpt\n\n### Gemini\nfrom gemini',
+                                groupMembers: [
+                                    {
+                                        name: 'GPT',
+                                        providerId: 'chatgpt-web',
+                                        modelId: 'gpt-5',
+                                        content: 'from gpt',
+                                        status: 'done'
+                                    },
+                                    {
+                                        name: 'Gemini',
+                                        providerId: 'gemini-api',
+                                        modelId: 'gemini-2.5-pro',
+                                        content: 'from gemini',
+                                        status: 'done'
+                                    }
+                                ],
+                                groupSummary: {
+                                    phase: 'done',
+                                    content: '@GPT and @Gemini agree'
+                                }
+                            }
+                        ]
+                    })
+                ]
+            })
+        });
+
+        expect(pushResponse.status).toBe(200);
+
+        const pullResponse = await app.request('/api/sync/pull', {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                'x-sync-key': 'workspace-group'
+            },
+            body: JSON.stringify({ cursor: null })
+        });
+
+        expect(pullResponse.status).toBe(200);
+        const pulled = await pullResponse.json() as {
+            conversations: Array<{ messages: Array<Record<string, unknown>> }>;
+        };
+        const assistantMessage = pulled.conversations[0].messages[1];
+        expect(assistantMessage.groupMembers).toEqual([
+            {
+                name: 'GPT',
+                providerId: 'chatgpt-web',
+                modelId: 'gpt-5',
+                content: 'from gpt',
+                status: 'done'
+            },
+            {
+                name: 'Gemini',
+                providerId: 'gemini-api',
+                modelId: 'gemini-2.5-pro',
+                content: 'from gemini',
+                status: 'done'
+            }
+        ]);
+        expect(assistantMessage.groupSummary).toEqual({
+            phase: 'done',
+            content: '@GPT and @Gemini agree'
         });
     });
 

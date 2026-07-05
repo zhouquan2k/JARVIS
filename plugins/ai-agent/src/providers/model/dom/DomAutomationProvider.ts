@@ -2,7 +2,7 @@ import type { ModelOptionDefinition, ProviderModelCatalog } from '@packages/core
 import type { IModelProvider, ProviderSendResult, ProviderStreamUpdate, ReasoningEffort, SendMessageOptions } from '../../../interfaces/IModelProvider';
 import type { DomTransport } from './domTransport';
 
-const DOM_PROVIDER_TIMEOUT_MS = 90_000;
+const DOM_PROVIDER_TIMEOUT_MS = 300_000;
 const TEXT_STABLE_WINDOW_MS = 2_000;
 
 export const MODELS_NOT_READY_ERROR_NAME = 'ModelsNotReadyError';

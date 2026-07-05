@@ -46,8 +46,14 @@ export interface WorkspaceErrorSource {
     clearCurrentError(): void;
 }
 
+export interface ConversationDocumentIdsSource {
+    getDocumentIds(): readonly string[] | null | undefined;
+}
+
 export interface WorkspaceRuntimeContext {
     currentError: string | null;
+    /** Current conversation's associated document IDs; null/undefined when no conversation active. */
+    currentConversationDocumentIds?: readonly string[] | null;
     clearCurrentError(): void;
     beforeRouteNavigate(input: WorkspaceRouteNavigationInput): Promise<void> | void;
     publishWorkspaceSelectionChanged(input: WorkspaceSelectionChangedEvent): Promise<void> | void;
@@ -58,6 +64,7 @@ export interface WorkspaceRuntimeContext {
     registerWorkspaceSelectionChangedHandler(
         handler: (input: WorkspaceSelectionChangedEvent) => Promise<void> | void
     ): () => void;
+    registerConversationDocumentIdsSource(source: ConversationDocumentIdsSource): () => void;
     getPluginMessages(): readonly WorkspacePluginMessage[];
     subscribePluginMessages(listener: (messages: readonly WorkspacePluginMessage[]) => void): () => void;
     postPluginMessage(message: WorkspacePluginMessage | null): void;

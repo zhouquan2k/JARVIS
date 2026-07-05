@@ -184,12 +184,11 @@ describe('DocumentEditorPane', () => {
         return mount(Harness);
     }
 
-    it('shows the active agent name in the middle pane title area', async () => {
+    it('shows the active document name in the middle pane title area', async () => {
         const { default: DocumentEditorPane } = await import('./DocumentEditorPane.vue');
         const wrapper = mount(DocumentEditorPane, {
             props: {
                 activePath: '/docs/guide.md',
-                activeAgentName: 'Docs Agent',
                 activeDocument: {
                     path: '/docs/guide.md',
                     mimeType: 'text/markdown',
@@ -210,7 +209,7 @@ describe('DocumentEditorPane', () => {
 
         await wrapper.vm.$nextTick();
 
-        expect(wrapper.get('[data-testid="document-editor-title"]').text()).toBe('Docs Agent / guide');
+        expect(wrapper.get('[data-testid="document-editor-title"]').text()).toBe('guide');
     });
 
     it('inserts a relative markdown link via in-place command in viewer mode without switching to source', async () => {
@@ -1221,6 +1220,7 @@ describe('DocumentEditorPane', () => {
 
         expect(createObjectURL).toHaveBeenCalledTimes(1);
         expect(wrapper.get('[data-testid="document-pdf-viewer"] iframe').attributes('src')).toBe('blob:pdf-preview');
+        expect(wrapper.find('[data-testid="document-readonly-banner"]').exists()).toBe(false);
 
         await wrapper.setProps({
             activePath: '/notes/today.md',
@@ -1268,6 +1268,7 @@ describe('DocumentEditorPane', () => {
         expect(wrapper.get('[data-testid="document-pdf-fallback"]').text()).toContain('This environment does not support embedded PDF preview.');
         expect(wrapper.get('[data-testid="document-pdf-fallback"]').text()).toContain('Open PDF in a new tab');
         expect(wrapper.get('[data-testid="document-pdf-open-link"]').attributes('href')).toBe('data:application/pdf;base64,JVBERg==');
+        expect(wrapper.find('[data-testid="document-readonly-banner"]').exists()).toBe(false);
     });
 
     it('renders image documents as read-only data urls and clears image state after switching away', async () => {
@@ -1304,6 +1305,7 @@ describe('DocumentEditorPane', () => {
         expect(image.attributes('src')).toBe('data:image/svg+xml;base64,PHN2Zy8+');
         expect(image.attributes('alt')).toBe('flow.svg');
         expect(wrapper.get('[data-testid="document-save"]').attributes('disabled')).toBeDefined();
+        expect(wrapper.find('[data-testid="document-readonly-banner"]').exists()).toBe(false);
         expect(wrapper.find('[data-testid="markdown-mode-switch"]').exists()).toBe(false);
         expect(wrapper.find('[data-testid="document-file-change"]').exists()).toBe(false);
         expect(createMarkdownEditor).not.toHaveBeenCalled();
@@ -1354,6 +1356,33 @@ describe('DocumentEditorPane', () => {
 
         expect(wrapper.get('[data-testid="document-unsupported-viewer"]').text()).toContain('application/octet-stream');
         expect(wrapper.get('[data-testid="document-save"]').attributes('disabled')).toBeDefined();
+        expect(wrapper.find('[data-testid="document-readonly-banner"]').exists()).toBe(false);
+    });
+
+    it('shows the offline read-only banner only for editable text documents', async () => {
+        const { default: DocumentEditorPane } = await import('./DocumentEditorPane.vue');
+        const wrapper = mount(DocumentEditorPane, {
+            props: {
+                activePath: '/notes/offline.md',
+                activeDocument: {
+                    path: '/notes/offline.md',
+                    mimeType: 'text/markdown',
+                    dataBase64: encodeTextDocument('# Offline'),
+                    canWrite: false
+                },
+                activeViewerId: 'text',
+                activePaneMode: 'viewer',
+                modelValue: '# Offline',
+                isSaving: false,
+                latestFileChange: null,
+                diffEntries: [],
+                canUndo: false,
+                canRedo: false
+            }
+        });
+
+        expect(wrapper.find('[data-testid="document-readonly-banner"]').exists()).toBe(true);
+        expect(wrapper.get('[data-testid="document-readonly-banner"]').text()).toContain('read-only offline');
     });
 
     it('opens markdown viewer search with Ctrl+F and leaves unsupported viewers to browser search', async () => {

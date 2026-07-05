@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { Task } from '@plugins/task-mgr/api';
 import { createDatabase } from '../src/db.js';
 import { SyncRepository } from '../src/repositories/syncRepository.js';
 import { SyncService } from '../src/services/syncService.js';
@@ -37,6 +38,30 @@ function createConversation(
         origin: overrides.origin,
         externalId: overrides.externalId,
         sync: overrides.sync
+    };
+}
+
+function createTask(id: string, updatedAt: number, overrides: Partial<Task> = {}): Task {
+    return {
+        id,
+        title: overrides.title ?? `Task ${id}`,
+        notes: overrides.notes ?? '',
+        completed: overrides.completed ?? false,
+        dueAt: overrides.dueAt ?? null,
+        priority: overrides.priority ?? null,
+        executionState: overrides.executionState ?? null,
+        documentPath: overrides.documentPath ?? null,
+        documentId: overrides.documentId ?? null,
+        agentKey: overrides.agentKey ?? '/',
+        createdAt: overrides.createdAt ?? updatedAt,
+        updatedAt,
+        completedAt: overrides.completedAt ?? null,
+        calendarProviderId: overrides.calendarProviderId ?? null,
+        calendarEventId: overrides.calendarEventId ?? null,
+        calendarSyncStatus: overrides.calendarSyncStatus ?? null,
+        calendarLastSyncedAt: overrides.calendarLastSyncedAt ?? null,
+        calendarLastSyncError: overrides.calendarLastSyncError ?? null,
+        recurrence: overrides.recurrence ?? null
     };
 }
 
@@ -117,5 +142,55 @@ describe('SyncService', () => {
         expect(workspaceBPull.conversations[0].updatedAt).toBe(50);
         expect(workspaceBPull.deletedConversations).toEqual([]);
         expect(workspaceBPull.nextCursor).toBe(1);
+    });
+
+    it('applies LWW and independent cursors to task sync resources', async () => {
+        const database = createDatabase(createConfig());
+        const service = new SyncService(new SyncRepository(database));
+
+        const firstPush = await service.pushTasks('workspace-a', [
+            createTask('task-1', 100, { title: 'First version' })
+        ]);
+        expect(firstPush.processedIds).toEqual(['task-1']);
+        expect(firstPush.processedDeletedIds).toEqual([]);
+        expect(firstPush.nextCursor).toBe(1);
+
+        const stalePush = await service.pushTasks('workspace-a', [
+            createTask('task-1', 90, { title: 'Older version' })
+        ]);
+        expect(stalePush.processedIds).toEqual([]);
+        expect(stalePush.nextCursor).toBe(1);
+
+        const deletePush = await service.pushTasks('workspace-a', [], [
+            { id: 'task-1', updatedAt: 110 }
+        ]);
+        expect(deletePush.processedDeletedIds).toEqual(['task-1']);
+        expect(deletePush.nextCursor).toBe(2);
+
+        const deleteDelta = service.pullTasks('workspace-a', 1);
+        expect(deleteDelta.tasks).toEqual([]);
+        expect(deleteDelta.deletedTasks).toEqual([
+            {
+                id: 'task-1',
+                updatedAt: 110
+            }
+        ]);
+        expect(deleteDelta.nextCursor).toBe(2);
+
+        const recreatePush = await service.pushTasks('workspace-a', [
+            createTask('task-1', 120, { title: 'Recreated' })
+        ]);
+        expect(recreatePush.processedIds).toEqual(['task-1']);
+        expect(recreatePush.nextCursor).toBe(3);
+
+        const recreateDelta = service.pullTasks('workspace-a', 2);
+        expect(recreateDelta.tasks).toEqual([
+            expect.objectContaining({
+                id: 'task-1',
+                title: 'Recreated'
+            })
+        ]);
+        expect(recreateDelta.deletedTasks).toEqual([]);
+        expect(recreateDelta.nextCursor).toBe(3);
     });
 });

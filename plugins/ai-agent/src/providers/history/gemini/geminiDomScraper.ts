@@ -561,8 +561,15 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
                 snapshotBeforeOpen: getHistoryDomSnapshot(config, normalizedQuery)
             });
             trigger.click();
-            await sleep(180);
-            input = resolveSearchInput(config);
+            // Poll until the SPA navigates to the search page and the input appears (up to 2000ms)
+            const pollInterval = 150;
+            const maxWait = 2000;
+            let waited = 0;
+            while (!input && waited < maxWait) {
+                await sleep(pollInterval);
+                waited += pollInterval;
+                input = resolveSearchInput(config);
+            }
             openedByTrigger = !!input;
         }
 
@@ -1206,6 +1213,9 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
      */
     async function ensureHistoryNavigationExpanded(config: GeminiHistoryRemoteConfig): Promise<void> {
         const RECENT_KEYWORDS = ['最近', 'recent', '履歴', '기록', 'historial', 'historique', 'verlauf'];
+        // "发起新对话" 与 "打开边栏" 共用 data-test-id="side-nav-sparkle-button"，
+        // 必须排除新建对话项，否则会误触发新对话而非展开边栏。
+        const NEW_CONVERSATION_KEYWORDS = ['发起新对话', '新对话', 'new chat', 'new conversation', 'neue unterhaltung'];
 
         const clickEl = (el: Element | null): boolean => {
             if (el instanceof HTMLElement) {
@@ -1215,16 +1225,32 @@ export function createGeminiDomScraper(options: GeminiDomScraperOptions = {}) {
             return false;
         };
 
-        // 1. Open the side navigation if it appears collapsed (no expandable sections visible yet).
-        //    Idempotent: only acts when no section toggle is present (i.e. sidebar is closed).
-        const hasSectionToggle = document.querySelector('[data-test-id="expandable-section-toggle"]');
-        if (!hasSectionToggle) {
-            const sidebarButton = document.querySelector('[data-test-id="side-nav-sparkle-button"]')
-                || document.querySelector('[data-test-id="side-nav-menu-button"]');
-            if (clickEl(sidebarButton)) {
-                debugHistory('history-nav-open-sidebar', {});
-                await sleep(900);
+        const isElementVisible = (el: Element | null): boolean => {
+            if (!(el instanceof HTMLElement)) {
+                return false;
             }
+            const rect = el.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0;
+        };
+
+        // 1. Open the side navigation if it is collapsed.
+        //    收起态(rail 模式)下 expandable-section-toggle 依然存在于 DOM，因此不能据此判断
+        //    边栏是否已展开。真正的信号是"打开边栏"按钮（<button>）当前可见——展开态下该按钮
+        //    宽高为 0（不可见）。点击它即可展开边栏并加载"最近"对话列表。
+        const sidebarOpenButton = Array.from(
+            document.querySelectorAll('[data-test-id="side-nav-sparkle-button"], [data-test-id="side-nav-menu-button"]')
+        ).find((el) => {
+            const ariaLabel = (el.getAttribute('aria-label') ?? '').toLowerCase();
+            if (NEW_CONVERSATION_KEYWORDS.some((keyword) => ariaLabel.includes(keyword))) {
+                return false;
+            }
+            return el.tagName.toLowerCase() === 'button' && isElementVisible(el);
+        }) ?? null;
+        if (clickEl(sidebarOpenButton)) {
+            debugHistory('history-nav-open-sidebar', {
+                ariaLabel: sidebarOpenButton?.getAttribute('aria-label')
+            });
+            await sleep(900);
         }
 
         // 2. Expand the "Recent" section if it is collapsed.

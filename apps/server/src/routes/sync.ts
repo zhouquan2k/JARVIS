@@ -1,6 +1,11 @@
 import { Hono, type Context } from 'hono';
 import type { ServerConfig } from '../config.js';
-import { normalizePullRequest, normalizePushRequest } from '../types/sync.js';
+import {
+    normalizePullRequest,
+    normalizePushRequest,
+    normalizeTaskPullRequest,
+    normalizeTaskPushRequest
+} from '../types/sync.js';
 import { SyncService } from '../services/syncService.js';
 
 const ALLOW_HEADERS = 'content-type, x-sync-key';
@@ -46,9 +51,13 @@ async function readJsonBody(c: Context): Promise<unknown> {
     }
 }
 
-export function createSyncRouter(options: { service: SyncService; config: ServerConfig }) {
+export function createSyncRouter(options: {
+    service: SyncService;
+    config: ServerConfig;
+    ensureTaskSyncMigrated?: (syncKey: string) => Promise<void>;
+}) {
     const app = new Hono();
-    const { service, config } = options;
+    const { service, config, ensureTaskSyncMigrated } = options;
 
     app.use('*', async (c, next) => {
         const origin = c.req.header('origin');
@@ -92,6 +101,32 @@ export function createSyncRouter(options: { service: SyncService; config: Server
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Invalid pull request.';
             const code = /syncKey/i.test(message) ? 'SYNC_KEY_INVALID' : 'SYNC_PULL_INVALID';
+            return c.json({ error: message, code }, 400);
+        }
+    });
+
+    app.post('/tasks/push', async (c) => {
+        try {
+            const syncKey = resolveSyncKey(c.req.header('x-sync-key'), config);
+            await ensureTaskSyncMigrated?.(syncKey);
+            const body = normalizeTaskPushRequest(await readJsonBody(c));
+            return c.json(await service.pushTasks(syncKey, body.tasks, body.deletedTasks ?? []));
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Invalid task push request.';
+            const code = /syncKey/i.test(message) ? 'SYNC_KEY_INVALID' : 'SYNC_TASK_PUSH_INVALID';
+            return c.json({ error: message, code }, 400);
+        }
+    });
+
+    app.post('/tasks/pull', async (c) => {
+        try {
+            const syncKey = resolveSyncKey(c.req.header('x-sync-key'), config);
+            await ensureTaskSyncMigrated?.(syncKey);
+            const body = normalizeTaskPullRequest(await readJsonBody(c));
+            return c.json(service.pullTasks(syncKey, body.cursor));
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Invalid task pull request.';
+            const code = /syncKey/i.test(message) ? 'SYNC_KEY_INVALID' : 'SYNC_TASK_PULL_INVALID';
             return c.json({ error: message, code }, 400);
         }
     });

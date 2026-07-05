@@ -32,8 +32,8 @@ export class HttpConversationQueryProvider implements IConversationQueryProvider
 
 /**
  * 将宿主提供的 context provider 适配为会话查询 provider：
- * - 旧宿主的 context provider 自带 `getConversations`（如桌面 IPC 桥）：直接复用，保持原有行为。
- * - 新宿主的 context provider 仅实现文档上下文：回退到插件自建的 HTTP 会话查询。
+ * - 若宿主的 context provider 自带 `getConversations`：直接复用。
+ * - 否则回退到插件自建的 HTTP 会话查询。
  */
 export function toConversationQueryProvider(
     contextProvider: unknown,

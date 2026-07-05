@@ -103,8 +103,13 @@ async function runStage<T>(
     }
 }
 
-async function fetchTranscript(endpoint: string, url: string, signal?: AbortSignal): Promise<{ title: string; transcript: string }> {
-    const response = await fetch(endpoint, {
+async function fetchTranscript(
+    endpoint: string,
+    url: string,
+    fetchImpl: typeof fetch,
+    signal?: AbortSignal
+): Promise<{ title: string; transcript: string }> {
+    const response = await fetchImpl(endpoint, {
         method: 'POST',
         headers: {
             'content-type': 'application/json'
@@ -126,14 +131,15 @@ async function fetchTranscript(endpoint: string, url: string, signal?: AbortSign
 }
 
 export function createBilibiliImportPlugin(options: { contextBaseUrl?: string } = {}): PluginManifest {
-    const endpoint = buildImportEndpoint(options.contextBaseUrl);
-
     return {
         id: 'bilibili-import',
         name: 'Bilibili Import',
         version: '1.0.0',
         defaultEnabled: true,
         setup(api) {
+            const endpoint = buildImportEndpoint(options.contextBaseUrl ?? api.getHostContext().environment.contextBaseUrl);
+            const fetchImpl = api.getHostContext().getCapability<typeof fetch>('http-client')
+                ?? globalThis.fetch.bind(globalThis);
             const contributionQuery = api.getContributionQuery();
             const contribution: DocumentImportContribution<BilibiliImportParams> = {
                 id: 'bilibili-video',
@@ -157,7 +163,7 @@ export function createBilibiliImportPlugin(options: { contextBaseUrl?: string } 
                     const transcriptPayload = await runStage(input.hostApi, {
                         key: 'fetch-transcript',
                         label: '抓取文字稿'
-                    }, () => fetchTranscript(endpoint, normalizedUrl, input.signal));
+                    }, () => fetchTranscript(endpoint, normalizedUrl, fetchImpl, input.signal));
 
                     const resolvedTitle = input.params.title.trim() || transcriptPayload.title.trim() || 'bilibili-import';
                     const transcriptMarkdown = await runStage(input.hostApi, {

@@ -1,17 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import {
-    DESKTOP_CONTEXT_CREATE_NODE_CHANNEL,
-    DESKTOP_CONTEXT_DELETE_NODE_CHANNEL,
-    DESKTOP_CONTEXT_GET_CONTEXT_CHANNEL,
-    DESKTOP_CONTEXT_GET_PROJECT_DOCUMENTS_CHANNEL,
-    DESKTOP_CONTEXT_INITIALIZE_CHANNEL,
-    DESKTOP_CONTEXT_MOVE_NODE_CHANNEL,
-    DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL,
-    DESKTOP_CONTEXT_RENAME_NODE_CHANNEL,
-    DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL,
-    DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL,
-    DESKTOP_CONTEXT_GET_DOCUMENT_ID_CHANNEL,
-    DESKTOP_CONTEXT_RESOLVE_DOCUMENT_IDS_CHANNEL
+    DESKTOP_CONTEXT_CHANNELS
 } from '../shared/contextBridge';
 import {
     DESKTOP_PROVIDER_LOGIN_COMPLETED_CHANNEL,
@@ -34,49 +23,153 @@ import {
     type BrowserAutomationCookieRequest,
     type BrowserAutomationFetchRequest
 } from '../shared/browserAutomationBridge';
+import {
+    DESKTOP_FETCH_CHANNEL,
+    type DesktopFetchRequest,
+    type DesktopFetchResponse
+} from '../shared/fetchBridge';
+
+function normalizeHeaders(headers?: HeadersInit): Array<[string, string]> | undefined {
+    if (!headers) {
+        return undefined;
+    }
+
+    if (Array.isArray(headers)) {
+        return headers.map(([key, value]) => [key, value]);
+    }
+
+    if (headers instanceof Headers) {
+        return Array.from(headers.entries());
+    }
+
+    return Object.entries(headers);
+}
+
+async function serializeFetchRequest(input: RequestInfo | URL, init?: RequestInit): Promise<DesktopFetchRequest> {
+    if (input instanceof Request) {
+        return {
+            input: input.url,
+            init: {
+                method: init?.method ?? input.method,
+                headers: normalizeHeaders(init?.headers ?? input.headers),
+                bodyText: init?.body !== undefined ? String(init.body) : await input.text()
+            }
+        };
+    }
+
+    return {
+        input: String(input),
+        init: {
+            method: init?.method,
+            headers: normalizeHeaders(init?.headers),
+            bodyText: init?.body === undefined ? undefined : String(init.body)
+        }
+    };
+}
+
+async function desktopFetch(input: RequestInfo | URL, init?: RequestInit): Promise<DesktopFetchResponse> {
+    if (init?.signal?.aborted) {
+        throw new DOMException('The operation was aborted.', 'AbortError');
+    }
+
+    const payload = await serializeFetchRequest(input, init);
+    return ipcRenderer.invoke(DESKTOP_FETCH_CHANNEL, payload) as Promise<DesktopFetchResponse>;
+}
+
+const jarvisContext = {
+    initializeAccess() {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_CHANNELS.initializeAccess);
+    },
+    getContext() {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_CHANNELS.getContext);
+    },
+    getFolderMetadata(path: string) {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_CHANNELS.getFolderMetadata, path);
+    },
+    getProjectDocuments(curNode: string) {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_CHANNELS.getProjectDocuments, curNode);
+    },
+    readDocument(path: string) {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_CHANNELS.readDocument, path);
+    },
+    writeDocument(input: { path: string; mimeType: string; dataBase64: string; expectedVersion?: string }) {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_CHANNELS.writeDocument, input);
+    },
+    createNode(input: { parentPath?: string; name: string; kind: 'file' | 'directory' }) {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_CHANNELS.createNode, input);
+    },
+    deleteNode(path: string) {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_CHANNELS.deleteNode, path);
+    },
+    renameNode(input: { path: string; name: string }) {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_CHANNELS.renameNode, input);
+    },
+    moveNode(input: { path: string; targetParentPath?: string }) {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_CHANNELS.moveNode, input);
+    },
+    searchInScope(request: { query: string; scopePath?: string; maxResults?: number }) {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_CHANNELS.searchInScope, request);
+    },
+    getDocumentId(docPath: string) {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_CHANNELS.getDocumentId, docPath);
+    },
+    resolveDocumentIds(ids: string[]) {
+        return ipcRenderer.invoke(DESKTOP_CONTEXT_CHANNELS.resolveDocumentIds, ids);
+    }
+};
+
+contextBridge.exposeInMainWorld('jarvisContext', jarvisContext);
+contextBridge.exposeInMainWorld('jarvisFetchBridge', desktopFetch);
 
 contextBridge.exposeInMainWorld('chatprismDesktop', {
     runtimeEnv: {
         contextBaseUrl: process.env.CHATPRISM_RENDERER_CONTEXT_BASE_URL ?? process.env.CHATPRISM_CONTEXT_BASE_URL,
+        syncBaseUrl: process.env.CHATPRISM_RENDERER_SYNC_BASE_URL ?? process.env.CHATPRISM_SYNC_BASE_URL,
+        syncKey: process.env.CHATPRISM_RENDERER_SYNC_KEY ?? process.env.CHATPRISM_SYNC_KEY ?? process.env.VITE_SYNC_KEY,
+        codexBaseUrl: process.env.CHATPRISM_RENDERER_CODEX_BASE_URL ?? process.env.CHATPRISM_CODEX_BASE_URL,
+        providerConfigBaseUrl: process.env.CHATPRISM_RENDERER_PROVIDER_CONFIG_BASE_URL ?? process.env.CHATPRISM_PROVIDER_CONFIG_BASE_URL,
         domChatGptUrl: process.env.CHATPRISM_DOM_CHATGPT_URL,
         domGeminiUrl: process.env.CHATPRISM_DOM_GEMINI_URL,
         geminiApiKey: process.env.CHATPRISM_LLM_API_KEY || process.env.VITE_LLM_API_KEY || process.env.VITE_GEMINI_API_KEY
     },
     initializeContextAccess() {
-        return ipcRenderer.invoke(DESKTOP_CONTEXT_INITIALIZE_CHANNEL);
+        return jarvisContext.initializeAccess();
     },
     getContext() {
-        return ipcRenderer.invoke(DESKTOP_CONTEXT_GET_CONTEXT_CHANNEL);
+        return jarvisContext.getContext();
+    },
+    getFolderMetadata(path: string) {
+        return jarvisContext.getFolderMetadata(path);
     },
     getProjectDocuments(curNode: string) {
-        return ipcRenderer.invoke(DESKTOP_CONTEXT_GET_PROJECT_DOCUMENTS_CHANNEL, curNode);
+        return jarvisContext.getProjectDocuments(curNode);
     },
     readContextDocument(path: string) {
-        return ipcRenderer.invoke(DESKTOP_CONTEXT_READ_DOCUMENT_CHANNEL, path);
+        return jarvisContext.readDocument(path);
     },
     writeContextDocument(input: { path: string; mimeType: string; dataBase64: string; expectedVersion?: string }) {
-        return ipcRenderer.invoke(DESKTOP_CONTEXT_WRITE_DOCUMENT_CHANNEL, input);
+        return jarvisContext.writeDocument(input);
     },
     createContextNode(input: { parentPath?: string; name: string; kind: 'file' | 'directory' }) {
-        return ipcRenderer.invoke(DESKTOP_CONTEXT_CREATE_NODE_CHANNEL, input);
+        return jarvisContext.createNode(input);
     },
     deleteContextNode(path: string) {
-        return ipcRenderer.invoke(DESKTOP_CONTEXT_DELETE_NODE_CHANNEL, path);
+        return jarvisContext.deleteNode(path);
     },
     renameContextNode(input: { path: string; name: string }) {
-        return ipcRenderer.invoke(DESKTOP_CONTEXT_RENAME_NODE_CHANNEL, input);
+        return jarvisContext.renameNode(input);
     },
     moveContextNode(input: { path: string; targetParentPath?: string }) {
-        return ipcRenderer.invoke(DESKTOP_CONTEXT_MOVE_NODE_CHANNEL, input);
+        return jarvisContext.moveNode(input);
     },
     searchContextInScope(request: { query: string; scopePath?: string; maxResults?: number }) {
-        return ipcRenderer.invoke(DESKTOP_CONTEXT_SEARCH_IN_SCOPE_CHANNEL, request);
+        return jarvisContext.searchInScope(request);
     },
     getDocumentId(docPath: string) {
-        return ipcRenderer.invoke(DESKTOP_CONTEXT_GET_DOCUMENT_ID_CHANNEL, docPath);
+        return jarvisContext.getDocumentId(docPath);
     },
     resolveDocumentIds(ids: string[]) {
-        return ipcRenderer.invoke(DESKTOP_CONTEXT_RESOLVE_DOCUMENT_IDS_CHANNEL, ids);
+        return jarvisContext.resolveDocumentIds(ids);
     },
     openProviderLoginWindow(providerId: string) {
         return ipcRenderer.invoke(DESKTOP_PROVIDER_LOGIN_OPEN_CHANNEL, providerId);
@@ -92,6 +185,9 @@ contextBridge.exposeInMainWorld('chatprismDesktop', {
     },
     browserAutomationGetCookie(request: BrowserAutomationCookieRequest) {
         return ipcRenderer.invoke(DESKTOP_BROWSER_AUTOMATION_GET_COOKIE_CHANNEL, request);
+    },
+    fetch(input: RequestInfo | URL, init?: RequestInit) {
+        return desktopFetch(input, init);
     },
     onProviderLoginWindowOpened(listener: (providerId: string) => void) {
         const wrapped = (_event: Electron.IpcRendererEvent, payload: ProviderLoginEventPayload) => {

@@ -1,4 +1,8 @@
-import { DEFAULT_SYNC_BASE_URL, resolveSyncBaseUrl } from '@packages/core/config';
+import {
+    DEFAULT_CONTEXT_BASE_URL,
+    resolveContextBaseUrl,
+    type ResolveContextBaseUrlOptions
+} from '@packages/core/config';
 import type { Conversation } from '../../interfaces/Conversation';
 import type { ConversationQuery } from '../../interfaces/IConversationPersistProvider';
 import type {
@@ -18,45 +22,17 @@ import type {
 } from '@plugins/ai-agent/src/internal';
 import { HttpApiClient } from '@plugins/ai-agent/src/internal';
 
-export const DEFAULT_CONTEXT_BASE_URL = 'http://127.0.0.1:8787/api/context';
-
 export interface HttpContextProviderOptions {
     baseUrl?: string;
     fetchImpl?: typeof fetch;
 }
 
-export interface ResolveContextBaseUrlOptions {
-    env?: Record<string, string | undefined>;
-}
-
-function hasEnvContainer(
-    value: ResolveContextBaseUrlOptions | Record<string, string | undefined>
-): value is ResolveContextBaseUrlOptions {
-    return 'env' in value;
-}
+export { DEFAULT_CONTEXT_BASE_URL, resolveContextBaseUrl };
+export type { ResolveContextBaseUrlOptions };
 
 function normalizeBaseUrl(value?: string): string {
     const normalized = value?.trim();
     return (normalized ? normalized : DEFAULT_CONTEXT_BASE_URL).replace(/\/+$/, '');
-}
-
-export function resolveContextBaseUrl(
-    options: ResolveContextBaseUrlOptions | Record<string, string | undefined> = {}
-): string {
-    const env = hasEnvContainer(options) ? options.env : options;
-    const explicit = env?.CHATPRISM_CONTEXT_BASE_URL?.trim()
-        || env?.VITE_CONTEXT_BASE_URL?.trim()
-        || env?.WXT_CONTEXT_BASE_URL?.trim();
-    if (explicit) {
-        return explicit.replace(/\/+$/, '');
-    }
-
-    const syncBaseUrl = resolveSyncBaseUrl({ env });
-    if (syncBaseUrl !== DEFAULT_SYNC_BASE_URL && syncBaseUrl.endsWith('/api/sync')) {
-        return `${syncBaseUrl.slice(0, -'/api/sync'.length)}/api/context`;
-    }
-
-    return DEFAULT_CONTEXT_BASE_URL;
 }
 
 export class HttpContextProvider implements IContextProvider {

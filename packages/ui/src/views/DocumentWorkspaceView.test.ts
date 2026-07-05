@@ -13,8 +13,8 @@ import type { WorkspaceRuntimeContext } from '@packages/core/src';
 import { resetMockChatStore, useMockChatStore } from '../../test-support/mockChatStore';
 
 const agentConversationPanelStub = {
-    props: ['showAgentConversationList'],
-    setup(props: { showAgentConversationList?: boolean }) {
+    props: ['showScopeConversationList'],
+    setup(props: { showScopeConversationList?: boolean }) {
         const chatStore = useMockChatStore();
         const currentConversationTitle = computed(() => chatStore.currentConversation?.title ?? '');
         return {
@@ -25,7 +25,7 @@ const agentConversationPanelStub = {
     template: `
       <div>
         <div v-if="currentConversationTitle" data-testid="agent-conversation-title">{{ currentConversationTitle }}</div>
-        <div v-else-if="props.showAgentConversationList" data-testid="agent-document-conversation-list" />
+        <div v-else-if="props.showScopeConversationList" data-testid="agent-document-conversation-list" />
         <div v-else data-testid="agent-conversation-panel-stub" />
       </div>
     `
@@ -37,12 +37,12 @@ const workspaceAgentConfigPanelStub = {
         const documentStore = useDocumentWorkspaceStore();
         const chatStore = useMockChatStore();
         const selectedOwnerNode = computed(() => {
-            if (documentStore.selectedNodePath === '/' && documentStore.activeAgent) {
+            if (documentStore.selectedNodePath === '/' && documentStore.activeScopeData) {
                 return {
                     path: '/',
                     name: 'Root',
                     kind: 'directory',
-                    scopeKey: documentStore.activeAgentKey ?? '/',
+                    scopeKey: documentStore.activeScopeKey ?? '/',
                     ownsMetadata: true
                 };
             }
@@ -66,7 +66,7 @@ const workspaceAgentConfigPanelStub = {
                 return;
             }
 
-            await documentStore.saveAgentConfig({
+            await documentStore.saveFolderMetadata({
                 ownerPath: selectedOwnerNode.value.path,
                 patch
             });
@@ -83,24 +83,24 @@ const workspaceAgentConfigPanelStub = {
     },
     template: `
       <AgentView
-        v-if="selectedOwnerNode && documentStore.activeAgent && documentStore.activeAgentKey"
-        :agent-key="documentStore.activeAgentKey"
-        :agent="documentStore.activeAgent"
+        v-if="selectedOwnerNode && documentStore.activeScopeData && documentStore.activeScopeKey"
+        :agent-key="documentStore.activeScopeKey"
+        :agent="documentStore.activeScopeData"
         :owner-node="selectedOwnerNode"
-        :index-path="documentStore.agentIndexPath"
-        :index-document="documentStore.agentIndexDocument"
-        :index-draft-content="documentStore.agentIndexDraftContent"
-        :index-viewer-id="documentStore.agentIndexViewerId"
-        :index-pane-mode="documentStore.agentIndexPaneMode"
-        :index-is-saving="documentStore.agentIndexIsSaving"
-        :index-is-dirty="!!(documentStore.agentIndexPath && documentStore.dirtyPaths[documentStore.agentIndexPath])"
+        :index-path="documentStore.scopeIndexPath"
+        :index-document="documentStore.scopeIndexDocument"
+        :index-draft-content="documentStore.scopeIndexDraftContent"
+        :index-viewer-id="documentStore.scopeIndexViewerId"
+        :index-pane-mode="documentStore.scopeIndexPaneMode"
+        :index-is-saving="documentStore.scopeIndexIsSaving"
+        :index-is-dirty="!!(documentStore.scopeIndexPath && documentStore.dirtyPaths[documentStore.scopeIndexPath])"
         :providers="chatStore.availableProviders"
         :builtin-tools="builtinTools"
         :model-load-states="chatStore.providerModelStates"
         @load-provider-models="chatStore.ensureProviderModelsLoaded"
         @save-agent-config="saveSelectedAgentConfig"
-        @update-index-content="documentStore.updateAgentIndexDocument"
-        @save-index-document="documentStore.flushAgentIndexDocument"
+        @update-index-content="documentStore.updateScopeIndexDocument"
+        @save-index-document="documentStore.flushScopeIndexDocument"
         @open-document-link="emit('open-document-link', $event)"
         @open-conversation-link="emit('open-conversation-link', $event)"
       />
@@ -206,36 +206,6 @@ function mountDocumentWorkspace(options: Parameters<typeof mount<typeof Document
             if (input.activeScopeMetadata !== undefined) {
                 chatStore.saveWorkspaceAgentContext((input.activeScopeMetadata?.data ?? null) as ResolvedAgentConfig | null);
             }
-
-            const savedStatus = chatStore.restoreAgentViewStatus();
-            const sameSelection = savedStatus
-                && (
-                    savedStatus.activePath
-                        ? input.activePath === savedStatus.activePath
-                        : (input.selectedNodePath ?? null) === savedStatus.selectedNodePath
-                );
-
-            if (sameSelection) {
-                if (!savedStatus.activeConversationId) {
-                    if (chatStore.currentConversation) {
-                        chatStore.clearWorkspaceConversationSelection();
-                    }
-                    return;
-                }
-
-                if (chatStore.currentConversation?.id !== savedStatus.activeConversationId) {
-                    try {
-                        await chatStore.selectLocalConversation(savedStatus.activeConversationId);
-                    } catch {
-                        chatStore.clearWorkspaceConversationSelection();
-                    }
-                }
-                return;
-            }
-
-            if (chatStore.currentConversation) {
-                chatStore.clearWorkspaceConversationSelection();
-            }
         },
         registerCurrentErrorSource() {
             return () => undefined;
@@ -287,6 +257,7 @@ describe('DocumentWorkspaceView', () => {
     beforeEach(() => {
         setActivePinia(createPinia());
         resetMockChatStore();
+        localStorage.clear();
     });
 
     it('renders the three-pane document workspace shell with the root agent editor selected', async () => {
@@ -312,22 +283,22 @@ describe('DocumentWorkspaceView', () => {
                 },
                 stubs: {
                     WorkspaceRightPane: {
-                        props: ['activeAgent', 'agentResolutionError', 'isResolvingAgent'],
+                        props: ['activeScopeData', 'metadataResolutionError', 'isResolvingAgent'],
                         template: `
                           <div
                             data-testid="agent-pane"
-                            :data-agent-name="activeAgent?.name ?? ''"
-                            :data-agent-error="agentResolutionError ?? ''"
+                            :data-agent-name="activeScopeData?.name ?? ''"
+                            :data-agent-error="metadataResolutionError ?? ''"
                             :data-agent-loading="isResolvingAgent === true"
                           />
                         `
                     },
                     AgentView: {
-                        props: ['agentKey', 'ownerNode'],
+                        props: ['scopeKey', 'ownerNode'],
                         template: `
                           <div
                             data-testid="agent-view-stub"
-                            :data-agent-key="agentKey"
+                            :data-agent-key="scopeKey"
                             :data-owner-path="ownerNode.path"
                           />
                         `
@@ -446,7 +417,7 @@ describe('DocumentWorkspaceView', () => {
         const documentStore = useDocumentWorkspaceStore();
         expect(documentStore.selectedNodePath).toBe('/docs');
         expect(documentStore.activePath).toBeNull();
-        expect(documentStore.agentIndexPath).toBe('/docs/index.md');
+        expect(documentStore.scopeIndexPath).toBe('/docs/index.md');
     });
 
     it('allows the host to override the default assistant pane through the slot', async () => {
@@ -568,10 +539,10 @@ describe('DocumentWorkspaceView', () => {
         const documentStore = useDocumentWorkspaceStore();
         expect(documentStore.selectedNodePath).toBe('/notes');
         expect(documentStore.activePath).toBeNull();
-        expect(documentStore.agentIndexPath).toBe('/notes/index.md');
+        expect(documentStore.scopeIndexPath).toBe('/notes/index.md');
     });
 
-    it('routes normal directory index editing and saving through the agentIndex state', async () => {
+    it('routes normal directory index editing and saving through the scopeIndex state', async () => {
         const contextProvider = createMockContextProvider({
             nodes: [
                 { path: '/notes', name: 'notes', kind: 'directory' },
@@ -608,7 +579,7 @@ describe('DocumentWorkspaceView', () => {
         await flushPromises();
 
         const documentStore = useDocumentWorkspaceStore();
-        expect(documentStore.agentIndexDraftContent).toBe('# Updated notes index');
+        expect(documentStore.scopeIndexDraftContent).toBe('# Updated notes index');
         expect(documentStore.dirtyPaths['/notes/index.md']).toBe(true);
         expect(documentStore.activePath).toBeNull();
 
@@ -716,12 +687,12 @@ describe('DocumentWorkspaceView', () => {
                 },
                 stubs: {
                     WorkspaceRightPane: {
-                        props: ['showAgentConversationList', 'activeAgentKey'],
+                        props: ['showScopeConversationList', 'activeScopeKey'],
                         template: `
                           <div
                             data-testid="agent-pane"
-                            :data-show-agent-conversation-list="showAgentConversationList === true"
-                            :data-agent-key="activeAgentKey ?? ''"
+                            :data-show-agent-conversation-list="showScopeConversationList === true"
+                            :data-agent-key="activeScopeKey ?? ''"
                           />
                         `
                     },
@@ -741,7 +712,7 @@ describe('DocumentWorkspaceView', () => {
 
     it('publishes the current workspace selection after runtimeContext becomes available', async () => {
         const selectionEvents: Array<{
-            activeAgentKey: string | null;
+            activeScopeKey: string | null;
             activePath: string | null;
             activeDocumentPath: string | null;
             activeDocumentMimeType: string | null;
@@ -783,7 +754,7 @@ describe('DocumentWorkspaceView', () => {
             beforeRouteNavigate: vi.fn(),
             publishWorkspaceSelectionChanged: vi.fn(async (input) => {
                 selectionEvents.push({
-                    activeAgentKey: input.activeScopeKey ?? null,
+                    activeScopeKey: input.activeScopeKey ?? null,
                     activePath: input.activePath,
                     activeDocumentPath: input.activeDocument?.path ?? null,
                     activeDocumentMimeType: input.activeDocument?.mimeType ?? null
@@ -801,7 +772,7 @@ describe('DocumentWorkspaceView', () => {
         await flushPromises();
 
         expect(selectionEvents).toContainEqual({
-            activeAgentKey: '/',
+            activeScopeKey: '/',
             activePath: '/report.pdf',
             activeDocumentPath: '/report.pdf',
             activeDocumentMimeType: 'application/pdf'
@@ -1082,8 +1053,8 @@ describe('DocumentWorkspaceView', () => {
                         template: '<div data-testid="agent-pane" />'
                     },
                     DocumentEditorPane: {
-                        props: ['activeAgentName'],
-                        template: '<div data-testid="document-editor" :data-agent-name="activeAgentName ?? \'\'" />'
+                        props: ['activeScopeLabel'],
+                        template: '<div data-testid="document-editor" :data-agent-name="activeScopeLabel ?? \'\'" />'
                     }
                 }
             }
@@ -1190,7 +1161,7 @@ describe('DocumentWorkspaceView', () => {
                 id: 'conversation-1',
                 title: 'Guide discussion',
                 origin: 'local',
-                agentKey: '/docs/',
+                scopeKey: '/docs/',
                 updatedAt: 1,
                 messages: []
             }
@@ -1260,12 +1231,12 @@ describe('DocumentWorkspaceView', () => {
             global: {
                 stubs: {
                     WorkspaceRightPane: {
-                        props: ['activeAgent', 'agentResolutionError', 'isResolvingAgent'],
+                        props: ['activeScopeData', 'metadataResolutionError', 'isResolvingAgent'],
                         template: `
                           <div
                             data-testid="agent-pane"
-                            :data-agent-name="activeAgent?.name ?? ''"
-                            :data-agent-error="agentResolutionError ?? ''"
+                            :data-agent-name="activeScopeData?.name ?? ''"
+                            :data-agent-error="metadataResolutionError ?? ''"
                             :data-agent-loading="isResolvingAgent === true"
                           />
                         `
@@ -1297,12 +1268,12 @@ describe('DocumentWorkspaceView', () => {
             global: {
                 stubs: {
                     WorkspaceRightPane: {
-                        props: ['activeAgent', 'agentResolutionError', 'isResolvingAgent'],
+                        props: ['activeScopeData', 'metadataResolutionError', 'isResolvingAgent'],
                         template: `
                           <div
                             data-testid="agent-pane"
-                            :data-agent-name="activeAgent?.name ?? ''"
-                            :data-agent-error="agentResolutionError ?? ''"
+                            :data-agent-name="activeScopeData?.name ?? ''"
+                            :data-agent-error="metadataResolutionError ?? ''"
                             :data-agent-loading="isResolvingAgent === true"
                           />
                         `
@@ -1317,22 +1288,108 @@ describe('DocumentWorkspaceView', () => {
         await flushPromises();
         await wrapper.vm.$nextTick();
 
-        expect(chatStore.currentConversation?.id).toBe('conversation-saved');
-        expect(chatStore.workspaceMode).toBe('conversation');
-        expect(chatStore.historySource).toBe('local');
+        expect(chatStore.currentConversation?.id).toBe('conversation-current');
 
         expect(documentStore.selectedNodePath).toBe('/docs');
         expect(documentStore.activePath).toBe('/docs/guide.md');
         expect(documentStore.activeDocument?.path).toBe('/docs/guide.md');
         expect(documentStore.expandedPaths).toContain('/docs');
-        expect(documentStore.isAgentOwnerSelected).toBe(true);
+        expect(documentStore.isMetadataOwnerSelected).toBe(true);
 
         await wrapper.get('[data-path="/other.md"]').trigger('click');
         await flushPromises();
 
-        expect(chatStore.currentConversation).toBeNull();
+        expect(chatStore.currentConversation?.id).toBe('conversation-current');
         expect(documentStore.selectedNodePath).toBe('/other.md');
         expect(documentStore.activePath).toBe('/other.md');
+    });
+
+    it('restores the last persisted workspace file selection when remounting', async () => {
+        const contextProvider = createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' },
+                { path: '/docs/archive', name: 'archive', kind: 'directory', parentPath: '/docs' }
+            ],
+            documents: {
+                '/docs/guide.md': '# Guide'
+            }
+        });
+
+        const firstMount = mountDocumentWorkspace({
+            props: {
+                contextProvider
+            },
+            global: {
+                stubs: {
+                    DocumentEditorPane: {
+                        template: '<div data-testid="document-editor" />'
+                    }
+                }
+            }
+        });
+
+        await flushPromises();
+        const documentStore = useDocumentWorkspaceStore();
+        await documentStore.openNode('/docs/guide.md');
+        await flushPromises();
+        firstMount.unmount();
+
+        setActivePinia(createPinia());
+        resetMockChatStore();
+        const wrapper = mountDocumentWorkspace({
+            props: {
+                contextProvider
+            },
+            global: {
+                stubs: {
+                    DocumentEditorPane: {
+                        template: '<div data-testid="document-editor" />'
+                    }
+                }
+            }
+        });
+
+        await flushPromises();
+        await wrapper.vm.$nextTick();
+
+        const remountedStore = useDocumentWorkspaceStore();
+        expect(remountedStore.selectedNodePath).toBe('/docs/guide.md');
+        expect(remountedStore.activePath).toBe('/docs/guide.md');
+        expect(remountedStore.activeDocument?.path).toBe('/docs/guide.md');
+    });
+
+    it('falls back safely when the persisted workspace path is stale on remount', async () => {
+        localStorage.setItem('jarvis:knowledge-workspace:selection-snapshot', JSON.stringify({
+            selectedNodePath: '/docs/archive/old.md',
+            activePath: '/docs/archive/old.md'
+        }));
+
+        const wrapper = mountDocumentWorkspace({
+            props: {
+                contextProvider: createMockContextProvider({
+                    nodes: [
+                        { path: '/docs', name: 'docs', kind: 'directory' },
+                        { path: '/docs/archive', name: 'archive', kind: 'directory', parentPath: '/docs' }
+                    ],
+                    documents: {}
+                })
+            },
+            global: {
+                stubs: {
+                    DocumentEditorPane: {
+                        template: '<div data-testid="document-editor" />'
+                    }
+                }
+            }
+        });
+
+        await flushPromises();
+        await wrapper.vm.$nextTick();
+
+        const documentStore = useDocumentWorkspaceStore();
+        expect(documentStore.selectedNodePath).toBe('/docs/archive');
+        expect(documentStore.activePath).toBeNull();
     });
 
     it('keeps the agent panel in list mode after switching to a different node in the same agent scope', async () => {
@@ -1342,7 +1399,7 @@ describe('DocumentWorkspaceView', () => {
                 id: 'conversation-saved',
                 title: 'Saved Chat',
                 origin: 'local',
-                agentKey: '/docs/.agent.json',
+                scopeKey: '/docs/.agent.json',
                 updatedAt: 10,
                 messages: []
             }
@@ -1392,8 +1449,9 @@ describe('DocumentWorkspaceView', () => {
         await flushPromises();
         await wrapper.get('[data-testid="workspace-right-pane-tab-conversations"]').trigger('click');
 
-        expect(chatStore.currentConversation?.id).toBe('conversation-saved');
-        expect(wrapper.get('[data-testid="agent-conversation-title"]').text()).toBe('Saved Chat');
+        expect(chatStore.currentConversation).toBeNull();
+        expect(wrapper.find('[data-testid="agent-conversation-title"]').exists()).toBe(false);
+        expect(wrapper.get('[data-testid="agent-document-conversation-list"]').exists()).toBe(true);
 
         await wrapper.get('[data-path="/docs/reports"]').trigger('click');
         await flushPromises();
@@ -1422,12 +1480,12 @@ describe('DocumentWorkspaceView', () => {
             global: {
                 stubs: {
                     WorkspaceRightPane: {
-                        props: ['activeAgent', 'agentResolutionError', 'isResolvingAgent'],
+                        props: ['activeScopeData', 'metadataResolutionError', 'isResolvingAgent'],
                         template: `
                           <div
                             data-testid="agent-pane"
-                            :data-agent-name="activeAgent?.name ?? ''"
-                            :data-agent-error="agentResolutionError ?? ''"
+                            :data-agent-name="activeScopeData?.name ?? ''"
+                            :data-agent-error="metadataResolutionError ?? ''"
                             :data-agent-loading="isResolvingAgent === true"
                           />
                         `

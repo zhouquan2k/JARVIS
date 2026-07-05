@@ -436,6 +436,24 @@ The knowledge workspace MUST provide a higher-level navigation bridge that can r
 - **THEN** that lower-level node-opening operation MUST continue to work without owning route switching
 - **AND** the higher-level knowledge-workspace navigation bridge MUST remain responsible for route restoration
 
+### Requirement: Knowledge workspace MUST persist and restore the latest workspace node selection across reload
+The knowledge workspace MUST persist the latest effective workspace selection while the user navigates the file tree, and MUST restore that selection after a renderer refresh or app restart. The persisted snapshot MUST preserve both the selected tree node and the active document path so directory scope and open-document state can be recovered together. When the exact saved path no longer exists, restoration MUST fall back through the existing workspace path-resolution rules instead of failing.
+
+#### Scenario: Restore the latest selected document after reload
+- **WHEN** the user last selected a document node in the knowledge workspace and the renderer reloads
+- **THEN** the system MUST reopen that document as the active workspace node
+- **AND** it MUST restore the corresponding tree selection state
+
+#### Scenario: Restore a directory-scoped selection after reload
+- **WHEN** the user last selected a directory-scoped workspace context and no document was active
+- **THEN** the system MUST restore that directory selection after reload
+- **AND** it MUST NOT require a stale document path to exist
+
+#### Scenario: Fall back safely when the saved path is stale
+- **WHEN** the persisted workspace selection references a path that no longer exists
+- **THEN** the system MUST resolve the nearest existing workspace path using the normal restore fallback behavior
+- **AND** it MUST NOT fail the workspace mount because of the stale snapshot
+
 #### Scenario: Keep the agent owner indicator always visible
 - **WHEN** file treerender一个directory节点且该节点的 `isAgentOwner` 为 `true`
 - **THEN** 该图标 MUST 与directory名称一起visible，而不是依赖额外 hover 才出现
@@ -766,4 +784,3 @@ When an import fails before completion, the knowledge workspace MUST keep the wi
 - **WHEN** a summary-enabled import fails while generating summary content
 - **THEN** the workspace MUST surface an error message for the failed stage
 - **AND** the workspace MUST NOT present a success toast for the import
-

@@ -1,4 +1,4 @@
-import type { ControlledPageCapability, ControlledPageEvent } from '@packages/core/src/interfaces/ControlledPageCapability';
+import type { ControlledPageCapability, ControlledPageEvent } from '@packages/core';
 import type { DomModelInfo } from '../../../preload/domChat/domChatCore';
 import type { ReasoningEffort } from '../../../interfaces/IModelProvider';
 

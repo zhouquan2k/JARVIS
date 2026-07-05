@@ -21,6 +21,7 @@ function createHostApiStub() {
 function resolveDocumentImport(options: {
     languageModels?: Array<{ id: string; generateText: (prompt: string, options?: { system?: string; signal?: AbortSignal }) => Promise<string> }>;
     contextBaseUrl?: string;
+    fetchImpl?: typeof fetch;
 } = {}) {
     let registeredContribution: any = null;
     createBilibiliImportPlugin({
@@ -50,7 +51,17 @@ function resolveDocumentImport(options: {
             return {} as any;
         },
         getHostContext() {
-            return {} as any;
+            return {
+                environment: {
+                    contextBaseUrl: options.contextBaseUrl ?? 'http://127.0.0.1:8787/api/context'
+                },
+                getCapability(capability: string) {
+                    if (capability === 'http-client') {
+                        return options.fetchImpl ?? fetch;
+                    }
+                    return null;
+                }
+            } as any;
         }
     });
 
@@ -73,11 +84,11 @@ describe('createBilibiliImportPlugin', () => {
                 title: '  Video Title  ',
                 transcript: 'Line 1\nLine 2'
             })
-        }));
-        vi.stubGlobal('fetch', fetchMock);
+        })) as typeof fetch;
 
         const contribution = resolveDocumentImport({
-            contextBaseUrl: 'http://127.0.0.1:8787/api/context'
+            contextBaseUrl: 'http://127.0.0.1:8787/api/context',
+            fetchImpl: fetchMock
         });
         const hostApi = createHostApiStub();
         const result = await contribution.run({
@@ -109,19 +120,20 @@ describe('createBilibiliImportPlugin', () => {
 
     it('writes a summary document plus transcript resource when summary generation is enabled', async () => {
         const generateText = vi.fn(async () => '总结内容');
-        vi.stubGlobal('fetch', vi.fn(async () => ({
+        const fetchMock = vi.fn(async () => ({
             ok: true,
             json: async () => ({
                 title: 'Video Title',
                 transcript: 'Transcript body'
             })
-        })));
+        })) as typeof fetch;
 
         const contribution = resolveDocumentImport({
             languageModels: [{
                 id: 'mock-model',
                 generateText
-            }]
+            }],
+            fetchImpl: fetchMock
         });
         const hostApi = createHostApiStub();
         const result = await contribution.run({
@@ -159,15 +171,17 @@ describe('createBilibiliImportPlugin', () => {
     });
 
     it('fails early when summary generation is requested without an available language model', async () => {
-        vi.stubGlobal('fetch', vi.fn(async () => ({
+        const fetchMock = vi.fn(async () => ({
             ok: true,
             json: async () => ({
                 title: 'Video Title',
                 transcript: 'Transcript body'
             })
-        })));
+        })) as typeof fetch;
 
-        const contribution = resolveDocumentImport();
+        const contribution = resolveDocumentImport({
+            fetchImpl: fetchMock
+        });
         const hostApi = createHostApiStub();
 
         await expect(contribution.run({
@@ -182,14 +196,16 @@ describe('createBilibiliImportPlugin', () => {
     });
 
     it('marks the current stage as failed when transcript fetching fails', async () => {
-        vi.stubGlobal('fetch', vi.fn(async () => ({
+        const fetchMock = vi.fn(async () => ({
             ok: false,
             json: async () => ({
                 error: 'yt-dlp missing subtitles'
             })
-        })));
+        })) as typeof fetch;
 
-        const contribution = resolveDocumentImport();
+        const contribution = resolveDocumentImport({
+            fetchImpl: fetchMock
+        });
         const hostApi = createHostApiStub();
 
         await expect(contribution.run({

@@ -4,6 +4,24 @@ import type { ReasoningEffort } from './IModelProvider';
 import type { GroupMember } from '../group/groupTypes';
 
 export type ConversationRole = 'user' | 'assistant';
+
+export type GroupMemberStatus = 'pending' | 'streaming' | 'done' | 'error';
+export type GroupSummaryPhase = 'waiting' | 'streaming' | 'done' | 'error';
+
+export interface GroupMemberPart {
+    name: string;
+    providerId: string;
+    modelId: string;
+    content: string;
+    status: GroupMemberStatus;
+    error?: string;
+}
+
+export interface GroupSummaryPart {
+    phase: GroupSummaryPhase;
+    content: string;
+    error?: string;
+}
 export type MessageAttachmentType = 'image' | 'file';
 export type MessageFunctionalPartKind = 'tool_call' | 'tool_result' | 'tool_exchange' | 'function_call' | 'search' | 'trace';
 
@@ -82,6 +100,8 @@ export interface ConversationMessage {
     requestSnapshot?: MessageRequestSnapshot;
     annotations?: MessageAnnotation[];
     functionalParts?: MessageFunctionalPart[];
+    groupMembers?: GroupMemberPart[];
+    groupSummary?: GroupSummaryPart;
 }
 
 export interface ConversationSyncState {
@@ -189,7 +209,9 @@ export function cloneConversationMessage(message: ConversationMessage): Conversa
         attachments: message.attachments?.map(cloneAttachment),
         requestSnapshot: message.requestSnapshot ? cloneRequestSnapshot(message.requestSnapshot) : undefined,
         annotations: message.annotations?.map(cloneAnnotation),
-        functionalParts: message.functionalParts?.map(cloneFunctionalPart)
+        functionalParts: message.functionalParts?.map(cloneFunctionalPart),
+        groupMembers: message.groupMembers ? message.groupMembers.map((m) => ({ ...m })) : undefined,
+        groupSummary: message.groupSummary ? { ...message.groupSummary } : undefined
     };
 }
 
@@ -402,6 +424,12 @@ export function normalizeConversationMessage(value: unknown, index = 0): Convers
             ? message.functionalParts
                 .map((part, partIndex) => normalizeFunctionalPart(part, `functional-part-${index}-${partIndex}`))
                 .filter((part): part is MessageFunctionalPart => !!part)
+            : undefined,
+        groupMembers: Array.isArray(message.groupMembers)
+            ? (message.groupMembers as GroupMemberPart[]).map((m) => ({ ...m }))
+            : undefined,
+        groupSummary: message.groupSummary && typeof message.groupSummary === 'object'
+            ? { ...(message.groupSummary as GroupSummaryPart) }
             : undefined
     };
 }

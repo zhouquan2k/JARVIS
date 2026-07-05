@@ -1,5 +1,5 @@
 import type { ProviderConfig, ProviderModelCatalog, RuntimeMode } from '@packages/core/config';
-import type { ControlledPageCapability } from '@packages/core/src/interfaces/ControlledPageCapability';
+import type { ControlledPageCapability } from '@packages/core';
 import type { IModelProvider } from '../interfaces/IModelProvider';
 
 export type RuntimeCredentials = Record<string, string | undefined>;
@@ -19,7 +19,7 @@ export interface ModelProviderRuntimeOptions {
     providerOptionsResolver?: ModelProviderOptionsResolver;
     controlledPageCapability?: ControlledPageCapability;
     /** Override target URLs for DOM providers (e.g. point to a local mock in tests). */
-    domProviderUrls?: Partial<Record<'chatgpt-dom' | 'gemini-dom' | 'claude-dom', string>>;
+    domProviderUrls?: Partial<Record<'chatgpt-dom' | 'gemini-dom' | 'claude-dom' | 'gemini-dom-summary', string>>;
 }
 
 export interface ModelProviderRuntime {

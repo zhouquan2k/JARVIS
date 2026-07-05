@@ -4,7 +4,8 @@ import { toggleMark } from '@milkdown/kit/prose/commands';
 import { Slice, type Node as ProseMirrorNode } from '@milkdown/kit/prose/model';
 import { Decoration, DecorationSet, type EditorView as ProseMirrorEditorView } from '@milkdown/kit/prose/view';
 import * as milkdownKitUtils from '@milkdown/kit/utils';
-import { resolveContextBaseUrl } from '@plugins/ai-agent/api';
+import { resolveContextBaseUrl } from '@packages/core/config';
+import { decodeBase64, inferDocumentMimeType } from '@packages/core/src';
 import { translateWorkspaceMessage } from '../i18n';
 import { findMarkdownSearchMatches } from './markdownSearch';
 import { renderMermaidPreview } from './mermaidPreview';
@@ -652,6 +653,35 @@ export function resolveMarkdownImageUrl(src: string, documentPath: string | null
     return resolveMarkdownAssetUrl(src, documentPath);
 }
 
+function resolveMarkdownAssetWorkspacePath(src: string, documentPath: string | null): string | null {
+    const normalizedSrc = src.trim();
+    if (!normalizedSrc || normalizedSrc.startsWith('#')) {
+        return null;
+    }
+
+    const existingAssetPath = safeDocumentAssetPath(normalizedSrc);
+    if (existingAssetPath) {
+        return safeDecodePath(existingAssetPath);
+    }
+
+    if (/^data:/i.test(normalizedSrc) || /^https?:\/\//i.test(normalizedSrc)) {
+        return null;
+    }
+
+    const sourceWithoutHash = normalizedSrc.split('#', 1)[0] ?? normalizedSrc;
+    if (sourceWithoutHash.startsWith('/')) {
+        return safeDecodePath(sourceWithoutHash);
+    }
+
+    if (!documentPath) {
+        return null;
+    }
+
+    const documentDirectory = documentPath.slice(0, documentPath.lastIndexOf('/') + 1) || '/';
+    const resolvedPath = new URL(sourceWithoutHash, `http://workspace.local${documentDirectory}`).pathname;
+    return safeDecodePath(resolvedPath);
+}
+
 function resolveMarkdownAssetUrl(src: string, documentPath: string | null): string {
     const normalizedSrc = src.trim();
     if (!normalizedSrc) {
@@ -672,6 +702,28 @@ function resolveMarkdownAssetUrl(src: string, documentPath: string | null): stri
         env: readRuntimeEnv()
     });
     return `${contextBaseUrl}/document-asset?path=${encodeURIComponent(safeDecodePath(resolvedPath))}`;
+}
+
+function getDesktopContextDocumentReader():
+    | ((path: string) => Promise<{ mimeType: string; dataBase64: string }>)
+    | null {
+    if (typeof window === 'undefined') {
+        return null;
+    }
+
+    if (window.jarvisContext?.readDocument) {
+        return (path: string) => window.jarvisContext!.readDocument(path);
+    }
+
+    if (window.chatprismDesktop?.readContextDocument) {
+        return (path: string) => window.chatprismDesktop!.readContextDocument(path);
+    }
+
+    return null;
+}
+
+function canResolveMarkdownAssetLocally(src: string, documentPath: string | null): boolean {
+    return !!getDesktopContextDocumentReader() && !!resolveMarkdownAssetWorkspacePath(src, documentPath);
 }
 
 export function resolveMarkdownDocumentLinkPath(href: string, documentPath: string | null): string | null {
@@ -1737,8 +1789,41 @@ function attachMarkdownImageEnhancements(
     }
 
     const controller = new AbortController();
+    const localAssetUrlCache = new Map<string, Promise<string>>();
+    const localAssetObjectUrls = new Set<string>();
     let pdfEmbedTimer: number | null = null;
     let imageEnhancementTimer: number | null = null;
+
+    const resolveLocalAssetUrl = async (src: string): Promise<string> => {
+        const assetPath = resolveMarkdownAssetWorkspacePath(src, documentPath);
+        const reader = getDesktopContextDocumentReader();
+        if (!assetPath || !reader || typeof URL.createObjectURL !== 'function') {
+            return resolveMarkdownAssetUrl(src, documentPath);
+        }
+
+        const cached = localAssetUrlCache.get(assetPath);
+        if (cached) {
+            return cached;
+        }
+
+        const pending = reader(assetPath)
+            .then((document) => {
+                const bytes = decodeBase64(document.dataBase64);
+                const blob = new Blob([bytes], {
+                    type: document.mimeType || inferDocumentMimeType(assetPath)
+                });
+                const objectUrl = URL.createObjectURL(blob);
+                localAssetObjectUrls.add(objectUrl);
+                return objectUrl;
+            })
+            .catch((error) => {
+                localAssetUrlCache.delete(assetPath);
+                throw error;
+            });
+
+        localAssetUrlCache.set(assetPath, pending);
+        return pending;
+    };
 
     const schedulePdfEmbedHydration = () => {
         if (controller.signal.aborted) {
@@ -1751,7 +1836,7 @@ function attachMarkdownImageEnhancements(
 
         pdfEmbedTimer = window.setTimeout(() => {
             pdfEmbedTimer = null;
-            hydratePdfEmbedBlocks(root, documentPath);
+            hydratePdfEmbedBlocks(root, documentPath, resolveLocalAssetUrl);
         }, 0);
     };
 
@@ -1766,7 +1851,7 @@ function attachMarkdownImageEnhancements(
 
         imageEnhancementTimer = window.setTimeout(() => {
             imageEnhancementTimer = null;
-            hydrateResizableMarkdownImages(root, documentPath, onResizeMarkdownImage, getMarkdownSource);
+            hydrateResizableMarkdownImages(root, documentPath, resolveLocalAssetUrl, onResizeMarkdownImage, getMarkdownSource);
         }, 0);
     };
 
@@ -1798,6 +1883,13 @@ function attachMarkdownImageEnhancements(
             window.clearTimeout(imageEnhancementTimer);
             imageEnhancementTimer = null;
         }
+        if (typeof URL.revokeObjectURL === 'function') {
+            for (const objectUrl of localAssetObjectUrls) {
+                URL.revokeObjectURL(objectUrl);
+            }
+        }
+        localAssetObjectUrls.clear();
+        localAssetUrlCache.clear();
     }, { once: true });
 
     root.addEventListener('click', (event) => {
@@ -1834,6 +1926,17 @@ function attachMarkdownImageEnhancements(
 
         event.preventDefault();
         event.stopPropagation();
+        if (canResolveMarkdownAssetLocally(href, documentPath)) {
+            void resolveLocalAssetUrl(href)
+                .then((resolvedUrl) => {
+                    window.open(resolvedUrl, '_blank');
+                })
+                .catch(() => {
+                    window.open(resolveMarkdownAssetUrl(href, documentPath), '_blank');
+                });
+            return;
+        }
+
         window.open(resolveMarkdownAssetUrl(href, documentPath), '_blank');
     }, {
         capture: true,
@@ -1920,27 +2023,42 @@ function applyRatioFromSource(
 function hydrateResizableMarkdownImages(
     root: HTMLElement,
     documentPath: string | null,
+    resolveLocalAssetUrl: ((src: string) => Promise<string>) | undefined,
     onResizeMarkdownImage?: (payload: { src: string; ratio: number }) => void,
     getMarkdownSource?: () => string
 ): void {
     const images = root.querySelectorAll<HTMLImageElement>('.milkdown img');
     images.forEach((image) => {
-        const src = image.getAttribute('src')?.trim() ?? '';
-        if (!src || /^data:/i.test(src)) {
+        const currentSrc = image.getAttribute('src')?.trim() ?? '';
+        const sourceKey = image.dataset.markdownAssetSource?.trim() || currentSrc;
+        if (!sourceKey || /^data:/i.test(sourceKey)) {
             return;
         }
 
-        const assetPath = safeDocumentAssetPath(src);
-        const isRemoteOnly = /^https?:\/\//i.test(src) && !assetPath;
+        image.dataset.markdownAssetSource = sourceKey;
+
+        const assetPath = safeDocumentAssetPath(sourceKey);
+        const isRemoteOnly = /^https?:\/\//i.test(sourceKey) && !assetPath;
         if (isRemoteOnly) {
             return;
+        }
+
+        if (resolveLocalAssetUrl && canResolveMarkdownAssetLocally(sourceKey, documentPath)) {
+            void resolveLocalAssetUrl(sourceKey)
+                .then((resolvedUrl) => {
+                    if (!image.isConnected || image.getAttribute('src') === resolvedUrl) {
+                        return;
+                    }
+                    image.setAttribute('src', resolvedUrl);
+                })
+                .catch(() => undefined);
         }
 
         // Already wrapped: only refresh the ratio. Crepe re-applies
         // style.height on every NodeView update, so we have to re-assert
         // our width-based sizing each time hydrate runs.
         if (image.closest('.markdown-image-resize-frame')) {
-            const refresh = () => applyRatioFromSource(image, src, documentPath, getMarkdownSource);
+            const refresh = () => applyRatioFromSource(image, sourceKey, documentPath, getMarkdownSource);
             if (image.complete && image.naturalWidth > 0) {
                 refresh();
             } else {
@@ -1955,7 +2073,7 @@ function hydrateResizableMarkdownImages(
             return;
         }
 
-        const applyOnce = () => applyRatioFromSource(image, src, documentPath, getMarkdownSource);
+        const applyOnce = () => applyRatioFromSource(image, sourceKey, documentPath, getMarkdownSource);
         if (image.complete && image.naturalWidth > 0) {
             applyOnce();
         } else {
@@ -2016,7 +2134,7 @@ function hydrateResizableMarkdownImages(
                     ? Number((latestWidth / baseWidth).toFixed(2))
                     : 1;
                 onResizeMarkdownImage?.({
-                    src,
+                    src: sourceKey,
                     ratio: Number.isFinite(ratio) && ratio > 0 ? ratio : 1
                 });
             };
@@ -2032,7 +2150,11 @@ function hydrateResizableMarkdownImages(
     });
 }
 
-function hydratePdfEmbedBlocks(root: HTMLElement, documentPath: string | null): void {
+function hydratePdfEmbedBlocks(
+    root: HTMLElement,
+    documentPath: string | null,
+    resolveLocalAssetUrl?: (src: string) => Promise<string>
+): void {
     const placeholders = root.querySelectorAll<HTMLElement>('.markdown-pdf-embed[data-pdf-candidates]');
     placeholders.forEach((placeholder) => {
         if (placeholder.querySelector('.markdown-pdf-embed__frame')) {
@@ -2074,7 +2196,7 @@ function hydratePdfEmbedBlocks(root: HTMLElement, documentPath: string | null): 
         object.append(fallbackLink);
         placeholder.append(object);
 
-        void resolvePdfEmbedUrl(candidates, documentPath).then((resolvedUrl) => {
+        void resolvePdfEmbedUrl(candidates, documentPath, resolveLocalAssetUrl).then((resolvedUrl) => {
             if (!placeholder.isConnected || !object.isConnected) {
                 return;
             }
@@ -2132,15 +2254,36 @@ function parsePdfEmbedBlockContent(content: string): { label: string; candidates
     }
 }
 
-async function resolvePdfEmbedUrl(candidates: string[], documentPath: string | null): Promise<string> {
+async function resolvePdfEmbedUrl(
+    candidates: string[],
+    documentPath: string | null,
+    resolveLocalAssetUrl?: (src: string) => Promise<string>
+): Promise<string> {
     const urls = candidates.map((candidate) => resolveMarkdownAssetUrl(candidate, documentPath));
-    const cacheKey = JSON.stringify(urls);
+    const cacheKey = JSON.stringify({
+        urls,
+        desktopLocal: !!resolveLocalAssetUrl
+    });
     const cached = pdfEmbedResolutionCache.get(cacheKey);
     if (cached) {
         return cached;
     }
 
     const resolution = (async () => {
+        if (resolveLocalAssetUrl) {
+            for (const candidate of candidates) {
+                if (!canResolveMarkdownAssetLocally(candidate, documentPath)) {
+                    continue;
+                }
+
+                try {
+                    return await resolveLocalAssetUrl(candidate);
+                } catch {
+                    continue;
+                }
+            }
+        }
+
         if (typeof fetch !== 'function') {
             return urls[0] ?? '';
         }

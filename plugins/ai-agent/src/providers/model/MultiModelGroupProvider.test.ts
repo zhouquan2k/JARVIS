@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { MultiModelGroupProvider } from './MultiModelGroupProvider';
 import type { IModelProvider, ProviderSendResult, ProviderStreamUpdate } from '../../interfaces/IModelProvider';
 import type { GroupConfig } from '../../group/groupTypes';
+import { composeGroupSummaryPrompt } from '../../group/groupSummaryPrompt';
 
 function makeMockProvider(id: string, responseText: string): IModelProvider & { abortCalled: boolean } {
     const mock = {
@@ -32,7 +33,9 @@ function makeProvider(config: GroupConfig) {
 
     const group = new MultiModelGroupProvider({
         resolveMemberProvider: (id) => providers[id],
-        getGroupConfig: () => config
+        getGroupConfig: () => config,
+        resolveSummarizer: () => null,
+        getSummarizerConfig: () => null
     });
 
     return { group, providers };
@@ -69,7 +72,9 @@ describe('MultiModelGroupProvider', () => {
 
         const group = new MultiModelGroupProvider({
             resolveMemberProvider: (id) => providers[id],
-            getGroupConfig: () => ({ members })
+            getGroupConfig: () => ({ members }),
+            resolveSummarizer: () => null,
+            getSummarizerConfig: () => null
         });
 
         const updates: string[] = [];
@@ -130,7 +135,9 @@ describe('MultiModelGroupProvider', () => {
 
         const group = new MultiModelGroupProvider({
             resolveMemberProvider: (id) => providers[id],
-            getGroupConfig: () => ({ members })
+            getGroupConfig: () => ({ members }),
+            resolveSummarizer: () => null,
+            getSummarizerConfig: () => null
         });
 
         const sendPromise = group.sendMessage('test', {}, () => {});
@@ -159,7 +166,9 @@ describe('MultiModelGroupProvider', () => {
         };
         const group = new MultiModelGroupProvider({
             resolveMemberProvider: (id) => providers[id],
-            getGroupConfig
+            getGroupConfig,
+            resolveSummarizer: () => null,
+            getSummarizerConfig: () => null
         });
 
         const result = await group.sendMessage('Tell me something', { modelId: 'dom' }, () => {});
@@ -179,7 +188,9 @@ describe('MultiModelGroupProvider', () => {
         };
         const group = new MultiModelGroupProvider({
             resolveMemberProvider: (id) => providers[id],
-            getGroupConfig
+            getGroupConfig,
+            resolveSummarizer: () => null,
+            getSummarizerConfig: () => null
         });
 
         const dynamicMembers = [
@@ -204,7 +215,9 @@ describe('MultiModelGroupProvider', () => {
         };
         const group = new MultiModelGroupProvider({
             resolveMemberProvider: (id) => providers[id],
-            getGroupConfig
+            getGroupConfig,
+            resolveSummarizer: () => null,
+            getSummarizerConfig: () => null
         });
 
         await group.applyPageDefaults({
@@ -279,7 +292,9 @@ describe('MultiModelGroupProvider', () => {
         };
         const group = new MultiModelGroupProvider({
             resolveMemberProvider: (id) => providers[id],
-            getGroupConfig
+            getGroupConfig,
+            resolveSummarizer: () => null,
+            getSummarizerConfig: () => null
         });
 
         await group.applyPageDefaults({ modelId: 'dom', reasoningEffort: 'high' });
@@ -287,6 +302,55 @@ describe('MultiModelGroupProvider', () => {
         expect(getGroupConfig).toHaveBeenCalledWith('dom');
         expect(providers['chatgpt-dom'].applyPageDefaults).toHaveBeenCalledWith({ modelId: 'dom', reasoningEffort: 'high' });
         expect(providers['gemini-dom'].applyPageDefaults).toHaveBeenCalledWith({ modelId: 'dom', reasoningEffort: 'high' });
+    });
+
+    it('reuses the same summarizer conversation across group summaries', async () => {
+        const memberProviders: Record<string, ReturnType<typeof makeMockProvider>> = {
+            'chatgpt-codex': makeMockProvider('chatgpt-codex', 'Alpha'),
+            'gemini-api': makeMockProvider('gemini-api', 'Beta')
+        };
+        const summarizer = makeMockProvider('gemini-dom-summary', '## Consensus\n中文总结');
+        const group = new MultiModelGroupProvider({
+            resolveMemberProvider: (id) => memberProviders[id],
+            getGroupConfig: () => ({ members }),
+            resolveSummarizer: () => summarizer,
+            getSummarizerConfig: () => ({ providerId: 'gemini-dom-summary', modelId: '3.1 Pro' })
+        });
+
+        await group.sendMessage('first', {}, () => {});
+        await group.sendMessage('second', {}, () => {});
+
+        const firstSummaryOptions = (summarizer.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][1];
+        const secondSummaryOptions = (summarizer.sendMessage as ReturnType<typeof vi.fn>).mock.calls[1][1];
+
+        expect(firstSummaryOptions).toMatchObject({ modelId: '3.1 Pro' });
+        expect(firstSummaryOptions.history).toBeUndefined();
+        expect(secondSummaryOptions).toMatchObject({
+            modelId: '3.1 Pro',
+            history: [{ role: 'user', content: '继续沿用当前总结对话。' }]
+        });
+    });
+
+    it('summary prompt explicitly requires simplified chinese body text', () => {
+        const prompt = composeGroupSummaryPrompt([
+            {
+                name: 'ChatGPT',
+                providerId: 'chatgpt-codex',
+                modelId: 'auto',
+                content: 'English mixed response',
+                status: 'done'
+            },
+            {
+                name: 'Gemini',
+                providerId: 'gemini-api',
+                modelId: 'gemini-2.5-flash',
+                content: 'Another mixed response',
+                status: 'done'
+            }
+        ]);
+
+        expect(prompt).toContain('The summary body MUST be written in Simplified Chinese');
+        expect(prompt).toContain('Do not default to English');
     });
 
     it('feeds previous-round replies from other members (cross-round visibility)', async () => {

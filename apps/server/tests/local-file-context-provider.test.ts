@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { DEFAULT_WORKSPACE_METADATA_BOOTSTRAP } from '@packages/core';
 import { LocalFileContextProvider } from '../src/providers/localFileContextProvider.js';
 
 const tempRoots: string[] = [];
@@ -14,7 +15,7 @@ describe('LocalFileContextProvider.getContext', () => {
         tempRoots.length = 0;
     });
 
-    it('returns a full tree with owner markers, effective agent keys and aligned agent configs', async () => {
+    it('returns a full tree with owner markers, effective agent keys and raw scope metadata', async () => {
         const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-local-context-'));
         tempRoots.push(rootPath);
 
@@ -65,26 +66,19 @@ describe('LocalFileContextProvider.getContext', () => {
         });
 
         expect(context.folderMetadata['/']?.data).toMatchObject({
-            name: 'Default Knowledge Agent',
-            scopePath: '/',
-            sourcePaths: ['/.agent.json']
+            ...DEFAULT_WORKSPACE_METADATA_BOOTSTRAP
         });
         expect(context.folderMetadata['/workspace/']?.data).toMatchObject({
             name: 'Workspace Agent',
-            scopePath: '/workspace',
-            sourcePaths: ['/.agent.json', '/workspace/.agent.json']
+            instructions: 'Handle workspace docs.'
         });
         expect(context.folderMetadata['/workspace/archive/']?.data).toMatchObject({
             name: 'Archive Agent',
-            scopePath: '/workspace/archive',
-            instructions: 'Handle archived docs.',
-            sourcePaths: ['/.agent.json', '/workspace/.agent.json', '/workspace/archive/.agent.json']
+            instructions: 'Handle archived docs.'
         });
-        expect(context.folderMetadata['/workspace/archive/']?.data?.effectiveInstructions).toContain('Handle workspace docs.');
-        expect(context.folderMetadata['/workspace/archive/']?.data?.effectiveInstructions).toContain('Handle archived docs.');
     });
 
-    it('merges default tools into the root agent and lets descendants inherit them', async () => {
+    it('preserves raw scope tool metadata without provider-side agent merging', async () => {
         const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-local-context-'));
         tempRoots.push(rootPath);
 
@@ -108,28 +102,12 @@ describe('LocalFileContextProvider.getContext', () => {
         const provider = new LocalFileContextProvider({ rootPath });
         const context = await provider.getContext();
 
+        expect(context.folderMetadata['/']?.data?.tools).toEqual(DEFAULT_WORKSPACE_METADATA_BOOTSTRAP.tools);
         expect(context.folderMetadata['/workspace/']?.data?.tools).toEqual([
-            { id: 'read_current_file', description: 'Read the currently active file.' },
-            { id: 'list_directory', description: 'List files and directories within the knowledge workspace. Use "." for the current agent root and absolute paths for workspace locations.' },
             { id: 'read_file', description: 'Read workspace files only' },
-            { id: 'search_in_scope', description: 'Search for relevant text within the current agent scope.' },
-            { id: 'replace_text_in_file', description: 'Replace an exact text match in a file.' },
-            { id: 'replace_range_in_file', description: 'Replace text within a specific line and column range.' },
-            { id: 'insert_text_in_file', description: 'Insert text at a specific position in a file.' },
-            { id: 'delete_range_in_file', description: 'Delete text within a specific line and column range.' },
-            { id: 'write_file', description: 'Create or overwrite an entire file.' },
             { id: 'search_workspace', description: 'Search the workspace subtree' }
         ]);
         expect(context.folderMetadata['/workspace/archive/']?.data?.tools).toEqual([
-            { id: 'read_current_file', description: 'Read the currently active file.' },
-            { id: 'list_directory', description: 'List files and directories within the knowledge workspace. Use "." for the current agent root and absolute paths for workspace locations.' },
-            { id: 'read_file', description: 'Read workspace files only' },
-            { id: 'search_in_scope', description: 'Search for relevant text within the current agent scope.' },
-            { id: 'replace_text_in_file', description: 'Replace an exact text match in a file.' },
-            { id: 'replace_range_in_file', description: 'Replace text within a specific line and column range.' },
-            { id: 'insert_text_in_file', description: 'Insert text at a specific position in a file.' },
-            { id: 'delete_range_in_file', description: 'Delete text within a specific line and column range.' },
-            { id: 'write_file', description: 'Create or overwrite an entire file.' },
             { id: 'search_workspace', description: 'Search archived files only' },
             { id: 'cite_sources', description: 'Cite source files' }
         ]);
@@ -186,13 +164,12 @@ describe('LocalFileContextProvider.getContext', () => {
         });
         expect(context.folderMetadata['/reports/']?.data).toMatchObject({
             name: 'Reports Mount',
-            scopePath: '/reports',
-            sourcePaths: ['/.agent.json', '/reports/.agent.json']
+            instructions: 'Handle mounted reports.',
+            linkDir: path.relative(reportsPath, targetPath)
         });
         expect(context.folderMetadata['/reports/archive/']?.data).toMatchObject({
             name: 'Archive Agent',
-            scopePath: '/reports/archive',
-            sourcePaths: ['/.agent.json', '/reports/.agent.json', '/reports/archive/.agent.json']
+            instructions: 'Handle mounted archives.'
         });
 
         const initialSummary = await provider.readDocument('/reports/summary.md');

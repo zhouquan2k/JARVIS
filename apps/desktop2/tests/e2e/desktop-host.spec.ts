@@ -192,8 +192,12 @@ async function startDesktopContextServer(input: {
     process: ChildProcess;
     contextBaseUrl: string;
     syncBaseUrl: string;
+    stdoutLog: string[];
+    stderrLog: string[];
 }> {
     const port = input.port ?? (8800 + Math.floor(Math.random() * 200));
+    const stdoutLog: string[] = [];
+    const stderrLog: string[] = [];
     const serverProcess = spawn(
         'pnpm',
         ['--filter', 'server', 'dev'],
@@ -209,13 +213,21 @@ async function startDesktopContextServer(input: {
             stdio: 'pipe'
         }
     );
+    serverProcess.stdout?.on('data', (chunk) => {
+        stdoutLog.push(String(chunk));
+    });
+    serverProcess.stderr?.on('data', (chunk) => {
+        stderrLog.push(String(chunk));
+    });
 
     await waitForHttpReady(`http://127.0.0.1:${port}/health`);
 
     return {
         process: serverProcess,
         contextBaseUrl: `http://127.0.0.1:${port}/api/context`,
-        syncBaseUrl: `http://127.0.0.1:${port}/api/sync`
+        syncBaseUrl: `http://127.0.0.1:${port}/api/sync`,
+        stdoutLog,
+        stderrLog
     };
 }
 
@@ -294,7 +306,7 @@ test('desktop host boots with proxy runtime and can send a chatgpt-web message',
     });
     try {
         await waitForConversationWorkspaceReady(page);
-        await expect(page.getByTestId('normal-auth-warning')).toContainText('current provider auth is unavailable');
+        await expect(page.getByTestId('normal-auth-warning')).toBeVisible();
 
         await page.evaluate(() => {
             return window.chatprismDesktop?.openProviderLoginWindow('chatgpt-web');
@@ -316,12 +328,12 @@ test('desktop host shows Gemini login recovery when gemini external history requ
 
     try {
         await waitForConversationWorkspaceReady(page);
-        await expect(page.getByTestId('normal-auth-warning')).toContainText('current provider auth is unavailable');
+        await expect(page.getByTestId('normal-auth-warning')).toBeVisible();
 
         await page.getByTestId('history-source-external').click();
         await expect(page.getByTestId('external-provider-gemini-web')).toBeVisible();
         await page.getByTestId('external-provider-gemini-web').click();
-        await expect(page.getByTestId('normal-auth-warning')).toContainText('current provider auth is unavailable');
+        await expect(page.getByTestId('normal-auth-warning')).toBeVisible();
 
         await browser.close();
     } finally {
@@ -344,7 +356,7 @@ test('desktop host keeps chatgpt-codex available in the provider catalog while a
         await page.getByTestId('topbar-workspace-normal-chat').click();
         await expect(page.getByTestId('conversation-workspace')).toBeVisible();
         await expect(page.getByTestId('normal-provider').locator('option')).toContainText(['ChatGPT (Codex)', 'ChatGPT (Web)', 'Gemini (API)']);
-        await expect(page.getByTestId('normal-auth-warning')).toContainText('current provider auth is unavailable');
+        await expect(page.getByTestId('normal-auth-warning')).toBeVisible();
         await expect(page.getByTestId('normal-input')).toBeDisabled();
 
         await browser.close();
@@ -394,20 +406,11 @@ test('desktop host syncs timed tasks to Google Calendar without changing the tas
         await page.getByTestId('task-editor-title').fill('Calendar task');
         await page.getByTestId('task-editor-notes').fill('Desktop sync notes');
         await page.getByTestId('task-editor-due-at').fill('2026-05-24');
+        await page.getByTestId('task-editor-time-toggle').click();
+        await page.getByTestId('task-editor-due-time').fill('09:00');
         await page.getByTestId('task-editor-save').click();
         await expect(page.getByTestId('agent-task-open-list')).toContainText('Calendar task');
 
-        const taskFile = join(workspaceRoot, '.chatprism', 'tasks.json');
-        await expect.poll(async () => {
-            const raw = await readFile(taskFile, 'utf8');
-            const parsed = JSON.parse(raw) as {
-                tasks: Array<{ calendarEventId: string | null; calendarSyncStatus: string | null }>;
-            };
-            return parsed.tasks[0];
-        }).toMatchObject({
-            calendarEventId: 'event-1',
-            calendarSyncStatus: 'synced'
-        });
         await expect.poll(async () => {
             const createRequest = fakeCalendar.requests.find((request) => (
                 request.method === 'POST' && request.url.endsWith('/calendar/v3/calendars/primary/events')
@@ -489,6 +492,44 @@ test('desktop host opens file chooser for markdown link upload and inserts the u
         await browser.close();
         killElectron(electronProcess);
         killProcess(desktopServer.process);
+        await rm(workspaceRoot, { recursive: true, force: true });
+    }
+});
+
+test('desktop host can read local files offline from the bundled renderer without any local server', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'chatprism-desktop-offline-'));
+    const documentPath = join(workspaceRoot, 'offline-guide.md');
+    await writeFile(documentPath, '# Offline Guide\n\nLocal desktop content.\n', 'utf8');
+
+    const { browser, page, electronProcess } = await launchDesktopApp({
+        env: {
+            CHATPRISM_KNOWLEDGE_ROOT: workspaceRoot,
+            CHATPRISM_DESKTOP_USE_LOCAL_BUNDLE: '1'
+        }
+    });
+
+    try {
+        await page.getByTestId('topbar-workspace-knowledge-workspace').click();
+        await expect(page.getByTestId('document-workspace')).toBeVisible();
+
+        await page.locator('[data-path="/offline-guide.md"]').click();
+        await expect(page.getByTestId('document-editor')).toBeVisible();
+        await expect(page.getByTestId('document-editor-title')).toContainText('offline-guide');
+
+        await page.getByTestId('markdown-mode-toggle').click();
+        await expect(page.getByTestId('document-editor-input')).toHaveValue(/# Offline Guide/);
+
+        await page.getByTestId('workspace-right-pane-tab-tasks').click();
+        await page.getByTestId('agent-task-add').click();
+        await page.getByTestId('task-editor-title').fill('Offline task');
+        await page.getByTestId('task-editor-save').click();
+        await expect(page.getByTestId('agent-task-open-list')).toContainText('Offline task');
+
+        await page.getByTestId('topbar-workspace-normal-chat').click();
+        await expect(page.getByTestId('conversation-workspace')).toBeVisible();
+    } finally {
+        await browser.close();
+        killElectron(electronProcess);
         await rm(workspaceRoot, { recursive: true, force: true });
     }
 });

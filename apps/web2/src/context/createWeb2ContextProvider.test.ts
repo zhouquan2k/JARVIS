@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { HttpContextProvider } from '@packages/ui';
 import { createWeb2ContextProvider, resolveContextBaseUrl } from './createWeb2ContextProvider';
+import { Web2ContextProvider } from './Web2ContextProvider';
 
 describe('createWeb2ContextProvider', () => {
     it('derives the context base url from the explicit env or sync base url', () => {
@@ -13,13 +13,13 @@ describe('createWeb2ContextProvider', () => {
         })).toBe('https://sync.example.com/api/context');
     });
 
-    it('creates an HttpContextProvider with the resolved base url', () => {
+    it('creates a Web2ContextProvider with the resolved base url', () => {
         const provider = createWeb2ContextProvider({
             env: {
                 VITE_CONTEXT_BASE_URL: 'https://context.example.com/api/context/'
             }
         });
 
-        expect(provider).toBeInstanceOf(HttpContextProvider);
+        expect(provider).toBeInstanceOf(Web2ContextProvider);
     });
 });

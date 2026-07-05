@@ -4,5 +4,6 @@ export type {
     TaskExecutionState,
     TaskPriority,
     TaskQueryTag,
+    TaskRecurrence,
     TaskService
 } from './src/contracts/Task';

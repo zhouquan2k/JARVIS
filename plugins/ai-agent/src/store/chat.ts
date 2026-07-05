@@ -36,11 +36,12 @@ import {
 } from '@packages/core/config';
 import type { ControlledPageCapability } from '@packages/core';
 import { markRaw, toRaw } from 'vue';
-import { translateWorkspaceMessage } from '@packages/ui/src/i18n';
+import { translateWorkspaceMessage } from '@packages/ui';
 import { executeConversationArchive, type ArchiveExecutionResult } from '../services/conversationArchive';
 import { buildFallbackConversationTitle, extractNodeNameFromPath, sanitizeConversationTitle } from '../utils/conversationTitle';
-import { formatHttpApiError } from '@packages/ui/src/utils/formatHttpApiError';
+import { formatHttpApiError } from '@packages/ui';
 import { augmentPromptWithMentionedFiles, prepareRequestWithActiveDocument } from '../runtime/agents/augmentPromptWithAgentContext';
+import { resolveAllScopedAgentConfigsFromWorkspaceContext } from '../runtime/agents/config/resolveScopedAgentConfig';
 import type { AgentRuntime } from '../runtime/agents/runtime/types';
 import { resolveGroupMembers, resolveGroupCandidates } from '../providers/model/MultiModelGroupProvider';
 import type { GroupMember } from '../group/groupTypes';
@@ -162,6 +163,7 @@ const DOM_PROVIDER_SITE_URLS: Record<string, string> = {
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
 const DEFAULT_REASONING_EFFORT: ReasoningEffort = 'high';
 const NEW_CHAT_TITLE = 'New Chat';
+const LAST_LOCAL_CONVERSATION_STORAGE_KEY = 'jarvis:chat:last-local-conversation-id';
 const FILE_REFERENCE_PATTERN = /(^|[\s([{\u3000\uFF08\u3010])@([^\s@]+)/gu;
 const TRAILING_MENTION_PUNCTUATION = /[.,;:!?)\]}>\u3001\u3002\uFF0C\uFF1B\uFF1A\uFF01\uFF1F\uFF09\u3011\u300B]+$/u;
 const FILE_EXTENSION_MIME_TYPES: Record<string, string> = {
@@ -176,6 +178,47 @@ const FILE_EXTENSION_MIME_TYPES: Record<string, string> = {
     yml: 'application/yaml',
     yaml: 'application/yaml'
 };
+
+function createRuntimeUuid(): string {
+    const randomUuid = globalThis.crypto?.randomUUID;
+    if (typeof randomUuid === 'function') {
+        return randomUuid.call(globalThis.crypto);
+    }
+
+    return `chatprism-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function getBrowserStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null {
+    if (typeof globalThis === 'undefined' || !('localStorage' in globalThis)) {
+        return null;
+    }
+
+    try {
+        return globalThis.localStorage;
+    } catch {
+        return null;
+    }
+}
+
+function readLastLocalConversationId(): string | null {
+    const storage = getBrowserStorage();
+    const value = storage?.getItem(LAST_LOCAL_CONVERSATION_STORAGE_KEY)?.trim();
+    return value || null;
+}
+
+function writeLastLocalConversationId(id: string | null): void {
+    const storage = getBrowserStorage();
+    if (!storage) {
+        return;
+    }
+
+    if (id && id.trim()) {
+        storage.setItem(LAST_LOCAL_CONVERSATION_STORAGE_KEY, id.trim());
+        return;
+    }
+
+    storage.removeItem(LAST_LOCAL_CONVERSATION_STORAGE_KEY);
+}
 
 function toBase64(bytes: Uint8Array): string {
     if (typeof Buffer !== 'undefined') {
@@ -199,7 +242,7 @@ async function fileToAttachment(file: File): Promise<MessageAttachment> {
     const resolvedMimeType = file.type || inferredMimeType || 'application/octet-stream';
 
     return {
-        id: crypto.randomUUID(),
+        id: createRuntimeUuid(),
         type: resolvedMimeType.startsWith('image/') ? 'image' : 'file',
         name: file.name,
         mimeType: resolvedMimeType,
@@ -550,6 +593,25 @@ function buildConversationModelSelection(
             ? { groupMembers: groupMembers.map((member) => ({ ...member })) }
             : {})
     };
+}
+
+function buildPersistedModelSelectionFromSendTarget(input: {
+    providerId: string;
+    modelId: string;
+    modelOptions: Record<string, boolean>;
+    reasoningEffort: ReasoningEffort;
+    explicit: boolean;
+    currentProviderId: string | null;
+    groupMembers?: GroupMember[];
+}): ConversationModelSelection | undefined {
+    return buildConversationModelSelection(
+        input.providerId,
+        input.modelId,
+        input.modelOptions,
+        input.reasoningEffort,
+        input.explicit && input.providerId === input.currentProviderId,
+        input.providerId === GROUP_PROVIDER_ID ? (input.groupMembers ?? []) : []
+    );
 }
 
 function getQuestionKey(message: ConversationMessage): string {
@@ -1037,9 +1099,15 @@ export const useChatStore = defineStore('chat', {
         },
 
         buildCurrentConversationModelSelection(): ConversationModelSelection | undefined {
+            // currentModelId 可能在 provider 目录刷新时被重置为空（setProviderCatalog），
+            // 此时不能让已选 provider（尤其 group）丢失，回退到该 provider 的默认模型。
+            let modelId = this.currentModelId;
+            if (this.currentProviderId && !modelId) {
+                modelId = this.resolveProviderConfig(this.currentProviderId)?.defaultModel || '';
+            }
             return buildConversationModelSelection(
                 this.currentProviderId,
-                this.currentModelId,
+                modelId,
                 this.currentModelOptions,
                 this.currentReasoningEffort,
                 this.currentModelSelectionExplicit,
@@ -1052,7 +1120,20 @@ export const useChatStore = defineStore('chat', {
                 return;
             }
 
-            this.currentConversation.modelSelection = this.buildCurrentConversationModelSelection();
+            const next = this.buildCurrentConversationModelSelection();
+            // 不允许用 undefined 覆盖一条已存在的有效选择：目录刷新瞬间 currentModelId/currentProviderId
+            // 可能短暂为空，若直接写回会把 group 等已选 provider 从持久化里抹掉，导致后续轮次回退到 agent 默认 provider。
+            if (!next && this.currentConversation.modelSelection?.providerId) {
+                console.warn('[ChatStore]', JSON.stringify({
+                    stage: 'syncModelSelection-skip-undefined-overwrite',
+                    conversationId: this.currentConversation.id,
+                    currentProviderId: this.currentProviderId,
+                    currentModelId: this.currentModelId,
+                    existingProviderId: this.currentConversation.modelSelection.providerId
+                }));
+                return;
+            }
+            this.currentConversation.modelSelection = next;
         },
 
         applyCurrentModelState(modelId: string, sourceOptions: Record<string, boolean> = {}) {
@@ -1226,6 +1307,13 @@ export const useChatStore = defineStore('chat', {
                 this.currentProviderId = nextCatalog[0].id;
             }
 
+            // 目录刷新会清空 currentModelId；这是「空 modelId 抹掉会话已选 provider」链路的起点，留观测点。
+            console.log('[ChatStore]', JSON.stringify({
+                stage: 'setProviderCatalog-reset-modelId',
+                currentProviderId: this.currentProviderId,
+                previousModelId: this.currentModelId,
+                conversationId: this.currentConversation?.id
+            }));
             this.currentModelId = '';
             this.currentModelOptions = {};
             this.currentReasoningEffort = DEFAULT_REASONING_EFFORT;
@@ -1374,6 +1462,12 @@ export const useChatStore = defineStore('chat', {
             }
 
             await this.loadLocalConversations();
+            if (!this.currentConversation) {
+                const savedConversationId = readLastLocalConversationId();
+                if (savedConversationId) {
+                    await this.selectLocalConversation(savedConversationId);
+                }
+            }
             if (this.historySource === 'external') {
                 await this.refreshActiveExternalSource();
             }
@@ -1494,6 +1588,13 @@ export const useChatStore = defineStore('chat', {
                 next = [{ ...candidates[0] }];
             }
             this.currentGroupMembers = next.map((member) => ({ ...member }));
+            console.log('[ChatStore]', JSON.stringify({
+                stage: 'ensureGroupMembersInitialized',
+                persisted: Array.isArray(persisted) ? persisted.map((m) => m.providerId) : null,
+                candidates: candidates.map((m) => m.providerId),
+                fromPersisted: fromPersisted.map((m) => m.providerId),
+                result: this.currentGroupMembers.map((m) => m.providerId)
+            }));
         },
 
         /** 顶部勾选区切换某候选成员的参与状态（保证至少保留 1 个）。 */
@@ -1516,6 +1617,12 @@ export const useChatStore = defineStore('chat', {
             this.currentGroupMembers = candidates
                 .filter((candidate) => selectedIds.has(candidate.providerId))
                 .map((member) => ({ ...member }));
+            console.log('[ChatStore]', JSON.stringify({
+                stage: 'toggleGroupMember',
+                toggled: providerId,
+                wasSelected: isSelected,
+                result: this.currentGroupMembers.map((m) => m.providerId)
+            }));
             this.syncCurrentConversationModelSelection();
             this.applyProviderPageDefaults(GROUP_PROVIDER_ID);
         },
@@ -1603,6 +1710,11 @@ export const useChatStore = defineStore('chat', {
                 return;
             }
 
+            // 当前对话已有持久化的模型选择，不覆盖（切换模式/agent 时不应改变已有对话属性）。
+            if (this.currentConversation?.modelSelection?.providerId) {
+                return;
+            }
+
             // agent 驱动的选择不是用户显式覆盖。
             this.currentModelSelectionExplicit = false;
             await this.setCurrentModelProvider(providerId, targetAgent.modelName?.trim() || undefined);
@@ -1658,6 +1770,14 @@ export const useChatStore = defineStore('chat', {
                 return;
             }
 
+            // 已有当前对话时，切换全屏/模式属于纯视图变化，不应改动其模型：
+            // 既包括持久化的模型选择，也包括内存中已解析出的模型（新会话尚未落库，
+            // 但右栏已按文档/agent 默认解析出 provider）。否则展开全屏会把当前模型
+            // 静默切换为工作区根 agent 的默认模型。
+            if (this.currentConversation && (this.currentConversation.modelSelection?.providerId || this.currentProviderId)) {
+                return;
+            }
+
             // agent 驱动的选择不是用户显式覆盖。
             this.currentModelSelectionExplicit = false;
             await this.setCurrentModelProvider(providerId, agent.modelName?.trim() || undefined);
@@ -1676,7 +1796,10 @@ export const useChatStore = defineStore('chat', {
             await provider.initializeAccess();
             const context = await provider.getContext();
             this.conversationAgentConfigs = Object.fromEntries(
-                Object.entries(context.folderMetadata).map(([key, meta]) => [key, cloneResolvedAgentConfig(meta.data as unknown as ResolvedAgentConfig)])
+                Object.entries(resolveAllScopedAgentConfigsFromWorkspaceContext(context)).map(([key, agent]) => [
+                    key,
+                    cloneResolvedAgentConfig(agent)
+                ])
             );
             return this.conversationAgentConfigs;
         },
@@ -2116,12 +2239,28 @@ export const useChatStore = defineStore('chat', {
             // 用户在下拉框显式选择时（explicit），会话模型选择优先于 agent 默认模型；
             // 否则保持既有行为：agent 指定的模型优先于（仅为默认值的）currentProviderId。
             const explicitOverride = this.currentModelSelectionExplicit && !!this.currentProviderId;
+            // 存量会话若曾被「显式选择」（persisted.explicit===true，如用户主动选了 group），
+            // 即便内存里的 explicit 标志在视图/会话切换中被重置丢失，也以持久化的 providerId 为准，
+            // 避免已确定的 group 等会话被静默降级到 agent 默认 provider（下拉框仍显示 group，输出却变单条）。
+            // 注意：仅认 explicit 的持久化选择；新建/agent 驱动会话（无 explicit）仍走 agent 默认优先的既有逻辑。
+            const persisted = this.currentConversation?.modelSelection;
+            const persistedExplicitProviderId = persisted?.explicit ? persisted.providerId : undefined;
             const requestedProviderId = explicitOverride
                 ? this.currentProviderId
-                : (effectiveAgentContext?.modelProviderName?.trim() || this.currentProviderId);
+                : (persistedExplicitProviderId || effectiveAgentContext?.modelProviderName?.trim() || this.currentProviderId);
             if (!requestedProviderId) {
                 throw new Error('No active model provider selected.');
             }
+            console.log('[ChatStore]', JSON.stringify({
+                stage: 'resolveSendTarget',
+                currentProviderId: this.currentProviderId,
+                currentModelSelectionExplicit: this.currentModelSelectionExplicit,
+                explicitOverride,
+                persistedProviderId: persisted?.providerId,
+                persistedExplicit: persisted?.explicit === true,
+                agentProviderId: effectiveAgentContext?.modelProviderName?.trim() || null,
+                requestedProviderId
+            }));
 
             const providerConfig = await this.ensureProviderModelsLoaded(requestedProviderId);
             if (!providerConfig) {
@@ -2155,6 +2294,17 @@ export const useChatStore = defineStore('chat', {
             const provider = this.resolveModelProvider(requestedProviderId);
             if (!provider) {
                 throw new Error(`Provider '${requestedProviderId}' is not initialized.`);
+            }
+
+            if (requestedProviderId === GROUP_PROVIDER_ID) {
+                console.log('[ChatStore]', JSON.stringify({
+                    stage: 'resolveSendTarget-groupMembers',
+                    currentGroupMembers: this.currentGroupMembers.map((m) => m.providerId),
+                    persistedGroupMembers: Array.isArray(this.currentConversation?.modelSelection?.groupMembers)
+                        ? this.currentConversation!.modelSelection!.groupMembers!.map((m) => m.providerId)
+                        : null,
+                    candidates: this.groupCandidateMembers.map((m) => m.providerId)
+                }));
             }
 
             return {
@@ -2401,6 +2551,9 @@ export const useChatStore = defineStore('chat', {
                     && this.currentConversation.title === NEW_CHAT_TITLE;
                 this.currentConversation = refreshed || (shouldPreserveUnsavedDraft ? this.currentConversation : null);
             }
+            if (this.currentConversation?.origin === 'local') {
+                writeLastLocalConversationId(this.currentConversation.id);
+            }
             this.refreshCurrentConversationArchiveStatus();
 
             if (this.externalHistoryItems.length > 0) {
@@ -2416,6 +2569,9 @@ export const useChatStore = defineStore('chat', {
             const chat = await this.storageProvider.getConversation(id);
             if (chat && !chat.compare && !chat.sync?.deleted) {
                 this.currentConversation = normalizeStoredConversation(chat);
+                if (this.currentConversation.origin === 'local') {
+                    writeLastLocalConversationId(this.currentConversation.id);
+                }
             }
             this.clearArchiveConversationProgressPart();
             this.refreshCurrentConversationArchiveStatus();
@@ -2570,7 +2726,7 @@ export const useChatStore = defineStore('chat', {
             const boundNodeName = explicitBoundNodeName
                 ?? (shouldClearConversationWorkspaceContext ? undefined : this.resolveConversationBoundNodeName());
             const nextConversation: Conversation = {
-                id: crypto.randomUUID(),
+                id: createRuntimeUuid(),
                 title: NEW_CHAT_TITLE,
                 boundNodeName,
                 origin: 'local',
@@ -2593,6 +2749,7 @@ export const useChatStore = defineStore('chat', {
             }
             this.clearArchiveConversationProgressPart();
             this.currentConversation = nextConversation;
+            writeLastLocalConversationId(nextConversation.id);
             this.historySource = 'local';
             this.previewConversation = null;
             this.currentError = null;
@@ -2641,6 +2798,7 @@ export const useChatStore = defineStore('chat', {
 
         clearWorkspaceConversationSelection() {
             this.currentConversation = null;
+            writeLastLocalConversationId(null);
             this.previewConversation = null;
             this.historySource = 'local';
             this.currentError = null;
@@ -2822,6 +2980,9 @@ export const useChatStore = defineStore('chat', {
 
                 await this.loadLocalConversations();
                 this.currentConversation = activatedConversation;
+                if (activatedConversation?.origin === 'local') {
+                    writeLastLocalConversationId(activatedConversation.id);
+                }
                 this.historySource = 'local';
                 this.previewConversation = null;
                 this.currentError = null;
@@ -2850,6 +3011,9 @@ export const useChatStore = defineStore('chat', {
             }
 
             this.currentConversation = importedConversation;
+            if (importedConversation.origin === 'local') {
+                writeLastLocalConversationId(importedConversation.id);
+            }
             this.historySource = 'local';
             this.previewConversation = null;
             this.currentError = null;
@@ -2876,6 +3040,9 @@ export const useChatStore = defineStore('chat', {
                 }
             }
             await this.storageProvider.saveConversation(toRaw(conversation));
+            if (conversation.origin === 'local') {
+                writeLastLocalConversationId(conversation.id);
+            }
             await this.loadLocalConversations();
             this.refreshCurrentConversationArchiveStatus();
             if (this.resolveHistoryProvider() && this.externalHistoryItems.length > 0) {
@@ -2901,7 +3068,7 @@ export const useChatStore = defineStore('chat', {
 
             const importedConversation: Conversation = {
                 ...cloneConversation(preview),
-                id: crypto.randomUUID(),
+                id: createRuntimeUuid(),
                 origin: previewOrigin,
                 externalId: previewExternalId,
                 backendId: preview.backendId || preview.externalId,
@@ -3005,10 +3172,10 @@ export const useChatStore = defineStore('chat', {
                     mode: 'none' as const
                 };
 
-            const questionId = crypto.randomUUID();
+            const questionId = createRuntimeUuid();
             const createdAt = Date.now();
-            const userMsgId = crypto.randomUUID();
-            const assistantMsgId = crypto.randomUUID();
+            const userMsgId = createRuntimeUuid();
+            const assistantMsgId = createRuntimeUuid();
 
             activeConversation.messages.push({
                 id: userMsgId,
@@ -3069,19 +3236,23 @@ export const useChatStore = defineStore('chat', {
 
                 executionConversation.origin = executionConversation.origin || 'local';
                 const backendId = executionConversation.backendId;
-                executionConversation.modelSelection = buildConversationModelSelection(
-                    sendTarget.providerId,
-                    sendTarget.modelId,
-                    sendTarget.modelOptions,
-                    sendTarget.reasoningEffort,
+                executionConversation.modelSelection = buildPersistedModelSelectionFromSendTarget({
+                    providerId: sendTarget.providerId,
+                    modelId: sendTarget.modelId,
+                    modelOptions: sendTarget.modelOptions,
+                    reasoningEffort: sendTarget.reasoningEffort,
                     // 显式覆盖时 sendTarget 即下拉框选择，保留该标记以便重开会话仍优先于 agent。
-                    this.currentModelSelectionExplicit && sendTarget.providerId === this.currentProviderId
-                );
+                    explicit: this.currentModelSelectionExplicit,
+                    currentProviderId: this.currentProviderId,
+                    groupMembers: sendTarget.groupMembers
+                });
                 const onUpdate = (
                     update: {
                         text: string;
                         annotations?: ConversationMessage['annotations'];
                         functionalParts?: ConversationMessage['functionalParts'];
+                        groupMembers?: ConversationMessage['groupMembers'];
+                        groupSummary?: ConversationMessage['groupSummary'];
                     }
                 ) => {
                     const lastMsg = executionConversation.messages[executionConversation.messages.length - 1];
@@ -3089,6 +3260,12 @@ export const useChatStore = defineStore('chat', {
                         lastMsg.content = update.text;
                         lastMsg.annotations = update.annotations;
                         lastMsg.functionalParts = update.functionalParts;
+                        if (update.groupMembers !== undefined) {
+                            lastMsg.groupMembers = update.groupMembers;
+                        }
+                        if (update.groupSummary !== undefined) {
+                            lastMsg.groupSummary = update.groupSummary;
+                        }
                     }
                 };
                 const conversationContextProvider = this.resolveCurrentConversationContextProvider();
@@ -3110,6 +3287,7 @@ export const useChatStore = defineStore('chat', {
                             history,
                             modelOptions: cloneModelOptions(sendTarget.modelOptions),
                             reasoningEffort: sendTarget.reasoningEffort,
+                            groupMembers: sendTarget.groupMembers,
                             context: { conversationId: backendId }
                         },
                         onUpdate
@@ -3167,6 +3345,12 @@ export const useChatStore = defineStore('chat', {
                     lastMsg.content = result.text;
                     lastMsg.annotations = result.annotations;
                     lastMsg.functionalParts = result.functionalParts;
+                    if (result.groupMembers !== undefined) {
+                        lastMsg.groupMembers = result.groupMembers;
+                    }
+                    if (result.groupSummary !== undefined) {
+                        lastMsg.groupSummary = result.groupSummary;
+                    }
                 }
 
                 if (this.shouldRegenerateConversationTitle(targetConversation, wasEditingFirstVisibleQuestion)) {

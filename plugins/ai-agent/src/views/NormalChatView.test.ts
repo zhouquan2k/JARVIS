@@ -392,6 +392,47 @@ describe('NormalChatView', () => {
         expect(wrapper.find('.selector-row [data-testid="model-option-toggle-group"]').exists()).toBe(true);
     });
 
+    it('shows the summary dom page button first for group conversations and removes bottom raw links', async () => {
+        const store = useChatStore();
+        store.workspaceMode = 'conversation';
+        store.currentProviderId = 'group';
+        store.currentModelId = 'dom';
+        store.currentGroupMembers = [
+            { providerId: 'chatgpt-dom', modelId: 'GPT-5.5', name: 'ChatGPT' },
+            { providerId: 'gemini-dom', modelId: '3.1 Pro', name: 'Gemini' }
+        ];
+        store.currentConversation = createConversation([
+            {
+                id: 'assistant-1',
+                role: 'assistant',
+                content: '',
+                createdAt: 1,
+                groupMembers: [
+                    { name: 'ChatGPT', providerId: 'chatgpt-dom', modelId: 'GPT-5.5', content: 'A', status: 'done' },
+                    { name: 'Gemini', providerId: 'gemini-dom', modelId: '3.1 Pro', content: 'B', status: 'done' }
+                ],
+                groupSummary: { phase: 'done', content: '## Consensus\n总结内容' }
+            }
+        ]);
+        store.init = vi.fn().mockResolvedValue(undefined);
+        store.checkAuth = vi.fn().mockResolvedValue(true);
+        const revealSpy = vi.spyOn(store, 'revealControlledPage').mockResolvedValue(undefined);
+
+        const wrapper = mountView();
+        await flushPromises();
+
+        const pageButtons = wrapper.findAll('.dom-pages-bar .dom-page-btn');
+        expect(pageButtons).toHaveLength(3);
+        expect(pageButtons[0]?.text()).toContain('Summary');
+        expect(pageButtons[1]?.text()).toContain('ChatGPT');
+        expect(pageButtons[2]?.text()).toContain('Gemini');
+        expect(wrapper.find('[data-testid^="group-dom-conversation-link-"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid^="dom-conversation-link-"]').exists()).toBe(false);
+
+        await pageButtons[0].trigger('click');
+        expect(revealSpy).toHaveBeenCalledWith('gemini-dom-summary');
+    });
+
     it('collapses the top selector row by default in agent mode', async () => {
         const store = useChatStore();
         store.workspaceMode = 'conversation';

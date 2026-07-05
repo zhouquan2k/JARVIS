@@ -10,7 +10,7 @@ Independently runnable and deployable units; they are runtime shells that expose
 
 - **Browser Extension App**
 
-- **Web App**
+- **Web App**: browser / PWA host; in production it is served same-origin by the Sync Server, and offline behavior relies on a Service Worker app shell plus read-only document cache
 
 - **Desktop App**
 
@@ -28,7 +28,7 @@ The table below lists modules, responsibilities, and dependency directions for e
 | `packages/plugin-system` | Plugin system: plugin registration, enablement, assembly, runtime context construction, and plugin runtime orchestration | → `core`; ideally no compile-time dependency on `plugins` — loads plugins dynamically at runtime per the plugin contracts defined in `core` |
 | `packages/core` | Minimal stable cross-package contracts, plugin contracts, and host-agnostic general infrastructure | No dependency on any upper layer; AI/task domain contracts should not accumulate here |
 | `packages/node` | Node-only adapter layer and infrastructure implementations shared between the Desktop main process and the sync server | → `core` |
-| `plugins/*` | Domain capabilities such as AI and tasks: domain models, workflows, stores, business views, capability-specific rules | → `core` (implements its plugin contracts); ideally exposes no `api` and is not a compile-time dependency of any package |
+| `plugins/*` | Domain capabilities such as AI and tasks: domain models, workflows, stores, business views, capability-specific rules | → `core` (implements its plugin contracts); during the transition they may reuse stable rendering-layer exports from `ui`, but should not depend on `ui/src/*` internals; ideally expose no `api` and are not a compile-time dependency of any package |
 
 The dependency chain is `apps → ui → plugin-system ⇢ plugins`: the host hands control to `ui` at the entry point; `ui` loads `plugin-system`; `plugin-system` dynamically loads, registers, and assembles `plugins` at runtime per plugin contracts (`⇢` denotes runtime loading, not a compile-time dependency). Hosts are thereby decoupled from concrete plugins and depend only on `ui` and `core`.
 
@@ -37,7 +37,7 @@ The dependency chain is `apps → ui → plugin-system ⇢ plugins`: the host ha
 - When environment differences affect upper-layer behavior, hosts should expose them as **environment properties, capability handles, or context** to be consumed in place by upper layers, rather than writing business branches directly inside the host.
 - For runtime concepts, bootstrap result objects, or UI shell objects that are easy to blur, default to "**don't design for the future; refactor when needed; otherwise keep it simple (fewer classes is better)**"; introduce a new independent type or shell only when current responsibilities are already clearly distinct.
 - Hosts do not directly depend on `plugins` / `plugin-system`, and are not responsible for plugin enablement or assembly; plugin registration and assembly are the responsibility of `plugin-system`.
-- Interactions between plugins, and between `plugin-system` and concrete plugins, are all conducted through plugin contracts defined in `core`; ideally plugins need not expose an `api` and should not be a compile-time dependency of any package.
+- Interactions between plugins, and between `plugin-system` and concrete plugins, are all conducted through plugin contracts defined in `core`; during the transition plugins may reuse stable public exports from `ui` for rendering integration, but should not depend on `ui/src/*` internals; ideally plugins need not expose an `api` and should not be a compile-time dependency of any package.
 - `packages/core` has no dependency on any upper layer; domain contracts belonging to AI or task capabilities should not accumulate here.
 - Business logic for AI, tasks, and future capabilities belongs in their respective plugins, and should not continue to accumulate in `packages/ui`.
 - A knowledge base, even when deployed locally, is still treated as an external dependency (see Section 5).
@@ -46,7 +46,7 @@ The dependency chain is `apps → ui → plugin-system ⇢ plugins`: the host ha
 
 ### 3.1 Role of plugin-system
 
-- `packages/plugin-system` is the implementation layer of the plugin system, responsible for plugin registration (`PluginRegistry`), enablement and assembly (`PluginManager`), runtime context construction, and plugin runtime orchestration.
+- `packages/plugin-system` is the implementation layer of the plugin system, responsible for plugin registration, enablement and assembly, runtime context construction, and plugin runtime orchestration.
 - It is loaded by `packages/ui` during workspace initialization; hosts do not depend on it directly and do not participate in plugin enablement or assembly.
 - It only has a compile-time dependency on `packages/core`; ideally it does not compile-time depend on concrete `plugins`, instead loading them dynamically at runtime per the plugin contracts defined in `core`, making it the decoupling layer between the "core workspace frontend" and "concrete domain plugins."
 
@@ -58,7 +58,7 @@ The dependency chain is `apps → ui → plugin-system ⇢ plugins`: the host ha
 ### 3.3 Plugin Contracts and Isolation
 
 - Plugins integrate into the system by implementing plugin contracts defined in `core`, and are discovered and loaded by `plugin-system` at runtime.
-- Ideally plugins **need not expose an `api`** — no other module should need to consume a plugin directly; all interactions are conducted via contracts and runtime context.
+- Ideally plugins **need not expose an `api`** — no other module should need to consume a plugin directly; all interactions are conducted via contracts and runtime context. During the transition, if a plugin must reuse workspace rendering helpers, it should depend on stable exports from `@packages/ui` rather than `@packages/ui/src/*`.
 - Plugin internal implementations stay entirely within the plugin directory, are not compile-time dependencies of any package, and no one should depend on their internal implementation paths.
 
 ### 3.4 Plugin Collaboration with Hosts / UI
@@ -88,8 +88,6 @@ Insert operations in viewer mode (links / conversation references / asset embeds
 - Edit mode (plain textarea) continues to splice directly on the source string, preserving this path when byte-level truth is needed.
 - This is an internal decision of `packages/ui` and does not affect sync service contracts or cross-host interfaces.
 
-The viewer-mode insertion entry point is `insertMarkdownAtViewerSelection` in `packages/ui/src/utils/markdownDocument.ts`.
-
 ### 4.2 Document Identity and Node Movement
 
 **Overview**
@@ -98,7 +96,7 @@ Each markdown document has a stable ULID written into its YAML frontmatter under
 
 **Identity Assignment**
 
-- On first open, `DocumentIdentityIndex` checks whether `jarvis_id` exists in the frontmatter; if not, one is generated and written back.
+- On first open, the in-memory document identity index checks whether `jarvis_id` exists in the frontmatter; if not, one is generated and written back.
 - The index is kept in memory only (`path → id` and `id → path` bidirectional mappings). There is no separate persistent index file; the source frontmatter is the source of truth.
 - The Milkdown editor strips the frontmatter at the presentation layer using a WeakMap keyed by document instance, and restores it during serialization. Users never see or directly edit `jarvis_id`.
 
@@ -106,22 +104,22 @@ Each markdown document has a stable ULID written into its YAML frontmatter under
 
 When a node is moved or renamed:
 
-1. Only the in-memory `DocumentIdentityIndex` is updated (`identityIndex.remap(oldPath, newPath)`).
+1. Only the in-memory document identity index is updated.
 2. No database writes; no path column changes. Existing `documentIds[]` entries in session and task records remain unchanged and still match the ULID in the document frontmatter, independent of the file's current location.
-3. A cross-agent guard inside `moveNode` ensures that a rename is rejected when another Agent process holds a file lock, preventing concurrent access from causing identity splits.
+3. The node-move path includes a cross-agent guard: when another Agent process holds the file lock, the rename is rejected to prevent identity splits under concurrent access.
 
 **Query Routing**
 
 All context queries follow a **`documentId`-first** approach:
 
-- Server-side: when `documentId` is present, prefer `_getConversationsByDocumentId` / `_getTasksByDocumentId`; `documentPath` is only a fallback for early records.
-- Client-side: `documentScopedConversations` in `AgentConversationPanel` accepts conversations that satisfy either of the following: `documentPaths` contains the current path, **or** `documentIds` contains the current document's ULID. This dual-match guard covers the window between a move operation and the next async data reload, ensuring conversations are shown immediately after a rename.
+- Server-side: when `documentId` is present, prefer stable document-identity lookup; `documentPath` is only a fallback for early records.
+- Client-side: the current-document conversation list accepts either a path match or a stable document-identity match. This dual-match guard covers the window between a move operation and the next async data reload, ensuring conversations are shown immediately after a rename.
 
 **Outbound Link Rewriting**
 
 Links written into documents by the toolbar (conversation references, asset embeds) use standard relative paths relative to the repository root. The `references/` directory is protected and its contents are not affected by link rewriting operations.
 
-### 4.3 Standalone Server + Relative-Path Renderer
+### 4.3 Standalone Server + Relative-Path Renderer / Direct Hub Mode
 
 **Overview**
 
@@ -129,17 +127,25 @@ Links written into documents by the toolbar (conversation references, asset embe
 
 **Decision**
 
-The desktop renderer is always **same-origin** with the API, and every `/api/*` call uses a **relative path** — the renderer never builds absolute URLs like `http://127.0.0.1:8787`.
+Desktop supports two runtime shapes:
 
-- **dev**: the renderer is served by Vite; `server.proxy` in `vite.config.ts` forwards `/api` and `/health` to the server.
-- **prod / e2e**: the renderer is served statically by the server (`serveStatic` registered before API routes for asset hits, SPA fallback registered after API routes so it never shadows them), making renderer and API same-origin by construction.
-- The desktop main process uses the absolute `CHATPRISM_CONTEXT_BASE_URL` only to derive the server origin for loading the renderer; all base URLs injected into the renderer are normalized to relative values (`createDesktop2RuntimeOptions` fills `/api/context`, `/api/sync`, `/api/codex`, `/api/provider-configs` defaults).
+- **server-origin / dev-server mode**: the renderer is **same-origin** with the API, and every `/api/*` call uses a **relative path**.
+- **local-bundle mode**: the renderer is loaded from a local bundle, main injects absolute hub URLs into the renderer, the document workspace talks over IPC to a local file-context capability owned by the main process rather than treating remote `/api/context` as its primary path, and remote sync/codex traffic goes through the main-process bridge.
+
+- **dev**: the renderer is served by a local dev server, which proxies `/api` and `/health` to the local backend.
+- **server-origin / prod / e2e**: the renderer is served statically by the server, making renderer and API same-origin by construction; web2 PWA / offline E2E must run in this mode to exercise real Service Worker precache and runtime cache behavior.
+- **local-bundle / desktop production-simulation**: main directly loads the local bundle and injects real hub URLs into the renderer through environment-backed configuration.
+- When main does not inject explicit hub URLs, the renderer still falls back to relative defaults such as `/api/context`, `/api/sync`, `/api/codex`, and `/api/provider-configs`.
+- Desktop's offline boundary is layered: document tree access, document read/write, node CRUD, and scoped search depend on the local file-context capability; `sync`, `codex`, and `provider-configs` remain online capabilities and are not claimed to work offline.
+- Treat the resource / attachment layer separately from document text: markdown source files continue to persist relative references (for example `references/...`); the desktop viewer may resolve local assets into temporary local URLs at render time (for example `blob:`) to support offline access, but those runtime URLs are never written back into the document, so filesystem-oriented consumers such as Obsidian, external agents, git, and Dropbox still see the original relative links.
 
 **Consequences**
 
-- Eliminates cross-origin CORS entirely (same-origin requests don't trigger it) and removes reliance on the server's CORS allowlist as a fallback.
-- CSP only needs `img-src 'self'` to allow local resources such as `document-asset` images — no special-case for `http://127.0.0.1:*`.
+- Eliminates renderer-side CORS in same-origin mode; in local-bundle mode the main-process fetch bridge bypasses renderer-side CORS entirely.
+- `document-asset` is a compatible HTTP resource representation, but it is not the only long-term shape for desktop local asset access; desktop may resolve assets directly from the local file domain without requiring the resource layer to keep depending on remote or local-server `/api/context/document-asset`.
+- CSP only needs `img-src 'self'` to allow local resources such as `document-asset` images — no special-case for `http://127.0.0.1:*`; when desktop uses `blob:` URLs at render time, those URLs are a viewer-only implementation detail and do not change the underlying file-domain source of truth.
 - Relative paths are agnostic to deployment port / host, making migration and packaging more robust.
+- The Web host's offline boundary is "static shell + read-only cache for recently viewed documents + IndexedDB replicas for conversations/tasks"; browser cache remains a projection layer, not the source of truth for documents.
 
 ## 5. Runtime and External Dependency Chain
 

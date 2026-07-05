@@ -416,6 +416,19 @@ describe('useChatStore workspace history flow', () => {
 
     beforeEach(() => {
         setActivePinia(createPinia());
+        const storage = new Map<string, string>();
+        vi.stubGlobal('localStorage', {
+            getItem: vi.fn((key: string) => storage.get(key) ?? null),
+            setItem: vi.fn((key: string, value: string) => {
+                storage.set(key, value);
+            }),
+            removeItem: vi.fn((key: string) => {
+                storage.delete(key);
+            }),
+            clear: vi.fn(() => {
+                storage.clear();
+            })
+        });
     });
 
     const scopedAgent: ResolvedAgentConfig = {
@@ -929,6 +942,62 @@ describe('useChatStore workspace history flow', () => {
         });
     });
 
+    it('persists the actual last-used single-model selection when a new reply is saved', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([
+            {
+                id: 'conversation-2',
+                title: 'Other conversation',
+                origin: 'local',
+                updatedAt: 1,
+                messages: []
+            }
+        ]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        store.setProviderModelsResolver(async (providerId: string) => {
+            if (providerId === 'other-provider') {
+                return {
+                    models: [{ id: 'other-dynamic', name: 'Other Dynamic' }],
+                    defaultModel: 'other-dynamic'
+                };
+            }
+
+            return {
+                models: [{ id: 'dynamic-model', name: 'Dynamic Model' }],
+                defaultModel: 'dynamic-model'
+            };
+        });
+
+        await store.initializeProviderCatalog(providerCatalog);
+        await store.setCurrentModelProviderByUser('other-provider');
+        await store.startNewConversation();
+        await store.sendMessage('使用 other-provider');
+        const conversationId = store.currentConversation?.id;
+
+        expect(conversationId).toBeTruthy();
+        expect((await storage.getConversation(conversationId!))?.modelSelection).toEqual({
+            providerId: 'other-provider',
+            modelId: 'other-dynamic',
+            modelOptions: {},
+            reasoningEffort: 'high',
+            explicit: true
+        });
+
+        await store.selectLocalConversation('conversation-2');
+        await store.selectLocalConversation(conversationId!);
+
+        expect(store.currentProviderId).toBe('other-provider');
+        expect(store.currentModelId).toBe('other-dynamic');
+        expect(store.currentConversation?.modelSelection).toEqual({
+            providerId: 'other-provider',
+            modelId: 'other-dynamic',
+            modelOptions: {},
+            reasoningEffort: 'high',
+            explicit: true
+        });
+    });
+
     it('normalizes and persists shared web_search for Gemini-style model definitions', async () => {
         const provider = new MockModelProvider();
         const storage = new MockStorageProvider([]);
@@ -958,6 +1027,87 @@ describe('useChatStore workspace history flow', () => {
             modelOptions: { web_search: true },
             reasoningEffort: 'high'
         });
+    });
+
+    it('persists the actual last-used group selection when a new reply is saved', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([
+            {
+                id: 'conversation-2',
+                title: 'Other conversation',
+                origin: 'local',
+                updatedAt: 1,
+                messages: []
+            }
+        ]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog([
+            ...providerCatalog,
+            {
+                id: 'group',
+                name: 'Group',
+                models: [{ id: 'dom', name: 'DOM Team' }],
+                defaultModel: 'dom',
+                supportedRuntimeModes: ['web']
+            }
+        ]);
+        store.availableProviders = [
+            {
+                id: 'group',
+                name: 'Group',
+                models: [{ id: 'dom', name: 'DOM Team' }],
+                defaultModel: 'dom',
+                supportedRuntimeModes: ['web']
+            },
+            { id: 'chatgpt-dom' },
+            { id: 'gemini-dom' },
+            { id: 'claude-dom' }
+        ] as unknown as typeof store.availableProviders;
+        store.currentProviderId = 'group';
+        store.currentModelId = 'dom';
+        store.currentModelSelectionExplicit = true;
+        store.currentGroupMembers = [
+            { providerId: 'chatgpt-dom', modelId: 'dom', name: 'ChatGPT' },
+            { providerId: 'claude-dom', modelId: 'dom', name: 'Claude' }
+        ];
+
+        await store.startNewConversation();
+        await store.sendMessage('使用 group');
+        const conversationId = store.currentConversation?.id;
+
+        expect(conversationId).toBeTruthy();
+        expect((await storage.getConversation(conversationId!))?.modelSelection).toEqual({
+            providerId: 'group',
+            modelId: 'dom',
+            modelOptions: {},
+            reasoningEffort: 'high',
+            explicit: true,
+            groupMembers: [
+                { providerId: 'chatgpt-dom', modelId: 'dom', name: 'ChatGPT' },
+                { providerId: 'claude-dom', modelId: 'dom', name: 'Claude' }
+            ]
+        });
+
+        await store.selectLocalConversation('conversation-2');
+        await store.selectLocalConversation(conversationId!);
+
+        expect(store.currentProviderId).toBe('group');
+        expect(store.currentModelId).toBe('dom');
+        expect(store.currentConversation?.modelSelection).toMatchObject({
+            providerId: 'group',
+            modelId: 'dom',
+            modelOptions: {},
+            reasoningEffort: 'high',
+            explicit: true
+        });
+        expect(store.currentConversation?.modelSelection?.groupMembers?.map((member) => ({
+            providerId: member.providerId,
+            name: member.name
+        }))).toEqual([
+            { providerId: 'chatgpt-dom', name: 'ChatGPT' },
+            { providerId: 'claude-dom', name: 'Claude' }
+        ]);
     });
 
     it('allows overriding reasoning effort and persists it through the send pipeline', async () => {
@@ -1225,6 +1375,39 @@ describe('useChatStore workspace history flow', () => {
 
         expect(store.currentProviderId).toBe('other-provider');
         expect(store.currentModelId).toBe('other-static');
+    });
+
+    it('keeps the current model when a conversation already resolved one in memory (fullscreen toggle)', async () => {
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+
+        await store.initializeProviderCatalog(providerCatalog);
+
+        // 右栏已按文档 agent 解析出模型（内存态），但新会话尚未把该选择落库到 modelSelection。
+        store.currentConversation = {
+            id: 'workspace-unsent',
+            title: 'Doc scoped chat',
+            origin: 'local',
+            updatedAt: Date.now(),
+            messages: []
+        };
+        store.currentProviderId = 'gemini-api';
+        store.currentModelId = 'gemini-2.5-pro';
+
+        // 展开全屏会持久化工作区根 agent 上下文并尝试套用其默认模型。
+        store.saveWorkspaceAgentContext({
+            ...scopedAgent,
+            modelProviderName: 'other-provider',
+            modelName: 'other-static'
+        });
+
+        await store.applyWorkspaceAgentContextSelection();
+
+        // 纯视图切换不应改动当前对话的模型（旧实现会切到 other-provider）。
+        expect(store.currentProviderId).toBe('gemini-api');
+        expect(store.currentModelId).toBe('gemini-2.5-pro');
     });
 
     it('applies the active agent selection to the current model state by display name', async () => {
@@ -1877,7 +2060,9 @@ describe('useChatStore workspace history flow', () => {
 
         expect(store.activeAgentContext).toEqual(expect.objectContaining({
             name: 'Docs Agent',
-            tools: [{ id: 'read_document', description: 'Read docs' }]
+            tools: expect.arrayContaining([
+                { id: 'read_document', description: 'Read docs' }
+            ])
         }));
     });
 
@@ -2701,7 +2886,9 @@ describe('useChatStore workspace history flow', () => {
         expect(run.mock.calls[0]?.[0]).toMatchObject({
             agent: expect.objectContaining({
                 name: 'Docs Agent',
-                tools: [{ id: 'read_document', description: 'Read docs' }]
+                tools: expect.arrayContaining([
+                    { id: 'read_document', description: 'Read docs' }
+                ])
             }),
             workspace: expect.objectContaining({
                 contextProvider: conversationContextProvider,
@@ -3698,6 +3885,27 @@ describe('useChatStore workspace history flow', () => {
             activePath: '/docs/guide.md',
             activeConversationId: 'conversation-1'
         });
+    });
+
+    it('restores the last active local conversation during init', async () => {
+        localStorage.setItem('jarvis:chat:last-local-conversation-id', 'conversation-restored');
+        const storage = new MockStorageProvider([
+            {
+                id: 'conversation-restored',
+                title: 'Restored conversation',
+                origin: 'local',
+                updatedAt: 10,
+                messages: [{ id: 'restored-user', role: 'user', content: '恢复这条会话' }]
+            }
+        ]);
+        const store = useChatStore();
+        store.setProviders(new MockModelProvider(), storage);
+        await store.initializeProviderCatalog(providerCatalog);
+
+        await store.init();
+
+        expect(store.currentConversation?.id).toBe('conversation-restored');
+        expect(store.currentConversation?.messages[0]?.content).toBe('恢复这条会话');
     });
 
     it('resets workspace conversation state without clearing the active conversation', async () => {

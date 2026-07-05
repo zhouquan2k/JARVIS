@@ -21,7 +21,7 @@ describe('AppTopBar', () => {
         const buttonTestIds = wrapper.findAll('.workspace-btn').map((button) => button.attributes('data-testid'));
 
         expect(wrapper.get('.brand-title').text()).toBe('JARVIS');
-        expect(wrapper.get('.brand-icon').attributes('src')).toBe('/jarvis.png');
+        expect(wrapper.get('.brand-icon').attributes('src')).toBe('./jarvis.png');
         expect(buttonTestIds).toEqual([
             'topbar-workspace-knowledge-workspace',
             'topbar-workspace-all-tasks',

@@ -8,10 +8,20 @@ import { useDocumentWorkspaceStore } from './documentWorkspace';
 describe('useDocumentWorkspaceStore', () => {
     beforeEach(() => {
         setActivePinia(createPinia());
+        const storage = new Map<string, string>();
+        vi.stubGlobal('localStorage', {
+            getItem(key: string) {
+                return storage.get(key) ?? null;
+            },
+            setItem(key: string, value: string) {
+                storage.set(key, value);
+            }
+        });
     });
 
     afterEach(() => {
         vi.useRealTimers();
+        vi.unstubAllGlobals();
     });
 
     it('hydrates the tree without opening a file and resolves the root agent context', async () => {
@@ -33,8 +43,8 @@ describe('useDocumentWorkspaceStore', () => {
         expect(store.selectedNodePath).toBe('/');
         expect(store.draftContent).toBe('');
         expect(store.expandedPaths).toEqual(['/']);
-        expect(store.activeAgent?.name).toBe('Default Knowledge Agent');
-        expect(store.activeAgent?.scopePath).toBe('/');
+        expect(store.activeScopeData?.name).toBe('Default Knowledge Agent');
+        expect(store.activeScopeData?.scopePath).toBe('/');
     });
 
     it('formats normalized context hydration failures into currentError', async () => {
@@ -263,17 +273,18 @@ describe('useDocumentWorkspaceStore', () => {
         store.setContextProvider(provider);
 
         await store.hydrateWorkspace();
-        await store.convertDirectoryToAgent('/docs');
+        await store.enableDirectoryMetadata('/docs');
 
         const config = await provider.readDocument('/docs/.agent.json');
         expect(JSON.parse(decodeTextDocument(config.dataBase64))).toMatchObject({
-            ...DEFAULT_SCOPED_AGENT_CONFIG,
-            name: 'docs Agent'
+            name: 'Default Knowledge Scope',
+            modelProviderName: 'gemini-api',
+            modelName: 'Gemini Pro Latest'
         });
         expect(store.selectedNodePath).toBe('/docs');
         expect(store.activePath).toBeNull();
-        expect(store.isAgentOwnerSelected).toBe(true);
-        expect(store.activeAgent?.name).toBe('docs Agent');
+        expect(store.isMetadataOwnerSelected).toBe(true);
+        expect(store.activeScopeData?.name).toBe('Default Knowledge Scope');
     });
 
     it('reuses a leftover .agent.json.tmp when retrying directory conversion', async () => {
@@ -290,22 +301,23 @@ describe('useDocumentWorkspaceStore', () => {
         store.setContextProvider(provider);
 
         await store.hydrateWorkspace();
-        await store.convertDirectoryToAgent('/docs');
+        await store.enableDirectoryMetadata('/docs');
 
         const config = await provider.readDocument('/docs/.agent.json');
         expect(JSON.parse(decodeTextDocument(config.dataBase64))).toMatchObject({
-            ...DEFAULT_SCOPED_AGENT_CONFIG,
-            name: 'docs Agent'
+            name: 'Default Knowledge Scope',
+            modelProviderName: 'gemini-api',
+            modelName: 'Gemini Pro Latest'
         });
         await expect(provider.readDocument('/docs/.agent.json.tmp')).rejects.toThrow();
-        expect(store.isAgentOwnerSelected).toBe(true);
-        expect(store.activeAgent?.name).toBe('docs Agent');
+        expect(store.isMetadataOwnerSelected).toBe(true);
+        expect(store.activeScopeData?.name).toBe('Default Knowledge Scope');
     });
 
     it('treats an existing .agent.json as an already converted directory', async () => {
         const provider = createMockContextProvider({
             nodes: [
-                { path: '/docs', name: 'docs', kind: 'directory', isAgentOwner: true, agentKey: '/docs/' },
+                { path: '/docs', name: 'docs', kind: 'directory', isAgentOwner: true, scopeKey: '/docs/' },
                 { path: '/docs/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/docs' }
             ],
             documents: {
@@ -319,7 +331,7 @@ describe('useDocumentWorkspaceStore', () => {
         store.setContextProvider(provider);
 
         await store.hydrateWorkspace();
-        await store.convertDirectoryToAgent('/docs');
+        await store.enableDirectoryMetadata('/docs');
 
         const config = await provider.readDocument('/docs/.agent.json');
         expect(JSON.parse(decodeTextDocument(config.dataBase64))).toMatchObject({
@@ -332,7 +344,7 @@ describe('useDocumentWorkspaceStore', () => {
         const store = useDocumentWorkspaceStore();
         store.setContextProvider(createMockContextProvider({
             nodes: [
-                { path: '/docs', name: 'docs', kind: 'directory', isAgentOwner: true, agentKey: '/docs/' },
+                { path: '/docs', name: 'docs', kind: 'directory', isAgentOwner: true, scopeKey: '/docs/' },
                 { path: '/docs/.agent.json', name: '.agent.json', kind: 'file', parentPath: '/docs' },
                 { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' }
             ],
@@ -354,8 +366,8 @@ describe('useDocumentWorkspaceStore', () => {
         expect(store.selectedNodePath).toBe('/docs');
         expect(store.activePath).toBe('/docs/guide.md');
         expect(store.activeDocument?.path).toBe('/docs/guide.md');
-        expect(store.isAgentOwnerSelected).toBe(true);
-        expect(store.activeAgentKey).not.toBeNull();
+        expect(store.isMetadataOwnerSelected).toBe(true);
+        expect(store.activeScopeKey).not.toBeNull();
     });
 
     it('loads an existing agent owner index document while preserving the owner scope', async () => {
@@ -377,11 +389,49 @@ describe('useDocumentWorkspaceStore', () => {
 
         expect(store.selectedNodePath).toBe('/docs');
         expect(store.activePath).toBeNull();
-        expect(store.agentIndexPath).toBe('/docs/index.md');
-        expect(store.agentIndexDocument?.path).toBe('/docs/index.md');
-        expect(store.agentIndexViewerId).toBe('text');
-        expect(store.agentIndexDraftContent).toBe('# Docs index');
-        expect(store.isAgentOwnerSelected).toBe(true);
+        expect(store.scopeIndexPath).toBe('/docs/index.md');
+        expect(store.scopeIndexDocument?.path).toBe('/docs/index.md');
+        expect(store.scopeIndexViewerId).toBe('text');
+        expect(store.scopeIndexDraftContent).toBe('# Docs index');
+        expect(store.isMetadataOwnerSelected).toBe(true);
+    });
+
+    it('persists and reads the latest workspace selection snapshot', async () => {
+        const store = useDocumentWorkspaceStore();
+        store.selectedNodePath = '/docs';
+        store.activePath = '/docs/guide.md';
+
+        store.persistSelectionSnapshot();
+
+        expect(store.readPersistedSelectionSnapshot()).toEqual({
+            selectedNodePath: '/docs',
+            activePath: '/docs/guide.md'
+        });
+    });
+
+    it('restores the persisted workspace selection snapshot through restoreSelection', async () => {
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' }
+            ],
+            documents: {
+                '/docs/guide.md': '# Guide'
+            }
+        }));
+
+        localStorage.setItem('jarvis:knowledge-workspace:selection-snapshot', JSON.stringify({
+            selectedNodePath: '/docs',
+            activePath: '/docs/guide.md'
+        }));
+
+        await store.hydrateWorkspace();
+        await store.restorePersistedSelection();
+
+        expect(store.selectedNodePath).toBe('/docs');
+        expect(store.activePath).toBe('/docs/guide.md');
+        expect(store.activeDocument?.path).toBe('/docs/guide.md');
     });
 
     it('keeps agent view active when an agent owner index document is absent', async () => {
@@ -401,7 +451,7 @@ describe('useDocumentWorkspaceStore', () => {
 
         expect(store.selectedNodePath).toBe('/docs');
         expect(store.activePath).toBeNull();
-        expect(store.isAgentOwnerSelected).toBe(true);
+        expect(store.isMetadataOwnerSelected).toBe(true);
     });
 
     it('loads index.md for a normal directory while preserving the selected folder scope', async () => {
@@ -421,10 +471,10 @@ describe('useDocumentWorkspaceStore', () => {
 
         expect(store.selectedNodePath).toBe('/docs');
         expect(store.activePath).toBeNull();
-        expect(store.agentIndexPath).toBe('/docs/index.md');
-        expect(store.agentIndexDocument?.path).toBe('/docs/index.md');
-        expect(store.agentIndexDraftContent).toBe('# Docs index');
-        expect(store.isAgentOwnerSelected).toBe(false);
+        expect(store.scopeIndexPath).toBe('/docs/index.md');
+        expect(store.scopeIndexDocument?.path).toBe('/docs/index.md');
+        expect(store.scopeIndexDraftContent).toBe('# Docs index');
+        expect(store.isMetadataOwnerSelected).toBe(false);
     });
 
     it('keeps a normal directory empty when index.md is absent', async () => {
@@ -441,9 +491,9 @@ describe('useDocumentWorkspaceStore', () => {
 
         expect(store.selectedNodePath).toBe('/docs');
         expect(store.activePath).toBeNull();
-        expect(store.agentIndexPath).toBeNull();
-        expect(store.agentIndexDocument).toBeNull();
-        expect(store.isAgentOwnerSelected).toBe(false);
+        expect(store.scopeIndexPath).toBeNull();
+        expect(store.scopeIndexDocument).toBeNull();
+        expect(store.isMetadataOwnerSelected).toBe(false);
     });
 
     it('loads the root index document when the root agent owner has one', async () => {
@@ -464,11 +514,11 @@ describe('useDocumentWorkspaceStore', () => {
 
         expect(store.selectedNodePath).toBe('/');
         expect(store.activePath).toBeNull();
-        expect(store.agentIndexPath).toBe('/index.md');
-        expect(store.agentIndexDocument?.path).toBe('/index.md');
-        expect(store.agentIndexViewerId).toBe('text');
-        expect(store.agentIndexDraftContent).toBe('# Root index');
-        expect(store.isAgentOwnerSelected).toBe(true);
+        expect(store.scopeIndexPath).toBe('/index.md');
+        expect(store.scopeIndexDocument?.path).toBe('/index.md');
+        expect(store.scopeIndexViewerId).toBe('text');
+        expect(store.scopeIndexDraftContent).toBe('# Root index');
+        expect(store.isMetadataOwnerSelected).toBe(true);
     });
 
     it('edits and saves the agent owner index document through dedicated state', async () => {
@@ -488,17 +538,17 @@ describe('useDocumentWorkspaceStore', () => {
 
         await store.hydrateWorkspace();
         await store.openNode('/docs');
-        store.updateAgentIndexDocument('# Updated Docs index');
+        store.updateScopeIndexDocument('# Updated Docs index');
 
         expect(store.dirtyPaths['/docs/index.md']).toBe(true);
-        expect(store.agentIndexDraftContent).toBe('# Updated Docs index');
+        expect(store.scopeIndexDraftContent).toBe('# Updated Docs index');
 
-        await store.flushAgentIndexDocument();
+        await store.flushScopeIndexDocument();
 
         const saved = await contextProvider.readDocument('/docs/index.md');
         expect(Buffer.from(saved.dataBase64, 'base64').toString('utf8')).toBe('# Updated Docs index');
         expect(store.dirtyPaths['/docs/index.md']).toBe(false);
-        expect(Buffer.from(store.agentIndexDocument?.dataBase64 ?? '', 'base64').toString('utf8')).toBe('# Updated Docs index');
+        expect(Buffer.from(store.scopeIndexDocument?.dataBase64 ?? '', 'base64').toString('utf8')).toBe('# Updated Docs index');
     });
 
     it('resolves text/plain with the shared text viewer', async () => {
@@ -622,21 +672,21 @@ describe('useDocumentWorkspaceStore', () => {
         }));
 
         await store.hydrateWorkspace();
-        expect(store.activeAgent?.name).toBe('Default Knowledge Agent');
-        expect(store.activeAgent?.scopePath).toBe('/');
+        expect(store.activeScopeData?.name).toBe('Default Knowledge Agent');
+        expect(store.activeScopeData?.scopePath).toBe('/');
 
         await store.openNode('/workspace/archive');
         expect(store.selectedNodePath).toBe('/workspace/archive');
         expect(store.activePath).toBeNull();
         expect(store.activeDocument).toBeNull();
         expect(store.draftContent).toBe('');
-        expect(store.activeAgent?.name).toBe('Archive Agent');
-        expect(store.activeAgent?.scopePath).toBe('/workspace/archive');
+        expect(store.activeScopeData?.name).toBe('Archive Agent');
+        expect(store.activeScopeData?.scopePath).toBe('/workspace/archive');
 
         await store.openNode('/workspace/archive/snippet.md');
-        expect(store.activeAgent?.name).toBe('Archive Agent');
-        expect(store.activeAgent?.scopePath).toBe('/workspace/archive');
-        expect(store.agentResolutionError).toBeNull();
+        expect(store.activeScopeData?.name).toBe('Archive Agent');
+        expect(store.activeScopeData?.scopePath).toBe('/workspace/archive');
+        expect(store.metadataResolutionError).toBeNull();
     });
 
     it('refreshes the tree while preserving the selected path when it still exists', async () => {
@@ -801,6 +851,67 @@ describe('useDocumentWorkspaceStore', () => {
         expect(store.canGoForwardNodeHistory).toBe(false);
     });
 
+    it('tracks the five most recent real nodes, de-duplicates them, and persists the list', async () => {
+        const provider = createMockContextProvider({
+            nodes: [
+                { path: '/alpha.md', name: 'alpha.md', kind: 'file' },
+                { path: '/beta.md', name: 'beta.md', kind: 'file' },
+                { path: '/gamma', name: 'gamma', kind: 'directory' },
+                { path: '/delta.md', name: 'delta.md', kind: 'file' },
+                { path: '/epsilon.md', name: 'epsilon.md', kind: 'file' },
+                { path: '/zeta.md', name: 'zeta.md', kind: 'file' }
+            ],
+            documents: {
+                '/alpha.md': '# Alpha',
+                '/beta.md': '# Beta',
+                '/delta.md': '# Delta',
+                '/epsilon.md': '# Epsilon',
+                '/zeta.md': '# Zeta'
+            }
+        });
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(provider);
+
+        await store.hydrateWorkspace();
+        await store.openNode('/');
+        await store.openNode('/alpha.md');
+        await store.openNode('/beta.md');
+        await store.openNode('/gamma');
+        await store.openNode('/delta.md');
+        await store.openNode('/epsilon.md');
+        await store.openNode('/beta.md');
+        await store.openNode('/zeta.md');
+
+        expect(store.recentNodePaths).toEqual([
+            '/zeta.md',
+            '/beta.md',
+            '/epsilon.md',
+            '/delta.md',
+            '/gamma'
+        ]);
+        expect(store.recentNodes.map((node) => node.name)).toEqual([
+            'zeta.md',
+            'beta.md',
+            'epsilon.md',
+            'delta.md',
+            'gamma'
+        ]);
+        expect(localStorage.getItem('jarvis:knowledge-workspace:recent-node-paths')).toBe(JSON.stringify([
+            '/zeta.md',
+            '/beta.md',
+            '/epsilon.md',
+            '/delta.md',
+            '/gamma'
+        ]));
+
+        setActivePinia(createPinia());
+        const restoredStore = useDocumentWorkspaceStore();
+        restoredStore.setContextProvider(provider);
+        await restoredStore.hydrateWorkspace();
+
+        expect(restoredStore.recentNodePaths).toEqual(store.recentNodePaths);
+    });
+
     it('does not record restore navigation and removes missing nodes from history on refresh', async () => {
         const provider = createMockContextProvider({
             nodes: [
@@ -835,6 +946,29 @@ describe('useDocumentWorkspaceStore', () => {
         expect(store.canGoBackNodeHistory).toBe(false);
     });
 
+    it('removes missing nodes from the recent list on refresh', async () => {
+        const provider = createMockContextProvider({
+            nodes: [
+                { path: '/docs', name: 'docs', kind: 'directory' },
+                { path: '/notes.md', name: 'notes.md', kind: 'file' }
+            ],
+            documents: {
+                '/notes.md': '# Notes'
+            }
+        });
+        const store = useDocumentWorkspaceStore();
+        store.setContextProvider(provider);
+
+        await store.hydrateWorkspace();
+        await store.openNode('/docs');
+        await store.openNode('/notes.md');
+        await provider.deleteNode('/notes.md');
+        await store.refreshTree();
+
+        expect(store.recentNodePaths).toEqual(['/docs']);
+        expect(localStorage.getItem('jarvis:knowledge-workspace:recent-node-paths')).toBe(JSON.stringify(['/docs']));
+    });
+
     it('falls back to the default agent when no scoped config exists', async () => {
         const store = useDocumentWorkspaceStore();
         store.setContextProvider(createMockContextProvider({
@@ -849,9 +983,9 @@ describe('useDocumentWorkspaceStore', () => {
 
         await store.hydrateWorkspace();
 
-        expect(store.activeAgent?.name).toBe('Default Knowledge Agent');
-        expect(store.activeAgent?.scopePath).toBe('/');
-        expect(store.agentResolutionError).toBeNull();
+        expect(store.activeScopeData?.name).toBe('Default Knowledge Agent');
+        expect(store.activeScopeData?.scopePath).toBe('/');
+        expect(store.metadataResolutionError).toBeNull();
     });
 
     it('creates and saves the root default agent config when the root agent is edited', async () => {
@@ -869,7 +1003,7 @@ describe('useDocumentWorkspaceStore', () => {
 
         await store.hydrateWorkspace();
         await store.openNode('/');
-        await store.saveAgentConfig({
+        await store.saveFolderMetadata({
             ownerPath: '/',
             patch: {
                 instructions: 'Root prompt',
@@ -881,17 +1015,17 @@ describe('useDocumentWorkspaceStore', () => {
         const saved = await provider.readDocument('/.agent.json');
         const parsed = JSON.parse(decodeTextDocument(saved.dataBase64));
         expect(parsed).toMatchObject({
-            ...DEFAULT_SCOPED_AGENT_CONFIG,
+            name: 'Default Knowledge Scope',
             instructions: 'Root prompt',
             modelProviderName: 'gemini-api',
             modelName: 'gemini-2.5-flash'
         });
         expect(store.selectedNodePath).toBe('/');
-        expect(store.activeAgentKey).toBe('/');
-        expect(store.activeAgent?.name).toBe('Default Knowledge Agent');
-        expect(store.activeAgent?.effectiveInstructions).toContain('Root prompt');
-        expect(store.activeAgent?.modelProviderName).toBe('gemini-api');
-        expect(store.activeAgent?.modelName).toBe('gemini-2.5-flash');
+        expect(store.activeScopeKey).toBe('/');
+        expect(store.activeScopeData?.name).toBe('Default Knowledge Scope');
+        expect(store.activeScopeData?.effectiveInstructions).toContain('Root prompt');
+        expect(store.activeScopeData?.modelProviderName).toBe('gemini-api');
+        expect(store.activeScopeData?.modelName).toBe('gemini-2.5-flash');
     });
 
     it('saves editable agent config fields while preserving unsupported fields and refreshing the active agent', async () => {
@@ -919,7 +1053,7 @@ describe('useDocumentWorkspaceStore', () => {
 
         await store.hydrateWorkspace();
         await store.openNode('/docs');
-        await store.saveAgentConfig({
+        await store.saveFolderMetadata({
             ownerPath: '/docs',
             patch: {
                 description: 'Updated description',
@@ -951,10 +1085,10 @@ describe('useDocumentWorkspaceStore', () => {
             { id: 'write_file' }
         ]);
         expect(parsed.skills).toEqual([{ id: 'summarize' }]);
-        expect(store.activeAgent?.name).toBe('Docs Agent');
-        expect(store.activeAgent?.effectiveInstructions).toBe('New prompt');
-        expect(store.activeAgent?.modelProviderName).toBe('openai');
-        expect(store.activeAgent?.modelName).toBe('gpt-5.4');
+        expect(store.activeScopeData?.name).toBe('Docs Agent');
+        expect(store.activeScopeData?.effectiveInstructions).toBe('New prompt');
+        expect(store.activeScopeData?.modelProviderName).toBe('openai');
+        expect(store.activeScopeData?.modelName).toBe('gpt-5.4');
     });
 
     it('removes tools when saving full inheritance for an owner agent config', async () => {
@@ -976,11 +1110,10 @@ describe('useDocumentWorkspaceStore', () => {
         store.setContextProvider(provider);
 
         await store.hydrateWorkspace();
-        await store.saveAgentConfig({
+        await store.saveFolderMetadata({
             ownerPath: '/docs',
-            patch: {
-                inheritTools: true
-            }
+            patch: {},
+            clearedFields: ['tools']
         });
 
         const saved = await provider.readDocument('/docs/.agent.json');
@@ -1012,7 +1145,7 @@ describe('useDocumentWorkspaceStore', () => {
         store.setContextProvider(provider);
 
         await store.hydrateWorkspace();
-        await expect(store.saveAgentConfig({
+        await expect(store.saveFolderMetadata({
             ownerPath: '/docs',
             patch: {
                 instructions: 'New prompt'
@@ -1042,14 +1175,11 @@ describe('useDocumentWorkspaceStore', () => {
         store.setContextProvider(provider);
 
         await store.hydrateWorkspace();
-        await store.saveAgentConfig({
+        await store.saveFolderMetadata({
             ownerPath: '/docs',
             patch: {
-                instructions: '  ',
-                modelProviderName: '',
-                modelName: '',
-                inheritance: 'merge'
-            }
+            },
+            clearedFields: ['instructions', 'modelProviderName', 'modelName', 'inheritance']
         });
 
         const saved = await provider.readDocument('/docs/.agent.json');
@@ -1077,7 +1207,7 @@ describe('useDocumentWorkspaceStore', () => {
         expect(store.activePath).toBeNull();
         expect(store.selectedNodePath).toBe('/');
         expect(store.draftContent).toBe('');
-        expect(store.activeAgent).toBeNull();
+        expect(store.activeScopeData).toBeNull();
         expect(store.currentError).toContain('Failed to parse /broken/.agent.json');
     });
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createDomTransport } from './domTransport';
-import type { ControlledPageCapability } from '@packages/core/src/interfaces/ControlledPageCapability';
+import type { ControlledPageCapability } from '@packages/core';
 
 function makeCapability(): ControlledPageCapability {
     return {

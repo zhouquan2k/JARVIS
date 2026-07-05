@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DomAutomationProvider } from './DomAutomationProvider';
 import type { DomTransport } from './domTransport';
-import type { ControlledPageEvent } from '@packages/core/src/interfaces/ControlledPageCapability';
+import type { ControlledPageEvent } from '@packages/core';
 
 function makeTransport(dynamicModels?: { id: string; name: string }[]): DomTransport & {
     emit: (event: ControlledPageEvent) => void;
@@ -75,7 +75,7 @@ describe('DomAutomationProvider session continuity', () => {
         await Promise.resolve();
         await Promise.resolve();
         await Promise.resolve();
-        await vi.advanceTimersByTimeAsync(90_000);
+        await vi.advanceTimersByTimeAsync(300_000);
 
         await expect(sendPromise).resolves.toMatchObject({ text: 'final-from-fallback' });
         expect(transport.readFinalText).toHaveBeenCalledTimes(1);

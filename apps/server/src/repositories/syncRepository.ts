@@ -1,6 +1,11 @@
 import type { Conversation, ConversationOrigin, ConversationQuery, IConversationQueryProvider } from '@plugins/ai-agent/api';
 import type { SyncDatabase } from '../db.js';
-import type { SyncConversation, SyncDeletedConversation } from '../types/sync.js';
+import type {
+    SyncConversation,
+    SyncDeletedConversation,
+    SyncDeletedTask,
+    SyncTaskRecord
+} from '../types/sync.js';
 
 interface CursorRow {
     current_cursor: number;
@@ -18,6 +23,19 @@ interface ConversationRow {
 
 interface DeletedConversationRow {
     payload_json: string;
+    server_cursor: number;
+    created_at: number;
+    last_seen_at: number;
+}
+
+interface CursorStateRow {
+    current_cursor: number;
+}
+
+interface TaskRow {
+    payload_json: string;
+    updated_at: number;
+    deleted: number;
     server_cursor: number;
     created_at: number;
     last_seen_at: number;
@@ -53,6 +71,36 @@ export interface SaveDeletedConversationInput {
     createdAt: number;
 }
 
+export interface PersistedTask {
+    task: SyncTaskRecord;
+    serverCursor: number;
+    createdAt: number;
+    lastSeenAt: number;
+}
+
+export interface PersistedDeletedTask {
+    deletedTask: SyncDeletedTask;
+    serverCursor: number;
+    createdAt: number;
+    lastSeenAt: number;
+}
+
+export interface SaveTaskInput {
+    syncKey: string;
+    task: SyncTaskRecord;
+    serverCursor: number;
+    receivedAt: number;
+    createdAt: number;
+}
+
+export interface SaveDeletedTaskInput {
+    syncKey: string;
+    deletedTask: SyncDeletedTask;
+    serverCursor: number;
+    receivedAt: number;
+    createdAt: number;
+}
+
 export class SyncRepository implements IConversationQueryProvider {
     constructor(private readonly database: SyncDatabase) {}
 
@@ -75,6 +123,37 @@ export class SyncRepository implements IConversationQueryProvider {
                 INSERT INTO sync_cursor_state (sync_key, current_cursor, updated_at)
                 VALUES (@syncKey, @currentCursor, @updatedAt)
                 ON CONFLICT(sync_key) DO UPDATE SET
+                    current_cursor = excluded.current_cursor,
+                    updated_at = excluded.updated_at
+            `)
+            .run({
+                syncKey,
+                currentCursor: nextCursor,
+                updatedAt: timestamp
+            });
+
+        return nextCursor;
+    }
+
+    getCurrentTaskCursor(syncKey: string): number {
+        const row = this.database
+            .prepare(`
+                SELECT current_cursor
+                FROM sync_resource_cursor_state
+                WHERE sync_key = ? AND resource_type = 'task'
+            `)
+            .get(syncKey) as CursorStateRow | undefined;
+
+        return row?.current_cursor ?? 0;
+    }
+
+    allocateNextTaskCursor(syncKey: string, timestamp: number): number {
+        const nextCursor = this.getCurrentTaskCursor(syncKey) + 1;
+        this.database
+            .prepare(`
+                INSERT INTO sync_resource_cursor_state (sync_key, resource_type, current_cursor, updated_at)
+                VALUES (@syncKey, 'task', @currentCursor, @updatedAt)
+                ON CONFLICT(sync_key, resource_type) DO UPDATE SET
                     current_cursor = excluded.current_cursor,
                     updated_at = excluded.updated_at
             `)
@@ -395,6 +474,188 @@ export class SyncRepository implements IConversationQueryProvider {
         this.database
             .prepare('DELETE FROM synced_conversations WHERE sync_key = ? AND conversation_id = ?')
             .run(syncKey, conversationId);
+    }
+
+    getTask(syncKey: string, taskId: string): PersistedTask | null {
+        const row = this.database
+            .prepare(`
+                SELECT payload_json, updated_at, deleted, server_cursor, created_at, last_seen_at
+                FROM sync_tasks
+                WHERE sync_key = ? AND task_id = ? AND deleted = 0
+            `)
+            .get(syncKey, taskId) as TaskRow | undefined;
+
+        if (!row) {
+            return null;
+        }
+
+        return {
+            task: JSON.parse(row.payload_json) as SyncTaskRecord,
+            serverCursor: row.server_cursor,
+            createdAt: row.created_at,
+            lastSeenAt: row.last_seen_at
+        };
+    }
+
+    getDeletedTask(syncKey: string, taskId: string): PersistedDeletedTask | null {
+        const row = this.database
+            .prepare(`
+                SELECT payload_json, updated_at, deleted, server_cursor, created_at, last_seen_at
+                FROM sync_tasks
+                WHERE sync_key = ? AND task_id = ? AND deleted = 1
+            `)
+            .get(syncKey, taskId) as TaskRow | undefined;
+
+        if (!row) {
+            return null;
+        }
+
+        return {
+            deletedTask: JSON.parse(row.payload_json) as SyncDeletedTask,
+            serverCursor: row.server_cursor,
+            createdAt: row.created_at,
+            lastSeenAt: row.last_seen_at
+        };
+    }
+
+    listTasksSince(syncKey: string, cursor: number | null): {
+        tasks: PersistedTask[];
+        deletedTasks: PersistedDeletedTask[];
+        nextCursor: number;
+    } {
+        const minCursor = cursor ?? 0;
+        const rows = this.database
+            .prepare(`
+                SELECT payload_json, updated_at, deleted, server_cursor, created_at, last_seen_at
+                FROM sync_tasks
+                WHERE sync_key = ? AND server_cursor > ?
+                ORDER BY server_cursor ASC
+            `)
+            .all(syncKey, minCursor) as TaskRow[];
+
+        const tasks: PersistedTask[] = [];
+        const deletedTasks: PersistedDeletedTask[] = [];
+        for (const row of rows) {
+            if (row.deleted === 1) {
+                deletedTasks.push({
+                    deletedTask: JSON.parse(row.payload_json) as SyncDeletedTask,
+                    serverCursor: row.server_cursor,
+                    createdAt: row.created_at,
+                    lastSeenAt: row.last_seen_at
+                });
+                continue;
+            }
+
+            tasks.push({
+                task: JSON.parse(row.payload_json) as SyncTaskRecord,
+                serverCursor: row.server_cursor,
+                createdAt: row.created_at,
+                lastSeenAt: row.last_seen_at
+            });
+        }
+
+        return {
+            tasks,
+            deletedTasks,
+            nextCursor: this.getCurrentTaskCursor(syncKey)
+        };
+    }
+
+    listAllTasks(syncKey: string): SyncTaskRecord[] {
+        const rows = this.database
+            .prepare(`
+                SELECT payload_json
+                FROM sync_tasks
+                WHERE sync_key = ? AND deleted = 0
+                ORDER BY updated_at DESC
+            `)
+            .all(syncKey) as Array<{ payload_json: string }>;
+
+        return rows.map((row) => JSON.parse(row.payload_json) as SyncTaskRecord);
+    }
+
+    upsertTasks(inputs: SaveTaskInput[]): void {
+        const statement = this.database.prepare(`
+            INSERT INTO sync_tasks (
+                sync_key,
+                task_id,
+                payload_json,
+                updated_at,
+                deleted,
+                server_cursor,
+                created_at,
+                last_seen_at
+            )
+            VALUES (
+                @syncKey,
+                @taskId,
+                @payloadJson,
+                @updatedAt,
+                0,
+                @serverCursor,
+                @createdAt,
+                @lastSeenAt
+            )
+            ON CONFLICT(sync_key, task_id) DO UPDATE SET
+                payload_json = excluded.payload_json,
+                updated_at = excluded.updated_at,
+                deleted = 0,
+                server_cursor = excluded.server_cursor,
+                last_seen_at = excluded.last_seen_at
+        `);
+
+        for (const input of inputs) {
+            statement.run({
+                syncKey: input.syncKey,
+                taskId: input.task.id,
+                payloadJson: JSON.stringify(input.task),
+                updatedAt: input.task.updatedAt,
+                serverCursor: input.serverCursor,
+                createdAt: input.createdAt,
+                lastSeenAt: input.receivedAt
+            });
+        }
+    }
+
+    saveDeletedTask(input: SaveDeletedTaskInput): void {
+        this.database
+            .prepare(`
+                INSERT INTO sync_tasks (
+                    sync_key,
+                    task_id,
+                    payload_json,
+                    updated_at,
+                    deleted,
+                    server_cursor,
+                    created_at,
+                    last_seen_at
+                )
+                VALUES (
+                    @syncKey,
+                    @taskId,
+                    @payloadJson,
+                    @updatedAt,
+                    1,
+                    @serverCursor,
+                    @createdAt,
+                    @lastSeenAt
+                )
+                ON CONFLICT(sync_key, task_id) DO UPDATE SET
+                    payload_json = excluded.payload_json,
+                    updated_at = excluded.updated_at,
+                    deleted = 1,
+                    server_cursor = excluded.server_cursor,
+                    last_seen_at = excluded.last_seen_at
+            `)
+            .run({
+                syncKey: input.syncKey,
+                taskId: input.deletedTask.id,
+                payloadJson: JSON.stringify(input.deletedTask),
+                updatedAt: input.deletedTask.updatedAt,
+                serverCursor: input.serverCursor,
+                createdAt: input.createdAt,
+                lastSeenAt: input.receivedAt
+            });
     }
 
     getConversationsNeedingMigration(): Array<{ syncKey: string; conversationId: string; documentPaths: string[] }> {

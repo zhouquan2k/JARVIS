@@ -18,13 +18,13 @@
     <component
       :is="activeTabComponent"
       v-if="activeTabComponent"
-      class="agent-pane-chat"
-      :active-agent="props.activeAgent"
-      :active-agent-key="props.activeAgentKey"
+      class="scope-pane-chat"
+      :active-scope-data="props.activeScopeData"
+      :active-scope-key="props.activeScopeKey"
       :active-path="props.activePath"
       :selected-node-path="props.selectedNodePath"
       :active-document="props.activeDocument"
-      :show-agent-conversation-list="props.showAgentConversationList"
+      :show-scope-conversation-list="props.showScopeConversationList"
       :context-provider="props.contextProvider"
       :open-conversation-request="props.openConversationRequest"
       :workspace-detail-key="workspaceNavigationState?.detailKey ?? null"
@@ -35,7 +35,6 @@
 
 <script setup lang="ts">
 import type { ContextDocument, FolderMetadata, IContextProvider, WorkspaceTabContext } from '@packages/core/src';
-import type { ResolvedAgentConfig } from '@plugins/ai-agent/api';
 import { computed, inject, ref, watch } from 'vue';
 import type { ChatRoutePath } from '../routes';
 import { contributionQueryKey, workspaceNavigationStateKey, workspaceRuntimeContextKey, workspaceRouteKey } from '../plugins/injectionKeys';
@@ -43,15 +42,14 @@ import type { OpenConversationRequest } from '../types/conversationLink';
 import { useWorkspaceI18n } from '../i18n';
 
 const props = defineProps<{
-  activeAgent?: ResolvedAgentConfig | null;
-  activeAgentKey?: string | null;
+  activeScopeData?: Record<string, unknown> | null;
+  activeScopeKey?: string | null;
   activePath?: string | null;
   selectedNodePath?: string | null;
   activeDocument?: ContextDocument | null;
-  showAgentConversationList?: boolean;
+  showScopeConversationList?: boolean;
   contextProvider?: IContextProvider | null;
   onFileChanged?: ((change: { path: string; beforeContent: string; afterContent: string; alreadyPersisted?: boolean }) => void | Promise<void>) | null;
-  agentResolutionError?: string | null;
   openConversationRequest?: OpenConversationRequest | null;
 }>();
 const { t } = useWorkspaceI18n();
@@ -66,14 +64,14 @@ const activeTabComponent = computed(() => {
   return rightPanelTabs.value.find((tab) => tab.id === activeTab.value)?.component ?? null;
 });
 const activeScopeMetadata = computed<FolderMetadata | null>(() => {
-  const scopeKey = props.activeAgentKey?.trim() || null;
+  const scopeKey = props.activeScopeKey?.trim() || null;
   return scopeKey
-    ? { scopeKey, data: (props.activeAgent ?? {}) as unknown as Record<string, unknown> }
+    ? { scopeKey, data: (props.activeScopeData ?? {}) as unknown as Record<string, unknown> }
     : null;
 });
 const workspaceTabContext = computed<WorkspaceTabContext>(() => ({
   activeScopeMetadata: activeScopeMetadata.value,
-  activeScopeKey: props.activeAgentKey?.trim() || null,
+  activeScopeKey: props.activeScopeKey?.trim() || null,
   activePath: props.activePath?.trim() || null,
   selectedNodePath: props.selectedNodePath?.trim() || null,
   activeDocument: props.activeDocument ?? null,
@@ -81,7 +79,7 @@ const workspaceTabContext = computed<WorkspaceTabContext>(() => ({
   runtimeContext: runtimeContext?.value ?? null,
   openConversationId: props.openConversationRequest?.conversationId ?? null,
   openConversationNonce: props.openConversationRequest?.nonce ?? null,
-  showAgentConversationList: props.showAgentConversationList === true
+  showScopeConversationList: props.showScopeConversationList === true
 }));
 
 async function refreshTabBadgeCounts(): Promise<void> {
@@ -225,7 +223,7 @@ const emit = defineEmits<{
   background: linear-gradient(90deg, #22c55e, #38bdf8);
 }
 
-.agent-pane-chat {
+.scope-pane-chat {
   flex: 1;
   min-width: 0;
   min-height: 0;

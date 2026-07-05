@@ -276,7 +276,8 @@ export function createAgentRuntime(options: CreateAgentRuntimeOptions): AgentRun
                         attachments: preparedRequest.attachments,
                         history: request.history,
                         modelOptions: request.modelOptions,
-                        reasoningEffort: request.reasoningEffort
+                        reasoningEffort: request.reasoningEffort,
+                        groupMembers: request.groupMembers
                     },
                     onUpdate
                 );

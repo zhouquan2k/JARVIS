@@ -8,9 +8,7 @@ export default defineConfig({
     },
     resolve: {
         alias: {
-            '@packages/core': resolve(__dirname, '../core'),
-            '@plugins/ai-agent': resolve(__dirname, '../../plugins/ai-agent'),
-            '@plugins/task-mgr': resolve(__dirname, '../../plugins/task-mgr')
+            '@packages/core': resolve(__dirname, '../core')
         }
     }
 });

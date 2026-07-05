@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os';
 import path from 'node:path';
 import { FileSystemContextProvider } from './FileSystemContextProvider';
-import { DEFAULT_SCOPED_AGENT_CONFIG } from '../../../core/src/index.ts';
+import { DEFAULT_WORKSPACE_METADATA_BOOTSTRAP } from '../../../core/index.ts';
 
 const tempRoots: string[] = [];
 
@@ -15,7 +15,7 @@ describe('FileSystemContextProvider', () => {
         tempRoots.length = 0;
     });
 
-    it('returns a full tree with metadata ownership, effective scope keys and aligned agent configs', async () => {
+    it('returns a full tree with metadata ownership, effective scope keys and raw scope metadata', async () => {
         const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-node-context-'));
         tempRoots.push(rootPath);
 
@@ -68,27 +68,21 @@ describe('FileSystemContextProvider', () => {
         });
 
         expect(context.folderMetadata['/']?.data).toMatchObject({
-            ...DEFAULT_SCOPED_AGENT_CONFIG,
-            scopePath: '/',
-            sourcePaths: ['/.agent.json']
+            ...DEFAULT_WORKSPACE_METADATA_BOOTSTRAP
         });
         const rootAgentFile = await readFile(path.join(rootPath, '.agent.json'), 'utf8');
         expect(JSON.parse(rootAgentFile)).toMatchObject({
-            name: 'Default Knowledge Agent',
+            name: 'Default Knowledge Scope',
             modelProviderName: 'gemini-api'
         });
         expect(context.folderMetadata['/workspace/']?.data).toMatchObject({
             name: 'Workspace Agent',
-            scopePath: '/workspace',
-            sourcePaths: ['/.agent.json', '/workspace/.agent.json']
+            instructions: 'Handle workspace docs.'
         });
         expect(context.folderMetadata['/workspace/archive/']?.data).toMatchObject({
             name: 'Archive Agent',
-            scopePath: '/workspace/archive',
-            sourcePaths: ['/.agent.json', '/workspace/.agent.json', '/workspace/archive/.agent.json']
+            instructions: 'Handle archived docs.'
         });
-        expect(String(context.folderMetadata['/workspace/archive/']?.data?.effectiveInstructions)).toContain('Handle workspace docs.');
-        expect(String(context.folderMetadata['/workspace/archive/']?.data?.effectiveInstructions)).toContain('Handle archived docs.');
     });
 
     it('supports mounted top-level directories with virtual paths and alias-only root operations', async () => {
@@ -142,13 +136,12 @@ describe('FileSystemContextProvider', () => {
         });
         expect(context.folderMetadata['/reports/']?.data).toMatchObject({
             name: 'Reports Mount',
-            scopePath: '/reports',
-            sourcePaths: ['/.agent.json', '/reports/.agent.json']
+            instructions: 'Handle mounted reports.',
+            linkDir: path.relative(reportsPath, targetPath)
         });
         expect(context.folderMetadata['/reports/archive/']?.data).toMatchObject({
             name: 'Archive Agent',
-            scopePath: '/reports/archive',
-            sourcePaths: ['/.agent.json', '/reports/.agent.json', '/reports/archive/.agent.json']
+            instructions: 'Handle mounted archives.'
         });
 
         const initialMountAgentConfig = await provider.readDocument('/reports/.agent.json');
@@ -174,8 +167,8 @@ describe('FileSystemContextProvider', () => {
         const updatedMountContext = await provider.getContext();
         expect(updatedMountContext.folderMetadata['/reports/']?.data).toMatchObject({
             name: 'Updated Reports Mount',
-            scopePath: '/reports',
-            sourcePaths: ['/.agent.json', '/reports/.agent.json']
+            instructions: 'Use the alias-local agent config.',
+            linkDir: path.relative(reportsPath, targetPath)
         });
 
         const initialSummary = await provider.readDocument('/reports/summary.md');
@@ -321,187 +314,6 @@ describe('FileSystemContextProvider', () => {
             { path: '/workspace/archive/history.markdown', name: 'history.markdown' },
             { path: '/workspace/guide.md', name: 'guide.md' }
         ]);
-    });
-
-    it('persists document-scoped and project-scoped tasks in local task storage', async () => {
-        const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-node-tasks-'));
-        tempRoots.push(rootPath);
-        await mkdir(path.join(rootPath, 'workspace'), { recursive: true });
-        await writeFile(path.join(rootPath, 'workspace', 'guide.md'), '# Guide\n');
-
-        const provider = new FileSystemContextProvider({ rootPath });
-        const taskProvider = provider.getTaskService();
-
-        const docTask = await taskProvider.createTask({
-            id: 'temp-doc',
-            title: 'Document task',
-            notes: '',
-            completed: false,
-            dueAt: null,
-            priority: 'medium',
-            documentPath: '/workspace/guide.md',
-            agentKey: '/workspace/',
-            createdAt: 0,
-            updatedAt: 0,
-            completedAt: null,
-            calendarProviderId: null,
-            calendarEventId: null,
-            calendarSyncStatus: null,
-            calendarLastSyncedAt: null,
-            calendarLastSyncError: null
-        });
-        const projectTask = await taskProvider.createTask({
-            id: 'temp-project',
-            title: 'Project task',
-            notes: '',
-            completed: false,
-            dueAt: null,
-            priority: null,
-            documentPath: null,
-            agentKey: '/workspace/',
-            createdAt: 0,
-            updatedAt: 0,
-            completedAt: null,
-            calendarProviderId: null,
-            calendarEventId: null,
-            calendarSyncStatus: null,
-            calendarLastSyncedAt: null,
-            calendarLastSyncError: null
-        });
-
-        await expect(taskProvider.getTasks('/workspace/guide.md', '/workspace/', false)).resolves.toEqual([
-            expect.objectContaining({ id: docTask.id, agentKey: '/workspace/', documentPath: '/workspace/guide.md' })
-        ]);
-        await expect(taskProvider.getTasks(null, '/workspace/', false)).resolves.toEqual(expect.arrayContaining([
-            expect.objectContaining({ id: docTask.id, agentKey: '/workspace/', documentPath: '/workspace/guide.md' }),
-            expect.objectContaining({ id: projectTask.id, agentKey: '/workspace/', documentPath: null })
-        ]));
-
-        const completedTask = await taskProvider.setTaskCompleted(docTask.id, true);
-        expect(completedTask.completedAt).toBeGreaterThan(0);
-
-        const storedTaskFile = await readFile(path.join(rootPath, '.chatprism', 'tasks.json'), 'utf8');
-        expect(storedTaskFile).toContain(docTask.id);
-        expect(storedTaskFile).toContain(projectTask.id);
-    });
-
-    it('migrates legacy markdown tasks to documentId during initializeAccess', async () => {
-        const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-node-task-migration-'));
-        tempRoots.push(rootPath);
-        await mkdir(path.join(rootPath, 'workspace'), { recursive: true });
-        await writeFile(path.join(rootPath, 'workspace', 'guide.md'), '# Guide\n');
-        await mkdir(path.join(rootPath, '.chatprism'), { recursive: true });
-        await writeFile(
-            path.join(rootPath, '.chatprism', 'tasks.json'),
-            JSON.stringify({
-                tasks: [
-                    {
-                        id: 'legacy-task',
-                        title: 'Legacy task',
-                        notes: '',
-                        completed: false,
-                        dueAt: null,
-                        priority: null,
-                        documentPath: '/workspace/guide.md',
-                        agentKey: '/workspace/',
-                        createdAt: 1,
-                        updatedAt: 1,
-                        completedAt: null,
-                        calendarProviderId: null,
-                        calendarEventId: null,
-                        calendarSyncStatus: null,
-                        calendarLastSyncedAt: null,
-                        calendarLastSyncError: null
-                    }
-                ]
-            }, null, 2),
-            'utf8'
-        );
-
-        const provider = new FileSystemContextProvider({ rootPath });
-        await provider.initializeAccess();
-
-        const migratedDocument = await provider.readDocument('/workspace/guide.md');
-        expect(migratedDocument.documentId).toBeTruthy();
-
-        const storedTaskFile = await readFile(path.join(rootPath, '.chatprism', 'tasks.json'), 'utf8');
-        expect(storedTaskFile).toContain('"documentId":');
-        expect(storedTaskFile).toContain(migratedDocument.documentId!);
-    });
-
-    it('includes same-agent document tasks but not child-agent tasks when listing top-level agent tasks', async () => {
-        const rootPath = await mkdtemp(path.join(os.tmpdir(), 'chatprism-node-agent-scope-'));
-        tempRoots.push(rootPath);
-        await mkdir(path.join(rootPath, 'workspace', 'child'), { recursive: true });
-        await writeFile(path.join(rootPath, 'workspace', 'guide.md'), '# Guide\n');
-        await writeFile(path.join(rootPath, 'workspace', 'child', 'note.md'), '# Child\n');
-
-        const provider = new FileSystemContextProvider({ rootPath });
-        const taskProvider = provider.getTaskService();
-
-        await taskProvider.createTask({
-            id: 'top-project',
-            title: 'Top project task',
-            notes: '',
-            completed: false,
-            dueAt: null,
-            priority: null,
-            documentPath: null,
-            agentKey: '/workspace/',
-            createdAt: 0,
-            updatedAt: 0,
-            completedAt: null,
-            calendarProviderId: null,
-            calendarEventId: null,
-            calendarSyncStatus: null,
-            calendarLastSyncedAt: null,
-            calendarLastSyncError: null
-        });
-        await taskProvider.createTask({
-            id: 'top-doc',
-            title: 'Top document task',
-            notes: '',
-            completed: false,
-            dueAt: null,
-            priority: null,
-            documentPath: '/workspace/guide.md',
-            agentKey: '/workspace/',
-            createdAt: 0,
-            updatedAt: 0,
-            completedAt: null,
-            calendarProviderId: null,
-            calendarEventId: null,
-            calendarSyncStatus: null,
-            calendarLastSyncedAt: null,
-            calendarLastSyncError: null
-        });
-        await taskProvider.createTask({
-            id: 'child-doc',
-            title: 'Child document task',
-            notes: '',
-            completed: false,
-            dueAt: null,
-            priority: null,
-            documentPath: '/workspace/child/note.md',
-            agentKey: '/workspace/child/',
-            createdAt: 0,
-            updatedAt: 0,
-            completedAt: null,
-            calendarProviderId: null,
-            calendarEventId: null,
-            calendarSyncStatus: null,
-            calendarLastSyncedAt: null,
-            calendarLastSyncError: null
-        });
-
-        const topLevelTasks = await taskProvider.getTasks(null, '/workspace/', false);
-        expect(topLevelTasks).toEqual(expect.arrayContaining([
-            expect.objectContaining({ title: 'Top document task', agentKey: '/workspace/', documentPath: '/workspace/guide.md' }),
-            expect.objectContaining({ title: 'Top project task', agentKey: '/workspace/', documentPath: null })
-        ]));
-        expect(topLevelTasks).not.toEqual(expect.arrayContaining([
-            expect.objectContaining({ title: 'Child document task' })
-        ]));
     });
 
     it('rejects mixed-content mount roots', async () => {

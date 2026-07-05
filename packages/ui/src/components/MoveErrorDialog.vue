@@ -25,7 +25,7 @@
 import { computed } from 'vue';
 
 const props = defineProps<{
-  reason: 'cross-agent' | 'references-dir';
+  reason: 'cross-scope' | 'references-dir';
 }>();
 
 defineEmits<{
@@ -33,8 +33,8 @@ defineEmits<{
 }>();
 
 const errorMessage = computed(() => {
-  if (props.reason === 'cross-agent') {
-    return '无法将文档移动到不同的 Agent 目录。跨 Agent 移动不被支持。';
+  if (props.reason === 'cross-scope') {
+    return '无法将文档移动到不同的目录作用域。跨作用域移动不被支持。';
   }
   return '无法移动 references/ 目录。该目录由系统管理，不支持手动移动。';
 });

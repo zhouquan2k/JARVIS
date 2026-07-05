@@ -18,11 +18,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import type { IContextProvider } from '@packages/core/src';
-import { useWorkspaceI18n } from '@packages/ui/src/i18n';
+import { useWorkspaceI18n } from '@packages/ui';
 import TaskListPanel from './TaskListPanel.vue';
 
 const props = defineProps<{
-  activeAgentKey?: string | null;
+  activeScopeKey?: string | null;
   activePath?: string | null;
   selectedNodePath?: string | null;
   activeDocument?: { path: string; documentId?: string } | null;
@@ -36,7 +36,7 @@ const taskListRef = ref<InstanceType<typeof TaskListPanel> | null>(null);
 defineExpose({ openTaskCount: computed(() => taskListRef.value?.openTaskCount ?? 0) });
 
 const activeDocumentPath = computed(() => props.activeDocument?.path?.trim() || '');
-const activeAgentKey = computed(() => props.activeAgentKey?.trim() || '');
+const activeAgentKey = computed(() => props.activeScopeKey?.trim() || '');
 const scope = computed(() => {
   if (activeDocumentPath.value) {
     return {

@@ -97,6 +97,18 @@ describe('context api', () => {
             })
         });
 
+        const readDocumentGetResponse = await app.request('/api/context/read-document?path=%2Fwelcome.md', {
+            method: 'GET'
+        });
+        expect(readDocumentGetResponse.status).toBe(200);
+        await expect(readDocumentGetResponse.json()).resolves.toMatchObject({
+            document: expect.objectContaining({
+                path: '/welcome.md',
+                mimeType: 'text/markdown',
+                dataBase64: encodeTextDocument('# Welcome\n')
+            })
+        });
+
         const writeDocumentResponse = await app.request('/api/context/write-document', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },

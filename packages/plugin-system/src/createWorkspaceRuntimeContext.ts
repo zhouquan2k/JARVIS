@@ -1,4 +1,5 @@
 import type {
+    ConversationDocumentIdsSource,
     WorkspaceErrorSource,
     WorkspaceHostEvent,
     WorkspacePluginMessage,
@@ -11,6 +12,7 @@ export function createWorkspaceRuntimeContext(): WorkspaceRuntimeContext {
     const errorSources: WorkspaceErrorSource[] = [];
     const beforeRouteNavigateHandlers: Array<(input: WorkspaceRouteNavigationInput) => Promise<void> | void> = [];
     const workspaceSelectionChangedHandlers: Array<(input: WorkspaceSelectionChangedEvent) => Promise<void> | void> = [];
+    const conversationDocumentIdsSources: ConversationDocumentIdsSource[] = [];
     const pluginMessages = new Map<string, WorkspacePluginMessage>();
     const pluginMessageListeners = new Set<(messages: readonly WorkspacePluginMessage[]) => void>();
     const hostEventListeners = new Set<(event: WorkspaceHostEvent) => void>();
@@ -31,6 +33,15 @@ export function createWorkspaceRuntimeContext(): WorkspaceRuntimeContext {
                 }
             }
 
+            return null;
+        },
+        get currentConversationDocumentIds() {
+            for (let index = conversationDocumentIdsSources.length - 1; index >= 0; index -= 1) {
+                const ids = conversationDocumentIdsSources[index]?.getDocumentIds();
+                if (ids !== undefined) {
+                    return ids;
+                }
+            }
             return null;
         },
         clearCurrentError() {
@@ -76,6 +87,15 @@ export function createWorkspaceRuntimeContext(): WorkspaceRuntimeContext {
                 const index = workspaceSelectionChangedHandlers.indexOf(handler);
                 if (index >= 0) {
                     workspaceSelectionChangedHandlers.splice(index, 1);
+                }
+            };
+        },
+        registerConversationDocumentIdsSource(source) {
+            conversationDocumentIdsSources.push(source);
+            return () => {
+                const index = conversationDocumentIdsSources.indexOf(source);
+                if (index >= 0) {
+                    conversationDocumentIdsSources.splice(index, 1);
                 }
             };
         },

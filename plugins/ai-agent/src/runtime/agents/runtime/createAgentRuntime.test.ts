@@ -443,6 +443,32 @@ describe('createAgentRuntime', () => {
         });
     });
 
+    it('forwards groupMembers to provider.sendMessage so the group provider does not fall back to the default preset', async () => {
+        const provider = new BasicProvider();
+        const runtime = createAgentRuntime({
+            modelProviderRuntime: createRuntime(provider)
+        });
+        const groupMembers = [
+            { providerId: 'chatgpt-dom', modelId: 'GPT-5.5', name: 'ChatGPT' },
+            { providerId: 'gemini-dom', modelId: '3.1 Pro', name: 'Gemini' },
+            { providerId: 'claude-dom', modelId: 'Opus 4.8', name: 'Claude' }
+        ];
+
+        await runtime.run(
+            {
+                prompt: '群聊提问',
+                agent: null,
+                providerId: 'group',
+                modelId: 'group-dom',
+                groupMembers
+            },
+            () => undefined
+        );
+
+        expect(provider.sendMessage).toHaveBeenCalledTimes(1);
+        expect(provider.sendMessage.mock.calls[0]?.[1]?.groupMembers).toEqual(groupMembers);
+    });
+
     it('keeps tool exchanges grouped at the same insertion point when a turn emits multiple function calls', async () => {
         const provider = new MultiToolAgentProvider();
         const runtime = createAgentRuntime({

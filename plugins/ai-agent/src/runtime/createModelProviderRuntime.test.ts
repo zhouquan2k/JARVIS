@@ -71,6 +71,21 @@ describe('createModelProviderRuntime', () => {
         expect(typeof provider.abort).toBe('function');
     });
 
+    it('creates the internal gemini-dom-summary provider as a dedicated Gemini DOM alias', () => {
+        const capability = {
+            openControlledPage: vi.fn(async () => undefined),
+            evaluateInPage: vi.fn(async () => ''),
+            subscribeControlledPageEvent: vi.fn(() => () => {})
+        };
+        const runtime = createModelProviderRuntime({
+            runtimeMode: 'desktop',
+            controlledPageCapability: capability
+        });
+
+        const provider = runtime.getProvider('gemini-dom-summary');
+        expect(provider.id).toBe('gemini-dom-summary');
+    });
+
     it('exposes chatgpt-codex in supported runtime modes', () => {
         const runtime = createModelProviderRuntime({ runtimeMode: 'web' });
         expect(runtime.getProviderCatalog().some((provider) => provider.id === 'chatgpt-codex')).toBe(true);

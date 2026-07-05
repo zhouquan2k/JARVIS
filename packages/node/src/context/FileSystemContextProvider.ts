@@ -1,34 +1,24 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { Conversation, ConversationQuery, IConversationQueryProvider } from '@plugins/ai-agent/api';
-import type { TaskService } from '@plugins/task-mgr/api';
-import {
-    DEFAULT_SCOPED_AGENT_CONFIG,
-    type AgentConfig,
-    type AgentInheritanceMode,
-    type AgentSkillBinding,
-    type AgentToolBinding,
-    type ContextDocument,
-    type ContextNode,
-    type FolderMetadata,
-    type ProjectDocumentEntry,
-    type ContextSearchMatch,
-    type ContextSearchRequest,
-    type CreateContextNodeInput,
-    type IContextProvider,
-    type MoveContextNodeInput,
-    type ResolvedAgentConfig,
-    type WorkspaceContext,
-    type WriteContextDocumentInput,
-    type WriteContextDocumentResult,
-    createResolvedAgentConfig,
-    resolveChildAgentConfig
-} from '../coreRuntime.ts';
-import type { ITaskCalendarSyncService } from './ITaskCalendarSyncService.ts';
-import { FileSystemTaskProvider } from './FileSystemTaskProvider.ts';
+import * as contextProviderModule from '../../../core/src/interfaces/IContextProvider.ts';
+import type {
+    ContextDocument,
+    ContextNode,
+    FolderMetadata,
+    ProjectDocumentEntry,
+    ContextSearchMatch,
+    ContextSearchRequest,
+    CreateContextNodeInput,
+    IContextProvider,
+    MoveContextNodeInput,
+    WorkspaceContext,
+    WriteContextDocumentInput,
+    WriteContextDocumentResult
+} from '../../../core/src/interfaces/IContextProvider.ts';
 import { DocumentIdentityIndex } from './DocumentIdentityIndex.ts';
 
 const DEFAULT_WORKSPACE_AGENT_KEY = '/' as const;
+const DEFAULT_SCOPE_METADATA_BOOTSTRAP = contextProviderModule.DEFAULT_WORKSPACE_METADATA_BOOTSTRAP;
 const TEXT_ENCODER = new TextEncoder();
 
 const MIME_TYPES_BY_EXTENSION: Record<string, string> = {
@@ -59,16 +49,18 @@ interface SearchableScopedFile {
 
 export interface FileSystemContextProviderOptions {
     rootPath?: string;
-    conversationQueryProvider?: IConversationQueryProvider | null;
-    taskCalendarSyncService?: ITaskCalendarSyncService | null;
 }
 
-type AgentBinding = AgentToolBinding | AgentSkillBinding;
-type ParsedAgentConfig = AgentConfig & { inheritance?: AgentInheritanceMode; linkDir?: string };
+type MetadataBinding = {
+    id: string;
+    description?: string;
+};
 
-interface EffectiveAgentBinding {
-    agentKey: string;
-    config: ResolvedAgentConfig;
+type ScopeInheritanceMode = 'merge' | 'override';
+type ParsedScopeMetadata = Record<string, unknown> & { linkDir?: string };
+
+interface EffectiveScopeBinding {
+    scopeKey: string;
 }
 
 interface MountedDirectoryBinding {
@@ -111,8 +103,8 @@ function isMarkdownPath(targetPath: string): boolean {
     return extension === 'md' || extension === 'markdown';
 }
 
-function serializeDefaultAgentConfig(): string {
-    return `${JSON.stringify(DEFAULT_SCOPED_AGENT_CONFIG, null, 2)}\n`;
+function serializeDefaultScopeMetadata(): string {
+    return `${JSON.stringify(DEFAULT_SCOPE_METADATA_BOOTSTRAP, null, 2)}\n`;
 }
 
 function isTextDocumentMimeType(mimeType: string): boolean {
@@ -166,7 +158,7 @@ async function ensureRootAgentConfigFile(rootDirectory: string): Promise<void> {
         return;
     }
 
-    await fs.writeFile(rootAgentConfigPath, serializeDefaultAgentConfig(), 'utf8');
+    await fs.writeFile(rootAgentConfigPath, serializeDefaultScopeMetadata(), 'utf8');
 }
 
 function collectSearchMatches(filePath: string, content: string, query: string): ContextSearchMatch[] {
@@ -279,7 +271,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function parseInheritance(value: unknown, configPath: string): AgentInheritanceMode | undefined {
+function parseInheritance(value: unknown, configPath: string): ScopeInheritanceMode | undefined {
     if (value === undefined) {
         return undefined;
     }
@@ -291,11 +283,11 @@ function parseInheritance(value: unknown, configPath: string): AgentInheritanceM
     throw new Error(`Invalid inheritance in ${configPath}: expected "merge" or "override".`);
 }
 
-function parseBindings<T extends AgentBinding>(
+function parseBindings(
     value: unknown,
     configPath: string,
     fieldName: 'tools' | 'skills'
-): T[] | undefined {
+): MetadataBinding[] | undefined {
     if (value === undefined) {
         return undefined;
     }
@@ -321,11 +313,11 @@ function parseBindings<T extends AgentBinding>(
         return {
             id,
             description: item.description
-        } as T;
+        };
     });
 }
 
-function parseAgentConfig(content: string, configPath: string): ParsedAgentConfig {
+function parseScopeMetadata(content: string, configPath: string): ParsedScopeMetadata {
     let parsed: unknown;
 
     try {
@@ -370,8 +362,8 @@ function parseAgentConfig(content: string, configPath: string): ParsedAgentConfi
         instructions: parsed.instructions,
         modelProviderName: parsed.modelProviderName,
         modelName: parsed.modelName,
-        tools: parseBindings<AgentToolBinding>(parsed.tools, configPath, 'tools'),
-        skills: parseBindings<AgentSkillBinding>(parsed.skills, configPath, 'skills'),
+        tools: parseBindings(parsed.tools, configPath, 'tools'),
+        skills: parseBindings(parsed.skills, configPath, 'skills'),
         inheritance: parseInheritance(parsed.inheritance, configPath),
         linkDir: typeof parsed.linkDir === 'string' ? parsed.linkDir : undefined
     };
@@ -386,10 +378,9 @@ function sortContextNodes(nodes: ContextNode[]): ContextNode[] {
     });
 }
 
-function createDefaultAgentBinding(): EffectiveAgentBinding {
+function createDefaultScopeBinding(): EffectiveScopeBinding {
     return {
-        agentKey: DEFAULT_WORKSPACE_AGENT_KEY,
-        config: createResolvedAgentConfig('/', [], DEFAULT_SCOPED_AGENT_CONFIG)
+        scopeKey: DEFAULT_WORKSPACE_AGENT_KEY
     };
 }
 
@@ -473,47 +464,18 @@ function getParentAgentKeyFromContext(context: WorkspaceContext, parentPath?: st
     return findContextNodeByPath(context.nodes, parentPath)?.scopeKey ?? DEFAULT_WORKSPACE_AGENT_KEY;
 }
 
-function resolveEffectiveAgentBinding(
-    parent: EffectiveAgentBinding,
-    scopePath: string,
-    configPath: string,
-    config: ParsedAgentConfig
-): EffectiveAgentBinding {
-    const normalizedAgentKey = scopePath.endsWith('/') ? scopePath : `${scopePath}/`;
-
-    return {
-        agentKey: normalizedAgentKey,
-        config: resolveChildAgentConfig(parent.config, scopePath, configPath, config)
-    };
-}
-
 export class FileSystemContextProvider implements IContextProvider {
     readonly id = 'local-file-context';
     private readonly rootPath?: string;
-    private readonly conversationQueryProvider: IConversationQueryProvider | null;
-    private readonly taskProvider: FileSystemTaskProvider;
     private readonly identityIndex = new DocumentIdentityIndex();
 
     constructor(options: FileSystemContextProviderOptions = {}) {
         this.rootPath = options.rootPath?.trim() || undefined;
-        this.conversationQueryProvider = options.conversationQueryProvider ?? null;
-        this.taskProvider = new FileSystemTaskProvider({
-            resolveRootDirectory: () => this.resolveRootDirectory(),
-            calendarSyncService: options.taskCalendarSyncService ?? null,
-            resolveDocumentIdForTaskPath: async (documentPath) => {
-                try {
-                    return await this.getDocumentId(documentPath);
-                } catch {
-                    return null;
-                }
-            }
-        });
     }
 
     async initializeAccess(): Promise<void> {
         const rootDirectory = await this.resolveRootDirectory();
         await this.identityIndex.initialize(rootDirectory, '/');
-        await this.taskProvider.migrateMissingDocumentIds();
     }
 
     async getDocumentId(virtualPath: string): Promise<string> {
@@ -559,24 +521,23 @@ export class FileSystemContextProvider implements IContextProvider {
         const rootDirectory = await this.resolveRootDirectory();
         await ensureRootAgentConfigFile(rootDirectory);
         const mountBindings = await this.resolveMountedDirectoryBindings(rootDirectory);
-        const agentConfigs = new Map<string, ResolvedAgentConfig>();
-        const rootAgent = await this.resolveDirectoryAgentBinding(rootDirectory, '/', createDefaultAgentBinding());
-        agentConfigs.set(rootAgent.agentKey, rootAgent.config);
+        const folderMetadataMap = new Map<string, Record<string, unknown>>();
+        const rootScope = await this.resolveDirectoryScopeBinding(rootDirectory, '/', createDefaultScopeBinding(), folderMetadataMap);
 
         const nodes = await this.buildDirectoryNodes({
             realPath: rootDirectory,
             virtualPath: undefined,
-            inheritedAgent: rootAgent,
-            agentConfigs,
+            inheritedScope: rootScope,
+            folderMetadataMap,
             mountBindings
         });
 
         return {
             nodes,
             folderMetadata: Object.fromEntries(
-                [...agentConfigs.entries()].map(([scopeKey, config]) => [
+                [...folderMetadataMap.entries()].map(([scopeKey, metadata]) => [
                     scopeKey,
-                    { scopeKey, data: config as unknown as Record<string, unknown> } satisfies FolderMetadata
+                    { scopeKey, data: metadata } satisfies FolderMetadata
                 ])
             )
         };
@@ -587,39 +548,6 @@ export class FileSystemContextProvider implements IContextProvider {
         const node = findContextNodeByPath(context.nodes, targetPath);
         const scopeKey = node?.scopeKey ?? getParentAgentKeyFromContext(context, targetPath);
         return context.folderMetadata[scopeKey] ?? null;
-    }
-
-    async getConversations(query: ConversationQuery): Promise<Conversation[]> {
-        if (!this.conversationQueryProvider) {
-            return [];
-        }
-
-        if (query.documentId) {
-            return this._getConversationsByDocumentId(query.documentId);
-        }
-
-        return this._getConversationsByPath(query);
-    }
-
-    private async _getConversationsByDocumentId(documentId: string): Promise<Conversation[]> {
-        return this.conversationQueryProvider!.getConversations({ documentId });
-    }
-
-    private async _getConversationsByPath(query: ConversationQuery): Promise<Conversation[]> {
-        const normalizedDocumentPath = query.documentPath === undefined
-            ? undefined
-            : normalizeVirtualPath(query.documentPath, { allowRoot: false });
-        if (query.documentPath !== undefined && !normalizedDocumentPath) {
-            throw new Error('Document path must not be empty.');
-        }
-        return this.conversationQueryProvider!.getConversations({
-            ...query,
-            documentPath: normalizedDocumentPath
-        });
-    }
-
-    getTaskService(): TaskService {
-        return this.taskProvider;
     }
 
     async getProjectDocuments(curNode: string): Promise<ProjectDocumentEntry[]> {
@@ -998,8 +926,8 @@ export class FileSystemContextProvider implements IContextProvider {
     private async buildDirectoryNodes(input: {
         realPath: string;
         virtualPath?: string;
-        inheritedAgent: EffectiveAgentBinding;
-        agentConfigs: Map<string, ResolvedAgentConfig>;
+        inheritedScope: EffectiveScopeBinding;
+        folderMetadataMap: Map<string, Record<string, unknown>>;
         mountBindings: MountedDirectoryBinding[];
     }): Promise<ContextNode[]> {
         const entries = await fs.readdir(input.realPath, { withFileTypes: true });
@@ -1012,17 +940,17 @@ export class FileSystemContextProvider implements IContextProvider {
 
             if (entry.isDirectory() && mountedBinding) {
                 const stats = await fs.stat(mountedBinding.aliasRealPath);
-                const directoryAgent = await this.resolveDirectoryAgentBinding(
+                const directoryScope = await this.resolveDirectoryScopeBinding(
                     mountedBinding.aliasRealPath,
                     virtualPath,
-                    input.inheritedAgent
+                    input.inheritedScope,
+                    input.folderMetadataMap
                 );
-                input.agentConfigs.set(directoryAgent.agentKey, directoryAgent.config);
                 const children = await this.buildDirectoryNodes({
                     realPath: mountedBinding.targetRealPath,
                     virtualPath,
-                    inheritedAgent: directoryAgent,
-                    agentConfigs: input.agentConfigs,
+                    inheritedScope: directoryScope,
+                    folderMetadataMap: input.folderMetadataMap,
                     mountBindings: input.mountBindings
                 });
 
@@ -1034,8 +962,8 @@ export class FileSystemContextProvider implements IContextProvider {
                     hasChildren: children.length > 0,
                     updatedAt: stats.mtimeMs,
                     children,
-                    ownsMetadata: directoryAgent.agentKey === (virtualPath.endsWith('/') ? virtualPath : `${virtualPath}/`),
-                    scopeKey: directoryAgent.agentKey
+                    ownsMetadata: directoryScope.scopeKey === (virtualPath.endsWith('/') ? virtualPath : `${virtualPath}/`),
+                    scopeKey: directoryScope.scopeKey
                 } satisfies ContextNode;
             }
 
@@ -1043,13 +971,17 @@ export class FileSystemContextProvider implements IContextProvider {
             const stats = await fs.stat(realPath);
 
             if (entry.isDirectory()) {
-                const directoryAgent = await this.resolveDirectoryAgentBinding(realPath, virtualPath, input.inheritedAgent);
-                input.agentConfigs.set(directoryAgent.agentKey, directoryAgent.config);
+                const directoryScope = await this.resolveDirectoryScopeBinding(
+                    realPath,
+                    virtualPath,
+                    input.inheritedScope,
+                    input.folderMetadataMap
+                );
                 const children = await this.buildDirectoryNodes({
                     realPath,
                     virtualPath,
-                    inheritedAgent: directoryAgent,
-                    agentConfigs: input.agentConfigs,
+                    inheritedScope: directoryScope,
+                    folderMetadataMap: input.folderMetadataMap,
                     mountBindings: input.mountBindings
                 });
 
@@ -1061,8 +993,8 @@ export class FileSystemContextProvider implements IContextProvider {
                     hasChildren: children.length > 0,
                     updatedAt: stats.mtimeMs,
                     children,
-                    ownsMetadata: directoryAgent.agentKey === (virtualPath.endsWith('/') ? virtualPath : `${virtualPath}/`),
-                    scopeKey: directoryAgent.agentKey
+                    ownsMetadata: directoryScope.scopeKey === (virtualPath.endsWith('/') ? virtualPath : `${virtualPath}/`),
+                    scopeKey: directoryScope.scopeKey
                 } satisfies ContextNode;
             }
 
@@ -1073,35 +1005,34 @@ export class FileSystemContextProvider implements IContextProvider {
                 parentPath: input.virtualPath,
                 hasChildren: false,
                 updatedAt: stats.mtimeMs,
-                scopeKey: input.inheritedAgent.agentKey
+                scopeKey: input.inheritedScope.scopeKey
             } satisfies ContextNode;
         }));
 
         return sortContextNodes(nodes);
     }
 
-    private async resolveDirectoryAgentBinding(
+    private async resolveDirectoryScopeBinding(
         realPath: string,
         scopePath: string,
-        inheritedAgent: EffectiveAgentBinding
-    ): Promise<EffectiveAgentBinding> {
+        inheritedScope: EffectiveScopeBinding,
+        folderMetadataMap: Map<string, Record<string, unknown>>
+    ): Promise<EffectiveScopeBinding> {
         const configPath = getConfigPath(scopePath);
         const realConfigPath = path.join(realPath, '.agent.json');
 
         if (!(await exists(realConfigPath))) {
-            return inheritedAgent;
+            return inheritedScope;
         }
 
         const content = await fs.readFile(realConfigPath, 'utf8');
-        const config = parseAgentConfig(content, configPath);
-        if (scopePath === '/') {
-            return {
-                agentKey: DEFAULT_WORKSPACE_AGENT_KEY,
-                config: createResolvedAgentConfig(scopePath, [configPath], config)
-            };
-        }
+        const metadata = parseScopeMetadata(content, configPath);
+        const normalizedScopeKey = scopePath === '/' ? DEFAULT_WORKSPACE_AGENT_KEY : `${scopePath.replace(/\/$/, '')}/`;
+        folderMetadataMap.set(normalizedScopeKey, metadata);
 
-        return resolveEffectiveAgentBinding(inheritedAgent, scopePath, configPath, config);
+        return {
+            scopeKey: normalizedScopeKey
+        };
     }
 
 
@@ -1123,7 +1054,7 @@ export class FileSystemContextProvider implements IContextProvider {
             }
 
             const configContent = await fs.readFile(configRealPath, 'utf8');
-            const config = parseAgentConfig(configContent, getConfigPath(aliasPath));
+            const config = parseScopeMetadata(configContent, getConfigPath(aliasPath));
             if (config.linkDir === undefined) {
                 continue;
             }

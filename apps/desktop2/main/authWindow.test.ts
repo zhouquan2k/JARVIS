@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createAuthWindowManager, getProviderLoginConfig, getProviderLoginUrl } from './authWindow';
+import { createAuthWindowManager } from './authWindow';
 
 function createWindowHarness() {
     const listeners = new Map<string, Array<() => void>>();
@@ -18,10 +18,7 @@ function createWindowHarness() {
         }),
         webContents: {
             getURL: vi.fn().mockReturnValue(''),
-            executeJavaScript: vi.fn().mockResolvedValue({
-                authenticated: false,
-                href: 'https://gemini.google.com/app'
-            })
+            executeJavaScript: vi.fn().mockResolvedValue(false)
         },
         emit(event: string) {
             for (const listener of listeners.get(event) ?? []) {
@@ -29,6 +26,28 @@ function createWindowHarness() {
             }
         }
     };
+}
+
+function resolveProviderLoginConfig(providerId: string) {
+    if (providerId === 'chatgpt-web') {
+        return {
+            title: '登录 ChatGPT',
+            targetUrl: 'https://chatgpt.com/'
+        };
+    }
+
+    if (providerId === 'gemini-web') {
+        return {
+            title: '登录 Gemini',
+            targetUrl: 'https://gemini.google.com/app',
+            completionCheck: {
+                intervalMs: 1500,
+                script: 'true'
+            }
+        };
+    }
+
+    return undefined;
 }
 
 describe('createAuthWindowManager', () => {
@@ -43,7 +62,8 @@ describe('createAuthWindowManager', () => {
         const getProviderSession = vi.fn().mockReturnValue({ id: 'chatgpt-session' });
         const manager = createAuthWindowManager({
             createWindow,
-            getProviderSession
+            getProviderSession,
+            resolveProviderLoginConfig
         });
 
         const firstWindow = manager.openProviderLoginWindow('chatgpt-web');
@@ -76,8 +96,7 @@ describe('createAuthWindowManager', () => {
 
                 return {
                     title: '登录 Custom',
-                    targetUrl: 'https://example.com/login',
-                    completionStrategy: 'default'
+                    targetUrl: 'https://example.com/login'
                 };
             }
         });
@@ -91,7 +110,8 @@ describe('createAuthWindowManager', () => {
         const windowHarness = createWindowHarness();
         const manager = createAuthWindowManager({
             createWindow: vi.fn().mockReturnValue(windowHarness),
-            getProviderSession: vi.fn().mockReturnValue({})
+            getProviderSession: vi.fn().mockReturnValue({}),
+            resolveProviderLoginConfig
         });
         const onClosed = vi.fn();
         manager.onLoginWindowClosed(onClosed);
@@ -106,7 +126,8 @@ describe('createAuthWindowManager', () => {
         const windowHarness = createWindowHarness();
         const manager = createAuthWindowManager({
             createWindow: vi.fn().mockReturnValue(windowHarness),
-            getProviderSession: vi.fn().mockReturnValue({})
+            getProviderSession: vi.fn().mockReturnValue({}),
+            resolveProviderLoginConfig
         });
         const onOpened = vi.fn();
         manager.onLoginWindowOpened(onOpened);
@@ -116,33 +137,17 @@ describe('createAuthWindowManager', () => {
         expect(onOpened).toHaveBeenCalledWith('chatgpt-web');
     });
 
-    it('auto closes the Gemini login window after login is detected', async () => {
+    it('auto closes the login window after the configured completion check succeeds', async () => {
         vi.useFakeTimers();
         const windowHarness = createWindowHarness();
         windowHarness.webContents.executeJavaScript = vi.fn()
-            .mockResolvedValueOnce({
-                authenticated: false,
-                href: 'https://accounts.google.com/ServiceLogin'
-            })
-            .mockResolvedValueOnce({
-                authenticated: false,
-                href: 'https://gemini.google.com/app'
-            })
-            .mockResolvedValueOnce({
-                authenticated: true,
-                href: 'https://gemini.google.com/app'
-            })
-            .mockResolvedValueOnce({
-                authenticated: true,
-                href: 'https://gemini.google.com/app'
-            });
-        const probeGeminiHistoryReady = vi.fn()
+            .mockResolvedValueOnce(false)
             .mockResolvedValueOnce(false)
             .mockResolvedValueOnce(true);
         const manager = createAuthWindowManager({
             createWindow: vi.fn().mockReturnValue(windowHarness),
             getProviderSession: vi.fn().mockReturnValue({}),
-            probeGeminiHistoryReady
+            resolveProviderLoginConfig
         });
         const onCompleted = vi.fn();
         manager.onLoginWindowCompleted(onCompleted);
@@ -150,23 +155,17 @@ describe('createAuthWindowManager', () => {
         manager.openProviderLoginWindow('gemini-web');
         await vi.advanceTimersByTimeAsync(1500);
         expect(windowHarness.destroy).not.toHaveBeenCalled();
+        expect(windowHarness.webContents.executeJavaScript).toHaveBeenCalledTimes(1);
 
         await vi.advanceTimersByTimeAsync(1500);
         expect(onCompleted).not.toHaveBeenCalled();
         expect(windowHarness.destroy).not.toHaveBeenCalled();
-        expect(probeGeminiHistoryReady).toHaveBeenCalledTimes(0);
-
-        await vi.advanceTimersByTimeAsync(1500);
-        expect(onCompleted).not.toHaveBeenCalled();
-        expect(windowHarness.destroy).not.toHaveBeenCalled();
-        expect(probeGeminiHistoryReady).toHaveBeenCalledTimes(1);
-        expect(probeGeminiHistoryReady).toHaveBeenNthCalledWith(1, { forceReload: true });
+        expect(windowHarness.webContents.executeJavaScript).toHaveBeenCalledTimes(2);
 
         await vi.advanceTimersByTimeAsync(1500);
         expect(onCompleted).toHaveBeenCalledWith('gemini-web');
         expect(windowHarness.destroy).toHaveBeenCalledTimes(1);
-        expect(probeGeminiHistoryReady).toHaveBeenCalledTimes(2);
-        expect(probeGeminiHistoryReady).toHaveBeenNthCalledWith(2, { forceReload: false });
+        expect(windowHarness.webContents.executeJavaScript).toHaveBeenCalledTimes(3);
     });
 
     it('throws when no provider login config can be resolved', () => {
@@ -181,19 +180,5 @@ describe('createAuthWindowManager', () => {
         expect(() => manager.openProviderLoginWindow('unknown-provider')).toThrow(
             "Provider 'unknown-provider' does not support desktop login windows"
         );
-    });
-});
-
-describe('provider login config', () => {
-    it('returns the chatgpt desktop login config', () => {
-        expect(getProviderLoginConfig('chatgpt-web')).toEqual({
-            title: '登录 ChatGPT',
-            targetUrl: 'https://chatgpt.com/',
-            completionStrategy: 'default'
-        });
-    });
-
-    it('returns the gemini desktop login url', () => {
-        expect(getProviderLoginUrl('gemini-web')).toBe('https://gemini.google.com/app');
     });
 });

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { Task } from '@plugins/task-mgr/api';
 import { createDatabase } from '../src/db.js';
 import { SyncRepository } from '../src/repositories/syncRepository.js';
 import type { ServerConfig } from '../src/config.js';
@@ -40,6 +41,30 @@ function createConversation(
         origin: overrides.origin,
         externalId: overrides.externalId,
         sync: deleted ? { deleted: true } : overrides.sync
+    };
+}
+
+function createTask(id: string, updatedAt: number, overrides: Partial<Task> = {}): Task {
+    return {
+        id,
+        title: overrides.title ?? `Task ${id}`,
+        notes: overrides.notes ?? '',
+        completed: overrides.completed ?? false,
+        dueAt: overrides.dueAt ?? null,
+        priority: overrides.priority ?? null,
+        executionState: overrides.executionState ?? null,
+        documentPath: overrides.documentPath ?? null,
+        documentId: overrides.documentId ?? null,
+        agentKey: overrides.agentKey ?? '/',
+        createdAt: overrides.createdAt ?? updatedAt,
+        updatedAt,
+        completedAt: overrides.completedAt ?? null,
+        calendarProviderId: overrides.calendarProviderId ?? null,
+        calendarEventId: overrides.calendarEventId ?? null,
+        calendarSyncStatus: overrides.calendarSyncStatus ?? null,
+        calendarLastSyncedAt: overrides.calendarLastSyncedAt ?? null,
+        calendarLastSyncError: overrides.calendarLastSyncError ?? null,
+        recurrence: overrides.recurrence ?? null
     };
 }
 
@@ -100,6 +125,44 @@ describe('SyncRepository', () => {
         const betaChanges = repository.listConversationsAfterCursor('beta', null);
         expect(betaChanges).toHaveLength(1);
         expect(betaChanges[0].conversation.id).toBe('conv-3');
+    });
+
+    it('stores task rows with an independent cursor namespace', () => {
+        const database = createDatabase(createConfig());
+        const repository = new SyncRepository(database);
+
+        repository.runInTransaction(() => {
+            const cursorA1 = repository.allocateNextTaskCursor('alpha', 100);
+            repository.upsertTasks([{
+                syncKey: 'alpha',
+                task: createTask('task-1', 100, { documentPath: '/docs/guide.md' }),
+                serverCursor: cursorA1,
+                receivedAt: 100,
+                createdAt: 100
+            }]);
+
+            const cursorA2 = repository.allocateNextTaskCursor('alpha', 200);
+            repository.saveDeletedTask({
+                syncKey: 'alpha',
+                deletedTask: {
+                    id: 'task-2',
+                    updatedAt: 200
+                },
+                serverCursor: cursorA2,
+                receivedAt: 200,
+                createdAt: 200
+            });
+        });
+
+        expect(repository.getCurrentTaskCursor('alpha')).toBe(2);
+        expect(repository.getCurrentCursor('alpha')).toBe(0);
+        expect(repository.getTask('alpha', 'task-1')?.task.documentPath).toBe('/docs/guide.md');
+        expect(repository.getDeletedTask('alpha', 'task-2')?.deletedTask.updatedAt).toBe(200);
+
+        const result = repository.listTasksSince('alpha', null);
+        expect(result.tasks).toHaveLength(1);
+        expect(result.deletedTasks).toHaveLength(1);
+        expect(result.nextCursor).toBe(2);
     });
 
     it('preserves attachments and annotations in raw database payloads', () => {

@@ -1,3 +1,5 @@
+import type { Task, TaskExecutionState, TaskPriority, TaskRecurrence } from '@plugins/task-mgr/api';
+
 export type ConversationRole = 'user' | 'assistant';
 
 export interface MessageAttachment {
@@ -46,6 +48,24 @@ export interface ImageGroupAnnotation {
 
 export type MessageAnnotation = CiteAnnotation | ImageGroupAnnotation;
 
+export type GroupMemberStatus = 'pending' | 'streaming' | 'done' | 'error';
+export type GroupSummaryPhase = 'waiting' | 'streaming' | 'done' | 'error';
+
+export interface GroupMemberPart {
+    name: string;
+    providerId: string;
+    modelId: string;
+    content: string;
+    status: GroupMemberStatus;
+    error?: string;
+}
+
+export interface GroupSummaryPart {
+    phase: GroupSummaryPhase;
+    content: string;
+    error?: string;
+}
+
 export interface ConversationMessage {
     id: string;
     role: ConversationRole;
@@ -56,6 +76,23 @@ export interface ConversationMessage {
     deleted?: boolean;
     attachments?: MessageAttachment[];
     annotations?: MessageAnnotation[];
+    groupMembers?: GroupMemberPart[];
+    groupSummary?: GroupSummaryPart;
+}
+
+export interface ModelSelectionGroupMember {
+    providerId: string;
+    modelId: string;
+    name: string;
+}
+
+export interface ConversationModelSelection {
+    providerId: string;
+    modelId: string;
+    modelOptions: Record<string, boolean>;
+    reasoningEffort?: 'low' | 'medium' | 'high';
+    explicit?: boolean;
+    groupMembers?: ModelSelectionGroupMember[];
 }
 
 export interface ConversationSyncState {
@@ -63,6 +100,13 @@ export interface ConversationSyncState {
 }
 
 export interface SyncDeletedConversation {
+    id: string;
+    updatedAt: number;
+}
+
+export type SyncTaskRecord = Task;
+
+export interface SyncDeletedTask {
     id: string;
     updatedAt: number;
 }
@@ -82,6 +126,7 @@ export interface SyncConversation {
     messages: ConversationMessage[];
     updatedAt: number;
     sync?: ConversationSyncState;
+    modelSelection?: ConversationModelSelection;
 }
 
 export interface PushRequestBody {
@@ -95,12 +140,28 @@ export interface PullRequestBody {
 
 export interface SyncPushResponse {
     processedIds: string[];
+    processedDeletedIds: string[];
     nextCursor: number;
 }
 
 export interface SyncPullResponse {
     conversations: SyncConversation[];
     deletedConversations: SyncDeletedConversation[];
+    nextCursor: number;
+}
+
+export interface TaskPushRequestBody {
+    tasks: SyncTaskRecord[];
+    deletedTasks?: SyncDeletedTask[];
+}
+
+export interface TaskPullRequestBody {
+    cursor: number | null;
+}
+
+export interface TaskSyncPullResponse {
+    tasks: SyncTaskRecord[];
+    deletedTasks: SyncDeletedTask[];
     nextCursor: number;
 }
 
@@ -278,6 +339,107 @@ function normalizeAnnotation(value: unknown, index: number, messageIndex: number
     throw new Error(`messages[${messageIndex}].annotations[${index}].kind is not supported.`);
 }
 
+function normalizeGroupMembers(value: unknown[]): GroupMemberPart[] {
+    const result: GroupMemberPart[] = [];
+    for (const entry of value) {
+        if (!isRecord(entry)) {
+            continue;
+        }
+        if (typeof entry.name !== 'string'
+            || typeof entry.providerId !== 'string'
+            || typeof entry.modelId !== 'string') {
+            continue;
+        }
+        const status = entry.status === 'pending'
+            || entry.status === 'streaming'
+            || entry.status === 'done'
+            || entry.status === 'error'
+            ? entry.status
+            : 'done';
+        result.push({
+            name: entry.name,
+            providerId: entry.providerId,
+            modelId: entry.modelId,
+            content: typeof entry.content === 'string' ? entry.content : '',
+            status,
+            error: typeof entry.error === 'string' ? entry.error : undefined
+        });
+    }
+    return result;
+}
+
+function normalizeModelSelectionGroupMembers(value: unknown[]): ModelSelectionGroupMember[] {
+    const result: ModelSelectionGroupMember[] = [];
+    for (const entry of value) {
+        if (!isRecord(entry)) {
+            continue;
+        }
+        if (typeof entry.providerId !== 'string'
+            || typeof entry.modelId !== 'string'
+            || typeof entry.name !== 'string') {
+            continue;
+        }
+        result.push({
+            providerId: entry.providerId,
+            modelId: entry.modelId,
+            name: entry.name
+        });
+    }
+    return result;
+}
+
+function normalizeModelSelection(value: unknown): ConversationModelSelection | undefined {
+    if (!isRecord(value)) {
+        return undefined;
+    }
+    if (typeof value.providerId !== 'string' || typeof value.modelId !== 'string') {
+        return undefined;
+    }
+
+    const modelOptions: Record<string, boolean> = {};
+    if (isRecord(value.modelOptions)) {
+        for (const [key, optionValue] of Object.entries(value.modelOptions)) {
+            if (typeof optionValue === 'boolean') {
+                modelOptions[key] = optionValue;
+            }
+        }
+    }
+
+    const reasoningEffort = value.reasoningEffort === 'low'
+        || value.reasoningEffort === 'medium'
+        || value.reasoningEffort === 'high'
+        ? value.reasoningEffort
+        : undefined;
+
+    return {
+        providerId: value.providerId,
+        modelId: value.modelId,
+        modelOptions,
+        ...(reasoningEffort ? { reasoningEffort } : {}),
+        ...(value.explicit === true ? { explicit: true } : {}),
+        ...(Array.isArray(value.groupMembers)
+            ? { groupMembers: normalizeModelSelectionGroupMembers(value.groupMembers) }
+            : {})
+    };
+}
+
+function normalizeGroupSummary(value: unknown): GroupSummaryPart | undefined {
+    if (!isRecord(value)) {
+        return undefined;
+    }
+    const phase = value.phase === 'waiting'
+        || value.phase === 'streaming'
+        || value.phase === 'done'
+        || value.phase === 'error'
+        ? value.phase
+        : 'done';
+    return {
+        phase,
+        content: typeof value.content === 'string' ? value.content : '',
+        error: typeof value.error === 'string' ? value.error : undefined
+    };
+}
+
 function normalizeMessage(value: unknown, index: number): ConversationMessage {
     if (!isRecord(value)) {
         throw new Error(`messages[${index}] must be an object.`);
@@ -301,6 +463,12 @@ function normalizeMessage(value: unknown, index: number): ConversationMessage {
             : undefined,
         annotations: Array.isArray(value.annotations)
             ? value.annotations.map((annotation, annotationIndex) => normalizeAnnotation(annotation, annotationIndex, index))
+            : undefined,
+        groupMembers: Array.isArray(value.groupMembers)
+            ? normalizeGroupMembers(value.groupMembers)
+            : undefined,
+        groupSummary: value.groupSummary !== undefined
+            ? normalizeGroupSummary(value.groupSummary)
             : undefined
     };
 }
@@ -325,6 +493,157 @@ function normalizeDeletedConversation(value: unknown, index: number): SyncDelete
     return {
         id: readRequiredString(value, 'id', `deletedConversations[${index}].id`),
         updatedAt: readRequiredTimestamp(value, 'updatedAt', `deletedConversations[${index}].updatedAt`)
+    };
+}
+
+function normalizeTaskPriority(value: unknown, fieldName: string): TaskPriority | null {
+    if (value === undefined || value === null || value === '') {
+        return null;
+    }
+
+    if (value === 'low' || value === 'medium' || value === 'high') {
+        return value;
+    }
+
+    throw new Error(`${fieldName} must be one of low, medium, high, or null.`);
+}
+
+function normalizeTaskExecutionState(value: unknown, fieldName: string): TaskExecutionState {
+    if (value === undefined || value === null || value === '') {
+        return null;
+    }
+
+    if (value === 'doing' || value === 'morning' || value === 'afternoon' || value === 'evening') {
+        return value;
+    }
+
+    throw new Error(`${fieldName} must be one of doing, morning, afternoon, evening, or null.`);
+}
+
+function normalizeTaskRecurrence(value: unknown): TaskRecurrence {
+    if (value === 'daily' || value === 'weekly' || value === 'monthly') {
+        return value;
+    }
+
+    return null;
+}
+
+function normalizeTaskPath(value: unknown, fieldName: string): string | null {
+    if (value === undefined || value === null || value === '') {
+        return null;
+    }
+
+    if (typeof value !== 'string') {
+        throw new Error(`${fieldName} must be a string or null.`);
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === '/') {
+        return null;
+    }
+
+    const withLeadingSlash = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+    const normalized = withLeadingSlash.replace(/\/+/g, '/');
+    const segments = normalized.split('/');
+    if (segments.some((segment) => segment === '..')) {
+        throw new Error(`${fieldName} escapes the workspace root.`);
+    }
+
+    return normalized.endsWith('/') ? normalized : normalized;
+}
+
+function normalizeTaskAgentKey(value: unknown): string | null {
+    if (value === undefined || value === null || value === '') {
+        return null;
+    }
+
+    if (typeof value !== 'string') {
+        throw new Error('task.agentKey must be a string or null.');
+    }
+
+    const normalized = value.trim();
+    return normalized ? normalized : null;
+}
+
+function normalizeTaskDocumentId(value: unknown): string | null {
+    if (value === undefined || value === null || value === '') {
+        return null;
+    }
+
+    if (typeof value !== 'string') {
+        throw new Error('task.documentId must be a string or null.');
+    }
+
+    const normalized = value.trim();
+    return normalized ? normalized : null;
+}
+
+function normalizeOptionalTimestamp(value: unknown, fieldName: string): number | null {
+    if (value === undefined || value === null) {
+        return null;
+    }
+
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+        throw new Error(`${fieldName} must be a valid timestamp or null.`);
+    }
+
+    return value;
+}
+
+function normalizeTaskCalendarSyncStatus(value: unknown): Task['calendarSyncStatus'] {
+    if (value === undefined || value === null || value === '') {
+        return null;
+    }
+
+    if (value === 'synced' || value === 'failed') {
+        return value;
+    }
+
+    throw new Error('task.calendarSyncStatus must be synced, failed, or null.');
+}
+
+export function normalizeTaskRecord(value: unknown, fallbackNow = Date.now()): SyncTaskRecord {
+    if (!isRecord(value)) {
+        throw new Error('task must be an object.');
+    }
+
+    const completed = readOptionalBoolean(value, 'completed') ?? false;
+    const createdAt = readOptionalNumber(value, 'createdAt') ?? fallbackNow;
+    const updatedAt = readOptionalNumber(value, 'updatedAt') ?? fallbackNow;
+
+    return {
+        id: readRequiredString(value, 'id', 'task.id'),
+        title: readRequiredString(value, 'title', 'task.title'),
+        notes: readRequiredText(value, 'notes', 'task.notes'),
+        completed,
+        dueAt: normalizeOptionalTimestamp(value.dueAt, 'task.dueAt'),
+        priority: normalizeTaskPriority(value.priority, 'task.priority'),
+        executionState: normalizeTaskExecutionState(value.executionState, 'task.executionState'),
+        documentPath: normalizeTaskPath(value.documentPath, 'task.documentPath'),
+        documentId: normalizeTaskDocumentId(value.documentId),
+        agentKey: normalizeTaskAgentKey(value.agentKey),
+        createdAt,
+        updatedAt,
+        completedAt: completed
+            ? (normalizeOptionalTimestamp(value.completedAt, 'task.completedAt') ?? updatedAt)
+            : null,
+        calendarProviderId: readOptionalString(value, 'calendarProviderId') ?? null,
+        calendarEventId: readOptionalString(value, 'calendarEventId') ?? null,
+        calendarSyncStatus: normalizeTaskCalendarSyncStatus(value.calendarSyncStatus),
+        calendarLastSyncedAt: normalizeOptionalTimestamp(value.calendarLastSyncedAt, 'task.calendarLastSyncedAt'),
+        calendarLastSyncError: readOptionalString(value, 'calendarLastSyncError') ?? null,
+        recurrence: normalizeTaskRecurrence(value.recurrence)
+    };
+}
+
+function normalizeDeletedTask(value: unknown, index: number): SyncDeletedTask {
+    if (!isRecord(value)) {
+        throw new Error(`deletedTasks[${index}] must be an object.`);
+    }
+
+    return {
+        id: readRequiredString(value, 'id', `deletedTasks[${index}].id`),
+        updatedAt: readRequiredTimestamp(value, 'updatedAt', `deletedTasks[${index}].updatedAt`)
     };
 }
 
@@ -362,7 +681,8 @@ export function normalizeConversation(value: unknown): SyncConversation {
             : undefined,
         messages: value.messages.map((message, index) => normalizeMessage(message, index)),
         updatedAt: readRequiredTimestamp(value, 'updatedAt', 'conversation.updatedAt'),
-        sync: normalizeSyncState(value.sync)
+        sync: normalizeSyncState(value.sync),
+        modelSelection: normalizeModelSelection(value.modelSelection)
     };
 }
 
@@ -394,4 +714,21 @@ export function normalizePullRequest(value: unknown): PullRequestBody {
     }
 
     return { cursor };
+}
+
+export function normalizeTaskPushRequest(value: unknown): TaskPushRequestBody {
+    if (!isRecord(value) || !Array.isArray(value.tasks)) {
+        throw new Error('Task push request must include a tasks array.');
+    }
+
+    return {
+        tasks: value.tasks.map((task) => normalizeTaskRecord(task)),
+        deletedTasks: Array.isArray(value.deletedTasks)
+            ? value.deletedTasks.map((task, index) => normalizeDeletedTask(task, index))
+            : []
+    };
+}
+
+export function normalizeTaskPullRequest(value: unknown): TaskPullRequestBody {
+    return normalizePullRequest(value);
 }

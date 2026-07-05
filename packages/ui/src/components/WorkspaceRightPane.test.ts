@@ -54,7 +54,7 @@ describe('WorkspaceRightPane', () => {
 
         const wrapper = mount(WorkspaceRightPane, {
             props: {
-                activeAgent: {
+                activeScopeData: {
                     name: 'Docs Agent',
                     effectiveInstructions: 'Use docs context',
                     modelProviderName: 'gemini-api',
@@ -62,7 +62,7 @@ describe('WorkspaceRightPane', () => {
                     scopePath: '/docs',
                     sourcePaths: ['/docs/.agent.json']
                 },
-                activeAgentKey: '/docs/',
+                activeScopeKey: '/docs/',
                 activeDocument: {
                     path: '/docs/guide.md',
                     mimeType: 'text/markdown',
@@ -128,8 +128,8 @@ describe('WorkspaceRightPane', () => {
 
         const wrapper = mount(WorkspaceRightPane, {
             props: {
-                activeAgentKey: '/docs/',
-                showAgentConversationList: true,
+                activeScopeKey: '/docs/',
+                showScopeConversationList: true,
                 contextProvider: {
                     id: 'ctx',
                     initializeAccess: vi.fn(),
@@ -184,8 +184,8 @@ describe('WorkspaceRightPane', () => {
 
         const wrapper = mount(WorkspaceRightPane, {
             props: {
-                activeAgentKey: '/docs/',
-                showAgentConversationList: true,
+                activeScopeKey: '/docs/',
+                showScopeConversationList: true,
                 openConversationRequest: {
                     conversationId: 'conversation-1',
                     nonce: 1

@@ -2,23 +2,23 @@ import { app, BrowserWindow, nativeImage } from 'electron';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { resolveGeminiHistoryRuntimeConfig } from '@packages/core/config';
+import {
+    buildDesktopControlledPageRegistry,
+    resolveDesktopProviderLoginConfig
+} from '@plugins/ai-agent/desktop';
 import { createAuthWindowManager } from './authWindow';
 import { registerProviderLoginIpc } from './authIpc';
 import { registerBrowserAutomationIpc } from './browserAutomationIpc';
+import { registerContextProviderIpc } from './contextProviderIpc';
 import { createControlledPageManager } from './controlledPageManager';
-import { createDesktopMainHostContext } from './createDesktopMainHostContext';
-import { registerContextIpc } from './contextIpc';
 import { registerControlledPageIpc } from './controlledPageIpc';
+import { registerDesktopFetchIpc } from './fetchIpc';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const rendererDistDir = join(__dirname, '../../renderer');
 const preloadPath = join(__dirname, 'preload.cjs');
-const geminiHistoryPreloadPath = join(__dirname, 'gemini-history.preload.cjs');
-const chatgptDomPreloadPath = join(__dirname, 'chatgpt-dom.preload.cjs');
-const geminiDomPreloadPath = join(__dirname, 'gemini-dom.preload.cjs');
-const claudeDomPreloadPath = join(__dirname, 'claude-dom.preload.cjs');
+const controlledPagePreloadPath = join(__dirname, 'controlled-page.preload.cjs');
 
 function resolveDesktopBrandIconPath(): string {
     const bundledPngIconPath = join(rendererDistDir, 'jarvis.png');
@@ -54,35 +54,10 @@ let disposeProviderLoginIpc: (() => void) | null = null;
 let disposeContextIpc: (() => void) | null = null;
 let disposeControlledPageIpc: (() => void) | null = null;
 let disposeBrowserAutomationIpc: (() => void) | null = null;
-const desktopHostContext = createDesktopMainHostContext({
-    controlledPageManager,
-    preloadPath: geminiHistoryPreloadPath
-});
-
-async function probeGeminiHistoryReadyFromHostContext(options: { forceReload?: boolean } = {}): Promise<boolean> {
-    const bridge = desktopHostContext.getCapability<{
-        probeHistoryListReady(
-            config: Record<string, unknown>,
-            options?: { forceReload?: boolean }
-        ): Promise<boolean>;
-    }>('browser-tabs');
-    if (!bridge) {
-        return false;
-    }
-
-    const config = resolveGeminiHistoryRuntimeConfig({ env: process.env });
-    return bridge.probeHistoryListReady(config, options);
-}
+let disposeFetchIpc: (() => void) | null = null;
 
 const authWindowManager = createAuthWindowManager({
-    async probeGeminiHistoryReady() {
-        try {
-            return await probeGeminiHistoryReadyFromHostContext();
-        } catch (error) {
-            console.warn('Failed to probe Gemini history readiness from auth window.', error);
-            return false;
-        }
-    }
+    resolveProviderLoginConfig: resolveDesktopProviderLoginConfig
 });
 
 function deriveServerOrigin(): string {
@@ -98,15 +73,57 @@ function deriveServerOrigin(): string {
     return 'http://127.0.0.1:8787';
 }
 
-function getRendererEntryUrl(): string {
-    const devServerUrl = process.env.CHATPRISM_DESKTOP_DEV_SERVER_URL;
-    if (devServerUrl) {
-        process.env.CHATPRISM_RENDERER_CONTEXT_BASE_URL = '/api/context';
-        return devServerUrl;
+function useLocalRendererBundle(): boolean {
+    const flag = process.env.CHATPRISM_DESKTOP_USE_LOCAL_BUNDLE?.trim().toLowerCase();
+    return flag === '1' || flag === 'true' || flag === 'yes' || flag === 'on';
+}
+
+function resolveRendererApiBaseUrl(envKey: string, fallbackPath: string): string {
+    const explicit = process.env[envKey]?.trim();
+    if (explicit) {
+        return explicit;
+    }
+
+    return `${deriveServerOrigin()}${fallbackPath}`;
+}
+
+function prepareRendererRuntimeEnv(mode: 'dev-server' | 'server-origin' | 'local-bundle'): void {
+    if (mode === 'local-bundle') {
+        process.env.CHATPRISM_RENDERER_CONTEXT_BASE_URL = resolveRendererApiBaseUrl('CHATPRISM_CONTEXT_BASE_URL', '/api/context');
+        process.env.CHATPRISM_RENDERER_SYNC_BASE_URL = resolveRendererApiBaseUrl('CHATPRISM_SYNC_BASE_URL', '/api/sync');
+        process.env.CHATPRISM_RENDERER_CODEX_BASE_URL = resolveRendererApiBaseUrl('CHATPRISM_CODEX_BASE_URL', '/api/codex');
+        process.env.CHATPRISM_RENDERER_PROVIDER_CONFIG_BASE_URL = resolveRendererApiBaseUrl('CHATPRISM_PROVIDER_CONFIG_BASE_URL', '/api/provider-configs');
+        return;
     }
 
     process.env.CHATPRISM_RENDERER_CONTEXT_BASE_URL = '/api/context';
-    return `${deriveServerOrigin()}/`;
+    process.env.CHATPRISM_RENDERER_SYNC_BASE_URL = '/api/sync';
+    process.env.CHATPRISM_RENDERER_CODEX_BASE_URL = '/api/codex';
+    process.env.CHATPRISM_RENDERER_PROVIDER_CONFIG_BASE_URL = '/api/provider-configs';
+}
+
+function getRendererEntryTarget(): { mode: 'dev-server' | 'server-origin' | 'local-bundle'; url?: string } {
+    const devServerUrl = process.env.CHATPRISM_DESKTOP_DEV_SERVER_URL;
+    if (devServerUrl) {
+        prepareRendererRuntimeEnv('dev-server');
+        return {
+            mode: 'dev-server',
+            url: devServerUrl
+        };
+    }
+
+    if (useLocalRendererBundle()) {
+        prepareRendererRuntimeEnv('local-bundle');
+        return {
+            mode: 'local-bundle'
+        };
+    }
+
+    prepareRendererRuntimeEnv('server-origin');
+    return {
+        mode: 'server-origin',
+        url: `${deriveServerOrigin()}/`
+    };
 }
 
 async function createMainWindow() {
@@ -126,12 +143,17 @@ async function createMainWindow() {
         }
     });
 
-    const entryUrl = getRendererEntryUrl();
-    if (entryUrl.startsWith('file://')) {
+    const entryTarget = getRendererEntryTarget();
+    if (entryTarget.mode === 'local-bundle') {
         await window.loadFile(join(rendererDistDir, 'index.html'));
-    } else {
-        await window.loadURL(entryUrl);
+        return;
     }
+
+    if (!entryTarget.url) {
+        throw new Error('Desktop renderer entry URL is not configured.');
+    }
+
+    await window.loadURL(entryTarget.url);
 }
 
 function wireIpc() {
@@ -141,15 +163,11 @@ function wireIpc() {
     disposeBrowserAutomationIpc = registerBrowserAutomationIpc();
     disposeControlledPageIpc = registerControlledPageIpc({
         controlledPageManager,
-        preloadRegistry: {
-            'gemini-web': geminiHistoryPreloadPath,
-            'chatgpt-dom': chatgptDomPreloadPath,
-            'gemini-dom': geminiDomPreloadPath,
-            'claude-dom': claudeDomPreloadPath
-        }
+        controlledPageRegistry: buildDesktopControlledPageRegistry(controlledPagePreloadPath)
     });
-    disposeContextIpc = registerContextIpc({
-        contextBaseUrl: process.env.CHATPRISM_CONTEXT_BASE_URL
+    disposeFetchIpc = registerDesktopFetchIpc();
+    disposeContextIpc = registerContextProviderIpc({
+        knowledgeRoot: process.env.CHATPRISM_KNOWLEDGE_ROOT
     });
 }
 
@@ -183,6 +201,8 @@ app.on('before-quit', () => {
     disposeControlledPageIpc = null;
     disposeBrowserAutomationIpc?.();
     disposeBrowserAutomationIpc = null;
+    disposeFetchIpc?.();
+    disposeFetchIpc = null;
     disposeProviderLoginIpc?.();
     disposeProviderLoginIpc = null;
     authWindowManager.dispose();

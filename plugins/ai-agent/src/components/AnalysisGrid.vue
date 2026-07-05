@@ -38,7 +38,7 @@
 
 <script setup lang="ts">
 import type { AnalysisResult } from '@plugins/ai-agent/src/internal';
-import { useWorkspaceI18n } from '@packages/ui/src/i18n';
+import { useWorkspaceI18n } from '@packages/ui';
 
 defineProps<{
   result: AnalysisResult | null;

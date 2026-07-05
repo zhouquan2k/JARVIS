@@ -348,7 +348,7 @@ import type {
   ExternalHistoryProviderId
 } from '@plugins/ai-agent/src/internal';
 import type { LocalConversationFilter, WorkspaceHistorySource } from '../store/chat';
-import { useWorkspaceI18n } from '@packages/ui/src/i18n';
+import { useWorkspaceI18n } from '@packages/ui';
 import { formatConversationTitle, resolveConversationDocumentTag } from '../utils/conversationTitle';
 
 const props = defineProps<{

@@ -160,23 +160,25 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { Archive, ArrowLeft, Files, PanelRightOpen, Pencil, Plus } from 'lucide-vue-next';
 import type { ContextDocument, Conversation, IContextProvider, ProjectDocumentEntry, ResolvedAgentConfig } from '@plugins/ai-agent/src/internal';
 import { toConversationQueryProvider } from '../providers/context/HttpConversationQueryProvider';
+import {
+  isResolvedAgentConfig,
+  resolveScopedAgentConfigFromWorkspaceContext
+} from '../runtime/agents/config/resolveScopedAgentConfig';
 import AgentDocumentConversationList from './AgentDocumentConversationList.vue';
 import NormalChatView from '../views/NormalChatView.vue';
 import { useChatStore } from '../store/chat';
-import type { ChatRoutePath } from '@packages/ui/src/routes';
-import { useWorkspaceI18n } from '@packages/ui/src/i18n';
+import { useWorkspaceI18n, type ChatRoutePath, type OpenConversationRequest } from '@packages/ui';
 import { formatConversationTitle, extractNodeNameFromPath } from '../utils/conversationTitle';
-import type { OpenConversationRequest } from '@packages/ui/src/types/conversationLink';
 
 type PanelMode = 'list' | 'detail';
 
 const props = defineProps<{
-  activeAgent?: ResolvedAgentConfig | null;
-  activeAgentKey?: string | null;
+  activeScopeData?: Record<string, unknown> | ResolvedAgentConfig | null;
+  activeScopeKey?: string | null;
   activePath?: string | null;
   selectedNodePath?: string | null;
   activeDocument?: ContextDocument | null;
-  showAgentConversationList?: boolean;
+  showScopeConversationList?: boolean;
   contextProvider?: IContextProvider | null;
   openConversationRequest?: OpenConversationRequest | null;
 }>();
@@ -199,11 +201,12 @@ const previousSelectionKey = ref<string | null>(null);
 const editingConversationId = ref<string | null>(null);
 let documentConversationLoadToken = 0;
 let projectDocumentLoadToken = 0;
+let activeAgentContextLoadToken = 0;
 
 const activeDocumentPath = computed(() => props.activeDocument?.path?.trim() || '');
 const isDocumentSelection = computed(() => !!activeDocumentPath.value);
-const activeAgentKey = computed(() => props.activeAgentKey?.trim() || '');
-const isAgentDirectorySelection = computed(() => !activeDocumentPath.value && !!activeAgentKey.value && props.showAgentConversationList === true);
+const activeScopeKey = computed(() => props.activeScopeKey?.trim() || '');
+const isAgentDirectorySelection = computed(() => !activeDocumentPath.value && !!activeScopeKey.value && props.showScopeConversationList === true);
 const hasConversationListContext = computed(() => isDocumentSelection.value || isAgentDirectorySelection.value);
 const currentConversationTitle = computed(() => {
   return formatConversationTitle(
@@ -226,7 +229,7 @@ const toolbarTitle = computed(() => {
 });
 const hasCurrentConversation = computed(() => !!chatStore.currentConversation);
 const documentScopedConversations = computed(() => {
-  const scopedAgentKey = activeAgentKey.value;
+  const scopedAgentKey = activeScopeKey.value;
   const activeDocId = props.activeDocument?.documentId;
   const mergedIds = new Set<string>();
   const merged: typeof documentConversations.value = [];
@@ -283,11 +286,11 @@ const documentScopedConversations = computed(() => {
     .sort((left, right) => right.updatedAt - left.updatedAt);
 });
 const agentScopedConversations = computed(() => {
-  if (!activeAgentKey.value) {
+  if (!activeScopeKey.value) {
     return [];
   }
 
-  return chatStore.getConversationsByAgent(activeAgentKey.value)
+  return chatStore.getConversationsByAgent(activeScopeKey.value)
     .sort((left, right) => right.updatedAt - left.updatedAt);
 });
 const listConversations = computed(() => {
@@ -311,7 +314,7 @@ const listConversations = computed(() => {
     return [activeConversation, ...baseConversations];
   }
 
-  const normalizedAgentKey = chatStore.resolveConversationAgentKey(activeAgentKey.value ?? null);
+  const normalizedAgentKey = chatStore.resolveConversationAgentKey(activeScopeKey.value ?? null);
   const activeConversationAgentKey = chatStore.resolveConversationAgentKey(activeConversation.agentKey ?? null);
   if (normalizedAgentKey && normalizedAgentKey === activeConversationAgentKey) {
     return [activeConversation, ...baseConversations];
@@ -472,7 +475,7 @@ async function openRequestedConversation(request: OpenConversationRequest): Prom
 async function createDocumentConversation(): Promise<void> {
   await chatStore.startNewConversation({
     boundNodeName: extractNodeNameFromPath(props.selectedNodePath ?? props.activeDocument?.path ?? props.activePath ?? null),
-    agentKey: props.activeAgentKey ?? null,
+    agentKey: props.activeScopeKey ?? null,
     documentPath: props.activeDocument?.path ?? props.activePath ?? null,
     activeDocument: props.activeDocument ?? null
   });
@@ -501,7 +504,7 @@ async function deleteConversationFromList(conversationId: string): Promise<void>
   if (isCurrentConversation && activeDocumentPath.value) {
     await chatStore.startNewConversation({
       boundNodeName: extractNodeNameFromPath(props.selectedNodePath ?? props.activeDocument?.path ?? props.activePath ?? null),
-      agentKey: props.activeAgentKey ?? null,
+      agentKey: props.activeScopeKey ?? null,
       documentPath: props.activeDocument?.path ?? props.activePath ?? null,
       activeDocument: props.activeDocument ?? null
     });
@@ -574,7 +577,7 @@ function buildSelectionKey(): string | null {
   }
 
   if (hasConversationListContext.value) {
-    return `node:${props.selectedNodePath ?? props.activePath ?? activeAgentKey.value}`;
+    return `node:${props.selectedNodePath ?? props.activePath ?? activeScopeKey.value}`;
   }
 
   return null;
@@ -618,11 +621,46 @@ function syncPanelStateFromSelection(): void {
   isProjectDocumentPickerOpen.value = false;
 }
 
+async function resolveActiveScopeAgentContext(): Promise<ResolvedAgentConfig | null> {
+  const scopeKey = props.activeScopeKey?.trim();
+  if (!scopeKey) {
+    return null;
+  }
+
+  if (isResolvedAgentConfig(props.activeScopeData)) {
+    return props.activeScopeData;
+  }
+
+  const provider = props.contextProvider;
+  if (!provider) {
+    return null;
+  }
+
+  await provider.initializeAccess();
+  const context = await provider.getContext();
+  return resolveScopedAgentConfigFromWorkspaceContext(context, scopeKey);
+}
+
 watch(
-  () => props.activeAgent ?? null,
-  (agent) => {
-    chatStore.setActiveAgentContext(agent);
-    void chatStore.applyActiveAgentContextSelection(agent);
+  () => [props.activeScopeData ?? null, props.activeScopeKey ?? null, props.contextProvider ?? null] as const,
+  () => {
+    const token = ++activeAgentContextLoadToken;
+    void (async () => {
+      try {
+        const agent = await resolveActiveScopeAgentContext();
+        if (token !== activeAgentContextLoadToken) {
+          return;
+        }
+        chatStore.setActiveAgentContext(agent);
+        await chatStore.applyActiveAgentContextSelection(agent);
+      } catch {
+        if (token !== activeAgentContextLoadToken) {
+          return;
+        }
+        chatStore.setActiveAgentContext(null);
+        await chatStore.applyActiveAgentContextSelection(null);
+      }
+    })();
   },
   { immediate: true, flush: 'sync' }
 );
@@ -636,8 +674,8 @@ watch(
     props.selectedNodePath ?? null,
     props.activePath ?? null,
     activeDocumentPath.value,
-    activeAgentKey.value,
-    props.showAgentConversationList === true,
+    activeScopeKey.value,
+    props.showScopeConversationList === true,
     props.contextProvider ?? null
   ] as const,
   () => {

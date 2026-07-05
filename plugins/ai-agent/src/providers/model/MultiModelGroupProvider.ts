@@ -1,12 +1,17 @@
 import { APP_CONFIG, type ProviderModelCatalog } from '@packages/core/config';
 import type { IModelProvider, ProviderSendResult, ProviderStreamUpdate, ReasoningEffort, SendMessageOptions } from '../../interfaces/IModelProvider';
-import type { GroupConfig, GroupMember } from '../../group/groupTypes';
+import type { GroupMemberPart, GroupSummaryPart } from '../../interfaces/Conversation';
+import type { GroupConfig, GroupMember, MultiModelGroupProviderDeps } from '../../group/groupTypes';
 import { parseMentions } from '../../group/mentionParser';
 import { composeMemberPrompt } from '../../group/groupPrompt';
+import { composeGroupSummaryPrompt } from '../../group/groupSummaryPrompt';
 
-export interface MultiModelGroupProviderDeps {
-    resolveMemberProvider(providerId: string): IModelProvider;
-    getGroupConfig(presetModelId?: string): GroupConfig;
+function logGroup(stage: string, extra?: Record<string, unknown>): void {
+    try {
+        console.log('[GroupProvider]', JSON.stringify({ stage, ...extra }));
+    } catch {
+        // 序列化失败不影响编排
+    }
 }
 
 export class MultiModelGroupProvider implements IModelProvider {
@@ -14,6 +19,8 @@ export class MultiModelGroupProvider implements IModelProvider {
 
     private readonly deps: MultiModelGroupProviderDeps;
     private activeMemberProviders: IModelProvider[] = [];
+    private activeSummarizerProvider: IModelProvider | null = null;
+    private hasActiveSummaryConversation = false;
 
     constructor(deps: MultiModelGroupProviderDeps) {
         this.deps = deps;
@@ -34,10 +41,6 @@ export class MultiModelGroupProvider implements IModelProvider {
         return true;
     }
 
-    /**
-     * 本轮参与成员：优先用调用方传入的勾选结果（options.groupMembers），
-     * 否则回退到默认预设（deps.getGroupConfig）。
-     */
     private resolveConfig(options: { modelId?: string; groupMembers?: GroupMember[] }): GroupConfig {
         if (options.groupMembers && options.groupMembers.length > 0) {
             return { members: options.groupMembers };
@@ -45,10 +48,6 @@ export class MultiModelGroupProvider implements IModelProvider {
         return this.deps.getGroupConfig(options.modelId);
     }
 
-    /**
-     * 切到 group 时初始化同步：把统一推理档位下发给每个成员受控页面。
-     * 成员各自用自己的 modelId（preset 通常为 'dom'，不切模型只设档位）。best-effort。
-     */
     async applyPageDefaults(options: { modelId?: string; reasoningEffort?: ReasoningEffort; groupMembers?: GroupMember[] }): Promise<void> {
         const config = this.resolveConfig(options);
         await Promise.all(
@@ -69,21 +68,38 @@ export class MultiModelGroupProvider implements IModelProvider {
     ): Promise<ProviderSendResult> {
         const config = this.resolveConfig(options);
         const { targets } = parseMentions(prompt, config.members);
+        logGroup('resolve-members', {
+            optionsGroupMembers: (options.groupMembers ?? []).map((m) => m.providerId),
+            configMembers: config.members.map((m) => m.providerId),
+            parsedTargets: targets.map((m) => m.providerId)
+        });
 
-        const buffers: Map<string, string> = new Map(targets.map((m) => [m.name, '']));
-        const completedMembers = new Set<string>();
+        const groupMembers: GroupMemberPart[] = targets.map((m) => ({
+            name: m.name,
+            providerId: m.providerId,
+            modelId: m.modelId,
+            content: '',
+            status: 'pending'
+        }));
+
         this.activeMemberProviders = [];
+        this.activeSummarizerProvider = null;
 
-        const memberOrder = targets.map((m) => m.name);
+        const startedAt = Date.now();
+        logGroup('send-start', { memberCount: targets.length, members: targets.map((m) => ({ name: m.name, providerId: m.providerId, modelId: m.modelId })) });
+
+        const memberIndexByName = new Map(targets.map((m, i) => [m.name, i]));
 
         const buildTranscript = (): string => {
-            return memberOrder
-                .map((name) => {
-                    const content = buffers.get(name) ?? '';
-                    if (content === '' && !completedMembers.has(name)) {
-                        return `### ${name}\n*正在输入...*`;
+            return groupMembers
+                .map((m) => {
+                    if (m.status === 'error') {
+                        return `### ${m.name}\n*Error: ${m.error ?? 'unknown error'}*`;
                     }
-                    return `### ${name}\n${content}`;
+                    if (m.content === '' && m.status !== 'done') {
+                        return `### ${m.name}\n*正在输入...*`;
+                    }
+                    return `### ${m.name}\n${m.content}`;
                 })
                 .join('\n\n');
         };
@@ -92,34 +108,121 @@ export class MultiModelGroupProvider implements IModelProvider {
             const memberProvider = this.deps.resolveMemberProvider(member.providerId);
             this.activeMemberProviders.push(memberProvider);
 
-            // 注入 openteam 式群聊提示词（名册 + 自我身份 + 上一轮他人发言）。
-            // 经 prompt 文本传递，确保仅读 prompt 的 DomAutomationProvider 也能感知群聊与他人发言。
             const memberPrompt = composeMemberPrompt(member, config.members, options.history, prompt);
+            const idx = memberIndexByName.get(member.name)!;
+            groupMembers[idx].status = 'streaming';
+            logGroup('member-start', { name: member.name, providerId: member.providerId, modelId: member.modelId });
+            let firstChunkLogged = false;
 
             const sendPromise = memberProvider.sendMessage(
                 memberPrompt,
                 { ...options, modelId: member.modelId },
                 (chunk: ProviderStreamUpdate) => {
-                    // onUpdate 契约为「全量快照」（store 端 lastMsg.content = update.text），
-                    // 各成员的 chunk.text 已是该成员完整文本，直接替换，切勿累加。
-                    buffers.set(member.name, chunk.text);
-                    onUpdate({ text: buildTranscript() });
+                    if (!firstChunkLogged && chunk.text) {
+                        firstChunkLogged = true;
+                        logGroup('member-first-chunk', { name: member.name, textLen: chunk.text.length, sinceStartMs: Date.now() - startedAt });
+                    }
+                    groupMembers[idx].content = chunk.text;
+                    groupMembers[idx].status = 'streaming';
+                    onUpdate({
+                        text: buildTranscript(),
+                        groupMembers: groupMembers.map((m) => ({ ...m }))
+                    });
                 }
             );
 
-            return sendPromise.finally(() => {
-                completedMembers.add(member.name);
-                onUpdate({ text: buildTranscript() });
-            });
+            return sendPromise
+                .then((result) => {
+                    groupMembers[idx].content = result.text;
+                    groupMembers[idx].status = 'done';
+                    logGroup('member-done', { name: member.name, textLen: result.text.length, sinceStartMs: Date.now() - startedAt });
+                })
+                .catch((err: unknown) => {
+                    groupMembers[idx].status = 'error';
+                    groupMembers[idx].error = err instanceof Error ? err.message : String(err);
+                    logGroup('member-error', { name: member.name, error: groupMembers[idx].error, sinceStartMs: Date.now() - startedAt });
+                })
+                .finally(() => {
+                    onUpdate({
+                        text: buildTranscript(),
+                        groupMembers: groupMembers.map((m) => ({ ...m }))
+                    });
+                });
         });
 
         await Promise.all(memberTasks);
+
+        const successfulMembers = groupMembers.filter((m) => m.status === 'done');
+        let groupSummary: GroupSummaryPart | undefined;
+        logGroup('members-settled', {
+            sinceStartMs: Date.now() - startedAt,
+            statuses: groupMembers.map((m) => ({ name: m.name, status: m.status, textLen: m.content.length }))
+        });
+
+        if (successfulMembers.length >= 2) {
+            const summarizerConfig = this.deps.getSummarizerConfig(options.modelId);
+            const summarizerProvider = this.deps.resolveSummarizer(options.modelId);
+            logGroup('summary-decision', {
+                successfulCount: successfulMembers.length,
+                hasSummarizerProvider: Boolean(summarizerProvider),
+                hasSummarizerConfig: Boolean(summarizerConfig)
+            });
+
+            if (summarizerProvider && summarizerConfig) {
+                groupSummary = { phase: 'waiting', content: '' };
+                onUpdate({
+                    text: buildTranscript(),
+                    groupMembers: groupMembers.map((m) => ({ ...m })),
+                    groupSummary: { ...groupSummary }
+                });
+
+                try {
+                    this.activeSummarizerProvider = summarizerProvider;
+                    const summaryPrompt = composeGroupSummaryPrompt(successfulMembers, summarizerConfig.systemPrompt);
+                    groupSummary.phase = 'streaming';
+                    const summaryHistory = this.hasActiveSummaryConversation
+                        ? [{ role: 'user' as const, content: '继续沿用当前总结对话。' }]
+                        : undefined;
+                    this.hasActiveSummaryConversation = true;
+
+                    await summarizerProvider.sendMessage(
+                        summaryPrompt,
+                        { modelId: summarizerConfig.modelId, history: summaryHistory },
+                        (chunk: ProviderStreamUpdate) => {
+                            groupSummary!.content = chunk.text;
+                            groupSummary!.phase = 'streaming';
+                            onUpdate({
+                                text: buildTranscript(),
+                                groupMembers: groupMembers.map((m) => ({ ...m })),
+                                groupSummary: { ...groupSummary! }
+                            });
+                        }
+                    );
+
+                    groupSummary.phase = 'done';
+                    logGroup('summary-done', { textLen: groupSummary.content.length, sinceStartMs: Date.now() - startedAt });
+                } catch (err: unknown) {
+                    groupSummary.phase = 'error';
+                    groupSummary.error = err instanceof Error ? err.message : String(err);
+                    logGroup('summary-error', { error: groupSummary.error, sinceStartMs: Date.now() - startedAt });
+                } finally {
+                    this.activeSummarizerProvider = null;
+                    onUpdate({
+                        text: buildTranscript(),
+                        groupMembers: groupMembers.map((m) => ({ ...m })),
+                        groupSummary: { ...groupSummary! }
+                    });
+                }
+            }
+        }
 
         const finalText = buildTranscript();
         return {
             text: finalText,
             conversationId: 'group',
-            messageId: `group-${Date.now()}`
+            messageId: `group-${Date.now()}`,
+            groupMembers: groupMembers.map((m) => ({ ...m })),
+            groupSummary: groupSummary ? { ...groupSummary } : undefined
         };
     }
 
@@ -128,6 +231,11 @@ export class MultiModelGroupProvider implements IModelProvider {
             provider.abort();
         }
         this.activeMemberProviders = [];
+
+        if (this.activeSummarizerProvider) {
+            this.activeSummarizerProvider.abort();
+            this.activeSummarizerProvider = null;
+        }
     }
 }
 
@@ -138,7 +246,6 @@ export function resolveGroupMembers(
     return groupPresets?.[presetModelId] ?? [];
 }
 
-/** 群聊全部候选成员（顶部勾选区展示用，含默认未勾选项）。 */
 export function resolveGroupCandidates(): GroupMember[] {
     const candidates = APP_CONFIG.groupCandidates as GroupMember[] | undefined;
     return (candidates ?? []).map((member) => ({ ...member }));

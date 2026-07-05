@@ -1,4 +1,5 @@
 import type { ResolvedAgentConfig, ContextDocument, IContextProvider, MessageAttachment } from '@plugins/ai-agent/src/internal';
+import type { GroupMember } from '@plugins/ai-agent/src/group/groupTypes';
 import type {
     ProviderContextMessage,
     ProviderSendResult,
@@ -26,6 +27,8 @@ export interface AgentRuntimeRequest {
     history?: ProviderContextMessage[];
     modelOptions?: Record<string, boolean>;
     reasoningEffort?: ReasoningEffort;
+    /** group provider 专用：本轮参与的成员列表（由顶部勾选区决定）。透传给 group provider，避免回退默认预设。 */
+    groupMembers?: GroupMember[];
     context?: { parentMessageId?: string, conversationId?: string };
 }
 

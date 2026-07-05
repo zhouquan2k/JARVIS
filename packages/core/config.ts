@@ -16,6 +16,7 @@ export interface ModelConfig {
     name: string;
     nameKey?: string;
     options?: ModelOptionDefinition[];
+    reasoningEffort?: 'low' | 'medium' | 'high';
 }
 
 export interface ProviderModelCatalog {
@@ -58,6 +59,12 @@ export interface GroupMemberConfig {
     providerId: string;
     modelId: string;
     name: string;
+}
+
+export interface GroupSummarizerConfig {
+    providerId: string;
+    modelId: string;
+    systemPrompt?: string;
 }
 
 export const DEFAULT_SYNC_KEY = '0';
@@ -137,6 +144,8 @@ export const APP_CONFIG: {
     groupPresets: Record<string, GroupMemberConfig[]>;
     /** 群聊可选成员池：顶部勾选区展示的全部候选 DOM 成员（实际可用性再按运行模式过滤）。 */
     groupCandidates: GroupMemberConfig[];
+    /** 按群预设 ID 配置总结模型；undefined 表示该预设不启用自动总结。 */
+    groupSummarizers: Record<string, GroupSummarizerConfig>;
 } = {
     providers: [
         {
@@ -503,6 +512,12 @@ export const APP_CONFIG: {
         { providerId: 'gemini-dom', modelId: '3.1 Pro', name: 'Gemini' },
         { providerId: 'claude-dom', modelId: 'Opus 4.8', name: 'Claude' }
     ],
+    groupSummarizers: {
+        'dom': {
+            providerId: 'gemini-dom-summary',
+            modelId: '3.1 Pro'
+        }
+    },
     analyzer: {
         defaultProvider: 'gemini-api',
         defaultModel: 'gemini-pro-latest',

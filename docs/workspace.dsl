@@ -11,9 +11,9 @@ workspace "ChatPrism" "Context and container views for the current codebase" {
 
         chatprism = softwareSystem "ChatPrism" "A multi-host AI workspace spanning Web, browser extension, Desktop, and sync services." {
             extensionApp = container "Browser Extension App" "Browser-extension host for chat, comparison, history import, and the knowledge workspace; extension mechanisms also carry agent capabilities." "TypeScript, Vue, WXT"
-            webApp = container "Web App" "Browser host for chat, comparison, and the knowledge workspace." "TypeScript, Vue, Vite"
+            webApp = container "Web App" "Browser/PWA host for chat, comparison, and the knowledge workspace; production mode is same-origin with the Sync Server and supports offline app-shell + read-only document cache." "TypeScript, Vue, Vite"
             desktopApp = container "Desktop App" "Electron desktop host for chat, comparison, history import, and the knowledge workspace; also carries desktop-only agent and file capabilities." "TypeScript, Vue, Electron"
-            syncServer = container "Sync Server" "Provides conversation sync APIs, knowledge context APIs, and provider configuration APIs." "TypeScript, Hono, Node.js"
+            syncServer = container "Sync Server" "Provides conversation/task sync APIs, knowledge context APIs, provider configuration APIs, and same-origin static hosting for the web2 production bundle." "TypeScript, Hono, Node.js"
             sharedPackages = container "Shared Packages" "Runtime-bounded workspace packages: core owns cross-host contracts, ui owns shared interface layers, and node owns Node-only adapters and infrastructure." "TypeScript workspace packages" {
                 corePackage = component "packages/core" "Cross-host contracts, domain models, runtime abstractions, and reusable provider/client implementations shared by Web, Extension, Desktop, and Server." "Workspace package"
                 uiPackage = component "packages/ui" "Shared UI components, views, and stores reused mainly by Web, Extension, and Desktop renderers." "Workspace package"

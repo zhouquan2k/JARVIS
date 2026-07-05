@@ -47,7 +47,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import type { MessageAttachment } from '@plugins/ai-agent/src/internal';
-import { useWorkspaceI18n } from '@packages/ui/src/i18n';
+import { useWorkspaceI18n } from '@packages/ui';
 
 defineProps<{
   attachments: MessageAttachment[];

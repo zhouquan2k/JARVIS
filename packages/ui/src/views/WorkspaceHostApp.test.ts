@@ -84,19 +84,33 @@ function createRuntimeContext(): WorkspaceRuntimeContext {
                     activePath: input.activePath,
                     activeConversationId: currentConversationId
                 });
-                const routeAgent = input.activeScopeMetadata?.data as Record<string, unknown> | undefined;
-                if (routeAgent) {
-                    chatStore.saveWorkspaceAgentContext(routeAgent);
+                const routeScope = input.activeScopeMetadata?.data as Record<string, unknown> | undefined;
+                if (routeScope) {
+                    chatStore.saveWorkspaceAgentContext(routeScope);
                 }
                 chatStore.setSidebarCollapsed(input.revealSidebar !== true);
                 await chatStore.applyWorkspaceAgentContextSelection();
             }
             if (input.nextRoutePath === '/' && input.currentRoutePath === '/chat') {
-                const saved = chatStore.restoreAgentViewStatus();
-                if (saved && (saved.selectedNodePath || saved.activePath)) {
+                const currentDocumentPath = chatStore.currentConversation?.documentPaths?.[0]?.trim() || null;
+                const currentScopeKey = chatStore.currentConversation?.scopeKey?.trim() || null;
+                if (currentDocumentPath) {
                     chatStore.saveAgentViewStatus({
-                        selectedNodePath: saved.selectedNodePath,
-                        activePath: saved.activePath,
+                        selectedNodePath: currentDocumentPath,
+                        activePath: currentDocumentPath,
+                        activeConversationId: currentConversationId
+                    });
+                } else if (currentScopeKey) {
+                    const selectedNodePath = currentScopeKey === '/' || currentScopeKey === '/.agent.json'
+                        ? '/'
+                        : currentScopeKey.endsWith('/.agent.json')
+                            ? (currentScopeKey.slice(0, -'/.agent.json'.length) || '/')
+                            : currentScopeKey.endsWith('/')
+                                ? (currentScopeKey.slice(0, -1) || '/')
+                                : currentScopeKey;
+                    chatStore.saveAgentViewStatus({
+                        selectedNodePath,
+                        activePath: null,
                         activeConversationId: currentConversationId
                     });
                 }
@@ -233,8 +247,8 @@ describe('WorkspaceHostApp', () => {
         const documentStore = useDocumentWorkspaceStore();
         documentStore.selectedNodePath = '/docs';
         documentStore.activePath = '/docs/guide.md';
-        documentStore.activeAgentKey = '/docs/';
-        documentStore.activeAgent = {
+        documentStore.activeScopeKey = '/docs/';
+        documentStore.activeScopeData = {
             name: 'Docs Agent',
             effectiveInstructions: 'Use docs context',
             modelProviderName: 'gemini-api',
@@ -470,7 +484,7 @@ describe('WorkspaceHostApp', () => {
         expect(navigateTo).toHaveBeenCalledWith('/');
     });
 
-    it('updates the saved agent conversation to the current chat before restoring the knowledge workspace', async () => {
+    it('updates the saved workspace target from the current chat before restoring the knowledge workspace', async () => {
         setActivePinia(createPinia());
         const navigateTo = vi.fn();
         const chatStore = useMockChatStore();
@@ -483,6 +497,8 @@ describe('WorkspaceHostApp', () => {
             id: 'conversation-2',
             title: 'Current Chat',
             origin: 'local',
+            scopeKey: '/notes/',
+            documentPaths: ['/notes/today.md'],
             updatedAt: Date.now(),
             messages: []
         };
@@ -518,8 +534,8 @@ describe('WorkspaceHostApp', () => {
         await flushPromises();
 
         expect(chatStore.restoreAgentViewStatus()).toEqual({
-            selectedNodePath: '/docs',
-            activePath: '/docs/guide.md',
+            selectedNodePath: '/notes/today.md',
+            activePath: '/notes/today.md',
             activeConversationId: 'conversation-2'
         });
         expect(navigateTo).toHaveBeenCalledWith('/');

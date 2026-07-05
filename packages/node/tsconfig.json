@@ -9,10 +9,7 @@
     "skipLibCheck": true,
     "paths": {
       "@packages/core": ["../core/index.ts"],
-      "@packages/core/*": ["../core/*"],
-      "@plugins/task-mgr": ["../../plugins/task-mgr/src/index.ts"],
-      "@plugins/task-mgr/*": ["../../plugins/task-mgr/*"],
-      "@plugins/task-mgr/api": ["../../plugins/task-mgr/api.ts"]
+      "@packages/core/*": ["../core/*"]
     },
     "types": ["node"]
   },

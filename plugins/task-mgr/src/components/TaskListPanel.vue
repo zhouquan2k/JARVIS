@@ -22,6 +22,33 @@
       {{ error }}
     </p>
 
+    <template v-else-if="completedOnly">
+      <div class="task-list-panel__list" data-testid="agent-task-completed-list">
+        <article
+          v-for="task in visibleCompletedTasks"
+          :key="task.id"
+          class="task-list-panel__item task-list-panel__item--completed"
+          :class="{ 'task-list-panel__item--with-meta': Boolean(task.dueAt) }"
+          :data-testid="`agent-task-item-${task.id}`"
+        >
+          <TaskListRow
+            :task="task"
+            :show-priority="false"
+            :show-edit="false"
+            :open-menu-task-id="openMenuTaskId"
+            :is-navigable="isGlobalAllTasksView"
+            @toggle-completed="toggleTask"
+            @delete-task="deleteTaskFromMenu"
+            @toggle-menu="toggleMenu"
+            @open-task="openTaskNode"
+          />
+        </article>
+        <p v-if="visibleCompletedTasks.length === 0" class="task-list-panel__message" data-testid="agent-task-empty">
+          {{ t('shared.noTasks') }}
+        </p>
+      </div>
+    </template>
+
     <template v-else>
       <div class="task-list-panel__list" data-testid="agent-task-open-list">
         <article
@@ -47,6 +74,78 @@
             </header>
             <article
               v-for="task in group.tasks"
+              :key="task.id"
+              class="task-list-panel__item"
+              :class="taskRowClass(task)"
+              :data-testid="`agent-task-item-${task.id}`"
+            >
+              <TaskEditorInline
+                v-if="editingTaskId === task.id"
+                :task="editingTask!"
+                @save="saveTask"
+                @cancel="cancelEdit"
+              />
+              <TaskListRow
+                v-else
+                :task="task"
+                :show-priority="true"
+                :show-edit="true"
+                :open-menu-task-id="openMenuTaskId"
+                :is-navigable="isGlobalAllTasksView"
+                @toggle-completed="toggleTask"
+                @start-edit="startEditTaskFromRow"
+                @open-edit="openEditFromMenu"
+                @delete-task="deleteTaskFromMenu"
+                @toggle-menu="toggleMenu"
+                @open-task="openTaskNode"
+              />
+            </article>
+          </section>
+        </template>
+
+        <template v-else-if="includeTomorrow">
+          <article
+            v-for="task in visibleOpenTasks"
+            :key="task.id"
+            class="task-list-panel__item"
+            :class="taskRowClass(task)"
+            :data-testid="`agent-task-item-${task.id}`"
+          >
+            <TaskEditorInline
+              v-if="editingTaskId === task.id"
+              :task="editingTask!"
+              @save="saveTask"
+              @cancel="cancelEdit"
+            />
+            <TaskListRow
+              v-else
+              :task="task"
+              :show-priority="true"
+              :show-edit="true"
+              :open-menu-task-id="openMenuTaskId"
+              :is-navigable="isGlobalAllTasksView"
+              @toggle-completed="toggleTask"
+              @start-edit="startEditTaskFromRow"
+              @open-edit="openEditFromMenu"
+              @delete-task="deleteTaskFromMenu"
+              @toggle-menu="toggleMenu"
+              @open-task="openTaskNode"
+            />
+          </article>
+          <p v-if="visibleOpenTasks.length === 0" class="task-list-panel__message" data-testid="agent-task-today-empty">
+            {{ t('shared.noTasks') }}
+          </p>
+
+          <section
+            v-if="visibleTomorrowTasks.length > 0"
+            class="task-list-panel__group task-list-panel__group--tomorrow"
+            data-testid="task-group-tomorrow"
+          >
+            <h2 class="task-list-panel__tomorrow-heading" data-testid="task-group-title-tomorrow">
+              {{ t('shared.tomorrow') }}
+            </h2>
+            <article
+              v-for="task in visibleTomorrowTasks"
               :key="task.id"
               class="task-list-panel__item"
               :class="taskRowClass(task)"
@@ -107,12 +206,12 @@
           </article>
         </template>
 
-        <p v-if="visibleOpenTasks.length === 0" class="task-list-panel__message" data-testid="agent-task-empty">
+        <p v-if="visibleOpenTasks.length === 0 && !includeTomorrow" class="task-list-panel__message" data-testid="agent-task-empty">
           {{ t('shared.noTasks') }}
         </p>
       </div>
 
-      <section class="task-list-panel__completed">
+      <section v-if="showCompletedSection" class="task-list-panel__completed">
         <button
           type="button"
           class="task-list-panel__completed-toggle"
@@ -157,8 +256,7 @@
 <script setup lang="ts">
 import { Fragment, computed, defineComponent, h, inject, onBeforeUnmount, onMounted, ref, watch, type PropType } from 'vue';
 import type { Task, TaskExecutionState, TaskPriority, TaskQueryTag } from '../../api';
-import { useWorkspaceI18n } from '@packages/ui/src/i18n';
-import { workspaceNavigationApiKey } from '@packages/ui/src/plugins/injectionKeys';
+import { useWorkspaceI18n, workspaceNavigationApiKey } from '@packages/ui';
 import TaskEditorInline from './TaskEditorInline.vue';
 import { getTaskService } from '../taskServiceRegistry';
 
@@ -209,6 +307,7 @@ const TaskListRow = defineComponent({
       h('div', {
         class: 'task-list-panel__content',
         'data-testid': `agent-task-content-${rowProps.task.id}`,
+        onClick: rowProps.isNavigable ? () => emit('open-task', rowProps.task) : undefined,
         onDblclick: rowProps.task.completed ? undefined : () => emit('start-edit', rowProps.task)
       }, [
         h('div', { class: 'task-list-panel__title-row' }, [
@@ -309,19 +408,26 @@ const props = withDefaults(defineProps<{
   tag?: TaskQueryTag | null;
   groupByDate?: boolean;
   detailKey?: string | null;
+  includeTomorrow?: boolean;
+  showCompletedSection?: boolean;
+  completedOnly?: boolean;
 }>(), {
   documentPath: null,
   documentId: null,
   agentKey: null,
   tag: 'all',
   groupByDate: false,
-  detailKey: null
+  detailKey: null,
+  includeTomorrow: false,
+  showCompletedSection: true,
+  completedOnly: false
 });
 
 const { t } = useWorkspaceI18n();
 const loading = ref(false);
 const error = ref<string | null>(null);
 const tasks = ref<Task[]>([]);
+const tomorrowOpenTasks = ref<Task[]>([]);
 const editingTask = ref<Task | null>(null);
 const completedCollapsed = ref(true);
 const openMenuTaskId = ref<string | null>(null);
@@ -340,7 +446,8 @@ const completedTasks = computed(() => sortTasks(tasks.value.filter((task) => tas
 defineExpose({ openTaskCount: computed(() => openTasks.value.length) });
 const visibleOpenTasks = computed(() => openTasks.value);
 const visibleCompletedTasks = computed(() => completedTasks.value);
-const canCreateTask = computed(() => true);
+const visibleTomorrowTasks = computed(() => sortTasks(tomorrowOpenTasks.value));
+const canCreateTask = computed(() => !props.completedOnly);
 const openTaskGroups = computed(() => props.groupByDate ? buildDateGroups(visibleOpenTasks.value) : []);
 
 watch(
@@ -392,13 +499,23 @@ async function loadTasks(): Promise<void> {
   error.value = null;
   try {
     const taskProvider = getTaskService();
-    const [open, completed] = await Promise.all([
-      taskProvider.getTasks(normalizedDocumentPath.value, normalizedAgentKey.value, false, props.tag, props.documentId),
-      taskProvider.getTasks(normalizedDocumentPath.value, normalizedAgentKey.value, true, props.tag, props.documentId)
-    ]);
-    tasks.value = [...open, ...completed];
+    if (props.completedOnly) {
+      tasks.value = await taskProvider.getTasks(normalizedDocumentPath.value, normalizedAgentKey.value, true, props.tag, props.documentId);
+      tomorrowOpenTasks.value = [];
+    } else {
+      const [open, completed, tomorrow] = await Promise.all([
+        taskProvider.getTasks(normalizedDocumentPath.value, normalizedAgentKey.value, false, props.tag, props.documentId),
+        taskProvider.getTasks(normalizedDocumentPath.value, normalizedAgentKey.value, true, props.tag, props.documentId),
+        props.includeTomorrow
+          ? taskProvider.getTasks(normalizedDocumentPath.value, normalizedAgentKey.value, false, 'tomorrow', props.documentId)
+          : Promise.resolve([] as Task[])
+      ]);
+      tasks.value = [...open, ...completed];
+      tomorrowOpenTasks.value = tomorrow;
+    }
   } catch (loadError) {
     tasks.value = [];
+    tomorrowOpenTasks.value = [];
     error.value = loadError instanceof Error ? loadError.message : t('shared.loadingTasksFailed');
   } finally {
     loading.value = false;
@@ -447,11 +564,7 @@ function startEditTaskFromRow(task: Task): void {
 
 async function openEditFromMenu(task: Task): Promise<void> {
   openMenuTaskId.value = null;
-  if (isGlobalAllTasksView.value) {
-    await openTaskNode(task);
-  } else {
-    startEditTask(task);
-  }
+  startEditTask(task);
 }
 
 function cancelEdit(): void {
@@ -595,9 +708,9 @@ function compareExecutionState(left: Task, right: Task): number {
 
 function getExecutionStateRank(value: TaskExecutionState): number {
   if (value === 'morning') return 0;
-  if (value === 'afternoon') return 1;
-  if (value === 'evening') return 2;
-  if (value === 'doing') return 3;
+  if (value === 'doing') return 1;
+  if (value === 'afternoon') return 2;
+  if (value === 'evening') return 3;
   return 4;
 }
 
@@ -795,6 +908,17 @@ function taskRowClass(task: Task): Record<string, boolean> {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: rgba(191, 219, 254, 0.74);
+}
+
+.task-list-panel__group--tomorrow {
+  margin-top: 28px;
+}
+
+.task-list-panel__tomorrow-heading {
+  margin: 0 0 14px;
+  font-size: 24px;
+  font-weight: 700;
+  color: #f8fafc;
 }
 
 .task-list-panel__item {

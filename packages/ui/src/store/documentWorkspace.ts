@@ -1,7 +1,21 @@
 import { defineStore } from 'pinia';
 import { markRaw } from 'vue';
-import { DEFAULT_WORKSPACE_SCOPE_KEY as DEFAULT_WORKSPACE_AGENT_KEY, type ContextDocument, type ContextNode, type CreateContextNodeInput, type FolderMetadata, type IContextProvider, type WorkspaceContext, type WriteContextDocumentResult, decodeTextDocument, encodeTextDocument, isTextDocumentMimeType } from '@packages/core/src';
-import { DEFAULT_SCOPED_AGENT_CONFIG, type AgentToolBinding, type AgentInheritanceMode, type ResolvedAgentConfig } from '@plugins/ai-agent/api';
+import {
+    DEFAULT_WORKSPACE_METADATA_FILE_NAME,
+    DEFAULT_WORKSPACE_METADATA_BOOTSTRAP,
+    DEFAULT_WORKSPACE_METADATA_TEMP_FILE_NAME,
+    DEFAULT_WORKSPACE_SCOPE_KEY,
+    type ContextDocument,
+    type ContextNode,
+    type CreateContextNodeInput,
+    type FolderMetadata,
+    type IContextProvider,
+    type WorkspaceContext,
+    type WriteContextDocumentResult,
+    decodeTextDocument,
+    encodeTextDocument,
+    isTextDocumentMimeType
+} from '@packages/core/src';
 import { buildLineDiffEntries, FileChangeService, type FileChangeRecord, type LineDiffEntry } from '../services/FileChangeService';
 import { resolveDocumentViewer } from '../document-viewers';
 import { formatHttpApiError } from '../utils/formatHttpApiError';
@@ -13,17 +27,10 @@ type ActiveViewerCapabilities = {
     edit: boolean;
 } | null;
 
-export type SaveAgentConfigInput = {
+export type SaveFolderMetadataInput = {
     ownerPath: string;
-    patch: {
-        description?: string;
-        instructions?: string;
-        modelProviderName?: string;
-        modelName?: string;
-        inheritance?: AgentInheritanceMode;
-        tools?: AgentToolBinding[];
-        inheritTools?: boolean;
-    };
+    patch: Record<string, unknown>;
+    clearedFields?: string[];
 };
 
 export interface DocumentWorkspaceState {
@@ -37,13 +44,13 @@ export interface DocumentWorkspaceState {
     activeViewerId: string | null;
     activeViewerCapabilities: ActiveViewerCapabilities;
     activePaneMode: 'empty' | 'viewer' | 'unsupported';
-    agentIndexPath: string | null;
-    agentIndexDocument: ContextDocument | null;
-    agentIndexViewerId: string | null;
-    agentIndexViewerCapabilities: ActiveViewerCapabilities;
-    agentIndexPaneMode: 'empty' | 'viewer' | 'unsupported';
-    agentIndexDraftContent: string;
-    agentIndexIsSaving: boolean;
+    scopeIndexPath: string | null;
+    scopeIndexDocument: ContextDocument | null;
+    scopeIndexViewerId: string | null;
+    scopeIndexViewerCapabilities: ActiveViewerCapabilities;
+    scopeIndexPaneMode: 'empty' | 'viewer' | 'unsupported';
+    scopeIndexDraftContent: string;
+    scopeIndexIsSaving: boolean;
     draftContent: string;
     dirtyPaths: Record<string, boolean>;
     panelSizes: [number, number, number];
@@ -53,10 +60,10 @@ export interface DocumentWorkspaceState {
     isSaving: boolean;
     accessInitialized: boolean;
     currentError: string | null;
-    activeAgentKey: string | null;
-    activeAgent: ResolvedAgentConfig | null;
-    isAgentOwnerSelected: boolean;
-    agentResolutionError: string | null;
+    activeScopeKey: string | null;
+    activeScopeData: Record<string, unknown> | null;
+    isMetadataOwnerSelected: boolean;
+    metadataResolutionError: string | null;
     fileChangeService: FileChangeService;
     latestFileChange: FileChangeRecord | null;
     activeDiffEntries: LineDiffEntry[];
@@ -64,6 +71,7 @@ export interface DocumentWorkspaceState {
     canRedoActiveFile: boolean;
     nodeHistory: string[];
     nodeHistoryIndex: number;
+    recentNodePaths: string[];
 }
 
 const AUTO_SAVE_DELAY_MS = 60_000;
@@ -72,6 +80,61 @@ const MAXIMIZED_PANEL_SIZES: [number, number, number] = [20, 80, 0];
 const MIN_MIDDLE_PANE_ZOOM = 1;
 const MAX_MIDDLE_PANE_ZOOM = 1.8;
 const MIDDLE_PANE_ZOOM_STEP = 0.1;
+const WORKSPACE_SELECTION_SNAPSHOT_STORAGE_KEY = 'jarvis:knowledge-workspace:selection-snapshot';
+const RECENT_NODE_PATHS_STORAGE_KEY = 'jarvis:knowledge-workspace:recent-node-paths';
+const MAX_RECENT_NODE_COUNT = 5;
+
+type WorkspaceSelectionSnapshot = {
+    selectedNodePath: string | null;
+    activePath: string | null;
+};
+
+function getWorkspaceSelectionSnapshotStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
+    if (typeof globalThis === 'undefined' || !('localStorage' in globalThis)) {
+        return null;
+    }
+
+    try {
+        return globalThis.localStorage;
+    } catch {
+        return null;
+    }
+}
+
+function getRecentNodePathsStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
+    if (typeof globalThis === 'undefined' || !('localStorage' in globalThis)) {
+        return null;
+    }
+
+    try {
+        return globalThis.localStorage;
+    } catch {
+        return null;
+    }
+}
+
+function sanitizeWorkspaceSelectionSnapshot(input: unknown): WorkspaceSelectionSnapshot | null {
+    if (!input || typeof input !== 'object') {
+        return null;
+    }
+
+    const record = input as Record<string, unknown>;
+    const selectedNodePath = typeof record.selectedNodePath === 'string'
+        ? record.selectedNodePath
+        : null;
+    const activePath = typeof record.activePath === 'string'
+        ? record.activePath
+        : null;
+
+    if (!selectedNodePath && !activePath) {
+        return null;
+    }
+
+    return {
+        selectedNodePath,
+        activePath
+    };
+}
 
 function flattenVisibleNodes(nodes: ContextNode[]): ContextNode[] {
     const flattened: ContextNode[] = [];
@@ -148,18 +211,18 @@ function findNodeByPath(nodes: ContextNode[], targetPath: string): ContextNode |
     return null;
 }
 
-function resolveRootAgentKey(context: WorkspaceContext | null): string | null {
+function resolveRootScopeKey(context: WorkspaceContext | null): string | null {
     if (!context) {
         return null;
     }
 
-    const rootAgentNode = findNodeByPath(context.nodes, '/.agent.json');
-    if (rootAgentNode?.scopeKey) {
-        return rootAgentNode.scopeKey;
+    const rootMetadataNode = findNodeByPath(context.nodes, resolveScopeMetadataPath('/'));
+    if (rootMetadataNode?.scopeKey) {
+        return rootMetadataNode.scopeKey;
     }
 
-    return context.folderMetadata[DEFAULT_WORKSPACE_AGENT_KEY]
-        ? DEFAULT_WORKSPACE_AGENT_KEY
+    return context.folderMetadata[DEFAULT_WORKSPACE_SCOPE_KEY]
+        ? DEFAULT_WORKSPACE_SCOPE_KEY
         : Object.keys(context.folderMetadata)[0] ?? null;
 }
 
@@ -186,18 +249,18 @@ function getParentPath(path: string | null): string {
     return lastSlash <= 0 ? '/' : path.slice(0, lastSlash);
 }
 
-export function getDefaultAgentIndexPath(ownerPath: string): string {
+export function getDefaultScopeIndexPath(ownerPath: string): string {
     return ownerPath === '/' ? '/index.md' : `${ownerPath.replace(/\/$/u, '')}/index.md`;
 }
 
-export function findDefaultAgentIndexNode(nodes: ContextNode[], ownerPath: string): ContextNode | null {
-    const indexPath = getDefaultAgentIndexPath(ownerPath);
+export function findDefaultScopeIndexNode(nodes: ContextNode[], ownerPath: string): ContextNode | null {
+    const indexPath = getDefaultScopeIndexPath(ownerPath);
     const node = findNodeByPath(nodes, indexPath);
     return node?.kind === 'file' && node.name === 'index.md' ? node : null;
 }
 
 function hasDirectoryIndexNode(nodes: ContextNode[], ownerPath: string): boolean {
-    return findDefaultAgentIndexNode(nodes, ownerPath) !== null;
+    return findDefaultScopeIndexNode(nodes, ownerPath) !== null;
 }
 
 function remapPath(path: string | null, fromPath: string, toPath: string): string | null {
@@ -289,21 +352,29 @@ function normalizeDocumentPath(path: string): string {
     return withLeadingSlash.replace(/\/+/g, '/').replace(/\/$/, '') || '/';
 }
 
-function getAgentConfigPath(ownerPath: string): string {
-    const normalizedOwnerPath = normalizeDocumentPath(ownerPath);
-    return normalizedOwnerPath === '/' ? '/.agent.json' : `${normalizedOwnerPath}/.agent.json`;
+function resolveScopeOwnerPath(scopeKey: string | null | undefined): string {
+    const normalizedScopeKey = typeof scopeKey === 'string' ? scopeKey.trim() : '';
+    if (!normalizedScopeKey || normalizedScopeKey === DEFAULT_WORKSPACE_SCOPE_KEY) {
+        return DEFAULT_WORKSPACE_SCOPE_KEY;
+    }
+
+    return normalizedScopeKey.endsWith('/')
+        ? normalizedScopeKey.slice(0, -1) || DEFAULT_WORKSPACE_SCOPE_KEY
+        : normalizedScopeKey;
 }
 
-function buildDefaultAgentConfig(ownerPath: string): Record<string, unknown> {
+function resolveScopeMetadataPath(ownerPath: string): string {
     const normalizedOwnerPath = normalizeDocumentPath(ownerPath);
-    const folderName = normalizedOwnerPath === '/'
-        ? 'Root'
-        : normalizedOwnerPath.split('/').filter(Boolean).pop() ?? 'Agent';
+    return normalizedOwnerPath === DEFAULT_WORKSPACE_SCOPE_KEY
+        ? `/${DEFAULT_WORKSPACE_METADATA_FILE_NAME}`
+        : `${normalizedOwnerPath}/${DEFAULT_WORKSPACE_METADATA_FILE_NAME}`;
+}
 
-    return {
-        ...DEFAULT_SCOPED_AGENT_CONFIG,
-        name: `${folderName} Agent`
-    };
+function resolveScopeMetadataTempPath(ownerPath: string): string {
+    const normalizedOwnerPath = normalizeDocumentPath(ownerPath);
+    return normalizedOwnerPath === DEFAULT_WORKSPACE_SCOPE_KEY
+        ? `/${DEFAULT_WORKSPACE_METADATA_TEMP_FILE_NAME}`
+        : `${normalizedOwnerPath}/${DEFAULT_WORKSPACE_METADATA_TEMP_FILE_NAME}`;
 }
 
 function parseJsonObject(content: string, path: string): Record<string, unknown> {
@@ -317,7 +388,7 @@ function parseJsonObject(content: string, path: string): Record<string, unknown>
     }
 
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-        throw new Error(`Invalid agent config in ${path}: expected a JSON object.`);
+        throw new Error(`Invalid folder metadata in ${path}: expected a JSON object.`);
     }
 
     return { ...parsed };
@@ -343,7 +414,7 @@ function createSyntheticContextNode(input: {
     name: string;
     kind: 'file' | 'directory';
     parentPath: string;
-    agentKey: string;
+    scopeKey: string;
 }): ContextNode {
     return {
         path: input.path,
@@ -351,7 +422,7 @@ function createSyntheticContextNode(input: {
         kind: input.kind,
         parentPath: input.parentPath,
         hasChildren: false,
-        scopeKey: input.agentKey
+        scopeKey: input.scopeKey
     };
 }
 
@@ -363,26 +434,11 @@ function isMissingDocumentError(error: unknown): boolean {
     return /节点不存在|node does not exist|not found|enoent|http 404/i.test(getErrorMessage(error));
 }
 
-function isRootAgentConfigBootstrapError(error: unknown): boolean {
-    return /invalid agent config in \/.agent\.json|failed to parse \/.agent\.json/i.test(getErrorMessage(error));
-}
-
-function patchOptionalStringField(
-    target: Record<string, unknown>,
-    patch: Record<string, unknown>,
-    fieldName: 'description' | 'instructions' | 'modelProviderName' | 'modelName'
-) {
-    if (!Object.prototype.hasOwnProperty.call(patch, fieldName)) {
-        return;
-    }
-
-    const value = typeof patch[fieldName] === 'string' ? patch[fieldName].trim() : '';
-    if (value) {
-        target[fieldName] = value;
-        return;
-    }
-
-    delete target[fieldName];
+function isRootMetadataBootstrapError(error: unknown): boolean {
+    const rootMetadataPath = resolveScopeMetadataPath(DEFAULT_WORKSPACE_SCOPE_KEY)
+        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`invalid folder metadata in ${rootMetadataPath}|failed to parse ${rootMetadataPath}`, 'i')
+        .test(getErrorMessage(error));
 }
 
 function clearActiveDocumentState(store: {
@@ -401,22 +457,22 @@ function clearActiveDocumentState(store: {
     store.draftContent = '';
 }
 
-function clearAgentIndexDocumentState(store: {
-    agentIndexPath: string | null;
-    agentIndexDocument: ContextDocument | null;
-    agentIndexViewerId: string | null;
-    agentIndexViewerCapabilities: ActiveViewerCapabilities;
-    agentIndexPaneMode: 'empty' | 'viewer' | 'unsupported';
-    agentIndexDraftContent: string;
-    agentIndexIsSaving: boolean;
+function clearScopeIndexDocumentState(store: {
+    scopeIndexPath: string | null;
+    scopeIndexDocument: ContextDocument | null;
+    scopeIndexViewerId: string | null;
+    scopeIndexViewerCapabilities: ActiveViewerCapabilities;
+    scopeIndexPaneMode: 'empty' | 'viewer' | 'unsupported';
+    scopeIndexDraftContent: string;
+    scopeIndexIsSaving: boolean;
 }) {
-    store.agentIndexPath = null;
-    store.agentIndexDocument = null;
-    store.agentIndexViewerId = null;
-    store.agentIndexViewerCapabilities = null;
-    store.agentIndexPaneMode = 'empty';
-    store.agentIndexDraftContent = '';
-    store.agentIndexIsSaving = false;
+    store.scopeIndexPath = null;
+    store.scopeIndexDocument = null;
+    store.scopeIndexViewerId = null;
+    store.scopeIndexViewerCapabilities = null;
+    store.scopeIndexPaneMode = 'empty';
+    store.scopeIndexDraftContent = '';
+    store.scopeIndexIsSaving = false;
 }
 
 function hasNodePath(path: string | null, nodes: ContextNode[]): boolean {
@@ -454,6 +510,28 @@ function sanitizeNodeHistory(
     };
 }
 
+function sanitizeRecentNodePaths(input: unknown, nodes: ContextNode[]): string[] {
+    if (!Array.isArray(input)) {
+        return [];
+    }
+
+    const seen = new Set<string>();
+    const paths: string[] = [];
+    for (const value of input) {
+        if (typeof value !== 'string' || value === '/' || seen.has(value) || !hasNodePath(value, nodes)) {
+            continue;
+        }
+
+        seen.add(value);
+        paths.push(value);
+        if (paths.length >= MAX_RECENT_NODE_COUNT) {
+            break;
+        }
+    }
+
+    return paths;
+}
+
 export const useDocumentWorkspaceStore = defineStore('document-workspace', {
     state: (): DocumentWorkspaceState => ({
         contextProvider: null,
@@ -466,13 +544,13 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
         activeViewerId: null,
         activeViewerCapabilities: null,
         activePaneMode: 'empty',
-        agentIndexPath: null,
-        agentIndexDocument: null,
-        agentIndexViewerId: null,
-        agentIndexViewerCapabilities: null,
-        agentIndexPaneMode: 'empty',
-        agentIndexDraftContent: '',
-        agentIndexIsSaving: false,
+        scopeIndexPath: null,
+        scopeIndexDocument: null,
+        scopeIndexViewerId: null,
+        scopeIndexViewerCapabilities: null,
+        scopeIndexPaneMode: 'empty',
+        scopeIndexDraftContent: '',
+        scopeIndexIsSaving: false,
         draftContent: '',
         dirtyPaths: {},
         panelSizes: DEFAULT_PANEL_SIZES,
@@ -482,17 +560,18 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
         isSaving: false,
         accessInitialized: false,
         currentError: null,
-        activeAgentKey: null,
-        activeAgent: null,
-        isAgentOwnerSelected: false,
-        agentResolutionError: null,
+        activeScopeKey: null,
+        activeScopeData: null,
+        isMetadataOwnerSelected: false,
+        metadataResolutionError: null,
         fileChangeService: markRaw(new FileChangeService()),
         latestFileChange: null,
         activeDiffEntries: [],
         canUndoActiveFile: false,
         canRedoActiveFile: false,
         nodeHistory: [],
-        nodeHistoryIndex: -1
+        nodeHistoryIndex: -1,
+        recentNodePaths: []
     }),
     getters: {
         activeNode(state): ContextNode | null {
@@ -512,9 +591,19 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
 
         /** 当前作用域的通用元数据视图（供扩展点 / 贡献上下文消费，data 由插件解释）。 */
         activeScopeMetadata(state): FolderMetadata | null {
-            return state.activeAgentKey
-                ? { scopeKey: state.activeAgentKey, data: (state.activeAgent ?? {}) as unknown as Record<string, unknown> }
+            return state.activeScopeKey
+                ? { scopeKey: state.activeScopeKey, data: (state.activeScopeData ?? {}) as unknown as Record<string, unknown> }
                 : null;
+        },
+
+        recentNodes(state): ContextNode[] {
+            if (!state.context) {
+                return [];
+            }
+
+            return state.recentNodePaths
+                .map((path) => findNodeByPath(state.context?.nodes ?? [], path))
+                .filter((node): node is ContextNode => node !== null);
         }
     },
     actions: {
@@ -549,8 +638,8 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
                 return [];
             }
 
-            const scopePath = this.activeAgent?.scopePath ?? '/';
-            const scopedTree = scopePath === '/'
+            const scopePath = resolveScopeOwnerPath(this.activeScopeKey);
+            const scopedTree = scopePath === DEFAULT_WORKSPACE_SCOPE_KEY
                 ? collectMarkdownTree(this.context?.nodes ?? [])
                 : this.collectMarkdownDocuments(scopePath);
 
@@ -699,22 +788,23 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             this.expandedPaths = ['/'];
             this.selectedNodePath = '/';
             clearActiveDocumentState(this);
-            clearAgentIndexDocumentState(this);
+            clearScopeIndexDocumentState(this);
             this.dirtyPaths = {};
             this.accessInitialized = false;
             this.currentError = null;
-            this.activeAgentKey = null;
-            this.activeAgent = null;
-            this.isAgentOwnerSelected = false;
-            this.agentResolutionError = null;
+            this.activeScopeKey = null;
+            this.activeScopeData = null;
+            this.isMetadataOwnerSelected = false;
+            this.metadataResolutionError = null;
             this.latestFileChange = null;
             this.activeDiffEntries = [];
             this.canUndoActiveFile = false;
             this.canRedoActiveFile = false;
             this.nodeHistory = [];
             this.nodeHistoryIndex = -1;
+            this.recentNodePaths = [];
             clearAutoSaveTimer(this);
-            clearAgentIndexAutoSaveTimer(this);
+            clearScopeIndexAutoSaveTimer(this);
         },
 
         async hydrateWorkspace() {
@@ -728,6 +818,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
                 await this.contextProvider.initializeAccess();
                 this.accessInitialized = true;
                 await this.refreshContext();
+                this.restorePersistedRecentNodes();
             } catch (error) {
                 this.currentError = formatHttpApiError(error);
             } finally {
@@ -748,25 +839,29 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             const sanitizedHistory = sanitizeNodeHistory(this.nodeHistory, this.nodeHistoryIndex, nextNodes);
             this.nodeHistory = sanitizedHistory.history;
             this.nodeHistoryIndex = sanitizedHistory.index;
+            if (this.recentNodePaths.length > 0) {
+                this.recentNodePaths = sanitizeRecentNodePaths(this.recentNodePaths, nextNodes);
+                this.persistRecentNodePaths();
+            }
 
             if (this.activePath && !hasNodePath(this.activePath, nextNodes)) {
                 clearActiveDocumentState(this);
                 this.syncActiveFileChange(null);
             }
 
-            if (this.agentIndexPath && !hasNodePath(this.agentIndexPath, nextNodes)) {
-                clearAgentIndexDocumentState(this);
-            } else if (this.agentIndexPath && this.agentIndexDocument) {
-                const refreshedAgentIndexDocument = await this.contextProvider.readDocument(this.agentIndexPath);
-                const refreshedAgentIndexViewer = resolveDocumentViewer(refreshedAgentIndexDocument);
-                this.agentIndexDocument = refreshedAgentIndexDocument;
-                this.agentIndexViewerId = refreshedAgentIndexViewer?.id ?? null;
-                this.agentIndexViewerCapabilities = refreshedAgentIndexViewer?.capabilities ?? null;
-                this.agentIndexPaneMode = refreshedAgentIndexViewer ? 'viewer' : 'unsupported';
-                if (!this.dirtyPaths[this.agentIndexPath]) {
-                    this.agentIndexDraftContent = refreshedAgentIndexViewer?.capabilities.edit
-                        && isTextDocumentMimeType(refreshedAgentIndexDocument.mimeType)
-                        ? decodeTextDocument(refreshedAgentIndexDocument.dataBase64)
+            if (this.scopeIndexPath && !hasNodePath(this.scopeIndexPath, nextNodes)) {
+                clearScopeIndexDocumentState(this);
+            } else if (this.scopeIndexPath && this.scopeIndexDocument) {
+                const refreshedScopeIndexDocument = await this.contextProvider.readDocument(this.scopeIndexPath);
+                const refreshedScopeIndexViewer = resolveDocumentViewer(refreshedScopeIndexDocument);
+                this.scopeIndexDocument = refreshedScopeIndexDocument;
+                this.scopeIndexViewerId = refreshedScopeIndexViewer?.id ?? null;
+                this.scopeIndexViewerCapabilities = refreshedScopeIndexViewer?.capabilities ?? null;
+                this.scopeIndexPaneMode = refreshedScopeIndexViewer ? 'viewer' : 'unsupported';
+                if (!this.dirtyPaths[this.scopeIndexPath]) {
+                    this.scopeIndexDraftContent = refreshedScopeIndexViewer?.capabilities.edit
+                        && isTextDocumentMimeType(refreshedScopeIndexDocument.mimeType)
+                        ? decodeTextDocument(refreshedScopeIndexDocument.dataBase64)
                         : '';
                 }
             }
@@ -781,10 +876,10 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
                 this.syncActiveFileChange(null);
             }
 
-            this.syncActiveAgent(this.activePath ?? this.selectedNodePath ?? '/');
+            this.syncActiveScope(this.activePath ?? this.selectedNodePath ?? '/');
 
-            if (!this.activePath && this.isAgentOwnerSelected) {
-                await this.loadAgentIndexDocument(this.selectedNodePath ?? '/');
+            if (!this.activePath && this.isMetadataOwnerSelected) {
+                await this.loadScopeIndexDocument(this.selectedNodePath ?? '/');
             }
         },
 
@@ -792,94 +887,82 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             await this.refreshContext();
         },
 
-        async saveAgentConfig(input: SaveAgentConfigInput): Promise<void> {
+        async saveFolderMetadata(input: SaveFolderMetadataInput): Promise<void> {
             if (!this.contextProvider) {
                 return;
             }
 
             this.currentError = null;
-            const configPath = getAgentConfigPath(input.ownerPath);
+            const metadataPath = resolveScopeMetadataPath(input.ownerPath);
             let document: ContextDocument | null = null;
-            let config: Record<string, unknown>;
+            let metadata: Record<string, unknown>;
             try {
                 try {
-                    document = await this.contextProvider.readDocument(configPath);
-                    config = parseJsonObject(decodeTextDocument(document.dataBase64), configPath);
+                    document = await this.contextProvider.readDocument(metadataPath);
+                    metadata = parseJsonObject(decodeTextDocument(document.dataBase64), metadataPath);
                 } catch (error) {
-                    if (configPath !== '/.agent.json' || !isMissingDocumentError(error)) {
+                    if (metadataPath !== resolveScopeMetadataPath(DEFAULT_WORKSPACE_SCOPE_KEY) || !isMissingDocumentError(error)) {
                         throw error;
                     }
 
-                    config = { ...DEFAULT_SCOPED_AGENT_CONFIG };
+                    metadata = { ...DEFAULT_WORKSPACE_METADATA_BOOTSTRAP };
 
                     try {
                         await this.contextProvider.createNode({
-                            name: '.agent.json',
+                            name: DEFAULT_WORKSPACE_METADATA_FILE_NAME,
                             kind: 'file'
                         });
                     } catch (createError) {
-                        if (!isRootAgentConfigBootstrapError(createError)) {
+                        if (!isRootMetadataBootstrapError(createError)) {
                             throw createError;
                         }
                     }
                 }
-                const patch = input.patch as Record<string, unknown>;
 
-                patchOptionalStringField(config, patch, 'description');
-                patchOptionalStringField(config, patch, 'instructions');
-                patchOptionalStringField(config, patch, 'modelProviderName');
-                patchOptionalStringField(config, patch, 'modelName');
-
-                if (Object.prototype.hasOwnProperty.call(patch, 'inheritance')) {
-                    const inheritance = patch.inheritance;
-                    if (inheritance === 'override') {
-                        config.inheritance = inheritance;
-                    } else {
-                        delete config.inheritance;
-                    }
+                for (const [key, value] of Object.entries(input.patch)) {
+                    metadata[key] = value;
                 }
 
-                if (Object.prototype.hasOwnProperty.call(patch, 'inheritTools') && patch.inheritTools === true) {
-                    delete config.tools;
-                } else if (Object.prototype.hasOwnProperty.call(patch, 'tools')) {
-                    config.tools = normalizeToolBindings(patch.tools);
+                for (const key of input.clearedFields ?? []) {
+                    delete metadata[key];
                 }
 
                 await this.contextProvider.writeDocument({
-                    path: configPath,
+                    path: metadataPath,
                     mimeType: document?.mimeType || 'application/json',
-                    dataBase64: encodeTextDocument(`${JSON.stringify(config, null, 2)}\n`),
+                    dataBase64: encodeTextDocument(`${JSON.stringify(metadata, null, 2)}\n`),
                     expectedVersion: document?.version
                 });
                 await this.refreshContext();
-                this.syncActiveAgent(input.ownerPath);
+                this.syncActiveScope(input.ownerPath);
             } catch (error) {
-                this.currentError = getErrorMessage(error) || '保存 Agent 配置失败，请稍后重试。';
+                this.currentError = getErrorMessage(error) || '保存目录元数据失败，请稍后重试。';
                 throw error;
             }
         },
 
-        syncActiveAgent(path: string) {
+        syncActiveScope(path: string) {
             if (!this.context) {
-                this.activeAgentKey = null;
-                this.activeAgent = null;
-                this.isAgentOwnerSelected = false;
-                this.agentResolutionError = null;
+                this.activeScopeKey = null;
+                this.activeScopeData = null;
+                this.isMetadataOwnerSelected = false;
+                this.metadataResolutionError = null;
                 return;
             }
 
-            const agentKey = path === '/'
-                ? resolveRootAgentKey(this.context)
+            const scopeKey = path === '/'
+                ? resolveRootScopeKey(this.context)
                 : this.findNodeByPath(path)?.scopeKey ?? null;
             const activeNode = path === '/' ? null : this.findNodeByPath(path);
-            const isRootAgentOwner = path === '/' && !!findNodeByPath(this.context.nodes, '/.agent.json');
-            this.activeAgentKey = agentKey;
-            this.activeAgent = agentKey
-                ? (this.context.folderMetadata[agentKey]?.data as unknown as ResolvedAgentConfig | undefined) ?? null
+            const isRootMetadataOwner = path === DEFAULT_WORKSPACE_SCOPE_KEY
+                && !!findNodeByPath(this.context.nodes, resolveScopeMetadataPath(DEFAULT_WORKSPACE_SCOPE_KEY));
+            this.activeScopeKey = scopeKey;
+            this.activeScopeData = scopeKey
+                ? (this.context.folderMetadata[scopeKey]?.data ?? null)
                 : null;
-            this.isAgentOwnerSelected = isRootAgentOwner || (activeNode?.kind === 'directory' && activeNode.ownsMetadata === true);
-            this.agentResolutionError = agentKey && !this.activeAgent
-                ? `No Agent configuration was found for agentConfigs['${agentKey}'].`
+            this.isMetadataOwnerSelected = isRootMetadataOwner || (activeNode?.kind === 'directory' && activeNode.ownsMetadata === true);
+            this.metadataResolutionError = scopeKey && !this.activeScopeData
+                ? `No folder metadata was found for scope['${scopeKey}'].`
                 : null;
         },
 
@@ -930,6 +1013,89 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             );
         },
 
+        persistSelectionSnapshot() {
+            const storage = getWorkspaceSelectionSnapshotStorage();
+            if (!storage) {
+                return;
+            }
+
+            const snapshot = sanitizeWorkspaceSelectionSnapshot({
+                selectedNodePath: this.selectedNodePath,
+                activePath: this.activePath
+            });
+            if (!snapshot) {
+                return;
+            }
+
+            try {
+                storage.setItem(WORKSPACE_SELECTION_SNAPSHOT_STORAGE_KEY, JSON.stringify(snapshot));
+            } catch {
+                // Ignore storage quota / availability failures and keep workspace usable.
+            }
+        },
+
+        readPersistedSelectionSnapshot(): WorkspaceSelectionSnapshot | null {
+            const storage = getWorkspaceSelectionSnapshotStorage();
+            if (!storage) {
+                return null;
+            }
+
+            try {
+                const raw = storage.getItem(WORKSPACE_SELECTION_SNAPSHOT_STORAGE_KEY);
+                if (!raw) {
+                    return null;
+                }
+
+                return sanitizeWorkspaceSelectionSnapshot(JSON.parse(raw));
+            } catch {
+                return null;
+            }
+        },
+
+        async restorePersistedSelection() {
+            const snapshot = this.readPersistedSelectionSnapshot();
+            if (!snapshot) {
+                return;
+            }
+
+            await this.restoreSelection(snapshot);
+        },
+
+        persistRecentNodePaths() {
+            const storage = getRecentNodePathsStorage();
+            if (!storage) {
+                return;
+            }
+
+            try {
+                storage.setItem(RECENT_NODE_PATHS_STORAGE_KEY, JSON.stringify(this.recentNodePaths));
+            } catch {
+                // Ignore storage quota / availability failures and keep workspace usable.
+            }
+        },
+
+        readPersistedRecentNodePaths(): string[] {
+            const storage = getRecentNodePathsStorage();
+            if (!storage) {
+                return [];
+            }
+
+            try {
+                const raw = storage.getItem(RECENT_NODE_PATHS_STORAGE_KEY);
+                if (!raw) {
+                    return [];
+                }
+
+                return sanitizeRecentNodePaths(JSON.parse(raw), this.nodes);
+            } catch {
+                return [];
+            }
+        },
+
+        restorePersistedRecentNodes() {
+            this.recentNodePaths = this.readPersistedRecentNodePaths();
+        },
+
         recordNodeHistory(path: string) {
             if (!hasNodePath(path, this.nodes)) {
                 return;
@@ -945,6 +1111,18 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
                 : [];
             this.nodeHistory = [...retainedHistory, path];
             this.nodeHistoryIndex = this.nodeHistory.length - 1;
+        },
+
+        recordRecentNode(path: string) {
+            if (path === '/' || !hasNodePath(path, this.nodes)) {
+                return;
+            }
+
+            this.recentNodePaths = [
+                path,
+                ...this.recentNodePaths.filter((candidate) => candidate !== path)
+            ].slice(0, MAX_RECENT_NODE_COUNT);
+            this.persistRecentNodePaths();
         },
 
         toggleExpanded(path: string) {
@@ -963,18 +1141,18 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
 
             const shouldRecordHistory = options?.recordHistory !== false;
             if (path === '/') {
-                await this.flushAgentIndexDocument();
+                await this.flushScopeIndexDocument();
                 await this.flushActiveDocument();
                 this.selectedNodePath = '/';
                 this.expandedPaths = ensureRootExpanded(this.expandedPaths);
                 clearActiveDocumentState(this);
-                clearAgentIndexDocumentState(this);
+                clearScopeIndexDocumentState(this);
                 this.syncActiveFileChange(null);
-                this.syncActiveAgent('/');
+                this.syncActiveScope('/');
                 if (shouldRecordHistory) {
                     this.recordNodeHistory('/');
                 }
-                await this.loadAgentIndexDocument('/');
+                await this.loadScopeIndexDocument('/');
                 return;
             }
 
@@ -985,25 +1163,26 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
 
             const selectedNodePath = options?.selectedNodePath ?? path;
             if (node.kind === 'directory') {
-                await this.flushAgentIndexDocument();
+                await this.flushScopeIndexDocument();
                 await this.flushActiveDocument();
                 this.selectedNodePath = selectedNodePath;
                 clearActiveDocumentState(this);
-                clearAgentIndexDocumentState(this);
+                clearScopeIndexDocumentState(this);
                 this.syncActiveFileChange(null);
-                this.syncActiveAgent(selectedNodePath);
+                this.syncActiveScope(selectedNodePath);
                 if (shouldRecordHistory) {
                     this.recordNodeHistory(path);
                 }
                 if (node.ownsMetadata || hasDirectoryIndexNode(this.nodes, selectedNodePath)) {
-                    await this.loadAgentIndexDocument(selectedNodePath);
+                    await this.loadScopeIndexDocument(selectedNodePath);
                 }
+                this.recordRecentNode(path);
                 return;
             }
 
-            await this.flushAgentIndexDocument();
+            await this.flushScopeIndexDocument();
             await this.flushActiveDocument();
-            clearAgentIndexDocumentState(this);
+            clearScopeIndexDocumentState(this);
             const document = await this.contextProvider.readDocument(path);
             const viewer = resolveDocumentViewer(document);
             this.selectedNodePath = selectedNodePath;
@@ -1020,31 +1199,32 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
                 [path]: false
             };
             this.syncActiveFileChange(path);
-            this.syncActiveAgent(selectedNodePath);
+            this.syncActiveScope(selectedNodePath);
             if (shouldRecordHistory) {
                 this.recordNodeHistory(path);
             }
+            this.recordRecentNode(path);
         },
 
-        async loadAgentIndexDocument(ownerPath: string): Promise<boolean> {
+        async loadScopeIndexDocument(ownerPath: string): Promise<boolean> {
             if (!this.contextProvider) {
                 return false;
             }
 
-            const indexNode = findDefaultAgentIndexNode(this.nodes, ownerPath);
+            const indexNode = findDefaultScopeIndexNode(this.nodes, ownerPath);
             if (!indexNode) {
-                clearAgentIndexDocumentState(this);
+                clearScopeIndexDocumentState(this);
                 return false;
             }
 
-            this.agentIndexPath = indexNode.path;
+            this.scopeIndexPath = indexNode.path;
             const document = await this.contextProvider.readDocument(indexNode.path);
             const viewer = resolveDocumentViewer(document);
-            this.agentIndexDocument = document;
-            this.agentIndexViewerId = viewer?.id ?? null;
-            this.agentIndexViewerCapabilities = viewer?.capabilities ?? null;
-            this.agentIndexPaneMode = viewer ? 'viewer' : 'unsupported';
-            this.agentIndexDraftContent = viewer?.capabilities.edit && isTextDocumentMimeType(document.mimeType)
+            this.scopeIndexDocument = document;
+            this.scopeIndexViewerId = viewer?.id ?? null;
+            this.scopeIndexViewerCapabilities = viewer?.capabilities ?? null;
+            this.scopeIndexPaneMode = viewer ? 'viewer' : 'unsupported';
+            this.scopeIndexDraftContent = viewer?.capabilities.edit && isTextDocumentMimeType(document.mimeType)
                 ? decodeTextDocument(document.dataBase64)
                 : '';
             this.dirtyPaths = {
@@ -1054,36 +1234,36 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             return true;
         },
 
-        updateAgentIndexDocument(content: string) {
-            if (!this.agentIndexPath || !this.agentIndexViewerCapabilities?.edit) {
+        updateScopeIndexDocument(content: string) {
+            if (!this.scopeIndexPath || !this.scopeIndexViewerCapabilities?.edit) {
                 return;
             }
 
-            this.agentIndexDraftContent = content;
+            this.scopeIndexDraftContent = content;
             this.dirtyPaths = {
                 ...this.dirtyPaths,
-                [this.agentIndexPath]: getEditableDocumentText(this.agentIndexDocument) !== content
+                [this.scopeIndexPath]: getEditableDocumentText(this.scopeIndexDocument) !== content
             };
-            scheduleAgentIndexAutoSave(this);
+            scheduleScopeIndexAutoSave(this);
         },
 
-        async flushAgentIndexDocument() {
+        async flushScopeIndexDocument() {
             if (
                 !this.contextProvider
-                || !this.agentIndexPath
-                || !this.agentIndexDocument
-                || !this.agentIndexViewerCapabilities?.edit
-                || !this.dirtyPaths[this.agentIndexPath]
-                || this.agentIndexIsSaving
+                || !this.scopeIndexPath
+                || !this.scopeIndexDocument
+                || !this.scopeIndexViewerCapabilities?.edit
+                || !this.dirtyPaths[this.scopeIndexPath]
+                || this.scopeIndexIsSaving
             ) {
                 return;
             }
 
-            clearAgentIndexAutoSaveTimer(this);
-            const activePath = this.agentIndexPath;
-            const activeDocument = this.agentIndexDocument;
-            const savedContent = this.agentIndexDraftContent;
-            this.agentIndexIsSaving = true;
+            clearScopeIndexAutoSaveTimer(this);
+            const activePath = this.scopeIndexPath;
+            const activeDocument = this.scopeIndexDocument;
+            const savedContent = this.scopeIndexDraftContent;
+            this.scopeIndexIsSaving = true;
             try {
                 this.currentError = null;
                 const writeResult = await this.contextProvider.writeDocument({
@@ -1097,8 +1277,8 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
                     ? { ...node, updatedAt }
                     : node);
 
-                const hasNewerLocalDraft = this.agentIndexDraftContent !== savedContent;
-                this.agentIndexDocument = {
+                const hasNewerLocalDraft = this.scopeIndexDraftContent !== savedContent;
+                this.scopeIndexDocument = {
                     ...activeDocument,
                     dataBase64: encodeTextDocument(savedContent),
                     updatedAt,
@@ -1110,13 +1290,13 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
                 };
 
                 if (hasNewerLocalDraft) {
-                    scheduleAgentIndexAutoSave(this);
+                    scheduleScopeIndexAutoSave(this);
                 }
             } catch (error) {
                 this.currentError = formatHttpApiError(error);
                 throw error;
             } finally {
-                this.agentIndexIsSaving = false;
+                this.scopeIndexIsSaving = false;
             }
         },
 
@@ -1224,10 +1404,10 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             const documentDirectory = getParentPath(input.documentPath);
             const referencesDirectoryPath = documentDirectory === '/' ? '/references' : `${documentDirectory}/references`;
             const referencesNode = this.findNodeByPath(referencesDirectoryPath);
-            const parentAgentKey = this.findNodeByPath(documentDirectory)?.scopeKey
+            const parentScopeKey = this.findNodeByPath(documentDirectory)?.scopeKey
                 ?? this.findNodeByPath(input.documentPath)?.scopeKey
-                ?? this.activeAgentKey
-                ?? DEFAULT_WORKSPACE_AGENT_KEY;
+                ?? this.activeScopeKey
+                ?? DEFAULT_WORKSPACE_SCOPE_KEY;
 
             if (!referencesNode) {
                 await this.contextProvider.createNode({
@@ -1242,7 +1422,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
                         name: 'references',
                         kind: 'directory',
                         parentPath: documentDirectory,
-                        agentKey: parentAgentKey
+                        scopeKey: parentScopeKey
                     })
                 ];
             }
@@ -1268,7 +1448,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
                         name: imageName,
                         kind: 'file',
                         parentPath: referencesDirectoryPath,
-                        agentKey: parentAgentKey
+                        scopeKey: parentScopeKey
                     })
                 ];
             }
@@ -1409,7 +1589,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
                 return;
             }
 
-            await this.flushAgentIndexDocument();
+            await this.flushScopeIndexDocument();
             const createdNode = await this.contextProvider.createNode({
                 ...input,
                 name: normalizeCreatedFileName(input.name, input.kind)
@@ -1433,10 +1613,10 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             );
             clearActiveDocumentState(this);
             this.syncActiveFileChange(null);
-            this.syncActiveAgent(createdNode.path);
+            this.syncActiveScope(createdNode.path);
         },
 
-        async convertDirectoryToAgent(ownerPath: string) {
+        async enableDirectoryMetadata(ownerPath: string) {
             if (!this.contextProvider) {
                 return;
             }
@@ -1451,46 +1631,43 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
                 return;
             }
 
-            await this.flushAgentIndexDocument();
-            const tempConfigName = '.agent.json.tmp';
-            const finalConfigPath = getAgentConfigPath(normalizedOwnerPath);
-            const tempConfigPath = normalizedOwnerPath === '/'
-                ? `/${tempConfigName}`
-                : `${normalizedOwnerPath}/${tempConfigName}`;
-            const configDocument = encodeTextDocument(`${JSON.stringify(buildDefaultAgentConfig(normalizedOwnerPath), null, 2)}\n`);
+            await this.flushScopeIndexDocument();
+            const finalMetadataPath = resolveScopeMetadataPath(normalizedOwnerPath);
+            const tempMetadataPath = resolveScopeMetadataTempPath(normalizedOwnerPath);
+            const metadataDocument = encodeTextDocument(`${JSON.stringify(DEFAULT_WORKSPACE_METADATA_BOOTSTRAP, null, 2)}\n`);
 
             try {
-                await this.contextProvider.readDocument(finalConfigPath);
+                await this.contextProvider.readDocument(finalMetadataPath);
                 await this.refreshTree();
                 await this.openNode(normalizedOwnerPath);
                 return;
             } catch {
-                // Continue creating the config when the final agent file does not exist.
+                // Continue creating the metadata file when the final file does not exist.
             }
 
-            let tempConfigExists = false;
+            let tempMetadataExists = false;
             try {
-                await this.contextProvider.readDocument(tempConfigPath);
-                tempConfigExists = true;
+                await this.contextProvider.readDocument(tempMetadataPath);
+                tempMetadataExists = true;
             } catch {
-                tempConfigExists = false;
+                tempMetadataExists = false;
             }
 
-            if (!tempConfigExists) {
+            if (!tempMetadataExists) {
                 await this.contextProvider.createNode({
                     parentPath: normalizedOwnerPath,
-                    name: tempConfigName,
+                    name: DEFAULT_WORKSPACE_METADATA_TEMP_FILE_NAME,
                     kind: 'file'
                 });
             }
             await this.contextProvider.writeDocument({
-                path: tempConfigPath,
+                path: tempMetadataPath,
                 mimeType: 'application/json',
-                dataBase64: configDocument
+                dataBase64: metadataDocument
             });
             await this.contextProvider.renameNode({
-                path: tempConfigPath,
-                name: '.agent.json'
+                path: tempMetadataPath,
+                name: DEFAULT_WORKSPACE_METADATA_FILE_NAME
             });
             await this.refreshTree();
             await this.openNode(normalizedOwnerPath);
@@ -1502,7 +1679,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             }
 
             const fallbackPath = getParentPath(path);
-            await this.flushAgentIndexDocument();
+            await this.flushScopeIndexDocument();
             await this.flushActiveDocument();
             await this.contextProvider.deleteNode(path);
 
@@ -1526,7 +1703,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
             this.selectedNodePath = fallbackPath;
             clearActiveDocumentState(this);
             this.syncActiveFileChange(null);
-            this.syncActiveAgent(fallbackPath);
+            this.syncActiveScope(fallbackPath);
         },
 
         async renameNode(input: { path: string; name: string }) {
@@ -1534,7 +1711,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
                 return;
             }
 
-            await this.flushAgentIndexDocument();
+            await this.flushScopeIndexDocument();
             await this.flushActiveDocument();
             const currentNode = this.findNodeByPath(input.path);
             const renamedNode = await this.contextProvider.renameNode({
@@ -1572,7 +1749,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
 
             clearActiveDocumentState(this);
             this.syncActiveFileChange(null);
-            this.syncActiveAgent(nextSelectedPath || '/');
+            this.syncActiveScope(nextSelectedPath || '/');
         },
 
         async moveNode(input: { path: string; targetParentPath?: string }): Promise<{ error?: string }> {
@@ -1580,7 +1757,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
                 return {};
             }
 
-            await this.flushAgentIndexDocument();
+            await this.flushScopeIndexDocument();
             await this.flushActiveDocument();
             let movedNode;
             try {
@@ -1660,7 +1837,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
 
             clearActiveDocumentState(this);
             this.syncActiveFileChange(null);
-            this.syncActiveAgent(resolveExistingPath(nextSelectedPath || targetParentPath, this.nodes) || '/');
+            this.syncActiveScope(resolveExistingPath(nextSelectedPath || targetParentPath, this.nodes) || '/');
             return {};
         },
 
@@ -1831,7 +2008,7 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
 });
 
 const autoSaveTimers = new WeakMap<object, ReturnType<typeof setTimeout>>();
-const agentIndexAutoSaveTimers = new WeakMap<object, ReturnType<typeof setTimeout>>();
+const scopeIndexAutoSaveTimers = new WeakMap<object, ReturnType<typeof setTimeout>>();
 
 function clearAutoSaveTimer(store: object) {
     const timer = autoSaveTimers.get(store);
@@ -1841,40 +2018,12 @@ function clearAutoSaveTimer(store: object) {
     }
 }
 
-function clearAgentIndexAutoSaveTimer(store: object) {
-    const timer = agentIndexAutoSaveTimers.get(store);
+function clearScopeIndexAutoSaveTimer(store: object) {
+    const timer = scopeIndexAutoSaveTimers.get(store);
     if (timer) {
         clearTimeout(timer);
-        agentIndexAutoSaveTimers.delete(store);
+        scopeIndexAutoSaveTimers.delete(store);
     }
-}
-
-function normalizeToolBindings(value: unknown): Array<{ id: string; description?: string }> {
-    if (!Array.isArray(value)) {
-        return [];
-    }
-
-    return value.flatMap((binding) => {
-        if (!binding || typeof binding !== 'object' || Array.isArray(binding)) {
-            return [];
-        }
-
-        const id = typeof (binding as { id?: unknown }).id === 'string'
-            ? (binding as { id: string }).id.trim()
-            : '';
-        if (!id) {
-            return [];
-        }
-
-        const description = typeof (binding as { description?: unknown }).description === 'string'
-            ? (binding as { description: string }).description.trim()
-            : '';
-
-        return [{
-            id,
-            ...(description ? { description } : {})
-        }];
-    });
 }
 
 function scheduleAutoSave(store: ReturnType<typeof useDocumentWorkspaceStore>) {
@@ -1885,10 +2034,10 @@ function scheduleAutoSave(store: ReturnType<typeof useDocumentWorkspaceStore>) {
     autoSaveTimers.set(store, timer);
 }
 
-function scheduleAgentIndexAutoSave(store: ReturnType<typeof useDocumentWorkspaceStore>) {
-    clearAgentIndexAutoSaveTimer(store);
+function scheduleScopeIndexAutoSave(store: ReturnType<typeof useDocumentWorkspaceStore>) {
+    clearScopeIndexAutoSaveTimer(store);
     const timer = setTimeout(() => {
-        void store.flushAgentIndexDocument();
+        void store.flushScopeIndexDocument();
     }, AUTO_SAVE_DELAY_MS);
-    agentIndexAutoSaveTimers.set(store, timer);
+    scopeIndexAutoSaveTimers.set(store, timer);
 }

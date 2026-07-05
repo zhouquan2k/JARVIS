@@ -126,6 +126,14 @@ vi.mock('@milkdown/crepe', () => ({
     }
 }));
 
+async function flushMarkdownViewerHydration(): Promise<void> {
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await Promise.resolve();
+}
+
 describe('markdownDocument', () => {
     it('enables table support in viewer mode without rewriting markdown table source', async () => {
         const { createMarkdownEditor, createMarkdownBlockRenderConfig, readMarkdownDocument } = await import('./markdownDocument');
@@ -725,6 +733,100 @@ describe('markdownDocument', () => {
         expect(() => scrollToMarkdownEditorSearchMatch(editor, 1)).not.toThrow();
         expect(getMarkdownEditorSearchMatchCount(editor)).toBe(0);
         expect(crepeInstance?.mockView.updateState).not.toHaveBeenCalled();
+    });
+
+    it('hydrates local desktop markdown images to blob urls at render time without changing markdown source', async () => {
+        vi.useRealTimers();
+        const createObjectURL = vi.fn(() => 'blob:local-image');
+        const revokeObjectURL = vi.fn();
+        Object.defineProperty(URL, 'createObjectURL', {
+            value: createObjectURL,
+            configurable: true,
+            writable: true
+        });
+        Object.defineProperty(URL, 'revokeObjectURL', {
+            value: revokeObjectURL,
+            configurable: true,
+            writable: true
+        });
+
+        window.jarvisContext = {
+            readDocument: vi.fn(async (path: string) => ({
+                path,
+                mimeType: 'image/png',
+                dataBase64: 'AQID'
+            }))
+        } as typeof window.jarvisContext;
+
+        const {
+            createMarkdownEditor,
+            destroyMarkdownEditor,
+            readMarkdownDocument,
+            resolveMarkdownImageUrl
+        } = await import('./markdownDocument');
+        const root = document.createElement('div');
+        document.body.append(root);
+        const markdown = '![Diagram](./images/flow.png)';
+        const editor = await createMarkdownEditor({
+            root,
+            content: markdown,
+            mode: 'viewer',
+            documentPath: '/notes/guide.md',
+            onChange: vi.fn(),
+            getMarkdownSource: () => markdown
+        });
+
+        root.innerHTML = `<div class="milkdown"><p><img src="${resolveMarkdownImageUrl('./images/flow.png', '/notes/guide.md')}"></p></div>`;
+        await flushMarkdownViewerHydration();
+
+        const image = root.querySelector('img');
+        expect(window.jarvisContext?.readDocument).toHaveBeenCalledWith('/notes/images/flow.png');
+        expect(image?.getAttribute('src')).toBe('blob:local-image');
+        expect(readMarkdownDocument(editor)).toBe(markdown);
+
+        await destroyMarkdownEditor(editor);
+        expect(revokeObjectURL).toHaveBeenCalledWith('blob:local-image');
+    });
+
+    it('hydrates local desktop pdf embeds to blob urls at render time', async () => {
+        vi.useRealTimers();
+        const createObjectURL = vi.fn(() => 'blob:local-pdf');
+        Object.defineProperty(URL, 'createObjectURL', {
+            value: createObjectURL,
+            configurable: true,
+            writable: true
+        });
+        Object.defineProperty(URL, 'revokeObjectURL', {
+            value: vi.fn(),
+            configurable: true,
+            writable: true
+        });
+
+        window.jarvisContext = {
+            readDocument: vi.fn(async (path: string) => ({
+                path,
+                mimeType: 'application/pdf',
+                dataBase64: 'JVBERg=='
+            }))
+        } as typeof window.jarvisContext;
+
+        const { createMarkdownEditor } = await import('./markdownDocument');
+        const root = document.createElement('div');
+        document.body.append(root);
+        await createMarkdownEditor({
+            root,
+            content: '```pdf-embed\n{"label":"Guide","candidates":["references/guide.pdf"],"showLink":false}\n```',
+            mode: 'viewer',
+            documentPath: '/notes/guide.md',
+            onChange: vi.fn()
+        });
+
+        root.innerHTML = '<div class="markdown-pdf-embed" data-pdf-candidates="[&quot;references/guide.pdf&quot;]" data-pdf-label="Guide"></div>';
+        await flushMarkdownViewerHydration();
+
+        const object = root.querySelector('object') as HTMLObjectElement | null;
+        expect(window.jarvisContext?.readDocument).toHaveBeenCalledWith('/notes/references/guide.pdf');
+        expect(object?.data).toBe('blob:local-pdf');
     });
 });
 

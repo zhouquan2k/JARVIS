@@ -35,7 +35,7 @@ export interface WorkspaceTabContext {
     restoreConversationId?: string | null;
     openConversationId?: string | null;
     openConversationNonce?: number | null;
-    showAgentConversationList?: boolean;
+    showScopeConversationList?: boolean;
 }
 
 export interface WorkspaceSelectionViewInput {

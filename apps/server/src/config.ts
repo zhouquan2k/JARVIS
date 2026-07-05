@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 export interface ServerConfig {
     port: number;
     dbPath: string;
+    syncKey?: string;
     isDevelopment: boolean;
     corsAllowlist: string[];
     knowledgeRoot?: string;
@@ -43,6 +44,7 @@ export function resolveServerConfig(env: NodeJS.ProcessEnv = process.env): Serve
     return {
         port: parsePort(env.PORT),
         dbPath: env.CHATPRISM_SYNC_DB_PATH || path.join(SERVER_ROOT, '.data', 'sync.sqlite'),
+        syncKey: env.CHATPRISM_SYNC_KEY?.trim() || env.VITE_SYNC_KEY?.trim() || undefined,
         isDevelopment: env.NODE_ENV !== 'production',
         corsAllowlist: parseAllowlist(env.CHATPRISM_SYNC_ALLOWED_ORIGINS),
         knowledgeRoot: env.CHATPRISM_KNOWLEDGE_ROOT?.trim() || undefined,

@@ -4,7 +4,7 @@
  * 这是「线上 preload」「独立实时探针」「jsdom 回归单测」三者共用的单一事实源：
  * 选择器、输入注入、回复提取、生成态判断都在这里，任何修改都能被独立验证。
  */
-import { extractGeminiMessageText } from '../../providers/history/gemini/geminiMessageSerializer';
+import { extractGeminiMessageText, serializeDomToMarkdown } from '../../providers/history/gemini/geminiMessageSerializer';
 import type { ReasoningEffort } from '../../interfaces/IModelProvider';
 
 export type { ReasoningEffort };
@@ -154,13 +154,47 @@ export function readLatestReply(doc: Document, provider: DomChatProvider): strin
     }
 
     if (provider === 'claude') {
-        // .font-claude-response 是 claude.ai 回复的内容容器（浏览器实探 2026-06 确认）。
         const content = last.querySelector<HTMLElement>('.font-claude-response') ?? last;
-        return stripLeadingSpeakerHeading((content.innerText ?? content.textContent ?? '').trim());
+        return stripLeadingSpeakerHeading(extractClaudeMessageText(content));
     }
 
     const content = last.querySelector<HTMLElement>('.markdown') ?? last;
-    return stripLeadingSpeakerHeading((content.innerText ?? content.textContent ?? '').trim());
+    // 用 HTML→Markdown 序列化器还原标题/列表/代码块/表格等结构，
+    // 取代会丢失 markdown 语法的 innerText（与 group 模式回答格式丢失问题对应）。
+    return stripLeadingSpeakerHeading(serializeDomToMarkdown(content));
+}
+
+/**
+ * 当前页面上「助手回复气泡」的数量。
+ * 用于追问轮的基线锚点：发送前记录数量，只有当出现「新气泡」（数量增加）后才认为是本轮回答，
+ * 从而避免把上一轮旧气泡的重渲染（序列化漂移）误当成新回复发出（ChatGPT 偶现旧答案闪现的根因）。
+ */
+export function countReplyBubbles(doc: Document, provider: DomChatProvider): number {
+    return doc.querySelectorAll(DOM_CHAT_SELECTORS[provider].responseBubble).length;
+}
+
+/**
+ * Claude.ai 正文文本提取：
+ * - 仅取 .standard-markdown / .progressive-markdown 正文块，跳过联网搜索脚手架；
+ * - 移除引用 chip（a[class*="group/tag"]）和无障碍隐藏元素，避免「来源1 来源2」混入正文；
+ * - 无正文块时兜底序列化整个容器（类名变更 / 简化结构 / fallback 气泡），不返回空。
+ */
+function extractClaudeMessageText(container: HTMLElement): string {
+    const blocks = container.querySelectorAll<HTMLElement>('.standard-markdown, .progressive-markdown');
+    // 无正式正文块时（类名变更 / 简化结构 / fallback 气泡）兜底序列化整个容器，
+    // 而非返回空——保证格式与内容都不丢，同样剔除引用 chip 与无障碍隐藏元素。
+    const sources = blocks.length > 0 ? Array.from(blocks) : [container];
+    return sources
+        .map((block) => {
+            const clone = block.cloneNode(true) as HTMLElement;
+            clone.querySelectorAll<Element>('a[class*="group/tag"]').forEach((el) => el.remove());
+            clone.querySelectorAll<Element>('.sr-only').forEach((el) => el.remove());
+            // 序列化保留 markdown 结构（标题/列表/代码块/表格），取代丢格式的 innerText。
+            return serializeDomToMarkdown(clone);
+        })
+        .filter(Boolean)
+        .join('\n\n')
+        .trim();
 }
 
 // 整行只是「Gemini 说 / ChatGPT 说 / Claude 说」之类的发言人标签（可带 markdown 标题号）。
@@ -181,6 +215,45 @@ export function stripLeadingSpeakerHeading(text: string): string {
         break;
     }
     return lines.join('\n').trim();
+}
+
+export interface LatestReplyNodeDump {
+    found: boolean;
+    bubbleCount: number;
+    containerSelector: string;
+    /** readLatestReply 实际提取到的文本长度（= 当前发给上层的内容）。 */
+    extractedTextLength: number;
+    /** 命中节点 innerText 长度（提取前的「页面可见文本」基准）。 */
+    bubbleInnerTextLength: number;
+    /** 内容容器（如 .font-claude-response / .markdown）innerText 长度。 */
+    contentInnerTextLength: number;
+    outerHTMLLength: number;
+    /** 命中节点完整 outerHTML（截断到 maxHtml，用于和 DOM 窗口逐段比对漏抓位置）。 */
+    outerHTML: string;
+}
+
+/**
+ * 阶段一诊断：dump「最后一条助手回复」命中节点的结构与各层文本长度，
+ * 用于对比 readLatestReply 提取结果与页面真实内容，定位 innerText 漏抓（折叠块 / 代码 / 多容器 / artifact）。
+ * 纯只读，不改变任何抓取行为。
+ */
+export function describeLatestReplyNode(doc: Document, provider: DomChatProvider, maxHtml = 40_000): LatestReplyNodeDump {
+    const selector = DOM_CHAT_SELECTORS[provider].responseBubble;
+    const bubbles = doc.querySelectorAll<HTMLElement>(selector);
+    const last = bubbles.length > 0 ? bubbles[bubbles.length - 1] : null;
+    const contentSelector = provider === 'claude' ? '.font-claude-response' : provider === 'chatgpt' ? '.markdown' : '';
+    const contentEl = last && contentSelector ? last.querySelector<HTMLElement>(contentSelector) : null;
+    const outerHTML = last?.outerHTML ?? '';
+    return {
+        found: Boolean(last),
+        bubbleCount: bubbles.length,
+        containerSelector: selector,
+        extractedTextLength: readLatestReply(doc, provider).length,
+        bubbleInnerTextLength: (last?.innerText ?? last?.textContent ?? '').length,
+        contentInnerTextLength: (contentEl?.innerText ?? contentEl?.textContent ?? '').length,
+        outerHTMLLength: outerHTML.length,
+        outerHTML: outerHTML.slice(0, maxHtml)
+    };
 }
 
 export function describePageState(doc: Document): string {
@@ -366,7 +439,8 @@ function getChatGptReasoningIndex(effort: ReasoningEffort): number {
 }
 
 function isChatGptReasoningLabel(label: string): boolean {
-    return Object.values(CHATGPT_REASONING_LABELS).some((labels) => labels.includes(label));
+    const reasoningLabels = Object.values(CHATGPT_REASONING_LABELS) as ReadonlyArray<readonly string[]>;
+    return reasoningLabels.some((labels) => labels.includes(label));
 }
 
 function chatGptModelLabelToId(label: string): string {
@@ -409,7 +483,10 @@ async function ensureChatGptPillMenuOpen(doc: Document): Promise<{
     btn: HTMLElement | null;
     firstItem: Element | null;
 }> {
-    const btn = doc.querySelector<HTMLElement>(CHATGPT_PILL_BTN);
+    // 使用 waitForSelector 而非同步 querySelector：group 模式下先调 setModel 后调 setReasoningEffort
+    // 时，ChatGPT 模型切换动画可能短暂移除 pill 按钮，同步查询会立即返回 null 导致设档失败。
+    // 使用较短的超时（2s）：足够覆盖 UI 过渡动画（通常 < 500ms），且不拖累"按钮完全缺失"场景。
+    const btn = (await waitForSelector(doc, CHATGPT_PILL_BTN, 2_000)) as HTMLElement | null;
     if (!btn) return { btn: null, firstItem: null };
 
     const firstExistingItem = doc.querySelector(CHATGPT_ROOT_MENU_ITEM_SEL);
@@ -698,9 +775,10 @@ function collectClaudeModelItems(doc: Document, into: DomModelInfo[]): void {
 
 /** 找到目标 modelId 对应的 menuitemradio 元素（带 .font-ui 的模型项）。 */
 function findClaudeModelItem(doc: Document, modelId: string): HTMLElement | null {
+    const normalizedModelId = claudeModelNameToId(modelId);
     for (const item of doc.querySelectorAll<HTMLElement>(CLAUDE_MODEL_ITEM_SEL)) {
         const name = extractClaudeModelName(item);
-        if (name && claudeModelNameToId(name) === modelId) {
+        if (name && (name === modelId || claudeModelNameToId(name) === normalizedModelId)) {
             return item;
         }
     }
@@ -830,6 +908,9 @@ async function setClaudeModel(doc: Document, modelId: string): Promise<{ ok: boo
         }
         clickItemRobust(target);
         await delay(150);
+        // 点击模型后菜单可能仍开着，显式关闭以免后续 injectPrompt 被 focus-trap 截获。
+        doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        await delay(100);
         return { ok: true, note: `switched-to:${modelId}` };
     }
 
@@ -862,15 +943,19 @@ async function setClaudeReasoningEffort(doc: Document, effort: ReasoningEffort):
     // 打开档位子菜单（同样健壮回退）
     const targetEl = await openMenuRobust(effortTrigger as HTMLElement, doc, targetSelector, 3_000);
     if (!targetEl) {
+        // 此时模型菜单与档位子菜单均可能打开，需关闭两层以消除 focus-trap。
+        doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        await delay(100);
         doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
         return { ok: false, note: `claude-effort-option-not-found:${targetLevel}` };
     }
 
     clickItemRobust(targetEl as HTMLElement);
     await delay(150);
-    // 点击档位选项后子菜单关闭，但父级模型选择器可能仍开着；
-    // 不关闭的话后续 injectPrompt 的焦点可能被菜单 focus-trap 截获，
-    // 导致 execCommand 写入菜单而非输入框，send button 无法出现。
+    // 点击档位选项后档位子菜单关闭，但父级模型选择器可能仍开着；
+    // 发送两次 Escape 确保两层菜单均关闭，避免 focus-trap 截获后续 injectPrompt 的焦点。
+    doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await delay(100);
     doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await delay(150);
     return { ok: true, note: `set-effort:${targetLevel}` };

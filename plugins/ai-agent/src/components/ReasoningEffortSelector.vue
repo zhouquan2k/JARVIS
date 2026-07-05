@@ -17,7 +17,7 @@
 
 <script setup lang="ts">
 import type { ReasoningEffort } from '@plugins/ai-agent/src/internal';
-import { useWorkspaceI18n } from '@packages/ui/src/i18n';
+import { useWorkspaceI18n } from '@packages/ui';
 
 const props = withDefaults(defineProps<{
   value: ReasoningEffort;

@@ -72,6 +72,30 @@ describe('createControlledPageManager', () => {
         expect(firstWindow.destroy).toHaveBeenCalledTimes(1);
     });
 
+    it('recreates the page when bridgeKey changes', async () => {
+        const { createControlledPageManager } = await import('./controlledPageManager');
+        const firstWindow = createWindowHarness();
+        const secondWindow = createWindowHarness();
+        const createWindow = vi.fn()
+            .mockReturnValueOnce(firstWindow)
+            .mockReturnValueOnce(secondWindow);
+        const manager = createControlledPageManager({ createWindow });
+
+        await manager.ensurePage('gemini-web', {
+            targetUrl: 'https://gemini.google.com/app',
+            preloadPath: '/tmp/controlled-page.cjs',
+            bridgeKey: 'gemini-history'
+        });
+        await manager.ensurePage('gemini-web', {
+            targetUrl: 'https://gemini.google.com/app',
+            preloadPath: '/tmp/controlled-page.cjs',
+            bridgeKey: 'gemini-dom'
+        });
+
+        expect(createWindow).toHaveBeenCalledTimes(2);
+        expect(firstWindow.destroy).toHaveBeenCalledTimes(1);
+    });
+
     it('reloads the page when forceReload is true even if targetUrl is unchanged', async () => {
         const { createControlledPageManager } = await import('./controlledPageManager');
         const windowHarness = createWindowHarness();

@@ -113,7 +113,7 @@ function normalizeTaskQueryTag(value: unknown): TaskQueryTag | null | undefined 
     if (value === null || value === '') {
         return null;
     }
-    if (value === 'all' || value === 'today' || value === 'planned' || value === 'scheduled' || value === 'backlog') {
+    if (value === 'all' || value === 'today' || value === 'tomorrow' || value === 'planned' || value === 'scheduled' || value === 'backlog') {
         return value;
     }
     throw new Error('tag must be one of all, today, planned, scheduled, backlog, or null.');
@@ -449,6 +449,20 @@ export function createContextRouter(options: { service: HttpContextService; conf
         try {
             const body = normalizeObjectBody(await readJsonBody(c));
             return c.json({ document: await service.readDocument(normalizeRequiredPath(body)) });
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to read document.';
+            return c.json({ error: message, code: 'CONTEXT_READ_DOCUMENT_FAILED' }, 400);
+        }
+    });
+
+    app.get('/read-document', async (c) => {
+        try {
+            const path = c.req.query('path');
+            if (typeof path !== 'string' || !path.trim()) {
+                throw new Error('path must not be empty.');
+            }
+
+            return c.json({ document: await service.readDocument(path) });
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to read document.';
             return c.json({ error: message, code: 'CONTEXT_READ_DOCUMENT_FAILED' }, 400);

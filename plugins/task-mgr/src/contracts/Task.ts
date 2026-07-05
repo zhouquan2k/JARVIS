@@ -1,6 +1,6 @@
 export type TaskPriority = 'low' | 'medium' | 'high';
 export type TaskCalendarSyncStatus = 'synced' | 'failed' | null;
-export type TaskQueryTag = 'all' | 'today' | 'planned' | 'scheduled' | 'backlog';
+export type TaskQueryTag = 'all' | 'today' | 'tomorrow' | 'planned' | 'scheduled' | 'backlog';
 export type TaskExecutionState = 'doing' | 'morning' | 'afternoon' | 'evening' | null;
 export type TaskRecurrence = 'daily' | 'weekly' | 'monthly' | null;
 

@@ -62,19 +62,30 @@ function forwardControlledPageConsole(page: WebContents, providerId: string): vo
     });
 }
 
+async function syncControlledPageProviderId(page: WebContents, providerId: string): Promise<void> {
+    try {
+        await page.executeJavaScript(
+            `document.documentElement.setAttribute('data-jarvis-provider-id', ${JSON.stringify(providerId)})`,
+            true
+        );
+    } catch (error) {
+        console.warn('[ControlledPageIpc]', JSON.stringify({
+            stage: 'sync-provider-id-failed',
+            providerId,
+            message: error instanceof Error ? error.message : String(error)
+        }));
+    }
+}
+
 export function registerControlledPageIpc(options: {
     controlledPageManager: ControlledPageManager;
-    /**
-     * providerId → preload 文件路径的映射。capability 层只做路由，不内置业务知识。
-     * 由调用方（main/index.ts）在初始化时配置，例如 `{ 'gemini-web': geminiHistoryPreloadPath }`。
-     */
-    preloadRegistry?: Record<string, string>;
+    controlledPageRegistry?: Record<string, { preloadPath?: string; bridgeKey?: string }>;
     ipc?: Pick<IpcMain, 'handle' | 'removeHandler'>;
 }) {
     const ipc = options.ipc ?? ipcMain;
 
-    function resolvePreloadPath(providerId: string): string | undefined {
-        return options.preloadRegistry?.[providerId];
+    function resolveControlledPageConfig(providerId: string): { preloadPath?: string; bridgeKey?: string } | undefined {
+        return options.controlledPageRegistry?.[providerId];
     }
 
     ipc.handle(DESKTOP_CONTROLLED_PAGE_OPEN_CHANNEL, async (_event, request: OpenControlledPageRequest) => {
@@ -85,13 +96,16 @@ export function registerControlledPageIpc(options: {
             visible: request.visible === true,
             forceReload: request.forceReload === true
         }));
+        const controlledPageConfig = resolveControlledPageConfig(request.providerId);
         const page = await options.controlledPageManager.ensurePage(request.providerId, {
             targetUrl: request.targetUrl,
             targetUrlIfBlank: request.targetUrlIfBlank,
             visible: request.visible,
             forceReload: request.forceReload,
-            preloadPath: resolvePreloadPath(request.providerId)
+            preloadPath: controlledPageConfig?.preloadPath,
+            bridgeKey: controlledPageConfig?.bridgeKey
         });
+        await syncControlledPageProviderId(page, request.providerId);
         forwardControlledPageConsole(page, request.providerId);
         console.log('[ControlledPageIpc]', JSON.stringify({
             stage: 'open-page-ready',
@@ -109,12 +123,15 @@ export function registerControlledPageIpc(options: {
             visible: request.visible === true,
             forceReload: request.forceReload === true
         }));
+        const controlledPageConfig = resolveControlledPageConfig(request.providerId);
         const page = await options.controlledPageManager.ensurePage(request.providerId, {
             targetUrl: request.targetUrl,
             visible: request.visible,
             forceReload: request.forceReload,
-            preloadPath: resolvePreloadPath(request.providerId)
+            preloadPath: controlledPageConfig?.preloadPath,
+            bridgeKey: controlledPageConfig?.bridgeKey
         });
+        await syncControlledPageProviderId(page, request.providerId);
         forwardControlledPageConsole(page, request.providerId);
         console.log('[ControlledPageIpc]', JSON.stringify({
             stage: 'evaluate-page-ready',

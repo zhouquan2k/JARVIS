@@ -29,15 +29,17 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import type { MessageAnnotation } from '@plugins/ai-agent/api';
+import type { WorkspaceImageGroupAnnotation, WorkspaceMessageAnnotation } from '../types/messageAnnotations';
 
 const props = defineProps<{
-  annotations?: MessageAnnotation[];
+  annotations?: WorkspaceMessageAnnotation[];
 }>();
 
 const activeImage = ref<string | null>(null);
 
-const imageGroups = computed(() => (props.annotations || []).filter((annotation) => annotation.kind === 'image_group'));
+const imageGroups = computed(() => (
+  props.annotations || []
+).filter((annotation): annotation is WorkspaceImageGroupAnnotation => annotation.kind === 'image_group'));
 
 function toDataUrl(mimeType: string, previewBase64?: string) {
   return `data:${mimeType};base64,${previewBase64 || ''}`;

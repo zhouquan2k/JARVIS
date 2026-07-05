@@ -1,0 +1,17 @@
+.git
+.DS_Store
+node_modules
+**/node_modules
+dist
+**/dist
+coverage
+**/coverage
+.turbo
+.pnpm-store
+.playwright
+playwright-report
+**/playwright-report
+test-results
+**/test-results
+tmp
+**/*.log

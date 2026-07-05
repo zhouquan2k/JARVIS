@@ -3,18 +3,23 @@
     <div
       ref="shellRef"
       class="knowledge-grid"
+      :class="{ 'knowledge-grid--narrow': isNarrowViewport }"
       :style="{ gridTemplateColumns }"
     >
-      <div class="grid-pane">
+      <div
+        class="grid-pane grid-pane--tree"
+        :class="{ 'grid-pane--tree-open': treeDrawerOpen }"
+      >
         <DocumentFileTree
           :nodes="documentStore.nodes"
+          :recent-nodes="documentStore.recentNodes"
           :expanded-paths="documentStore.expandedPaths"
           :active-path="documentStore.selectedNodePath"
           :current-error="documentStore.currentError"
           @open="onOpenNode"
           @toggle-expand="documentStore.toggleExpanded"
           @create="documentStore.createNode"
-          @convert-to-agent="documentStore.convertDirectoryToAgent"
+          @enable-directory-metadata="documentStore.enableDirectoryMetadata"
           @delete="documentStore.deleteNode"
           @rename="documentStore.renameNode"
           @move="onMoveNode"
@@ -66,7 +71,6 @@
             <DocumentEditorPane
               v-else
               :active-path="displayedDocumentPath"
-              :active-agent-name="documentStore.activeAgent?.name ?? null"
               :active-document="displayedDocument"
               :active-viewer-id="displayedViewerId"
               :active-pane-mode="displayedPaneMode"
@@ -103,39 +107,55 @@
         @pointerdown="startResize(1, $event)"
       />
       <div
-        class="grid-pane"
+        class="grid-pane grid-pane--assistant"
         :class="{ 'grid-pane--collapsed': documentStore.middlePaneMode === 'maximized' }"
       >
         <slot name="assistant-pane">
         <WorkspaceRightPane
           @request-workspace-switch="requestWorkspaceSwitch"
-          :active-agent="documentStore.activeAgent"
-          :active-agent-key="documentStore.activeAgentKey"
+          :active-scope-data="documentStore.activeScopeData"
+          :active-scope-key="documentStore.activeScopeKey"
           :active-path="documentStore.activePath"
             :selected-node-path="documentStore.selectedNodePath"
             :active-document="activeAssistantDocument"
-            :show-agent-conversation-list="!!documentStore.activeAgent && !!documentStore.activeAgentKey && !documentStore.activePath"
+            :show-scope-conversation-list="!!documentStore.activeScopeData && !!documentStore.activeScopeKey && !documentStore.activePath"
             :context-provider="props.contextProvider"
             :on-file-changed="handleAssistantFileChanged"
-            :agent-resolution-error="documentStore.agentResolutionError"
             :open-conversation-request="openConversationRequest"
           />
         </slot>
       </div>
     </div>
+    <div
+      v-if="isNarrowViewport && treeDrawerOpen"
+      class="tree-drawer-backdrop"
+      data-testid="tree-drawer-backdrop"
+      @click="treeDrawerOpen = false"
+    />
+    <button
+      v-if="isNarrowViewport"
+      type="button"
+      class="tree-drawer-toggle"
+      data-testid="tree-drawer-toggle"
+      :aria-label="treeDrawerOpen ? t('shared.closeFileTree') : t('shared.openFileTree')"
+      @click="treeDrawerOpen = !treeDrawerOpen"
+    >
+      <PanelLeft :size="20" />
+    </button>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import {
-  DEFAULT_WORKSPACE_SCOPE_KEY as DEFAULT_WORKSPACE_AGENT_KEY,
+  DEFAULT_WORKSPACE_SCOPE_KEY as DEFAULT_WORKSPACE_SCOPE_KEY,
   decodeTextDocument,
   encodeTextDocument,
   isTextDocumentMimeType,
   type ContextNode,
   type IContextProvider
 } from '@packages/core/src';
+import { PanelLeft } from 'lucide-vue-next';
 import WorkspaceRightPane from '../components/WorkspaceRightPane.vue';
 import DocumentEditorPane from '../components/DocumentEditorPane.vue';
 import DocumentFileTree from '../components/DocumentFileTree.vue';
@@ -144,6 +164,7 @@ import MoveConfirmDialog from '../components/MoveConfirmDialog.vue';
 import MoveErrorDialog from '../components/MoveErrorDialog.vue';
 import { useWorkspaceI18n } from '../i18n';
 import { contributionQueryKey, workspaceRuntimeContextKey } from '../plugins/injectionKeys';
+import { useIsNarrowViewport } from '../composables/useIsNarrowViewport';
 import { useDocumentImports } from '../services/documentCreationFlows';
 import { useDocumentWorkspaceStore } from '../store/documentWorkspace';
 import type { ChatRoutePath } from '../routes';
@@ -168,8 +189,14 @@ const emit = defineEmits<{
 }>();
 const shellRef = ref<HTMLElement | null>(null);
 const viewportRef = ref<HTMLElement | null>(null);
+const isNarrowViewport = useIsNarrowViewport();
+const treeDrawerOpen = ref(false);
 const panelSizes = computed(() => documentStore.panelSizes);
 const gridTemplateColumns = computed(() => {
+  if (isNarrowViewport.value) {
+    return 'minmax(0, 1fr)';
+  }
+
   if (documentStore.middlePaneMode === 'maximized') {
     return `minmax(0, calc((100% - 4px) * ${panelSizes.value[0]} / 100)) 4px minmax(0, calc((100% - 4px) * ${100 - panelSizes.value[0]} / 100)) 0px minmax(0, 0px)`;
   }
@@ -182,31 +209,31 @@ const activeDocumentIsDirty = computed(() => {
 const fallbackIndexDocumentIsActive = computed(() => {
   return !activeWorkspaceSelectionComponent.value
     && !documentStore.activePath
-    && !!documentStore.agentIndexDocument;
+    && !!documentStore.scopeIndexDocument;
 });
 const displayedDocumentPath = computed(() => {
-  return documentStore.activePath ?? (fallbackIndexDocumentIsActive.value ? documentStore.agentIndexPath : null);
+  return documentStore.activePath ?? (fallbackIndexDocumentIsActive.value ? documentStore.scopeIndexPath : null);
 });
 const displayedDocument = computed(() => {
-  return documentStore.activeDocument ?? (fallbackIndexDocumentIsActive.value ? documentStore.agentIndexDocument : null);
+  return documentStore.activeDocument ?? (fallbackIndexDocumentIsActive.value ? documentStore.scopeIndexDocument : null);
 });
 const displayedViewerId = computed(() => {
-  return documentStore.activeViewerId ?? (fallbackIndexDocumentIsActive.value ? documentStore.agentIndexViewerId : null);
+  return documentStore.activeViewerId ?? (fallbackIndexDocumentIsActive.value ? documentStore.scopeIndexViewerId : null);
 });
 const displayedPaneMode = computed(() => {
   return documentStore.activePath
     ? documentStore.activePaneMode
-    : (fallbackIndexDocumentIsActive.value ? documentStore.agentIndexPaneMode : documentStore.activePaneMode);
+    : (fallbackIndexDocumentIsActive.value ? documentStore.scopeIndexPaneMode : documentStore.activePaneMode);
 });
 const displayedDraftContent = computed(() => {
   return documentStore.activePath
     ? documentStore.draftContent
-    : (fallbackIndexDocumentIsActive.value ? documentStore.agentIndexDraftContent : documentStore.draftContent);
+    : (fallbackIndexDocumentIsActive.value ? documentStore.scopeIndexDraftContent : documentStore.draftContent);
 });
 const displayedIsSaving = computed(() => {
   return documentStore.activePath
     ? documentStore.isSaving
-    : (fallbackIndexDocumentIsActive.value ? documentStore.agentIndexIsSaving : documentStore.isSaving);
+    : (fallbackIndexDocumentIsActive.value ? documentStore.scopeIndexIsSaving : documentStore.isSaving);
 });
 const displayedDocumentIsDirty = computed(() => {
   const path = displayedDocumentPath.value;
@@ -220,10 +247,11 @@ const activeLinkableReferenceResources = computed(() => {
 });
 const activeInsertLinkTypes = ref<ResolvedInsertLinkType[]>([]);
 const isWorkspaceSelectionReady = ref(false);
+const hasRestoredPersistedSelection = ref(false);
 const openConversationRequest = ref<OpenConversationRequest | null>(null);
 const showMoveConfirm = ref(false);
 const showMoveError = ref(false);
-const moveErrorReason = ref<'cross-agent' | 'references-dir'>('cross-agent');
+const moveErrorReason = ref<'cross-scope' | 'references-dir'>('cross-scope');
 const pendingMoveInput = ref<{ path: string; targetParentPath?: string } | null>(null);
 const pendingNodeName = ref('');
 const pendingDestPath = ref('');
@@ -231,12 +259,12 @@ const pendingHasLinks = ref(false);
 const showImportWizard = ref(false);
 const importWizardTargetParentPath = ref('/');
 const selectedOwnerNode = computed<ContextNode | null>(() => {
-  if (documentStore.selectedNodePath === '/' && documentStore.activeAgent) {
+  if (documentStore.selectedNodePath === '/' && documentStore.activeScopeKey) {
     return {
       path: '/',
       name: 'Root',
       kind: 'directory',
-      scopeKey: documentStore.activeAgentKey ?? DEFAULT_WORKSPACE_AGENT_KEY,
+      scopeKey: documentStore.activeScopeKey,
       ownsMetadata: true
     };
   }
@@ -248,7 +276,7 @@ const workspaceSelectionInput = computed(() => ({
   selectedNode: documentStore.activeNode,
   selectedOwnerNode: selectedOwnerNode.value,
   activePath: documentStore.activePath,
-  activeScopeKey: documentStore.activeAgentKey,
+  activeScopeKey: documentStore.activeScopeKey,
   activeScopeMetadata: documentStore.activeScopeMetadata,
   contextProvider: props.contextProvider
 }));
@@ -283,7 +311,7 @@ const activeAssistantDocument = computed(() => {
 
   const viewerCapabilities = documentStore.activePath
     ? documentStore.activeViewerCapabilities
-    : (fallbackIndexDocumentIsActive.value ? documentStore.agentIndexViewerCapabilities : null);
+    : (fallbackIndexDocumentIsActive.value ? documentStore.scopeIndexViewerCapabilities : null);
   if (!viewerCapabilities?.edit) {
     return currentDocument;
   }
@@ -300,7 +328,7 @@ async function refreshInsertLinkTypes(): Promise<void> {
     activePath: documentStore.activePath,
     activeDocument: activeAssistantDocument.value,
     activeScopeMetadata: documentStore.activeScopeMetadata,
-    activeScopeKey: documentStore.activeAgentKey,
+    activeScopeKey: documentStore.activeScopeKey,
     selectedNodePath: documentStore.selectedNodePath,
     contextProvider: props.contextProvider
   };
@@ -325,7 +353,7 @@ const insertLinkRefreshState = computed(() => {
     activePath: documentStore.activePath,
     activeDocument: activeAssistantDocument.value,
     activeScopeMetadata: documentStore.activeScopeMetadata,
-    activeScopeKey: documentStore.activeAgentKey,
+    activeScopeKey: documentStore.activeScopeKey,
     selectedNodePath: documentStore.selectedNodePath,
     contextProvider: props.contextProvider
   };
@@ -352,7 +380,7 @@ async function onMoveNode(input: { path: string; targetParentPath?: string }) {
 
   const targetNode = targetParentPath !== '/' ? documentStore.findNodeByPath(targetParentPath) : null;
   if (movedNode?.scopeKey && targetNode?.scopeKey && movedNode.scopeKey !== targetNode.scopeKey) {
-    moveErrorReason.value = 'cross-agent';
+    moveErrorReason.value = 'cross-scope';
     showMoveError.value = true;
     return;
   }
@@ -403,7 +431,7 @@ async function syncWorkspaceConversationSelection(): Promise<void> {
 
   await runtimeContext?.value?.publishWorkspaceSelectionChanged({
     activeScopeMetadata: documentStore.activeScopeMetadata,
-    activeScopeKey: documentStore.activeAgentKey,
+    activeScopeKey: documentStore.activeScopeKey,
     selectedNodePath: documentStore.selectedNodePath,
     activePath: documentStore.activePath,
     activeDocument: activeAssistantDocument.value,
@@ -413,6 +441,7 @@ async function syncWorkspaceConversationSelection(): Promise<void> {
 }
 
 async function onOpenNode(path: string) {
+  treeDrawerOpen.value = false;
   await documentStore.openNode(path);
   documentStore.setMiddlePaneMode('default');
   documentStore.resetMiddlePaneZoom();
@@ -448,7 +477,7 @@ function openImportWizard(): void {
 }
 
 async function onOpenConversationLink(target: MarkdownConversationLinkTarget): Promise<void> {
-  if (!documentStore.activeAgentKey) {
+  if (!documentStore.activeScopeKey) {
     return;
   }
 
@@ -472,6 +501,7 @@ watch(
 
 watch(() => props.contextProvider, async (provider) => {
   isWorkspaceSelectionReady.value = false;
+  hasRestoredPersistedSelection.value = false;
   const shouldResetWorkspace = documentStore.contextProvider !== provider;
 
   if (shouldResetWorkspace) {
@@ -485,6 +515,11 @@ watch(() => props.contextProvider, async (provider) => {
 
   if (shouldResetWorkspace || !documentStore.accessInitialized) {
     await documentStore.hydrateWorkspace();
+  }
+
+  if (!hasRestoredPersistedSelection.value) {
+    await documentStore.restorePersistedSelection();
+    hasRestoredPersistedSelection.value = true;
   }
 
   isWorkspaceSelectionReady.value = true;
@@ -502,17 +537,20 @@ watch(
 watch(
   () => [documentStore.selectedNodePath, documentStore.activePath] as const,
   () => {
+    if (isWorkspaceSelectionReady.value) {
+      documentStore.persistSelectionSnapshot();
+    }
     void syncWorkspaceConversationSelection();
   },
   { immediate: true, flush: 'sync' }
 );
 
 watch(
-  () => [documentStore.activeAgentKey, documentStore.activePath, activeAssistantDocument.value, props.contextProvider] as const,
+  () => [documentStore.activeScopeKey, documentStore.activePath, activeAssistantDocument.value, props.contextProvider] as const,
   () => {
     void runtimeContext?.value?.publishWorkspaceSelectionChanged({
       activeScopeMetadata: documentStore.activeScopeMetadata,
-      activeScopeKey: documentStore.activeAgentKey,
+      activeScopeKey: documentStore.activeScopeKey,
       selectedNodePath: documentStore.selectedNodePath,
       activePath: documentStore.activePath,
       activeDocument: activeAssistantDocument.value,
@@ -527,7 +565,7 @@ let cleanupResize: (() => void) | null = null;
 
 function onDraftChange(markdown: string) {
   if (fallbackIndexDocumentIsActive.value && !documentStore.activePath) {
-    documentStore.updateAgentIndexDocument(markdown);
+    documentStore.updateScopeIndexDocument(markdown);
     return;
   }
 
@@ -536,7 +574,7 @@ function onDraftChange(markdown: string) {
 
 function onSaveDisplayedDocument() {
   if (fallbackIndexDocumentIsActive.value && !documentStore.activePath) {
-    return documentStore.flushAgentIndexDocument();
+    return documentStore.flushScopeIndexDocument();
   }
 
   return documentStore.flushActiveDocument();
@@ -697,7 +735,7 @@ watch(
 
 function startResize(handleIndex: 0 | 1, event: PointerEvent) {
   const shell = shellRef.value;
-  if (!shell) {
+  if (!shell || isNarrowViewport.value) {
     return;
   }
 
@@ -809,5 +847,57 @@ onBeforeUnmount(() => {
 .grid-pane--collapsed {
   visibility: hidden;
   pointer-events: none;
+}
+
+/* Narrow (mobile) mode: single column, file tree as overlay drawer. */
+.knowledge-grid--narrow .resize-handle {
+  display: none;
+}
+
+.knowledge-grid--narrow .grid-pane--assistant {
+  display: none;
+}
+
+.knowledge-grid--narrow .grid-pane--tree {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: min(85vw, 340px);
+  z-index: 60;
+  transform: translateX(-100%);
+  transition: transform 0.2s ease;
+  background: linear-gradient(180deg, #060b12, #0b1220);
+  border-right: 1px solid rgba(56, 189, 248, 0.25);
+  box-shadow: 0 0 32px rgba(2, 6, 12, 0.6);
+}
+
+.knowledge-grid--narrow .grid-pane--tree.grid-pane--tree-open {
+  transform: translateX(0);
+}
+
+.tree-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(2, 6, 12, 0.55);
+}
+
+.tree-drawer-toggle {
+  position: fixed;
+  left: 14px;
+  bottom: 18px;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  background: rgba(11, 18, 32, 0.92);
+  color: #7dd3fc;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(2, 6, 12, 0.55);
 }
 </style>

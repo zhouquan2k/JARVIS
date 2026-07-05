@@ -4,6 +4,8 @@ import { resolveCodexBaseUrl } from '@packages/core';
 import { createWeb2HostContext } from '../context/createWeb2HostContext';
 
 export function createWeb2RuntimeOptions(): CreateBuiltinWorkspaceRuntimeOptions {
+    const useRealSyncE2E = import.meta.env.VITE_REAL_SYNC_E2E === '1';
+
     return {
         hostContext: createWeb2HostContext({
             env: import.meta.env as Record<string, string | undefined>
@@ -16,7 +18,8 @@ export function createWeb2RuntimeOptions(): CreateBuiltinWorkspaceRuntimeOptions
             env: import.meta.env as Record<string, string | undefined>
         }),
         useMockRuntime: import.meta.env.VITE_E2E === '1',
-        useMockSync: import.meta.env.VITE_USE_MOCK_SYNC === '1' || import.meta.env.VITE_E2E === '1',
+        useMockSync: import.meta.env.VITE_USE_MOCK_SYNC === '1'
+            || (import.meta.env.VITE_E2E === '1' && !useRealSyncE2E),
         useMockHistoryProviders: import.meta.env.VITE_E2E === '1',
         pluginEnablement: loadPluginEnablementConfig({
             storage: typeof localStorage !== 'undefined' ? localStorage : undefined,

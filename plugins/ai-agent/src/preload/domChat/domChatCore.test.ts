@@ -2,6 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+    countReplyBubbles,
     findEnabledSendButton,
     findInput,
     isGenerating,
@@ -77,6 +78,48 @@ describe('readLatestReply — chatgpt', () => {
         expect(text).toContain('美国第一大城市是纽约');
         expect(text).not.toContain('旧回答');
     });
+
+    it('preserves markdown structure (headings/lists/code) instead of flattening to innerText', () => {
+        setBody(`
+            <div data-message-author-role="assistant"><div class="markdown">
+                <h2>结论</h2>
+                <p>支持 <strong>三种</strong> 方式：</p>
+                <ol><li>第一</li><li>第二</li></ol>
+                <pre><code class="language-ts">const a = 1;</code></pre>
+            </div></div>
+        `);
+        const text = readLatestReply(document, 'chatgpt');
+        expect(text).toContain('## 结论');
+        expect(text).toContain('**三种**');
+        expect(text).toContain('1. 第一');
+        expect(text).toContain('2. 第二');
+        expect(text).toContain('```ts');
+        expect(text).toContain('const a = 1;');
+    });
+});
+
+describe('countReplyBubbles', () => {
+    it('counts assistant bubbles per provider (chatgpt)', () => {
+        setBody(`
+            <div data-message-author-role="user"><div class="markdown">问题</div></div>
+            <div data-message-author-role="assistant"><div class="markdown">回答一</div></div>
+            <div data-message-author-role="assistant"><div class="markdown">回答二</div></div>
+        `);
+        expect(countReplyBubbles(document, 'chatgpt')).toBe(2);
+    });
+
+    it('returns 0 when no assistant bubble exists yet (chatgpt)', () => {
+        setBody(`<div data-message-author-role="user"><div class="markdown">问题</div></div>`);
+        expect(countReplyBubbles(document, 'chatgpt')).toBe(0);
+    });
+
+    it('counts streaming bubbles for claude', () => {
+        setBody(`
+            <div data-is-streaming="false"><div class="font-claude-response">旧</div></div>
+            <div data-is-streaming="true"><div class="font-claude-response">新</div></div>
+        `);
+        expect(countReplyBubbles(document, 'claude')).toBe(2);
+    });
 });
 
 describe('readLatestReply — claude', () => {
@@ -103,6 +146,28 @@ describe('readLatestReply — claude', () => {
     it('returns empty string when no [data-is-streaming] bubble exists', () => {
         setBody('<div class="other">nothing</div>');
         expect(readLatestReply(document, 'claude')).toBe('');
+    });
+
+    it('preserves markdown structure from .standard-markdown blocks instead of flattening to innerText', () => {
+        setBody(`
+            <div data-is-streaming="false">
+                <div class="font-claude-response">
+                    <div class="standard-markdown">
+                        <h3>方案对比</h3>
+                        <p>推荐 <strong>方案 A</strong>。</p>
+                        <ul><li>更快</li><li>更稳</li></ul>
+                        <pre><code class="language-bash">pnpm test</code></pre>
+                    </div>
+                </div>
+            </div>
+        `);
+        const text = readLatestReply(document, 'claude');
+        expect(text).toContain('### 方案对比');
+        expect(text).toContain('**方案 A**');
+        expect(text).toContain('- 更快');
+        expect(text).toContain('- 更稳');
+        expect(text).toContain('```bash');
+        expect(text).toContain('pnpm test');
     });
 });
 
@@ -792,6 +857,23 @@ describe('setReasoningEffort — chatgpt', () => {
         const result = await setReasoningEffort(document, 'chatgpt', 'high');
         expect(result.ok).toBe(false);
         expect(result.note).toBe('reasoning-picker-not-found');
+    });
+
+    it('succeeds even if the pill button transiently disappears (group mode: model change transition)', async () => {
+        // group 模式下先 setModel 后 setReasoningEffort：ChatGPT 切换模型时页面短暂移除 pill
+        // 按钮，ensureChatGptPillMenuOpen 必须等待其重新出现，而不是立即返回 null。
+        mountChatgptPillMenu({ selectedReasoning: '极速', selectedModelLabel: '5.5' });
+        const btn = document.querySelector<HTMLElement>('button.__composer-pill[aria-haspopup="menu"]')!;
+
+        // 移除 pill 按钮，模拟模型切换过渡
+        document.body.removeChild(btn);
+        // 100ms 后恢复（模拟过渡结束后 React 重新渲染 pill）
+        setTimeout(() => document.body.appendChild(btn), 100);
+
+        const result = await setReasoningEffort(document, 'chatgpt', 'high');
+        expect(result.ok).toBe(true);
+        expect(result.note).toBe('set-reasoning:advanced');
+        expect(document.querySelector<HTMLElement>('button.__composer-pill[aria-haspopup="menu"]')!.textContent).toBe('高级');
     });
 });
 

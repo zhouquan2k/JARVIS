@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { nextTick, ref } from 'vue';
 import type { ContributionQuery } from '@packages/core/src';
@@ -19,6 +19,10 @@ function createContributionQuery(overrides: Partial<ContributionQuery> = {}): Co
 }
 
 describe('DocumentFileTree', () => {
+    beforeEach(() => {
+        localStorage.clear();
+    });
+
     it('renders icon actions with floating tooltip labels', async () => {
         const wrapper = mount(DocumentFileTree, {
             props: {
@@ -33,8 +37,8 @@ describe('DocumentFileTree', () => {
         expect(wrapper.get('[data-testid="document-new-file"]').attributes('aria-label')).toBe('New file');
         expect(wrapper.get('[data-testid="document-refresh-tree"]').attributes('title')).toBe('Refresh file tree');
         expect(wrapper.get('[data-testid="document-refresh-tree"]').attributes('aria-label')).toBe('Refresh file tree');
-        expect(wrapper.get('[data-testid="document-convert-directory-to-agent"]').attributes('title')).toBe('Convert to Agent/Project');
-        expect(wrapper.get('[data-testid="document-convert-directory-to-agent"]').attributes('aria-label')).toBe('Convert to Agent/Project');
+        expect(wrapper.get('[data-testid="document-enable-directory-metadata"]').attributes('title')).toBe('Convert to Agent/Project');
+        expect(wrapper.get('[data-testid="document-enable-directory-metadata"]').attributes('aria-label')).toBe('Convert to Agent/Project');
         expect(wrapper.get('[data-testid="document-delete-node"]').attributes('title')).toBe('Delete selected node');
         expect(wrapper.get('[data-testid="document-delete-node"]').attributes('aria-label')).toBe('Delete selected node');
         expect(wrapper.get('[data-testid="document-import"]').attributes('title')).toBe('Import document');
@@ -54,7 +58,68 @@ describe('DocumentFileTree', () => {
         expect(document.body.textContent).not.toContain('New directory');
     });
 
-    it('emits convert-to-agent only for a selected non-agent directory', async () => {
+    it('renders recent nodes as a collapsed section by default and opens their real paths when expanded', async () => {
+        const wrapper = mount(DocumentFileTree, {
+            props: {
+                nodes: [
+                    { path: '/docs', name: 'docs', kind: 'directory' },
+                    { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' }
+                ],
+                recentNodes: [
+                    { path: '/docs/guide.md', name: 'guide.md', kind: 'file', parentPath: '/docs' },
+                    { path: '/docs', name: 'docs', kind: 'directory' }
+                ],
+                expandedPaths: ['/'],
+                activePath: '/docs/guide.md',
+                currentError: null
+            }
+        });
+
+        expect(wrapper.get('[data-testid="document-recent-toggle"]').text()).toContain('Recent');
+        expect(wrapper.get('[data-testid="document-recent-toggle"]').classes()).toContain('tree-row--section-toggle');
+        expect(wrapper.findAll('[data-testid="document-recent-node"]')).toHaveLength(0);
+        expect(wrapper.get('[data-testid="document-node-root"]').text()).toContain('Root');
+
+        await wrapper.get('[data-testid="document-recent-toggle"]').trigger('click');
+
+        const recentNodes = wrapper.findAll('[data-testid="document-recent-node"]');
+        expect(recentNodes).toHaveLength(2);
+        expect(recentNodes[0].classes()).toContain('tree-row--recent');
+        expect(recentNodes[0].attributes('data-path')).toBe('/docs/guide.md');
+        expect(recentNodes[0].classes()).toContain('active');
+        expect(recentNodes[0].text()).toContain('guide');
+        expect(recentNodes[0].text()).not.toContain('guide.md');
+        expect(localStorage.getItem('jarvis:knowledge-workspace:recent-section-expanded')).toBe('true');
+
+        await recentNodes[1].trigger('click');
+
+        expect(wrapper.emitted('open')).toEqual([
+            ['/docs']
+        ]);
+    });
+
+    it('restores the recent section expanded state from localStorage', async () => {
+        localStorage.setItem('jarvis:knowledge-workspace:recent-section-expanded', 'true');
+
+        const wrapper = mount(DocumentFileTree, {
+            props: {
+                nodes: [
+                    { path: '/docs', name: 'docs', kind: 'directory' }
+                ],
+                recentNodes: [
+                    { path: '/docs', name: 'docs', kind: 'directory' }
+                ],
+                expandedPaths: ['/'],
+                activePath: '/docs',
+                currentError: null
+            }
+        });
+
+        expect(wrapper.findAll('[data-testid="document-recent-node"]')).toHaveLength(1);
+        expect(wrapper.get('[data-testid="document-recent-toggle"]').text()).toContain('▾');
+    });
+
+    it('emits enable-directory-metadata only for a selected non-agent directory', async () => {
         const wrapper = mount(DocumentFileTree, {
             props: {
                 nodes: [
@@ -67,14 +132,14 @@ describe('DocumentFileTree', () => {
             }
         });
 
-        expect(wrapper.get('[data-testid="document-convert-directory-to-agent"]').attributes('disabled')).toBeUndefined();
-        await wrapper.get('[data-testid="document-convert-directory-to-agent"]').trigger('click');
-        expect(wrapper.emitted('convert-to-agent')).toEqual([
+        expect(wrapper.get('[data-testid="document-enable-directory-metadata"]').attributes('disabled')).toBeUndefined();
+        await wrapper.get('[data-testid="document-enable-directory-metadata"]').trigger('click');
+        expect(wrapper.emitted('enable-directory-metadata')).toEqual([
             ['/docs']
         ]);
 
         await wrapper.setProps({ activePath: '/agent' });
-        expect(wrapper.get('[data-testid="document-convert-directory-to-agent"]').attributes('disabled')).toBeDefined();
+        expect(wrapper.get('[data-testid="document-enable-directory-metadata"]').attributes('disabled')).toBeDefined();
     });
 
     it('creates pending nodes inline and emits create events with the resolved parent path', async () => {
@@ -105,7 +170,7 @@ describe('DocumentFileTree', () => {
         await flushPromises();
         await nextTick();
         expect(wrapper.get('[data-path="/docs"]').find('[data-testid="document-node-presentation-icon"]').exists()).toBe(true);
-        expect(wrapper.get('[data-path="/docs"]').find('[data-testid="document-node-agent-owner"]').exists()).toBe(true);
+        expect(wrapper.get('[data-path="/docs"]').find('[data-testid="document-node-metadata-owner"]').exists()).toBe(true);
 
         await wrapper.get('[data-testid="document-new-file"]').trigger('click');
         await wrapper.get('[data-testid="document-pending-node-input"]').setValue('note');
