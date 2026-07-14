@@ -227,6 +227,14 @@ describe('TaskListPanel', () => {
         const fixedNow = new Date();
         const provider = createTaskPanelProvider([
             createTask({
+                id: 'task-later-with-state',
+                title: 'Later with state',
+                documentPath: null,
+                agentKey: '/docs/',
+                executionState: 'morning',
+                dueAt: new Date(fixedNow.getFullYear(), fixedNow.getMonth(), fixedNow.getDate() + 7, 8, 0, 0, 0).getTime()
+            }),
+            createTask({
                 id: 'task-today',
                 title: 'Later today',
                 documentPath: null,
@@ -257,8 +265,11 @@ describe('TaskListPanel', () => {
         expect(provider.getTasks).toHaveBeenCalledWith(null, null, false, 'planned', null);
         expect(wrapper.get('[data-testid="task-group-title-' + formatDateKey(fixedNow, 0) + '"]').text()).toContain('Today');
         expect(wrapper.get('[data-testid="task-group-title-' + formatDateKey(fixedNow, 7) + '"]').text()).not.toBe('');
+        const groupTitles = wrapper.findAll('.task-list-panel__group-title').map((node) => node.text());
+        expect(groupTitles[0]).toContain('Today');
         expect(wrapper.get('[data-testid="agent-task-open-list"]').text()).toContain('Later today');
         expect(wrapper.get('[data-testid="agent-task-open-list"]').text()).toContain('Next week');
+        expect(wrapper.get('[data-testid="agent-task-open-list"]').text()).toContain('Later with state');
         resetTaskServiceForTests();
         vi.useRealTimers();
     });
@@ -533,7 +544,7 @@ describe('TaskListPanel', () => {
         resetTaskServiceForTests();
     });
 
-    it('uses the workspace navigation bridge for global task row clicks', async () => {
+    it('uses the workspace navigation bridge only from the global task row menu', async () => {
         const provider = createTaskPanelProvider([
             createTask({
                 id: 'task-nav',
@@ -560,7 +571,8 @@ describe('TaskListPanel', () => {
         });
 
         await flushPromises();
-        await wrapper.get('[data-testid="agent-task-content-task-nav"]').trigger('click');
+        await wrapper.get('[data-testid="agent-task-menu-task-nav"]').trigger('click');
+        await wrapper.get('[data-testid="agent-task-open-workspace-task-nav"]').trigger('click');
 
         expect(navigationApi.openNode).toHaveBeenCalledWith('/docs/guide.md', {
             tab: 'tasks',
@@ -569,7 +581,7 @@ describe('TaskListPanel', () => {
         resetTaskServiceForTests();
     });
 
-    it('navigates to agent directory (strips trailing slash from agentKey) when clicking an agent-only task in global view', async () => {
+    it('navigates to agent directory (strips trailing slash from agentKey) from the row menu in global view', async () => {
         const provider = createTaskPanelProvider([
             createTask({
                 id: 'task-agent-nav',
@@ -596,12 +608,49 @@ describe('TaskListPanel', () => {
         });
 
         await flushPromises();
-        await wrapper.get('[data-testid="agent-task-content-task-agent-nav"]').trigger('click');
+        await wrapper.get('[data-testid="agent-task-menu-task-agent-nav"]').trigger('click');
+        await wrapper.get('[data-testid="agent-task-open-workspace-task-agent-nav"]').trigger('click');
 
         expect(navigationApi.openNode).toHaveBeenCalledWith('/myagent', {
             tab: 'tasks',
             detailKey: 'task-agent-nav'
         });
+        resetTaskServiceForTests();
+    });
+
+    it('does not navigate when clicking a global task row and keeps dblclick for inline edit', async () => {
+        const provider = createTaskPanelProvider([
+            createTask({
+                id: 'task-global-edit',
+                title: 'Global inline edit task',
+                documentPath: '/docs/guide.md',
+                agentKey: '/docs/'
+            })
+        ]);
+        const navigationApi = {
+            openNode: vi.fn(async () => undefined)
+        };
+
+        setTaskServiceForTests(provider);
+        const wrapper = mount(TaskListPanel, {
+            props: {
+                documentPath: null,
+                agentKey: null
+            },
+            global: {
+                provide: {
+                    [workspaceNavigationApiKey as symbol]: navigationApi
+                }
+            }
+        });
+
+        await flushPromises();
+        await wrapper.get('[data-testid="agent-task-content-task-global-edit"]').trigger('click');
+        expect(navigationApi.openNode).not.toHaveBeenCalled();
+
+        await wrapper.get('[data-testid="agent-task-content-task-global-edit"]').trigger('dblclick');
+        expect(navigationApi.openNode).not.toHaveBeenCalled();
+        expect(wrapper.get('[data-testid="task-editor-inline"]').exists()).toBe(true);
         resetTaskServiceForTests();
     });
 

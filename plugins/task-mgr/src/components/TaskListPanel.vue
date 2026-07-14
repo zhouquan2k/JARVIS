@@ -52,7 +52,7 @@
     <template v-else>
       <div class="task-list-panel__list" data-testid="agent-task-open-list">
         <article
-          v-if="draftTask"
+          v-if="draftTask && !draftForTomorrow"
           class="task-list-panel__item task-list-panel__item--editing"
           data-testid="agent-task-item-draft-task"
         >
@@ -137,13 +137,38 @@
           </p>
 
           <section
-            v-if="visibleTomorrowTasks.length > 0"
             class="task-list-panel__group task-list-panel__group--tomorrow"
             data-testid="task-group-tomorrow"
           >
-            <h2 class="task-list-panel__tomorrow-heading" data-testid="task-group-title-tomorrow">
-              {{ t('shared.tomorrow') }}
-            </h2>
+            <div class="task-list-panel__tomorrow-header">
+              <h2 class="task-list-panel__tomorrow-heading" data-testid="task-group-title-tomorrow">
+                {{ t('shared.tomorrow') }}
+              </h2>
+              <button
+                v-if="canCreateTask"
+                type="button"
+                class="task-list-panel__add"
+                data-testid="agent-task-add-tomorrow"
+                :aria-label="t('shared.addTomorrowTask')"
+                :title="t('shared.addTomorrowTask')"
+                @click="startCreateTomorrowTask"
+              >
+                <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                  <path d="M10 4.25a.75.75 0 0 1 .75.75v4.25H15a.75.75 0 0 1 0 1.5h-4.25V15a.75.75 0 0 1-1.5 0v-4.25H5a.75.75 0 0 1 0-1.5h4.25V5a.75.75 0 0 1 .75-.75Z" fill="currentColor" />
+                </svg>
+              </button>
+            </div>
+            <article
+              v-if="draftTask && draftForTomorrow"
+              class="task-list-panel__item task-list-panel__item--editing"
+              data-testid="agent-task-item-draft-task-tomorrow"
+            >
+              <TaskEditorInline
+                :task="draftTask"
+                @save="saveTask"
+                @cancel="cancelEdit"
+              />
+            </article>
             <article
               v-for="task in visibleTomorrowTasks"
               :key="task.id"
@@ -172,6 +197,9 @@
                 @open-task="openTaskNode"
               />
             </article>
+            <p v-if="visibleTomorrowTasks.length === 0 && !draftForTomorrow" class="task-list-panel__message" data-testid="agent-task-tomorrow-empty">
+              {{ t('shared.noTasks') }}
+            </p>
           </section>
         </template>
 
@@ -219,7 +247,7 @@
           :aria-expanded="!completedCollapsed"
           @click="completedCollapsed = !completedCollapsed"
         >
-          <span>{{ t('shared.completedTasks', { count: completedTasks.length }) }}</span>
+          <span>{{ t('shared.completedTasks', { count: foldedCompletedTasks.length }) }}</span>
           <svg
             class="task-list-panel__completed-chevron"
             :class="{ 'task-list-panel__completed-chevron--expanded': !completedCollapsed }"
@@ -232,7 +260,7 @@
         </button>
         <div v-if="!completedCollapsed" class="task-list-panel__list" data-testid="agent-task-completed-list">
           <article
-            v-for="task in visibleCompletedTasks"
+            v-for="task in foldedCompletedTasks"
             :key="task.id"
             class="task-list-panel__item task-list-panel__item--completed"
             :class="{ 'task-list-panel__item--with-meta': Boolean(task.dueAt) }"
@@ -264,6 +292,10 @@ type TaskDateGroup = {
   dateKey: string;
   label: string;
   tasks: Task[];
+};
+
+type TaskSortOptions = {
+  dateFirst?: boolean;
 };
 
 const TaskListRow = defineComponent({
@@ -307,7 +339,6 @@ const TaskListRow = defineComponent({
       h('div', {
         class: 'task-list-panel__content',
         'data-testid': `agent-task-content-${rowProps.task.id}`,
-        onClick: rowProps.isNavigable ? () => emit('open-task', rowProps.task) : undefined,
         onDblclick: rowProps.task.completed ? undefined : () => emit('start-edit', rowProps.task)
       }, [
         h('div', { class: 'task-list-panel__title-row' }, [
@@ -382,6 +413,13 @@ const TaskListRow = defineComponent({
             class: 'task-list-panel__menu',
             'data-testid': `agent-task-menu-panel-${rowProps.task.id}`
           }, [
+            rowProps.isNavigable
+              ? h('button', {
+                type: 'button',
+                'data-testid': `agent-task-open-workspace-${rowProps.task.id}`,
+                onClick: () => emit('open-task', rowProps.task)
+              }, t('shared.openTaskInWorkspace'))
+              : null,
             rowProps.showEdit
               ? h('button', {
                 type: 'button',
@@ -429,6 +467,7 @@ const error = ref<string | null>(null);
 const tasks = ref<Task[]>([]);
 const tomorrowOpenTasks = ref<Task[]>([]);
 const editingTask = ref<Task | null>(null);
+const draftForTomorrow = ref(false);
 const completedCollapsed = ref(true);
 const openMenuTaskId = ref<string | null>(null);
 const panelRoot = ref<HTMLElement | null>(null);
@@ -442,6 +481,12 @@ const draftTask = computed(() => editingTask.value?.id === 'draft-task' ? editin
 const isGlobalAllTasksView = computed(() => normalizedDocumentPath.value === null && normalizedAgentKey.value === null);
 const openTasks = computed(() => sortTasks(tasks.value.filter((task) => !task.completed)));
 const completedTasks = computed(() => sortTasks(tasks.value.filter((task) => task.completed)));
+// The today view's folded "completed" section shows only tasks completed
+// today; other panels (e.g. per-document, tag="all") keep showing every
+// completed task in scope.
+const foldedCompletedTasks = computed(() => props.tag === 'today'
+  ? completedTasks.value.filter(isCompletedToday)
+  : completedTasks.value);
 
 defineExpose({ openTaskCount: computed(() => openTasks.value.length) });
 const visibleOpenTasks = computed(() => openTasks.value);
@@ -486,12 +531,21 @@ watch(
   { immediate: true }
 );
 
+let unsubscribeTaskChange: (() => void) | null = null;
+
 onMounted(() => {
   document.addEventListener('pointerdown', handleDocumentPointerDown);
+  // Re-read the list when the service pulls remote changes (e.g. a task
+  // completed on another device after the app returned to the foreground).
+  unsubscribeTaskChange = getTaskService().onChange?.(() => {
+    void loadTasks();
+  }) ?? null;
 });
 
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', handleDocumentPointerDown);
+  unsubscribeTaskChange?.();
+  unsubscribeTaskChange = null;
 });
 
 async function loadTasks(): Promise<void> {
@@ -503,9 +557,13 @@ async function loadTasks(): Promise<void> {
       tasks.value = await taskProvider.getTasks(normalizedDocumentPath.value, normalizedAgentKey.value, true, props.tag, props.documentId);
       tomorrowOpenTasks.value = [];
     } else {
+      // "today" tag filters by dueAt, but the today view's completed section
+      // needs tasks *completed* today regardless of their dueAt, so fetch the
+      // full completed set and filter by completedAt in isCompletedToday().
+      const completedFetchTag = props.tag === 'today' ? 'all' : props.tag;
       const [open, completed, tomorrow] = await Promise.all([
         taskProvider.getTasks(normalizedDocumentPath.value, normalizedAgentKey.value, false, props.tag, props.documentId),
-        taskProvider.getTasks(normalizedDocumentPath.value, normalizedAgentKey.value, true, props.tag, props.documentId),
+        taskProvider.getTasks(normalizedDocumentPath.value, normalizedAgentKey.value, true, completedFetchTag, props.documentId),
         props.includeTomorrow
           ? taskProvider.getTasks(normalizedDocumentPath.value, normalizedAgentKey.value, false, 'tomorrow', props.documentId)
           : Promise.resolve([] as Task[])
@@ -551,6 +609,15 @@ function createDraftTask(): Task {
 
 function startCreateTask(): void {
   editingTask.value = createDraftTask();
+  draftForTomorrow.value = false;
+}
+
+function startCreateTomorrowTask(): void {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const dueAt = new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate(), 0, 0, 0, 0).getTime();
+  editingTask.value = { ...createDraftTask(), dueAt };
+  draftForTomorrow.value = true;
 }
 
 function startEditTask(task: Task): void {
@@ -569,6 +636,7 @@ async function openEditFromMenu(task: Task): Promise<void> {
 
 function cancelEdit(): void {
   editingTask.value = null;
+  draftForTomorrow.value = false;
 }
 
 async function saveTask(task: Task): Promise<void> {
@@ -580,6 +648,7 @@ async function saveTask(task: Task): Promise<void> {
   }
 
   editingTask.value = null;
+  draftForTomorrow.value = false;
   await loadTasks();
 }
 
@@ -595,6 +664,8 @@ async function toggleTask(task: Task, completed: boolean): Promise<void> {
 }
 
 async function openTaskNode(task: Task): Promise<void> {
+  openMenuTaskId.value = null;
+
   if (!isGlobalAllTasksView.value || !workspaceNavigationApi) {
     return;
   }
@@ -652,7 +723,7 @@ function agentKeyToNodePath(agentKey?: string | null): string | null {
 
 function buildDateGroups(sourceTasks: Task[]): TaskDateGroup[] {
   const groups = new Map<string, TaskDateGroup>();
-  const sortedTasks = sortTasks(sourceTasks);
+  const sortedTasks = sortTasks(sourceTasks, { dateFirst: true });
 
   for (const task of sortedTasks) {
     const key = getDateKey(task.dueAt);
@@ -672,11 +743,13 @@ function buildDateGroups(sourceTasks: Task[]): TaskDateGroup[] {
   return [...groups.values()];
 }
 
-function sortTasks(sourceTasks: Task[]): Task[] {
+function sortTasks(sourceTasks: Task[], options: TaskSortOptions = {}): Task[] {
   return [...sourceTasks].sort((left, right) => {
-    const executionOrder = compareExecutionState(left, right);
-    if (executionOrder !== 0) {
-      return executionOrder;
+    if (!options.dateFirst) {
+      const executionOrder = compareExecutionState(left, right);
+      if (executionOrder !== 0) {
+        return executionOrder;
+      }
     }
 
     const leftHasDueAt = left.dueAt !== null;
@@ -686,6 +759,12 @@ function sortTasks(sourceTasks: Task[]): Task[] {
       if (left.dueAt !== right.dueAt) {
         return left.dueAt! - right.dueAt!;
       }
+
+      const executionOrder = compareExecutionState(left, right);
+      if (executionOrder !== 0) {
+        return executionOrder;
+      }
+
       return right.updatedAt - left.updatedAt;
     }
 
@@ -780,6 +859,17 @@ function formatDueAt(value: number): string {
 
 function isTaskOverdue(task: Task): boolean {
   return !task.completed && task.dueAt !== null && task.dueAt < Date.now();
+}
+
+function isCompletedToday(task: Task): boolean {
+  if (task.completedAt === null) {
+    return false;
+  }
+
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
+  const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
+  return task.completedAt >= startOfToday && task.completedAt <= endOfToday;
 }
 
 function formatTaskNotesPreview(notes: string): string {
@@ -914,8 +1004,16 @@ function taskRowClass(task: Task): Record<string, boolean> {
   margin-top: 28px;
 }
 
-.task-list-panel__tomorrow-heading {
+.task-list-panel__tomorrow-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   margin: 0 0 14px;
+}
+
+.task-list-panel__tomorrow-heading {
+  margin: 0;
   font-size: 24px;
   font-weight: 700;
   color: #f8fafc;

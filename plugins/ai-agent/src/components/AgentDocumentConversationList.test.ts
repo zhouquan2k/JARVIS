@@ -29,6 +29,67 @@ describe('AgentDocumentConversationList', () => {
         expect(wrapper.emitted('open')).toEqual([['conversation-1']]);
     });
 
+    it('reveals a swipe delete action on narrow viewports that enters the confirm step', async () => {
+        const originalMatchMedia = window.matchMedia;
+        window.matchMedia = ((query: string) => ({
+            matches: true,
+            media: query,
+            onchange: null,
+            addEventListener: () => undefined,
+            removeEventListener: () => undefined,
+            addListener: () => undefined,
+            removeListener: () => undefined,
+            dispatchEvent: () => false
+        })) as unknown as typeof window.matchMedia;
+
+        try {
+            const wrapper = mount(AgentDocumentConversationList, {
+                props: {
+                    conversations: [createConversation()]
+                }
+            });
+
+            const swipeDelete = wrapper.get('[data-testid="agent-document-conversation-swipe-delete"]');
+            expect(wrapper.emitted('delete')).toBeUndefined();
+
+            await swipeDelete.trigger('click');
+            expect(wrapper.emitted('delete')).toBeUndefined();
+            expect(wrapper.find('[data-testid="agent-document-conversation-delete-confirm"]').exists()).toBe(true);
+
+            await wrapper.get('[data-testid="agent-document-conversation-delete-confirm"]').trigger('click');
+            expect(wrapper.emitted('delete')).toEqual([['conversation-1']]);
+        } finally {
+            window.matchMedia = originalMatchMedia;
+        }
+    });
+
+    it('hides the desktop delete button on narrow viewports, leaving only swipe delete', async () => {
+        const originalMatchMedia = window.matchMedia;
+        window.matchMedia = ((query: string) => ({
+            matches: true,
+            media: query,
+            onchange: null,
+            addEventListener: () => undefined,
+            removeEventListener: () => undefined,
+            addListener: () => undefined,
+            removeListener: () => undefined,
+            dispatchEvent: () => false
+        })) as unknown as typeof window.matchMedia;
+
+        try {
+            const wrapper = mount(AgentDocumentConversationList, {
+                props: {
+                    conversations: [createConversation()]
+                }
+            });
+
+            expect(wrapper.find('[data-testid="agent-document-conversation-delete"]').exists()).toBe(false);
+            expect(wrapper.find('[data-testid="agent-document-conversation-swipe-delete"]').exists()).toBe(true);
+        } finally {
+            window.matchMedia = originalMatchMedia;
+        }
+    });
+
     it('shows inline editor for the editing conversation and emits rename', async () => {
         const wrapper = mount(AgentDocumentConversationList, {
             props: {

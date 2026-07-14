@@ -28,6 +28,16 @@ export interface SendMessageOptions {
   reasoningEffort?: ReasoningEffort;
   /** group provider 专用：本轮参与的成员列表（由顶部勾选区决定）。 */
   groupMembers?: GroupMember[];
+  /**
+   * DOM provider 专用：该会话此前落盘的站点会话 URL。
+   * 后续轮（history 非空）存在该值时，导航回该 URL 续聊；导航后校验失败即抛错。
+   */
+  resumeConversationUrl?: string;
+  /**
+   * group provider 专用：providerId → 站点会话 URL 的映射（含各成员与总结器），
+   * 由 chat store 从会话历史构建，group provider 据此分发各成员的 resumeConversationUrl。
+   */
+  groupMemberSessions?: Record<string, string>;
 }
 
 export interface ProviderStreamUpdate {
@@ -43,6 +53,8 @@ export interface ProviderSendResult {
   text: string;
   conversationId: string;
   messageId: string;
+  /** DOM provider 回填：本轮结束时受控页的真实会话 URL（location.href），用于持久化与后续恢复。 */
+  conversationUrl?: string;
   annotations?: MessageAnnotation[];
   toolCalls?: AgentToolCall[];
   modelTurn?: AgentModelTurn;

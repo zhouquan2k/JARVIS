@@ -20,6 +20,25 @@
         class="agent-document-list__item"
         :class="{ 'agent-document-list__item--active': conversation.id === activeConversationId }"
       >
+        <SwipeableListRow
+          :enabled="isNarrow"
+          :open="openSwipeId === conversation.id"
+          :reveal-width="84"
+          class="agent-document-list__swipe"
+          @update:open="(value: boolean) => onSwipeOpenChange(conversation.id, value)"
+        >
+          <template #actions="{ close }">
+            <button
+              type="button"
+              class="agent-document-list__swipe-delete"
+              data-testid="agent-document-conversation-swipe-delete"
+              :aria-label="t('shared.deleteConversation')"
+              @click.stop="onSwipeDelete(conversation.id, close)"
+            >
+              {{ t('shared.deleteConversation') }}
+            </button>
+          </template>
+          <div class="agent-document-list__item-row">
         <button
           type="button"
           class="agent-document-list__item-main"
@@ -97,6 +116,7 @@
         </div>
         <div v-else class="agent-document-list__item-aside">
           <button
+            v-if="!isNarrow"
             type="button"
             class="agent-document-list__delete-btn"
             data-testid="agent-document-conversation-delete"
@@ -111,6 +131,8 @@
             <span class="agent-document-list__item-clock">{{ formatUpdatedTime(conversation.updatedAt) }}</span>
           </span>
         </div>
+          </div>
+        </SwipeableListRow>
       </div>
     </div>
   </section>
@@ -120,7 +142,7 @@
 import { nextTick, ref, watch } from 'vue';
 import { Trash2 } from 'lucide-vue-next';
 import type { Conversation } from '@plugins/ai-agent/src/internal';
-import { useWorkspaceI18n } from '@packages/ui';
+import { useWorkspaceI18n, useIsNarrowViewport, SwipeableListRow } from '@packages/ui';
 import { formatConversationTitle } from '../utils/conversationTitle';
 
 const props = defineProps<{
@@ -138,6 +160,8 @@ const renameDraft = ref('');
 const renameInputRef = ref<HTMLInputElement | HTMLInputElement[] | null>(null);
 
 const pendingDeleteId = ref<string | null>(null);
+const openSwipeId = ref<string | null>(null);
+const isNarrow = useIsNarrowViewport();
 
 const emit = defineEmits<{
   (event: 'open', conversationId: string): void;
@@ -219,6 +243,24 @@ function confirmDelete(conversationId: string): void {
   emit('delete', conversationId);
 }
 
+function onSwipeOpenChange(conversationId: string, value: boolean): void {
+  if (value) {
+    pendingDeleteId.value = null;
+    openSwipeId.value = conversationId;
+    return;
+  }
+  if (openSwipeId.value === conversationId) {
+    openSwipeId.value = null;
+  }
+}
+
+function onSwipeDelete(conversationId: string, close: () => void): void {
+  close();
+  openSwipeId.value = null;
+  // Reuse the existing confirm/cancel step.
+  pendingDeleteId.value = conversationId;
+}
+
 function formatUpdatedDate(timestamp: number): string {
   return new Intl.DateTimeFormat('zh-CN', {
     month: '2-digit',
@@ -262,13 +304,49 @@ function formatUpdatedTime(timestamp: number): string {
 
 .agent-document-list__item {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 10px;
   border: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 14px;
   color: #e2e8f0;
   background: rgba(15, 23, 42, 0.72);
   font: inherit;
+  overflow: hidden;
+  --swipeable-row-bg: #0d1526;
+}
+
+.agent-document-list__swipe {
+  flex: 1;
+  min-width: 0;
+}
+
+.agent-document-list__item-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+}
+
+.agent-document-list__swipe-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  padding: 0 10px;
+  background: #b91c1c;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.agent-document-list__swipe-delete:hover,
+.agent-document-list__swipe-delete:focus-visible {
+  background: #dc2626;
 }
 
 .agent-document-list__items {

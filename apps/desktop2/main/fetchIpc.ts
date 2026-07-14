@@ -21,11 +21,13 @@ export function registerDesktopFetchIpc(options: RegisterDesktopFetchIpcOptions 
             body: request.init?.bodyText
         });
 
+        const bodyText = await response.text();
+
         return {
             status: response.status,
             statusText: response.statusText,
             headers: Array.from(response.headers.entries()),
-            bodyText: await response.text(),
+            bodyText,
             url: response.url
         };
     });

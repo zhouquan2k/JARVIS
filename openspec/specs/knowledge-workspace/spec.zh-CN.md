@@ -49,6 +49,39 @@
 - **WHEN** 当前 text viewer 文档的 `mimeType` 不是 `text/markdown`
 - **THEN** 系统 MUST NOT 要求为该文档显示 Mermaid 或 Markdown 图片预览控件
 
+### 需求：知识工作区 Markdown viewer SHALL 在 viewer 模式支持折叠标题小节
+在 `viewer` 模式下，知识工作区 Markdown viewer SHALL 在每个标题前渲染一个折叠切换控件，使用户可以收起或展开该标题所引导的小节。收起某标题时 MUST 隐藏其后、直到下一个同级或更高级标题之间的所有块，包括更深层级的子标题及其内容。折叠状态是仅限当前会话、作用于当前 editor 实例的内存态；它 MUST NOT 修改 Markdown 文档内容，且不跨文档切换或重新加载持久化。折叠控件 SHALL 仅在 `viewer` 模式生效，不在原始源码 `edit` 模式生效。
+
+#### 场景：收起标题小节
+- **WHEN** 用户在 `viewer` 模式激活某标题的折叠切换控件
+- **THEN** 系统 MUST 隐藏其后、直到下一个同级或更高级标题之间的块，包括嵌套标题及其内容
+- **AND** 切换控件 MUST 反映收起状态，且底层 Markdown 内容 MUST 保持不变
+
+#### 场景：展开先前收起的标题小节
+- **WHEN** 用户激活已收起标题的折叠切换控件
+- **THEN** 系统 MUST 恢复该标题被隐藏小节的可见性
+
+#### 场景：折叠状态不持久化
+- **WHEN** 用户收起一个或多个标题后切换文档或重新加载 viewer
+- **THEN** 重新打开的文档 MUST 以所有标题展开的状态渲染
+
+### 需求：知识工作区 Markdown viewer SHALL 提供一键展开/收起全部标题的工具条控件
+当 Markdown viewer 处于 `viewer` 模式时，文档编辑器工具条 SHALL 提供一个单一的切换控件，用于一次性收起文档中的全部标题、或展开全部标题，用户无需逐个激活每个标题的折叠切换控件。该控件 MUST 反映其下一次激活将执行的动作，且 MUST NOT 在原始源码 `edit` 模式显示。
+
+#### 场景：通过工具条收起全部标题
+- **WHEN** 当前没有任何标题被收起，用户激活工具条的一键折叠控件
+- **THEN** 系统 MUST 按与单个切换控件相同的折叠规则，收起文档中的每个标题（含嵌套标题）
+- **AND** 该控件之后 MUST 表明再次激活将展开全部标题
+
+#### 场景：通过工具条展开全部标题
+- **WHEN** 至少有一个标题处于收起状态，用户激活工具条的一键折叠控件
+- **THEN** 系统 MUST 展开文档中的每个标题
+- **AND** 该控件之后 MUST 表明再次激活将收起全部标题
+
+#### 场景：viewer 模式之外不可用一键折叠控件
+- **WHEN** Markdown 编辑器处于原始源码 `edit` 模式
+- **THEN** 工具条 MUST NOT 显示一键折叠控件
+
 ### 需求：知识工作区 Markdown viewer SHALL 在 viewer 模式渲染 Mermaid 图
 知识工作区主 Markdown viewer SHALL 在 `viewer` 模式下使用官方 `mermaid` 包，将语言标记为 `mermaid` 的 fenced code block 渲染为图。在 `edit` 模式下，同一代码块 MUST 保持为可编辑源码文本。
 

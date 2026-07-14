@@ -127,6 +127,23 @@
             'menu-open': openActionMenuId === item.id
           }"
         >
+          <SwipeableListRow
+            :enabled="isNarrow"
+            :open="openSwipeId === item.id"
+            :reveal-width="84"
+            @update:open="(value: boolean) => onLocalSwipeOpenChange(item.id, value)"
+          >
+            <template #actions="{ close }">
+              <button
+                type="button"
+                class="history-swipe-delete"
+                data-testid="local-history-swipe-delete"
+                :aria-label="t('shared.deleteConversation')"
+                @click.stop="onLocalSwipeDelete(item.id, close)"
+              >
+                {{ t('shared.deleteConversation') }}
+              </button>
+            </template>
           <button
             v-if="renameEditingId !== item.id"
             class="history-item local-history-button"
@@ -236,6 +253,7 @@
               {{ item.starred ? t('shared.unstarConversation') : t('shared.starConversation') }}
             </button>
             <button
+              v-if="!isNarrow"
               type="button"
               class="history-action-menu-item history-action-menu-item--danger"
               data-testid="local-history-delete"
@@ -266,6 +284,7 @@
               </button>
             </div>
           </div>
+          </SwipeableListRow>
         </div>
         <p v-if="localItems.length === 0" class="empty-text">{{ t('shared.noLocalHistory') }}</p>
       </div>
@@ -348,7 +367,7 @@ import type {
   ExternalHistoryProviderId
 } from '@plugins/ai-agent/src/internal';
 import type { LocalConversationFilter, WorkspaceHistorySource } from '../store/chat';
-import { useWorkspaceI18n } from '@packages/ui';
+import { useWorkspaceI18n, useIsNarrowViewport, SwipeableListRow } from '@packages/ui';
 import { formatConversationTitle, resolveConversationDocumentTag } from '../utils/conversationTitle';
 
 const props = defineProps<{
@@ -402,6 +421,8 @@ function resolveConversationDocumentTagLabel(conversation: Conversation): string
 const menuOpen = ref(false);
 const menuHostRef = ref<HTMLElement | null>(null);
 const pendingDeleteId = ref<string | null>(null);
+const openSwipeId = ref<string | null>(null);
+const isNarrow = useIsNarrowViewport();
 const localAgentBindingId = ref<string | null>(null);
 const renameEditingId = ref<string | null>(null);
 const renameDraft = ref('');
@@ -423,10 +444,31 @@ function handleSelectLocal(id: string) {
   pendingDeleteId.value = null;
   localAgentBindingId.value = null;
   openActionMenuId.value = null;
+  openSwipeId.value = null;
   if (renameEditingId.value === id) {
     return;
   }
   emit('select-local', id);
+}
+
+function onLocalSwipeOpenChange(id: string, value: boolean) {
+  if (value) {
+    // Opening one row's swipe closes any other open row.
+    pendingDeleteId.value = null;
+    openActionMenuId.value = null;
+    openSwipeId.value = id;
+    return;
+  }
+  if (openSwipeId.value === id) {
+    openSwipeId.value = null;
+  }
+}
+
+function onLocalSwipeDelete(id: string, close: () => void) {
+  close();
+  openSwipeId.value = null;
+  // Reuse the existing confirm/cancel step shown in the row actions area.
+  startDeleteLocal(id);
 }
 
 function confirmDeleteLocal(id: string) {
@@ -886,6 +928,31 @@ onUnmounted(() => {
 
 .history-row {
   position: relative;
+}
+
+.local-history-row {
+  --swipeable-row-bg: var(--cp-bg);
+}
+
+.history-swipe-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  padding: 0 10px;
+  background: #b91c1c;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.history-swipe-delete:hover,
+.history-swipe-delete:focus-visible {
+  background: #dc2626;
 }
 
 .history-row.binding-open {

@@ -66,6 +66,18 @@ export interface CreateMarkdownEditorOptions {
 const viewerControllers = new WeakMap<MarkdownEditor, AbortController>();
 const searchStates = new WeakMap<MarkdownEditor, MarkdownEditorSearchState>();
 
+// Session-only fold state for the viewer: which headings (by their 0-based
+// order in the document) are currently collapsed. Lives for the lifetime of the
+// editor instance only — switching documents or leaving viewer mode destroys the
+// editor and resets everything back to fully expanded. Not persisted anywhere.
+const foldStates = new WeakMap<MarkdownEditor, MarkdownEditorFoldState>();
+
+interface MarkdownEditorFoldState {
+    /** Folding decorations only apply in viewer mode. */
+    enabled: boolean;
+    collapsed: Set<number>;
+}
+
 interface MarkdownEditorSearchRange {
     index: number;
     from: number;
@@ -409,6 +421,7 @@ export async function createMarkdownEditor(options: CreateMarkdownEditorOptions)
         options.getMarkdownSource
     );
     installMarkdownSearchDecorations(editor);
+    getOrCreateFoldState(editor).enabled = options.mode === 'viewer';
     return editor;
 }
 
@@ -442,7 +455,7 @@ export function detectMarkdownBlockType(language: string, _content: string): Mar
     if (normalizedLanguage === 'mermaid') {
         return 'mermaid';
     }
-    if (normalizedLanguage === PDF_EMBED_BLOCK_LANGUAGE) {
+    if (normalizedLanguage === PDF_EMBED_BLOCK_LANGUAGE || normalizedLanguage === LEGACY_PDF_EMBED_BLOCK_LANGUAGE) {
         return 'pdf-embed';
     }
     return 'default-code';
@@ -711,12 +724,21 @@ function getDesktopContextDocumentReader():
         return null;
     }
 
-    if (window.jarvisContext?.readDocument) {
-        return (path: string) => window.jarvisContext!.readDocument(path);
+    const desktopWindow = window as Window & {
+        jarvisContext?: {
+            readDocument?: (path: string) => Promise<{ mimeType: string; dataBase64: string }>;
+        };
+        chatprismDesktop?: {
+            readContextDocument?: (path: string) => Promise<{ mimeType: string; dataBase64: string }>;
+        };
+    };
+
+    if (desktopWindow.jarvisContext?.readDocument) {
+        return (path: string) => desktopWindow.jarvisContext!.readDocument!(path);
     }
 
-    if (window.chatprismDesktop?.readContextDocument) {
-        return (path: string) => window.chatprismDesktop!.readContextDocument(path);
+    if (desktopWindow.chatprismDesktop?.readContextDocument) {
+        return (path: string) => desktopWindow.chatprismDesktop!.readContextDocument!(path);
     }
 
     return null;
@@ -1010,6 +1032,7 @@ const WIKI_IMAGE_EMBED_PATTERN = /!\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
 const MARKDOWN_IMAGE_PATTERN = /!\[([^\]]*)\]\(([^)]+)\)/g;
 const HTML_IMAGE_PATTERN = /<img\b[^>]*\bsrc\s*=\s*(["'])(.*?)\1[^>]*>/gi;
 const PDF_EMBED_BLOCK_LANGUAGE = 'cp-pdf-embed';
+const LEGACY_PDF_EMBED_BLOCK_LANGUAGE = 'pdf-embed';
 const PDF_EMBED_HEIGHT = 500;
 const MIN_MARKDOWN_IMAGE_WIDTH_PX = 48;
 const MAX_MARKDOWN_IMAGE_WIDTH_PX = 1600;
@@ -1676,26 +1699,234 @@ function refreshMarkdownEditorSearch(editor: MarkdownEditor) {
 }
 
 function getMarkdownEditorDecorations(editor: MarkdownEditor, doc: ProseMirrorNode): DecorationSet | null {
-    const state = getOrCreateSearchState(editor);
-    if (!state.query || state.matchCount === 0) {
-        return null;
-    }
+    const searchState = getOrCreateSearchState(editor);
+    const foldState = getOrCreateFoldState(editor);
 
-    if (state.decoratedDoc === doc && state.decorations) {
-        return state.decorations;
-    }
-
-    const decorations = DecorationSet.create(
-        doc,
-        state.ranges.map((range) => Decoration.inline(range.from, range.to, {
-            class: range.index === state.activeMatchIndex
+    const searchDecorations: Decoration[] = (searchState.query && searchState.matchCount > 0)
+        ? searchState.ranges.map((range) => Decoration.inline(range.from, range.to, {
+            class: range.index === searchState.activeMatchIndex
                 ? 'markdown-search-highlight markdown-search-highlight--active'
                 : 'markdown-search-highlight',
             'data-match-index': String(range.index)
         }))
+        : [];
+
+    const foldDecorations: Decoration[] = foldState.enabled
+        ? buildMarkdownFoldDecorations(doc, foldState.collapsed, (headingIndex) => toggleMarkdownFold(editor, headingIndex))
+        : [];
+
+    if (searchDecorations.length === 0 && foldDecorations.length === 0) {
+        return null;
+    }
+
+    return DecorationSet.create(doc, [...searchDecorations, ...foldDecorations]);
+}
+
+const FOLD_ICON_EXPANDED = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+const FOLD_ICON_COLLAPSED = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>';
+
+function getOrCreateFoldState(editor: MarkdownEditor): MarkdownEditorFoldState {
+    const existing = foldStates.get(editor);
+    if (existing) {
+        return existing;
+    }
+
+    const created: MarkdownEditorFoldState = {
+        enabled: false,
+        collapsed: new Set<number>()
+    };
+    foldStates.set(editor, created);
+    return created;
+}
+
+function toggleMarkdownFold(editor: MarkdownEditor, headingIndex: number) {
+    const state = getOrCreateFoldState(editor);
+    if (state.collapsed.has(headingIndex)) {
+        state.collapsed.delete(headingIndex);
+    } else {
+        state.collapsed.add(headingIndex);
+    }
+    // Re-run the decorations prop so the toggle icon and hidden ranges update.
+    withMarkdownEditorView(editor, (view) => {
+        view.updateState(view.state);
+    });
+}
+
+function countMarkdownHeadings(doc: ProseMirrorNode): number {
+    let count = 0;
+    doc.forEach((node) => {
+        if (node.type.name === 'heading') {
+            count += 1;
+        }
+    });
+    return count;
+}
+
+/**
+ * Toggle-all for the viewer's fold-all toolbar button: if any heading is
+ * currently collapsed, expand everything; otherwise collapse every heading
+ * (nested headings become hidden along with their parent, per the same fold
+ * rules as individual toggles). Returns the resulting "all collapsed" state
+ * so the caller (toolbar button) can reflect it in its icon, or `undefined`
+ * when folding is not applicable (no editor, edit mode, or no headings).
+ */
+export function toggleAllMarkdownFold(editor: MarkdownEditor): boolean | undefined {
+    const state = getOrCreateFoldState(editor);
+    if (!state.enabled) {
+        return undefined;
+    }
+
+    let result: boolean | undefined;
+    withMarkdownEditorView(editor, (view) => {
+        const headingCount = countMarkdownHeadings(view.state.doc);
+        if (headingCount === 0) {
+            result = false;
+            return;
+        }
+
+        if (state.collapsed.size > 0) {
+            state.collapsed.clear();
+            result = false;
+        } else {
+            for (let index = 0; index < headingCount; index += 1) {
+                state.collapsed.add(index);
+            }
+            result = true;
+        }
+        view.updateState(view.state);
+    });
+    return result;
+}
+
+function createFoldToggleButton(isCollapsed: boolean, onToggle: () => void): HTMLElement {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = isCollapsed
+        ? 'markdown-fold-toggle markdown-fold-toggle--collapsed'
+        : 'markdown-fold-toggle';
+    button.contentEditable = 'false';
+    button.setAttribute(
+        'aria-label',
+        translateWorkspaceMessage(isCollapsed ? 'shared.expandHeading' : 'shared.collapseHeading')
     );
-    state.decoratedDoc = doc;
-    state.decorations = decorations;
+    button.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
+    button.innerHTML = isCollapsed ? FOLD_ICON_COLLAPSED : FOLD_ICON_EXPANDED;
+    // Prevent ProseMirror from treating the button as an editing target.
+    button.addEventListener('mousedown', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+    });
+    button.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onToggle();
+    });
+    return button;
+}
+
+export interface MarkdownFoldBlock {
+    isHeading: boolean;
+    level: number;
+    from: number;
+    to: number;
+}
+
+export interface MarkdownFoldPlan {
+    /** Visible headings that should get a toggle button, in document order. */
+    toggles: Array<{ headingIndex: number; pos: number; collapsed: boolean }>;
+    /** Block ranges hidden because they belong to a collapsed heading's region. */
+    hidden: Array<{ from: number; to: number }>;
+}
+
+/**
+ * Pure fold planner over the top-level blocks of a document.
+ *  - Every visible heading gets a toggle; headings are keyed by their 0-based
+ *    order so the collapsed set stays stable across content re-syncs.
+ *  - A collapsed heading hides everything after it up to the next same-or-higher
+ *    heading, including nested headings and their toggles.
+ */
+export function planMarkdownFold(
+    blocks: MarkdownFoldBlock[],
+    collapsed: Set<number>
+): MarkdownFoldPlan {
+    const toggles: MarkdownFoldPlan['toggles'] = [];
+    const hidden: MarkdownFoldPlan['hidden'] = [];
+    let headingIndex = -1;
+    // Level of the collapsed heading whose region we are currently hiding, or
+    // null when we are outside any collapsed region.
+    let activeCollapseLevel: number | null = null;
+
+    for (const block of blocks) {
+        if (block.isHeading) {
+            headingIndex += 1;
+            const index = headingIndex;
+
+            // A deeper heading inside an active collapsed region stays hidden and
+            // does not get its own toggle.
+            if (activeCollapseLevel !== null && block.level > activeCollapseLevel) {
+                hidden.push({ from: block.from, to: block.to });
+                continue;
+            }
+
+            // A same-or-higher heading ends any active collapsed region.
+            activeCollapseLevel = null;
+
+            const isCollapsed = collapsed.has(index);
+            toggles.push({ headingIndex: index, pos: block.from, collapsed: isCollapsed });
+            if (isCollapsed) {
+                activeCollapseLevel = block.level;
+            }
+            continue;
+        }
+
+        if (activeCollapseLevel !== null) {
+            hidden.push({ from: block.from, to: block.to });
+        }
+    }
+
+    return { toggles, hidden };
+}
+
+/**
+ * Build fold decorations from the top-level document nodes: a widget toggle at
+ * the start of every visible heading, plus a `markdown-fold-hidden` node
+ * decoration on every block inside a collapsed heading's region.
+ */
+export function buildMarkdownFoldDecorations(
+    doc: ProseMirrorNode,
+    collapsed: Set<number>,
+    onToggle: (headingIndex: number) => void
+): Decoration[] {
+    const blocks: MarkdownFoldBlock[] = [];
+    doc.forEach((node, offset) => {
+        blocks.push({
+            isHeading: node.type.name === 'heading',
+            level: Number(node.attrs?.level) || 1,
+            from: offset,
+            to: offset + node.nodeSize
+        });
+    });
+
+    const plan = planMarkdownFold(blocks, collapsed);
+    const decorations: Decoration[] = [];
+
+    for (const toggle of plan.toggles) {
+        decorations.push(Decoration.widget(
+            toggle.pos + 1,
+            () => createFoldToggleButton(toggle.collapsed, () => onToggle(toggle.headingIndex)),
+            {
+                side: -1,
+                key: `fold-toggle-${toggle.headingIndex}-${toggle.collapsed ? 'c' : 'e'}`,
+                ignoreSelection: true,
+                stopEvent: () => true
+            }
+        ));
+    }
+
+    for (const range of plan.hidden) {
+        decorations.push(Decoration.node(range.from, range.to, { class: 'markdown-fold-hidden' }));
+    }
+
     return decorations;
 }
 
@@ -1809,7 +2040,7 @@ function attachMarkdownImageEnhancements(
         const pending = reader(assetPath)
             .then((document) => {
                 const bytes = decodeBase64(document.dataBase64);
-                const blob = new Blob([bytes], {
+                const blob = new Blob([Uint8Array.from(bytes)], {
                     type: document.mimeType || inferDocumentMimeType(assetPath)
                 });
                 const objectUrl = URL.createObjectURL(blob);

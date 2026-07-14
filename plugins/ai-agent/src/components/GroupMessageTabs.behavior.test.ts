@@ -2,19 +2,22 @@
 
 import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
+import { createPinia, setActivePinia } from 'pinia';
 import { createWorkspaceI18n } from '@packages/ui';
 import GroupMessageTabs from './GroupMessageTabs.vue';
 import type { GroupMemberPart, GroupSummaryPart } from '../interfaces/Conversation';
 
 function mountTabs(input: {
+    messageId?: string;
     groupMembers: GroupMemberPart[];
     groupSummary?: GroupSummaryPart;
 }) {
+    setActivePinia(createPinia());
     const i18n = createWorkspaceI18n({
         storage: { getItem: () => 'zh-CN', setItem: () => {} }
     });
     return mount(GroupMessageTabs, {
-        props: input,
+        props: { messageId: 'test-message', ...input },
         global: { plugins: [i18n] }
     });
 }
@@ -67,6 +70,30 @@ describe('GroupMessageTabs behavior', () => {
         await wrapper.vm.$nextTick();
 
         expect(wrapper.get('[data-testid="group-tab-Gemini"]').attributes('aria-selected')).toBe('true');
+    });
+
+    it('persists the selected tab to the store and restores it on remount', async () => {
+        const pinia = createPinia();
+        setActivePinia(pinia);
+        const i18n = createWorkspaceI18n({ storage: { getItem: () => 'zh-CN', setItem: () => {} } });
+        const props = {
+            messageId: 'msg-1',
+            groupMembers: [
+                { name: 'ChatGPT', providerId: 'chatgpt-codex', modelId: 'auto', content: 'A', status: 'done' },
+                { name: 'Gemini', providerId: 'gemini-api', modelId: 'pro', content: 'B', status: 'done' }
+            ],
+            groupSummary: { phase: 'done', content: '## Consensus\n done' }
+        } as const;
+
+        const first = mount(GroupMessageTabs, { props, global: { plugins: [pinia, i18n] } });
+        await first.get('[data-testid="group-tab-Gemini"]').trigger('click');
+        first.unmount();
+
+        // Re-mount the same message id (simulates workspace/conversation view switch).
+        const second = mount(GroupMessageTabs, { props, global: { plugins: [pinia, i18n] } });
+        await second.vm.$nextTick();
+
+        expect(second.get('[data-testid="group-tab-Gemini"]').attributes('aria-selected')).toBe('true');
     });
 
     it('clicking a member mention in summary switches to the member tab', async () => {

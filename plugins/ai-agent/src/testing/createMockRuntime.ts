@@ -1,4 +1,13 @@
-import { APP_CONFIG, type ModelConfig, type ProviderConfig, type ProviderModelCatalog, type RuntimeMode } from '@packages/core/config';
+import {
+    APP_CONFIG,
+    findPreferredModel,
+    firstPreferredModel,
+    normalizePreferredDefaultModels,
+    type ModelConfig,
+    type ProviderConfig,
+    type ProviderModelCatalog,
+    type RuntimeMode
+} from '@packages/core/config';
 import type { AnalysisResult } from '../interfaces/AnalysisResult';
 import type {
     AgentCapabilities,
@@ -46,19 +55,7 @@ function toMockModelId(providerId: string, preferredDefaultModel: string): strin
 }
 
 function resolveMockDefaultModel(provider: ProviderConfig, models: ModelConfig[]): string {
-    const preferredDefaultModel = provider.preferredDefaultModel?.trim();
-    if (!preferredDefaultModel) {
-        return provider.defaultModel;
-    }
-
-    const normalizedPreferred = normalizeModelToken(preferredDefaultModel);
-    const matchedModel = models.find((model) => {
-        return model.id === preferredDefaultModel
-            || model.name === preferredDefaultModel
-            || normalizeModelToken(model.id) === normalizedPreferred
-            || normalizeModelToken(model.name) === normalizedPreferred;
-    });
-
+    const matchedModel = findPreferredModel(models, provider.preferredDefaultModel);
     return matchedModel?.id || provider.defaultModel;
 }
 
@@ -70,26 +67,15 @@ function ensurePreferredDefaultModel(provider: ProviderConfig): ModelConfig[] {
             conflictsWith: option.conflictsWith ? [...option.conflictsWith] : undefined
         }))
     }));
-    const preferredDefaultModel = provider.preferredDefaultModel?.trim();
-    if (!preferredDefaultModel) {
+    const preferredDefaultModels = normalizePreferredDefaultModels(provider.preferredDefaultModel);
+    if (preferredDefaultModels.length === 0 || findPreferredModel(models, preferredDefaultModels)) {
         return models;
     }
 
-    const normalizedPreferred = normalizeModelToken(preferredDefaultModel);
-    const hasMatch = models.some((model) => {
-        return model.id === preferredDefaultModel
-            || model.name === preferredDefaultModel
-            || normalizeModelToken(model.id) === normalizedPreferred
-            || normalizeModelToken(model.name) === normalizedPreferred;
-    });
-
-    if (hasMatch) {
-        return models;
-    }
-
+    const firstPreferred = firstPreferredModel(preferredDefaultModels)!;
     models.push({
-        id: toMockModelId(provider.id, preferredDefaultModel),
-        name: preferredDefaultModel
+        id: toMockModelId(provider.id, firstPreferred),
+        name: firstPreferred
     });
     return models;
 }

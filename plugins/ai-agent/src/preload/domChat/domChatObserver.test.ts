@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { observeReply } from './domChatObserver';
+import { observeReply, waitForConversationSettled } from './domChatObserver';
 
 function setBody(html: string): void {
     document.body.innerHTML = html;
@@ -73,5 +73,53 @@ describe('observeReply — 旧答案闪现回归（ChatGPT group 追问轮）', 
         await flushMutations();
 
         expect(snapshots[snapshots.length - 1]).toContain('首轮答案');
+    });
+});
+
+describe('waitForConversationSettled — resume 水合竞态基线', () => {
+    it('等迟渲染的历史气泡补齐后再返回基线（不被低估）', async () => {
+        // resume 追问轮刚 loadURL：此刻只渲染出 1 条历史气泡，第 2 条旧答案随后才补上。
+        setBody(`
+            <div data-message-author-role="user"><div class="markdown">历史问1</div></div>
+            <div data-message-author-role="assistant"><div class="markdown">历史答1</div></div>
+        `);
+
+        // 稳定窗（150ms）必须明显长于迟渲染延迟（60ms），
+        // 否则 settle 会在旧气泡补齐前就返回，测试也会残留未触发的定时器污染后续用例。
+        const settledPromise = waitForConversationSettled(document, 'chatgpt', {
+            stableWindowMs: 150,
+            pollIntervalMs: 20,
+            timeoutMs: 3_000
+        });
+
+        // 60ms 后补挂第 2 条历史气泡（模拟 SPA 迟渲染），会重置稳定窗。
+        setTimeout(() => {
+            const late = document.createElement('div');
+            late.setAttribute('data-message-author-role', 'assistant');
+            late.innerHTML = '<div class="markdown">上一轮旧答案</div>';
+            document.body.appendChild(late);
+        }, 60);
+
+        const { bubbleCount, text } = await settledPromise;
+        // 基线必须等到迟渲染的旧气泡补齐后才定格：数量=2、文本=最后一条旧答案，
+        // 从而 observer 的数量门控才能真正拦住旧气泡。
+        expect(bubbleCount).toBe(2);
+        expect(text).toContain('上一轮旧答案');
+    });
+
+    it('已稳定的会话在一个稳定窗后快速返回当前基线', async () => {
+        setBody(`
+            <div data-message-author-role="user"><div class="markdown">问</div></div>
+            <div data-message-author-role="assistant"><div class="markdown">稳定答案</div></div>
+        `);
+
+        const { bubbleCount, text } = await waitForConversationSettled(document, 'chatgpt', {
+            stableWindowMs: 30,
+            pollIntervalMs: 10,
+            timeoutMs: 1_000
+        });
+
+        expect(bubbleCount).toBe(1);
+        expect(text).toContain('稳定答案');
     });
 });

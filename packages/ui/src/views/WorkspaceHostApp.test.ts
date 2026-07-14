@@ -430,6 +430,43 @@ describe('WorkspaceHostApp', () => {
         expect(navigateTo).toHaveBeenCalledWith('/chat');
     });
 
+    it('resets conversation focus mode when switching workspace', async () => {
+        setActivePinia(createPinia());
+        const navigateTo = vi.fn();
+        const documentStore = useDocumentWorkspaceStore();
+        documentStore.enterConversationFocus();
+        expect(documentStore.conversationFocusMode).toBe(true);
+
+        const wrapper = mount(WorkspaceHostApp, {
+            props: {
+                currentRoutePath: '/',
+                navigateTo,
+                contextProvider: { id: 'ctx' },
+                contributionQuery: createContributionQuery(),
+                runtimeContext: createRuntimeContext()
+            },
+            global: {
+                stubs: {
+                    AppTopBar: {
+                        template: '<div data-testid="topbar-stub" />'
+                    },
+                    DocumentWorkspaceView: {
+                        template: '<button data-testid="workspace-switch" @click="$emit(\'request-workspace-switch\', \'/chat\')" />'
+                    },
+                    ConversationWorkspaceView: {
+                        template: '<div data-testid="conversation-workspace-stub" />'
+                    }
+                }
+            }
+        });
+
+        await wrapper.get('[data-testid="workspace-switch"]').trigger('click');
+        await flushPromises();
+
+        expect(documentStore.conversationFocusMode).toBe(false);
+        expect(navigateTo).toHaveBeenCalledWith('/chat');
+    });
+
     it('navigates back to knowledge mode from the chat restore button', async () => {
         setActivePinia(createPinia());
         const navigateTo = vi.fn();

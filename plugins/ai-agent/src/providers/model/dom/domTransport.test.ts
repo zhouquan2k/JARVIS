@@ -49,6 +49,44 @@ describe('createDomTransport.open', () => {
         expect(call.targetUrl).toBeUndefined();
         expect(call.targetUrlIfBlank).toBe(targetUrl);
     });
+
+    it('resume (default): navigates directly to the stored conversation URL in a single load', async () => {
+        const capability = makeCapability();
+        const resumeUrl = 'https://chatgpt.com/c/abc123';
+        const transport = createDomTransport({ providerId: 'chatgpt-dom', targetUrl, capability });
+
+        await transport.open({ resumeUrl });
+
+        expect(capability.openControlledPage).toHaveBeenCalledTimes(1);
+        expect(capability.openControlledPage).toHaveBeenCalledWith({ providerId: 'chatgpt-dom', targetUrl: resumeUrl });
+        // 直连恢复不预热，不额外 evaluateInPage 等 Service Worker。
+        expect(capability.evaluateInPage).not.toHaveBeenCalled();
+    });
+
+    it('resume with warm boot (Claude): boots the site home first, waits for SW, then enters the conversation', async () => {
+        const capability = makeCapability();
+        const claudeHome = 'https://claude.ai/new';
+        const resumeUrl = 'https://claude.ai/chat/79c8b9fa';
+        const transport = createDomTransport({
+            providerId: 'claude-dom',
+            targetUrl: claudeHome,
+            capability,
+            resumeViaWarmBoot: true
+        });
+
+        await transport.open({ resumeUrl });
+
+        const openCalls = (capability.openControlledPage as ReturnType<typeof vi.fn>).mock.calls;
+        expect(openCalls).toHaveLength(2);
+        // 第一步：首页强制重载，热启动 SPA。
+        expect(openCalls[0][0]).toEqual({ providerId: 'claude-dom', targetUrl: claudeHome, forceReload: true });
+        // 第二步：进入落盘的会话 URL。
+        expect(openCalls[1][0]).toEqual({ providerId: 'claude-dom', targetUrl: resumeUrl });
+        // 两步之间等待 Service Worker 就绪。
+        const swCall = (capability.evaluateInPage as ReturnType<typeof vi.fn>).mock.calls[0][0];
+        expect(swCall.providerId).toBe('claude-dom');
+        expect(swCall.script).toContain('serviceWorker');
+    });
 });
 
 describe('createDomTransport.injectAndSubmit', () => {

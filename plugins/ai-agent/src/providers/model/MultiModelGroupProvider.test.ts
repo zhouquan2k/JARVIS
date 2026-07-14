@@ -276,6 +276,53 @@ describe('MultiModelGroupProvider', () => {
         expect(providers['gemini-api'].applyPageDefaults).toHaveBeenCalledWith({ modelId: 'gemini-2.5-flash', reasoningEffort: 'high' });
     });
 
+    it('resolves a member modelId priority list to the first model available in its provider catalog', async () => {
+        const claudeMembers = [
+            { providerId: 'claude-dom', modelId: ['Fable 5', 'Opus 4.8'], name: 'Claude' }
+        ];
+        const providers: Record<string, ReturnType<typeof makeMockProvider>> = {
+            'claude-dom': makeMockProvider('claude-dom', 'Hi from Claude')
+        };
+        const resolveMemberModels = vi.fn(async () => ({
+            // 目录里只有 Opus 4.8，没有 Fable 5：应跳过列表首项，命中下一个可用项。
+            models: [{ id: 'opus-4-8', name: 'Opus 4.8' }],
+            defaultModel: 'opus-4-8'
+        }));
+        const group = new MultiModelGroupProvider({
+            resolveMemberProvider: (id) => providers[id],
+            resolveMemberModels,
+            getGroupConfig: () => ({ members: claudeMembers }),
+            resolveSummarizer: () => null,
+            getSummarizerConfig: () => null
+        });
+
+        await group.applyPageDefaults({ reasoningEffort: 'high' });
+        expect(resolveMemberModels).toHaveBeenCalledWith('claude-dom');
+        expect(providers['claude-dom'].applyPageDefaults).toHaveBeenCalledWith({ modelId: 'opus-4-8', reasoningEffort: 'high' });
+
+        const result = await group.sendMessage('hi', {}, () => {});
+        expect(result.groupMembers?.[0]).toMatchObject({ providerId: 'claude-dom', modelId: 'opus-4-8' });
+    });
+
+    it('falls back to the first list entry when the member modelId list has no match in the provider catalog', async () => {
+        const claudeMembers = [
+            { providerId: 'claude-dom', modelId: ['Fable 5', 'Opus 4.8'], name: 'Claude' }
+        ];
+        const providers: Record<string, ReturnType<typeof makeMockProvider>> = {
+            'claude-dom': makeMockProvider('claude-dom', 'Hi from Claude')
+        };
+        const group = new MultiModelGroupProvider({
+            resolveMemberProvider: (id) => providers[id],
+            resolveMemberModels: vi.fn(async () => { throw new Error('catalog not ready'); }),
+            getGroupConfig: () => ({ members: claudeMembers }),
+            resolveSummarizer: () => null,
+            getSummarizerConfig: () => null
+        });
+
+        await group.applyPageDefaults({ reasoningEffort: 'high' });
+        expect(providers['claude-dom'].applyPageDefaults).toHaveBeenCalledWith({ modelId: 'Fable 5', reasoningEffort: 'high' });
+    });
+
     it('applyPageDefaults — resolves members from the selected preset (options.modelId)', async () => {
         const presets: Record<string, GroupConfig> = {
             'dom': {
@@ -304,12 +351,22 @@ describe('MultiModelGroupProvider', () => {
         expect(providers['gemini-dom'].applyPageDefaults).toHaveBeenCalledWith({ modelId: 'dom', reasoningEffort: 'high' });
     });
 
-    it('reuses the same summarizer conversation across group summaries', async () => {
+    it('resumes the summarizer conversation when its stored session URL is provided', async () => {
         const memberProviders: Record<string, ReturnType<typeof makeMockProvider>> = {
             'chatgpt-codex': makeMockProvider('chatgpt-codex', 'Alpha'),
             'gemini-api': makeMockProvider('gemini-api', 'Beta')
         };
-        const summarizer = makeMockProvider('gemini-dom-summary', '## Consensus\n中文总结');
+        // 总结器返回站点会话 URL，供落盘/恢复；首轮无恢复 URL，次轮通过 groupMemberSessions 传回。
+        const summarizer: IModelProvider = {
+            id: 'gemini-dom-summary',
+            getAvailableModels: vi.fn().mockResolvedValue({ models: [], defaultModel: '' }),
+            checkAuth: vi.fn().mockResolvedValue(true),
+            sendMessage: vi.fn(async (_p, _o, onUpdate: (u: ProviderStreamUpdate) => void): Promise<ProviderSendResult> => {
+                onUpdate({ text: '## Consensus\n中文总结' });
+                return { text: '## Consensus\n中文总结', conversationId: 'gemini-dom-summary', messageId: 's-msg', conversationUrl: 'https://gemini.google.com/app/sum-1' };
+            }),
+            abort: vi.fn()
+        };
         const group = new MultiModelGroupProvider({
             resolveMemberProvider: (id) => memberProviders[id],
             getGroupConfig: () => ({ members }),
@@ -317,18 +374,52 @@ describe('MultiModelGroupProvider', () => {
             getSummarizerConfig: () => ({ providerId: 'gemini-dom-summary', modelId: '3.1 Pro' })
         });
 
-        await group.sendMessage('first', {}, () => {});
-        await group.sendMessage('second', {}, () => {});
+        const firstResult = await group.sendMessage('first', {}, () => {});
+        // 首轮回填了总结器会话 URL，交由调用方持久化。
+        expect(firstResult.groupSummary?.providerId).toBe('gemini-dom-summary');
+        expect(firstResult.groupSummary?.conversationUrl).toBe('https://gemini.google.com/app/sum-1');
+
+        // 次轮：模拟 chat store 把落盘的总结器 URL 通过 groupMemberSessions 传回。
+        await group.sendMessage('second', {
+            groupMemberSessions: { 'gemini-dom-summary': 'https://gemini.google.com/app/sum-1' }
+        }, () => {});
 
         const firstSummaryOptions = (summarizer.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][1];
         const secondSummaryOptions = (summarizer.sendMessage as ReturnType<typeof vi.fn>).mock.calls[1][1];
 
         expect(firstSummaryOptions).toMatchObject({ modelId: '3.1 Pro' });
         expect(firstSummaryOptions.history).toBeUndefined();
+        expect(firstSummaryOptions.resumeConversationUrl).toBeUndefined();
         expect(secondSummaryOptions).toMatchObject({
             modelId: '3.1 Pro',
-            history: [{ role: 'user', content: '继续沿用当前总结对话。' }]
+            history: [{ role: 'user', content: '继续沿用当前总结对话。' }],
+            resumeConversationUrl: 'https://gemini.google.com/app/sum-1'
         });
+    });
+
+    it('passes each member its stored session URL as resumeConversationUrl', async () => {
+        const memberProviders: Record<string, ReturnType<typeof makeMockProvider>> = {
+            'chatgpt-codex': makeMockProvider('chatgpt-codex', 'Alpha'),
+            'gemini-api': makeMockProvider('gemini-api', 'Beta')
+        };
+        const group = new MultiModelGroupProvider({
+            resolveMemberProvider: (id) => memberProviders[id],
+            getGroupConfig: () => ({ members }),
+            resolveSummarizer: () => null,
+            getSummarizerConfig: () => null
+        });
+
+        await group.sendMessage('hi', {
+            groupMemberSessions: {
+                'chatgpt-codex': 'https://chatgpt.com/c/aaa',
+                'gemini-api': 'https://gemini.google.com/app/bbb'
+            }
+        }, () => {});
+
+        expect((memberProviders['chatgpt-codex'].sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][1])
+            .toMatchObject({ resumeConversationUrl: 'https://chatgpt.com/c/aaa' });
+        expect((memberProviders['gemini-api'].sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][1])
+            .toMatchObject({ resumeConversationUrl: 'https://gemini.google.com/app/bbb' });
     });
 
     it('summary prompt explicitly requires simplified chinese body text', () => {

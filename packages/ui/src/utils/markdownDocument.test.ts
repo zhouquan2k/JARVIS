@@ -310,6 +310,17 @@ describe('markdownDocument', () => {
         expect((preview as HTMLElement).querySelector('.markdown-pdf-embed__link')).toBeNull();
         expect((preview as HTMLElement).dataset.pdfCandidates).toBe('["references/guide.pdf"]');
         expect((preview as HTMLElement).dataset.pdfLabel).toBe('guide.pdf');
+        expect(detectMarkdownBlockType('pdf-embed', '')).toBe('pdf-embed');
+
+        const legacyPreview = codeMirrorConfig.renderPreview(
+            'pdf-embed',
+            JSON.stringify({ label: 'legacy-guide.pdf', candidates: ['references/legacy-guide.pdf'] }),
+            applyPreview
+        );
+        expect(legacyPreview).toBeInstanceOf(HTMLElement);
+        expect((legacyPreview as HTMLElement).className).toBe('markdown-pdf-embed');
+        expect((legacyPreview as HTMLElement).dataset.pdfCandidates).toBe('["references/legacy-guide.pdf"]');
+        expect((legacyPreview as HTMLElement).dataset.pdfLabel).toBe('legacy-guide.pdf');
     });
 
     it('uses source rendering as the default fallback for unconfigured code blocks', async () => {
@@ -885,5 +896,74 @@ describe('rewriteOutgoingLinks', () => {
         const md = '[ext](https://example.com) and [local](sub/note.md)';
         const result = rewriteOutgoingLinks(md, '/agent/docs', '/agent');
         expect(result).toBe('[ext](https://example.com) and [local](docs/sub/note.md)');
+    });
+});
+
+describe('planMarkdownFold', () => {
+    let planMarkdownFold: typeof import('./markdownDocument').planMarkdownFold;
+    type Block = import('./markdownDocument').MarkdownFoldBlock;
+
+    beforeEach(async () => {
+        ({ planMarkdownFold } = await import('./markdownDocument'));
+    });
+
+    // Compact block spec: `h1`/`h2`… for headings, `p` for any other block.
+    // Positions are sequential and only used to identify ranges in assertions.
+    function blocks(spec: string[]): Block[] {
+        return spec.map((token, i) => ({
+            isHeading: token.startsWith('h'),
+            level: token.startsWith('h') ? Number(token.slice(1)) : 1,
+            from: i * 10,
+            to: i * 10 + 5
+        }));
+    }
+
+    it('gives every heading a toggle and hides nothing when none are collapsed', () => {
+        const plan = planMarkdownFold(blocks(['h1', 'p', 'h2', 'p']), new Set());
+        expect(plan.toggles.map((t) => t.headingIndex)).toEqual([0, 1]);
+        expect(plan.toggles.every((t) => !t.collapsed)).toBe(true);
+        expect(plan.hidden).toEqual([]);
+    });
+
+    it('hides blocks after a collapsed heading up to the next same-level heading', () => {
+        const plan = planMarkdownFold(blocks(['h1', 'p', 'p', 'h1', 'p']), new Set([0]));
+        // Only the two paragraphs between the two h1 headings are hidden.
+        expect(plan.hidden).toEqual([
+            { from: 10, to: 15 },
+            { from: 20, to: 25 }
+        ]);
+        // Both h1 headings still get a toggle; the first is marked collapsed.
+        expect(plan.toggles.map((t) => ({ index: t.headingIndex, collapsed: t.collapsed }))).toEqual([
+            { index: 0, collapsed: true },
+            { index: 1, collapsed: false }
+        ]);
+    });
+
+    it('hides nested lower-level headings and suppresses their toggles', () => {
+        const plan = planMarkdownFold(blocks(['h1', 'p', 'h2', 'p', 'h1']), new Set([0]));
+        // h2 (idx 2..) and its paragraph are hidden along with the first paragraph.
+        expect(plan.hidden).toEqual([
+            { from: 10, to: 15 }, // p under h1
+            { from: 20, to: 25 }, // nested h2
+            { from: 30, to: 35 }  // p under h2
+        ]);
+        // Only the two visible h1 headings get toggles; the nested h2 does not.
+        expect(plan.toggles.map((t) => t.headingIndex)).toEqual([0, 2]);
+    });
+
+    it('does not let a collapsed deeper heading hide a following higher heading', () => {
+        const plan = planMarkdownFold(blocks(['h2', 'p', 'h1', 'p']), new Set([0]));
+        // Collapsing the h2 hides only its own paragraph; the later h1 is untouched.
+        expect(plan.hidden).toEqual([{ from: 10, to: 15 }]);
+        expect(plan.toggles.map((t) => t.headingIndex)).toEqual([0, 1]);
+    });
+
+    it('keeps heading indices stable regardless of which one is collapsed', () => {
+        const spec = blocks(['h1', 'p', 'h1', 'p', 'h1', 'p']);
+        const plan = planMarkdownFold(spec, new Set([1]));
+        // The middle heading (index 1) collapses; its single paragraph hides.
+        expect(plan.hidden).toEqual([{ from: 30, to: 35 }]);
+        const collapsedToggle = plan.toggles.find((t) => t.collapsed);
+        expect(collapsedToggle?.headingIndex).toBe(1);
     });
 });

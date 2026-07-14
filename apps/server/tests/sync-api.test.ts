@@ -634,7 +634,8 @@ describe('sync api', () => {
                                         providerId: 'chatgpt-web',
                                         modelId: 'gpt-5',
                                         content: 'from gpt',
-                                        status: 'done'
+                                        status: 'done',
+                                        conversationUrl: 'https://chatgpt.com/c/gpt-conv'
                                     },
                                     {
                                         name: 'Gemini',
@@ -646,7 +647,9 @@ describe('sync api', () => {
                                 ],
                                 groupSummary: {
                                     phase: 'done',
-                                    content: '@GPT and @Gemini agree'
+                                    content: '@GPT and @Gemini agree',
+                                    providerId: 'gemini-dom-summary',
+                                    conversationUrl: 'https://gemini.google.com/app/sum-conv'
                                 }
                             }
                         ]
@@ -677,7 +680,8 @@ describe('sync api', () => {
                 providerId: 'chatgpt-web',
                 modelId: 'gpt-5',
                 content: 'from gpt',
-                status: 'done'
+                status: 'done',
+                conversationUrl: 'https://chatgpt.com/c/gpt-conv'
             },
             {
                 name: 'Gemini',
@@ -689,7 +693,9 @@ describe('sync api', () => {
         ]);
         expect(assistantMessage.groupSummary).toEqual({
             phase: 'done',
-            content: '@GPT and @Gemini agree'
+            content: '@GPT and @Gemini agree',
+            providerId: 'gemini-dom-summary',
+            conversationUrl: 'https://gemini.google.com/app/sum-conv'
         });
     });
 

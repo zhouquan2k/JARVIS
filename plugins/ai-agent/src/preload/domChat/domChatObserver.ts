@@ -128,6 +128,73 @@ function logObserve(provider: DomChatProvider, stage: string, extra?: Record<str
     }
 }
 
+export interface SettleOptions {
+    /** 气泡数量需连续保持不变的时间窗（默认 600ms）。 */
+    stableWindowMs?: number;
+    /** 封顶超时：即使一直不稳定也在此时限后返回当前基线（默认 5s）。 */
+    timeoutMs?: number;
+    /** 轮询间隔（默认 150ms）。 */
+    pollIntervalMs?: number;
+}
+
+const SETTLE_DEFAULTS = {
+    stableWindowMs: 600,
+    timeoutMs: 5_000,
+    pollIntervalMs: 150
+};
+
+/**
+ * 捕获基线前等待「会话历史渲染稳定」。
+ *
+ * group 追问轮为续接同一对话会 loadURL 重新导航回会话页，但 SPA 的历史气泡是异步水合的——
+ * loadURL resolve（did-finish-load）时骨架已到、历史气泡可能尚未渲染完。若此刻立即 countReplyBubbles，
+ * baselineBubbleCount 会被低估；随后补渲染的旧气泡数量超过这个偏小基线，就会被 observer 误当成本轮新回复
+ * （即「ChatGPT group 追问轮偶现旧答案」的根因）。
+ *
+ * 本函数轮询气泡数量，直到在 stableWindowMs 内不再变化且非生成中，才返回稳定后的 { bubbleCount, text } 基线；
+ * timeoutMs 封顶兜底。首轮（空对话，数量恒 0）与未重载的追问（历史一直在位、数量恒定）都会在一个稳定窗后快速返回，
+ * 仅重载水合场景才真正等待历史补齐。
+ */
+export function waitForConversationSettled(
+    doc: Document,
+    provider: DomChatProvider,
+    options: SettleOptions = {}
+): Promise<{ bubbleCount: number; text: string }> {
+    const stableWindowMs = options.stableWindowMs ?? SETTLE_DEFAULTS.stableWindowMs;
+    const timeoutMs = options.timeoutMs ?? SETTLE_DEFAULTS.timeoutMs;
+    const pollIntervalMs = options.pollIntervalMs ?? SETTLE_DEFAULTS.pollIntervalMs;
+
+    return new Promise((resolve) => {
+        const startedAt = Date.now();
+        let lastCount = countReplyBubbles(doc, provider);
+        let stableSince = startedAt;
+
+        const settle = () => {
+            const bubbleCount = countReplyBubbles(doc, provider);
+            const text = readLatestReply(doc, provider);
+            logObserve(provider, 'settle-done', { bubbleCount, textLen: text.length, elapsedMs: Date.now() - startedAt });
+            resolve({ bubbleCount, text });
+        };
+
+        const tick = () => {
+            const count = countReplyBubbles(doc, provider);
+            const now = Date.now();
+            if (count !== lastCount) {
+                lastCount = count;
+                stableSince = now;
+            }
+            const stable = now - stableSince >= stableWindowMs && !isGenerating(doc, provider);
+            if (stable || now - startedAt >= timeoutMs) {
+                settle();
+                return;
+            }
+            setTimeout(tick, pollIntervalMs);
+        };
+
+        tick();
+    });
+}
+
 /**
  * 观察助手回复：每次变化推送「完整快照」；仅当确实生成完毕（无停止按钮）且文本稳定才结束，
  * 避免联网搜索暂停时过早结束。返回 dispose 函数。

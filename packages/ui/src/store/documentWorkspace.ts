@@ -56,6 +56,8 @@ export interface DocumentWorkspaceState {
     panelSizes: [number, number, number];
     middlePaneMode: 'default' | 'maximized';
     middlePaneZoom: number;
+    conversationFocusMode: boolean;
+    conversationFocusPanelSizes: [number, number];
     isHydrating: boolean;
     isSaving: boolean;
     accessInitialized: boolean;
@@ -77,6 +79,7 @@ export interface DocumentWorkspaceState {
 const AUTO_SAVE_DELAY_MS = 60_000;
 const DEFAULT_PANEL_SIZES: [number, number, number] = [20, 50, 30];
 const MAXIMIZED_PANEL_SIZES: [number, number, number] = [20, 80, 0];
+const DEFAULT_CONVERSATION_FOCUS_PANEL_SIZES: [number, number] = [25, 75];
 const MIN_MIDDLE_PANE_ZOOM = 1;
 const MAX_MIDDLE_PANE_ZOOM = 1.8;
 const MIDDLE_PANE_ZOOM_STEP = 0.1;
@@ -326,6 +329,16 @@ function normalizeSizes(sizes: [number, number, number]): [number, number, numbe
     return bounded.map((size) => Number(((size / total) * 100).toFixed(2))) as [number, number, number];
 }
 
+function normalizeFocusPanelSizes(sizes: [number, number]): [number, number] {
+    const bounded = sizes.map((size) => Math.max(15, Math.min(85, Number.isFinite(size) ? size : 0))) as [number, number];
+    const total = bounded[0] + bounded[1];
+    if (total <= 0) {
+        return [...DEFAULT_CONVERSATION_FOCUS_PANEL_SIZES];
+    }
+
+    return bounded.map((size) => Number(((size / total) * 100).toFixed(2))) as [number, number];
+}
+
 function normalizeMiddlePaneZoom(zoom: number): number {
     if (!Number.isFinite(zoom)) {
         return 1;
@@ -556,6 +569,8 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
         panelSizes: DEFAULT_PANEL_SIZES,
         middlePaneMode: 'default',
         middlePaneZoom: 1,
+        conversationFocusMode: false,
+        conversationFocusPanelSizes: DEFAULT_CONVERSATION_FOCUS_PANEL_SIZES,
         isHydrating: false,
         isSaving: false,
         accessInitialized: false,
@@ -1956,6 +1971,22 @@ export const useDocumentWorkspaceStore = defineStore('document-workspace', {
 
         toggleMiddlePaneExpanded() {
             this.setMiddlePaneMode(this.middlePaneMode === 'maximized' ? 'default' : 'maximized');
+        },
+
+        enterConversationFocus() {
+            this.conversationFocusMode = true;
+        },
+
+        exitConversationFocus() {
+            this.conversationFocusMode = false;
+        },
+
+        toggleConversationFocus() {
+            this.conversationFocusMode = !this.conversationFocusMode;
+        },
+
+        setConversationFocusPanelSizes(sizes: [number, number]) {
+            this.conversationFocusPanelSizes = normalizeFocusPanelSizes(sizes);
         },
 
         setMiddlePaneZoom(zoom: number) {

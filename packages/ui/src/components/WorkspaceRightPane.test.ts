@@ -6,6 +6,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { ref } from 'vue';
 import type { WorkspaceRuntimeContext } from '@packages/core/src';
 import { contributionQueryKey, workspaceRuntimeContextKey } from '../plugins/injectionKeys';
+import { useDocumentWorkspaceStore } from '../store/documentWorkspace';
 import WorkspaceRightPane from './WorkspaceRightPane.vue';
 
 const workspaceRightPaneContributionQuery = {
@@ -223,5 +224,66 @@ describe('WorkspaceRightPane', () => {
 
         expect(wrapper.find('[data-testid="agent-task-panel"]').exists()).toBe(false);
         expect(wrapper.find('[data-testid="agent-conversation-panel"]').exists()).toBe(true);
+    });
+
+    it('hides the tab selector while conversation focus mode is active', async () => {
+        setActivePinia(createPinia());
+        const documentStore = useDocumentWorkspaceStore();
+        const runtimeContext: WorkspaceRuntimeContext = {
+            currentError: null,
+            clearCurrentError: vi.fn(),
+            beforeRouteNavigate: vi.fn(),
+            publishWorkspaceSelectionChanged: vi.fn(async () => undefined),
+            registerCurrentErrorSource: vi.fn(() => () => undefined),
+            registerBeforeRouteNavigateHandler: vi.fn(() => () => undefined),
+            registerWorkspaceSelectionChangedHandler: vi.fn(() => () => undefined),
+            getPluginMessages: vi.fn(() => []),
+            subscribePluginMessages: vi.fn(() => () => undefined),
+            postPluginMessage: vi.fn(),
+            postHostEvent: vi.fn(),
+            subscribeHostEvent: vi.fn(() => () => undefined)
+        };
+
+        const wrapper = mount(WorkspaceRightPane, {
+            props: {
+                contextProvider: {
+                    id: 'ctx',
+                    initializeAccess: vi.fn(),
+                    getContext: vi.fn(),
+                    getConversations: vi.fn(async () => []),
+                    getTaskProvider: vi.fn(() => ({
+                        getTasks: vi.fn(async () => []),
+                        createTask: vi.fn(),
+                        updateTask: vi.fn(),
+                        deleteTask: vi.fn(),
+                        setTaskCompleted: vi.fn()
+                    })),
+                    getProjectDocuments: vi.fn(),
+                    readDocument: vi.fn(),
+                    writeDocument: vi.fn(),
+                    createNode: vi.fn(),
+                    deleteNode: vi.fn(),
+                    renameNode: vi.fn(),
+                    searchInScope: vi.fn()
+                } as any
+            },
+            global: {
+                provide: {
+                    [contributionQueryKey as symbol]: ref(workspaceRightPaneContributionQuery),
+                    [workspaceRuntimeContextKey as symbol]: ref(runtimeContext)
+                }
+            }
+        });
+
+        await flushPromises();
+        expect(wrapper.find('[data-testid="workspace-right-pane-tabs"]').exists()).toBe(true);
+
+        documentStore.enterConversationFocus();
+        await flushPromises();
+        expect(wrapper.find('[data-testid="workspace-right-pane-tabs"]').exists()).toBe(false);
+
+        documentStore.exitConversationFocus();
+        await flushPromises();
+        expect(wrapper.find('[data-testid="workspace-right-pane-tabs"]').exists()).toBe(true);
     });
 });

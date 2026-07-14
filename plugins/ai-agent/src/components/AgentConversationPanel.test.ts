@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount } from '@vue/test-utils';
 import type { Conversation, IContextProvider, IConversationPersistProvider, IModelProvider, Task } from '@plugins/ai-agent/src/internal';
+import { useDocumentWorkspaceStore } from '@packages/ui';
 import AgentConversationPanel from './AgentConversationPanel.vue';
 import { useChatStore } from '../store/chat';
 
@@ -88,8 +89,53 @@ describe('AgentConversationPanel', () => {
         setActivePinia(createPinia());
     });
 
-    it('emits a workspace switch request when expanding to chat mode', async () => {
+    it('does not expose an in-flight conversation on an unrelated document', async () => {
         const chatStore = useChatStore();
+        const inFlightConversation: Conversation = {
+            id: 'conversation-a',
+            title: 'Document A discussion',
+            origin: 'local',
+            agentKey: '/docs/',
+            documentPaths: ['/docs/a.md'],
+            updatedAt: 1,
+            messages: []
+        };
+        chatStore.currentConversation = inFlightConversation;
+        chatStore.conversations = [inFlightConversation];
+        chatStore.isGenerating = true;
+
+        const wrapper = mount(AgentConversationPanel, {
+            props: {
+                activeScopeKey: '/docs/',
+                activePath: '/docs/b.md',
+                selectedNodePath: '/docs/b.md',
+                activeDocument: {
+                    path: '/docs/b.md',
+                    mimeType: 'text/markdown',
+                    dataBase64: ''
+                },
+                showScopeConversationList: false,
+                contextProvider: createContextProvider()
+            },
+            global: {
+                stubs: {
+                    NormalChatView: {
+                        template: '<div data-testid="normal-chat-stub" />'
+                    }
+                }
+            }
+        });
+
+        await flushPromises();
+
+        expect(wrapper.find('[data-testid="agent-document-conversation-item"]').exists()).toBe(false);
+        expect(chatStore.currentConversation?.id).toBe('conversation-a');
+        expect(chatStore.isGenerating).toBe(true);
+    });
+
+    it('toggles conversation focus layout in place instead of switching workspace', async () => {
+        const chatStore = useChatStore();
+        const documentStore = useDocumentWorkspaceStore();
         chatStore.currentConversation = {
             id: 'conversation-1',
             title: 'Shared Conversation',
@@ -127,9 +173,18 @@ describe('AgentConversationPanel', () => {
         });
 
         await flushPromises();
+        expect(documentStore.conversationFocusMode).toBe(false);
+        chatStore.setQuestionIndexPanelOpen(false);
+
         await wrapper.get('[data-testid="agent-conversation-expand"]').trigger('click');
 
-        expect(wrapper.emitted('request-workspace-switch')).toEqual([['/chat']]);
+        expect(wrapper.emitted('request-workspace-switch')).toBeUndefined();
+        expect(documentStore.conversationFocusMode).toBe(true);
+        expect(chatStore.isQuestionIndexPanelOpen).toBe(true);
+
+        await wrapper.get('[data-testid="agent-conversation-expand"]').trigger('click');
+
+        expect(documentStore.conversationFocusMode).toBe(false);
     });
 
     it('shows only the conversation title in detail mode', async () => {

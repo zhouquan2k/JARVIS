@@ -142,6 +142,7 @@ async function syncRuntimeRouteState(nextRoutePath: ChatRoutePath, previousRoute
 
 async function onNavigateWorkspace(path: ChatRoutePath, options?: { revealSidebar?: boolean }) {
   pendingNavigationTarget.value = path;
+  documentStore.exitConversationFocus();
   await props.runtimeContext?.beforeRouteNavigate({
     currentRoutePath: props.currentRoutePath,
     nextRoutePath: path,

@@ -670,6 +670,64 @@ describe('useChatStore workspace history flow', () => {
         expect(calls).toBe(2);
     });
 
+    it('regression: restores the conversation-persisted modelId once an async (DOM-style) catalog becomes ready after a not-ready fallback', async () => {
+        // 回归用例：DOM provider 首次目录未就绪时，会先落到静态兜底的 defaultModel；
+        // 此前一旦真实目录异步就绪，applyProviderModelCatalog 会无条件套用 provider.defaultModel，
+        // 把用户/会话持久化的上次模型静默替换成 provider 默认模型（如 preferredDefaultModel）。
+        const storage = new MockStorageProvider([
+            {
+                id: 'dom-conv',
+                title: 'DOM chat',
+                origin: 'local',
+                updatedAt: 1,
+                messages: [],
+                modelSelection: {
+                    providerId: 'mock-provider',
+                    modelId: 'sonnet-4-5',
+                    modelOptions: {},
+                    reasoningEffort: 'high',
+                    explicit: true
+                }
+            } as unknown as Conversation
+        ]);
+        const store = useChatStore();
+        store.setProviders(new MockModelProvider(), storage);
+
+        let calls = 0;
+        store.setProviderModelsResolver(async (providerId: string) => {
+            if (providerId !== 'mock-provider') {
+                return { models: [{ id: 'other-dynamic', name: 'Other Dynamic' }], defaultModel: 'other-dynamic' };
+            }
+            calls += 1;
+            if (calls === 1) {
+                const err = new Error('model picker not ready');
+                err.name = 'ModelsNotReadyError';
+                throw err;
+            }
+            return {
+                models: [
+                    { id: 'preferred-default', name: 'Preferred Default' },
+                    { id: 'sonnet-4-5', name: 'Sonnet 4.5' }
+                ],
+                defaultModel: 'preferred-default'
+            };
+        });
+
+        // initializeProviderCatalog 会自动为「目录首项」预取模型；把 mock-provider 排到非首位，
+        // 避免这次预取提前消耗掉下面模拟的「第一次未就绪」，干扰对 selectLocalConversation 触发的
+        // 那次请求的观察。
+        await store.initializeProviderCatalog([providerCatalog[2], providerCatalog[0], providerCatalog[1]]);
+        await store.selectLocalConversation('dom-conv');
+
+        // 第一次目录未就绪：落到静态兜底目录的唯一模型，但记住了期望恢复的 modelId。
+        expect(store.currentModelId).toBe('static-model');
+        expect(store.providerModelStates['mock-provider']?.loaded).toBe(false);
+
+        // 真实目录异步就绪：应恢复持久化的 'sonnet-4-5'，而不是新目录的 defaultModel。
+        await store.ensureProviderModelsLoaded('mock-provider');
+        expect(store.currentModelId).toBe('sonnet-4-5');
+    });
+
     it('restores conversation model selection and normalizes conflicting options', async () => {
         const storage = new MockStorageProvider([
             {
@@ -1933,6 +1991,64 @@ describe('useChatStore workspace history flow', () => {
         store.ensureGroupMembersInitialized();
         // 从持久化恢复（过滤为候选并按候选顺序归一）。
         expect(store.currentGroupMembers.map((m) => m.name)).toEqual(['Gemini', 'Claude']);
+    });
+
+    it('group: reopening a conversation restores the persisted (non-default) member selection into currentGroupMembers', async () => {
+        // 回归用例：此前 setCurrentModelProvider 内先 applyCurrentModelState（触发 sync，
+        // 用当时还是空的 currentGroupMembers 覆盖了持久化的 groupMembers），再调用
+        // ensureGroupMembersInitialized 时已读不到持久化成员，静默回退到默认预设
+        // （ChatGPT + Gemini），丢失用户之前勾选的 Claude / 取消勾选的 ChatGPT。
+        const provider = new MockModelProvider();
+        const storage = new MockStorageProvider([
+            {
+                id: 'group-custom-conv',
+                title: 'Group chat',
+                origin: 'local',
+                updatedAt: 1,
+                messages: [],
+                modelSelection: {
+                    providerId: 'group',
+                    modelId: 'dom',
+                    modelOptions: {},
+                    reasoningEffort: 'high',
+                    explicit: true,
+                    groupMembers: [
+                        { providerId: 'gemini-dom', modelId: 'dom', name: 'Gemini' },
+                        { providerId: 'claude-dom', modelId: 'dom', name: 'Claude' }
+                    ]
+                }
+            } as unknown as Conversation
+        ]);
+        const store = useChatStore();
+        store.setProviders(provider, storage);
+        await store.initializeProviderCatalog([
+            ...providerCatalog,
+            {
+                id: 'group',
+                name: 'Group',
+                models: [{ id: 'dom', name: 'DOM Team' }],
+                defaultModel: 'dom',
+                supportedRuntimeModes: ['web']
+            }
+        ]);
+        store.availableProviders = [
+            {
+                id: 'group',
+                name: 'Group',
+                models: [{ id: 'dom', name: 'DOM Team' }],
+                defaultModel: 'dom',
+                supportedRuntimeModes: ['web']
+            },
+            { id: 'chatgpt-dom' },
+            { id: 'gemini-dom' },
+            { id: 'claude-dom' }
+        ] as unknown as typeof store.availableProviders;
+
+        await store.selectLocalConversation('group-custom-conv');
+
+        expect(store.currentProviderId).toBe('group');
+        // 持久化的是 [Gemini, Claude]（不含默认预设的 ChatGPT），不应回退到默认预设 [ChatGPT, Gemini]。
+        expect(store.currentGroupMembers.map((m) => m.providerId)).toEqual(['gemini-dom', 'claude-dom']);
     });
 
     it('applies and groups local conversations by agentKey without overwriting an existing binding', async () => {
@@ -4532,4 +4648,40 @@ describe('useChatStore workspace history flow', () => {
         });
     });
 
+});
+
+describe('useChatStore view-switch UI state', () => {
+    beforeEach(() => {
+        setActivePinia(createPinia());
+    });
+
+    it('stores and reads the scroll position by conversation id', () => {
+        const store = useChatStore();
+        store.setConversationScrollTop('conv-a', 320);
+        store.setConversationScrollTop('conv-b', 80);
+
+        expect(store.conversationScrollTops['conv-a']).toBe(320);
+        expect(store.conversationScrollTops['conv-b']).toBe(80);
+    });
+
+    it('ignores empty conversation id when storing scroll position', () => {
+        const store = useChatStore();
+        store.setConversationScrollTop('', 100);
+
+        expect(store.conversationScrollTops['']).toBeUndefined();
+    });
+
+    it('stores and reads the active group tab by message id', () => {
+        const store = useChatStore();
+        store.setMessageGroupActiveTab('msg-1', 'Gemini');
+
+        expect(store.messageGroupActiveTabs['msg-1']).toBe('Gemini');
+    });
+
+    it('ignores empty message id when storing the active group tab', () => {
+        const store = useChatStore();
+        store.setMessageGroupActiveTab('', 'Gemini');
+
+        expect(store.messageGroupActiveTabs['']).toBeUndefined();
+    });
 });

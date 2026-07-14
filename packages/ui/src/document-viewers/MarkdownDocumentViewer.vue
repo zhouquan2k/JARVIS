@@ -102,6 +102,7 @@ import {
   scrollToMarkdownEditorSearchMatch,
   setMarkdownEditorActiveSearchMatchIndex,
   setMarkdownEditorSearchQuery,
+  toggleAllMarkdownFold,
   toggleMarkAtViewerSelection,
   toggleMarkdownHighlightAtViewerSelection,
   wrapSelectionAsTaskListItem,
@@ -1049,7 +1050,8 @@ defineExpose({
   insertMarkdownInViewer,
   toggleHighlightInViewer,
   toggleMarkInViewer,
-  insertTaskListItemInViewer
+  insertTaskListItemInViewer,
+  toggleAllHeadingsInViewer
 });
 
 // viewer(WYSIWYG) 原地编辑后，Milkdown 的 markdownUpdated 监听是异步触发的，
@@ -1099,6 +1101,13 @@ function insertTaskListItemInViewer(): boolean {
     return false;
   }
   return flushViewerEditToModel(wrapSelectionAsTaskListItem(editor));
+}
+
+function toggleAllHeadingsInViewer(): boolean | undefined {
+  if (!editor) {
+    return undefined;
+  }
+  return toggleAllMarkdownFold(editor);
 }
 
 function applyLinkInViewer(input: { label: string; href: string }): boolean {
@@ -1803,6 +1812,41 @@ function requiresMarkdownDocumentPathRebind(content: string): boolean {
   white-space: pre-wrap;
   word-break: break-word;
   background: transparent;
+}
+
+.editor-input :deep(.markdown-fold-hidden) {
+  display: none !important;
+}
+
+.editor-input :deep(.markdown-fold-toggle) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1em;
+  height: 1.1em;
+  /* Hang into the left gutter so heading text is not pushed right. */
+  margin-left: -1.4em;
+  margin-right: 0.3em;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  color: rgba(148, 163, 184, 0.7);
+  background: transparent;
+  cursor: pointer;
+  vertical-align: middle;
+  user-select: none;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.editor-input :deep(.markdown-fold-toggle:hover) {
+  color: #7dd3fc;
+  background: rgba(125, 211, 252, 0.14);
+}
+
+.editor-input :deep(.markdown-fold-toggle svg) {
+  display: block;
+  width: 1em;
+  height: 1em;
 }
 
 .editor-input :deep(.markdown-search-highlight) {

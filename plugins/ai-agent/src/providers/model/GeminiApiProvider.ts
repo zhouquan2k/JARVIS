@@ -1,4 +1,4 @@
-import { APP_CONFIG, type ModelConfig, type ProviderModelCatalog } from '@packages/core/config';
+import { APP_CONFIG, firstPreferredModel, type ModelConfig, type ProviderModelCatalog } from '@packages/core/config';
 import type { AgentToolDeclaration } from '../../interfaces/AgentTools';
 import type {
     AgentCapabilities,
@@ -114,7 +114,7 @@ function normalizeGeminiFallbackDefault(models: ProviderModelCatalog['models'], 
 
     const preferredModel = findGeminiModelMatch(
         models,
-        APP_CONFIG.providers.find((provider) => provider.id === 'gemini-api')?.preferredDefaultModel || 'Gemini Pro Latest'
+        firstPreferredModel(APP_CONFIG.providers.find((provider) => provider.id === 'gemini-api')?.preferredDefaultModel) || 'Gemini Pro Latest'
     ) || models.find((model) => model.id === 'gemini-2.5-pro');
     return preferredModel?.id || models[0]?.id || fallbackDefaultModel;
 }
@@ -176,7 +176,7 @@ function isGeminiProLatestAlias(value: string | undefined): boolean {
 
     const normalizedValue = normalizedModelToken(value);
     const normalizedPreferred = normalizedModelToken(
-        APP_CONFIG.providers.find((provider) => provider.id === 'gemini-api')?.preferredDefaultModel || 'Gemini Pro Latest'
+        firstPreferredModel(APP_CONFIG.providers.find((provider) => provider.id === 'gemini-api')?.preferredDefaultModel) || 'Gemini Pro Latest'
     );
     return normalizedValue === normalizedModelToken('gemini-pro-latest') || normalizedValue === normalizedPreferred;
 }

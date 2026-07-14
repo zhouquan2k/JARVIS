@@ -1,4 +1,4 @@
-import { APP_CONFIG, type GroupSummarizerConfig, type ModelConfig, type ProviderConfig, type ProviderModelCatalog } from '@packages/core/config';
+import { APP_CONFIG, findPreferredModel, type GroupSummarizerConfig, type ModelConfig, type ProviderConfig, type ProviderModelCatalog } from '@packages/core/config';
 import { IModelProvider } from '../interfaces/IModelProvider';
 import { ChatGPTCodexProvider } from '../providers/model/ChatGPTCodexProvider';
 import { ChatGPTWebProvider } from '../providers/model/ChatGPTWebProvider';
@@ -110,31 +110,21 @@ function validateProviderCatalog(providerId: string, catalog: ProviderModelCatal
     };
 }
 
-function normalizeModelToken(value: string): string {
-    return value.toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
 function applyConfiguredDefaultModel(
     providerId: string,
     catalog: ProviderModelCatalog,
     providerConfig: ProviderConfig
 ): ProviderModelCatalog {
-    const configuredDefaultModel = providerConfig.preferredDefaultModel?.trim();
-    if (!configuredDefaultModel) {
+    const preferredDefaultModel = providerConfig.preferredDefaultModel;
+    if (!preferredDefaultModel || (Array.isArray(preferredDefaultModel) && preferredDefaultModel.length === 0)) {
         return catalog;
     }
 
-    const normalizedConfiguredValue = normalizeModelToken(configuredDefaultModel);
-    const matchedModel = catalog.models.find((model) => {
-        return model.id === configuredDefaultModel
-            || model.name === configuredDefaultModel
-            || normalizeModelToken(model.id) === normalizedConfiguredValue
-            || normalizeModelToken(model.name) === normalizedConfiguredValue;
-    });
+    const matchedModel = findPreferredModel(catalog.models, preferredDefaultModel);
 
     if (!matchedModel) {
         console.warn(
-            `Configured default model '${configuredDefaultModel}' was not found in available models for provider '${providerId}', falling back to provider catalog default '${catalog.defaultModel}'.`
+            `Configured default model(s) '${JSON.stringify(preferredDefaultModel)}' were not found in available models for provider '${providerId}', falling back to provider catalog default '${catalog.defaultModel}'.`
         );
         return {
             models: catalog.models.map(cloneModelConfig),
@@ -277,6 +267,7 @@ export function createModelProviderRuntime(options: ModelProviderRuntimeOptions)
 
                 return new MultiModelGroupProvider({
                     resolveMemberProvider: (id) => runtime.getProvider(id, { fresh: true }),
+                    resolveMemberModels: (id) => runtime.getProviderModels(id),
                     getGroupConfig: (presetModelId) => ({
                         members: resolveGroupMembers(presetModelId ?? providerConfig.defaultModel)
                     }),
@@ -303,7 +294,9 @@ export function createModelProviderRuntime(options: ModelProviderRuntimeOptions)
                     transport: createDomTransport({
                         providerId,
                         targetUrl,
-                        capability: options.controlledPageCapability
+                        capability: options.controlledPageCapability,
+                        // Claude 的 SPA 在全新受控窗口冷加载深链接会白屏，恢复时需先从首页热启动再进入会话。
+                        resumeViaWarmBoot: providerId === 'claude-dom'
                     })
                 });
             }

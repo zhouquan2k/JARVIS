@@ -25,7 +25,7 @@
         :tag="panelTag"
         :group-by-date="selectedTag === 'planned'"
         :include-tomorrow="selectedTag === 'today'"
-        :show-completed-section="false"
+        :show-completed-section="selectedTag === 'today'"
         :completed-only="selectedTag === 'completed'"
       />
     </div>

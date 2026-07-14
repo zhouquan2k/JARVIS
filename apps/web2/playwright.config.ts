@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 const configDir = path.dirname(fileURLToPath(import.meta.url));
 const knowledgeFixtureRoot = path.resolve(configDir, '../server/tests/fixtures/knowledge-workspace');
+const e2eDbPath = path.resolve(configDir, '.tmp', 'playwright-sync.sqlite');
 const useRendererDist = process.env.WEB2_E2E_USE_RENDERER_DIST === '1';
 const baseURL = process.env.PLAYWRIGHT_BASE_URL?.trim() || (useRendererDist
   ? 'http://127.0.0.1:8791'
@@ -16,6 +17,7 @@ function createServerCommand(): string {
   const baseEnv = [
     'PORT=8791',
     `CHATPRISM_KNOWLEDGE_ROOT=${knowledgeFixtureRoot}`,
+    `CHATPRISM_SYNC_DB_PATH=${e2eDbPath}`,
     `CHATPRISM_SYNC_KEY=${e2eSyncKey}`
   ];
 

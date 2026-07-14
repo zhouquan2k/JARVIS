@@ -4,13 +4,13 @@ import { mount } from '@vue/test-utils';
 import MoveErrorDialog from './MoveErrorDialog.vue';
 
 describe('MoveErrorDialog', () => {
-    it('renders cross-agent message', () => {
+    it('renders cross-scope message', () => {
         const wrapper = mount(MoveErrorDialog, {
-            props: { reason: 'cross-agent' }
+            props: { reason: 'cross-scope' }
         });
 
         const message = wrapper.get('[data-testid="move-error-message"]').text();
-        expect(message).toContain('Agent');
+        expect(message).toContain('跨作用域');
     });
 
     it('renders references-dir message', () => {

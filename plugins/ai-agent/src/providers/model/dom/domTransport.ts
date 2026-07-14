@@ -6,6 +6,12 @@ export interface DomTransportOptions {
     providerId: string;
     targetUrl: string;
     capability: ControlledPageCapability;
+    /**
+     * 恢复轮是否需要「预热两步导航」：先加载站点首页启动 SPA（激活 Service Worker），再进入会话 URL。
+     * 某些 SPA（如 Claude）在全新受控窗口里冷加载深链接 `/chat/<id>` 会白屏，必须先从首页热启动。
+     * 默认 false（ChatGPT/Gemini 直连恢复即可）。
+     */
+    resumeViaWarmBoot?: boolean;
 }
 
 export interface DomTransportOpenOptions {
@@ -15,6 +21,12 @@ export interface DomTransportOpenOptions {
      * - false（后续轮）：复用受控页当前会话（如 /c/<id>），不导航，从而像 openteam 一样在同一对话内持续追问。
      */
     reset?: boolean;
+    /**
+     * 后续轮恢复用：此前落盘的站点会话 URL。
+     * 传入时导航到该 URL（受控页空白或 URL 不同才实际加载），用于重启后回到原对话续聊。
+     * 与 reset 互斥；reset 优先。
+     */
+    resumeUrl?: string;
 }
 
 export interface DomTransport {
@@ -23,6 +35,8 @@ export interface DomTransport {
     readFinalText(): Promise<string>;
     injectAndSubmit(prompt: string, requestId: string): Promise<void>;
     subscribe(onEvent: (event: ControlledPageEvent) => void): () => void;
+    /** 读取受控页当前 URL（location.href），用于持久化会话 URL 与恢复校验。失败返回空字符串。 */
+    readConversationUrl(): Promise<string>;
     /** 打开页面（仅空白时导航）后读取模型选择器中的可用模型列表。失败返回空数组。 */
     readAvailableModels(): Promise<DomModelInfo[]>;
     /** 在页面内切换到指定模型（仅 Gemini）。失败时记录日志但不抛出。 */
@@ -33,19 +47,50 @@ export interface DomTransport {
 
 export function createDomTransport(options: DomTransportOptions): DomTransport {
     const { providerId, targetUrl, capability } = options;
+    const resumeViaWarmBoot = options.resumeViaWarmBoot === true;
+
+    // 预热：等待站点 Service Worker 就绪（有界超时），确保后续深链接加载被 SW 正常接管而非白屏。
+    const waitForServiceWorkerReady = async (): Promise<void> => {
+        await capability.evaluateInPage({
+            providerId,
+            script: `(async () => {
+                try {
+                    if (navigator.serviceWorker) {
+                        await Promise.race([
+                            navigator.serviceWorker.ready,
+                            new Promise((resolve) => setTimeout(resolve, 4000))
+                        ]);
+                    }
+                } catch {}
+                return true;
+            })()`
+        });
+    };
 
     return {
         async open(openOptions?: DomTransportOpenOptions) {
             const reset = openOptions?.reset === true;
-            console.log('[DomTransport]', JSON.stringify({ stage: 'open-controlled-page', providerId, targetUrl, reset }));
+            const resumeUrl = openOptions?.resumeUrl;
+            console.log('[DomTransport]', JSON.stringify({ stage: 'open-controlled-page', providerId, targetUrl, reset, resume: Boolean(resumeUrl), warmBoot: resumeViaWarmBoot }));
             if (reset) {
                 // 首轮：强制重载站点首页，确保是一个全新空白对话。
                 await capability.openControlledPage({ providerId, targetUrl, forceReload: true });
+            } else if (resumeUrl && resumeViaWarmBoot) {
+                // 预热恢复轮（如 Claude）：直接冷加载深链接会白屏，需复刻在线路径——
+                // 先加载首页启动 SPA + 激活 Service Worker，就绪后再进入会话 URL。
+                console.log('[DomTransport]', JSON.stringify({ stage: 'warm-boot-home', providerId, targetUrl }));
+                await capability.openControlledPage({ providerId, targetUrl, forceReload: true });
+                await waitForServiceWorkerReady();
+                console.log('[DomTransport]', JSON.stringify({ stage: 'warm-boot-navigate', providerId, resumeUrl }));
+                await capability.openControlledPage({ providerId, targetUrl: resumeUrl });
+            } else if (resumeUrl) {
+                // 恢复轮：导航回落盘的会话 URL（受控页空白或 URL 不同才实际加载），重启后回到原对话。
+                await capability.openControlledPage({ providerId, targetUrl: resumeUrl });
             } else {
                 // 后续轮：仅当受控页空白时才加载首页；已有活跃对话（/c/<id>）则保留，不导航。
                 await capability.openControlledPage({ providerId, targetUrlIfBlank: targetUrl });
             }
-            console.log('[DomTransport]', JSON.stringify({ stage: 'controlled-page-ready', providerId, reset }));
+            console.log('[DomTransport]', JSON.stringify({ stage: 'controlled-page-ready', providerId, reset, resume: Boolean(resumeUrl) }));
         },
 
         async setWebSearch(enabled: boolean) {
@@ -79,6 +124,21 @@ export function createDomTransport(options: DomTransportOptions): DomTransport {
 
         subscribe(onEvent: (event: ControlledPageEvent) => void): () => void {
             return capability.subscribeControlledPageEvent(providerId, onEvent);
+        },
+
+        async readConversationUrl(): Promise<string> {
+            try {
+                const url = await capability.evaluateInPage<string>({
+                    providerId,
+                    script: 'location.href'
+                });
+                const resolved = typeof url === 'string' ? url : '';
+                console.log('[DomTransport]', JSON.stringify({ stage: 'read-conversation-url', providerId, url: resolved }));
+                return resolved;
+            } catch (err) {
+                console.warn('[DomTransport]', JSON.stringify({ stage: 'read-conversation-url-failed', providerId, error: String(err) }));
+                return '';
+            }
         },
 
         async readAvailableModels(): Promise<DomModelInfo[]> {

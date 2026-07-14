@@ -1,4 +1,4 @@
-import { APP_CONFIG, type ProviderModelCatalog } from '@packages/core/config';
+import { APP_CONFIG, findPreferredModel, firstPreferredModel, type ProviderModelCatalog } from '@packages/core/config';
 import type { IModelProvider, ProviderSendResult, ProviderStreamUpdate, ReasoningEffort, SendMessageOptions } from '../../interfaces/IModelProvider';
 import type { GroupMemberPart, GroupSummaryPart } from '../../interfaces/Conversation';
 import type { GroupConfig, GroupMember, MultiModelGroupProviderDeps } from '../../group/groupTypes';
@@ -14,13 +14,15 @@ function logGroup(stage: string, extra?: Record<string, unknown>): void {
     }
 }
 
+/** modelId 已解析为具体模型 id 的成员。 */
+type ResolvedGroupMember = Omit<GroupMember, 'modelId'> & { modelId: string };
+
 export class MultiModelGroupProvider implements IModelProvider {
     readonly id = 'group';
 
     private readonly deps: MultiModelGroupProviderDeps;
     private activeMemberProviders: IModelProvider[] = [];
     private activeSummarizerProvider: IModelProvider | null = null;
-    private hasActiveSummaryConversation = false;
 
     constructor(deps: MultiModelGroupProviderDeps) {
         this.deps = deps;
@@ -48,10 +50,40 @@ export class MultiModelGroupProvider implements IModelProvider {
         return this.deps.getGroupConfig(options.modelId);
     }
 
+    /** 把成员 modelId（可能是优先级列表）解析为该成员 provider 目录中第一个可用的具体模型 id。 */
+    private async resolveMemberModelId(member: GroupMember): Promise<string> {
+        if (!Array.isArray(member.modelId)) {
+            return member.modelId;
+        }
+        if (this.deps.resolveMemberModels) {
+            try {
+                const catalog = await this.deps.resolveMemberModels(member.providerId);
+                const matched = findPreferredModel(catalog.models, member.modelId);
+                if (matched) {
+                    return matched.id;
+                }
+            } catch (err) {
+                logGroup('resolve-member-model-failed', {
+                    providerId: member.providerId,
+                    error: err instanceof Error ? err.message : String(err)
+                });
+            }
+        }
+        return firstPreferredModel(member.modelId) ?? '';
+    }
+
+    private async resolveMembers(members: GroupMember[]): Promise<ResolvedGroupMember[]> {
+        return Promise.all(members.map(async (member) => ({
+            ...member,
+            modelId: await this.resolveMemberModelId(member)
+        })));
+    }
+
     async applyPageDefaults(options: { modelId?: string; reasoningEffort?: ReasoningEffort; groupMembers?: GroupMember[] }): Promise<void> {
         const config = this.resolveConfig(options);
+        const members = await this.resolveMembers(config.members);
         await Promise.all(
-            config.members.map(async (member) => {
+            members.map(async (member) => {
                 const memberProvider = this.deps.resolveMemberProvider(member.providerId);
                 await memberProvider.applyPageDefaults?.({
                     modelId: member.modelId,
@@ -67,12 +99,25 @@ export class MultiModelGroupProvider implements IModelProvider {
         onUpdate: (update: ProviderStreamUpdate) => void
     ): Promise<ProviderSendResult> {
         const config = this.resolveConfig(options);
-        const { targets } = parseMentions(prompt, config.members);
+        // 先用未解析的 config.members 做 @mention 匹配（只依赖 name），并同步登记
+        // activeMemberProviders：确保调用方在 sendMessage 返回的 Promise resolve 前
+        // 立刻调用 abort() 时，仍能命中已激活的成员 provider（不被下面的异步模型解析打断）。
+        const { targets: unresolvedTargets } = parseMentions(prompt, config.members);
         logGroup('resolve-members', {
             optionsGroupMembers: (options.groupMembers ?? []).map((m) => m.providerId),
             configMembers: config.members.map((m) => m.providerId),
-            parsedTargets: targets.map((m) => m.providerId)
+            parsedTargets: unresolvedTargets.map((m) => m.providerId)
         });
+
+        // 快照本轮成员 provider：abort() 可能在下面的异步模型解析期间把 this.activeMemberProviders
+        // 清空，memberTasks 需要按这份快照（而非 this.activeMemberProviders）取对应 provider。
+        const memberProviders = unresolvedTargets.map((member) => this.deps.resolveMemberProvider(member.providerId));
+        this.activeMemberProviders = memberProviders;
+        this.activeSummarizerProvider = null;
+
+        const resolvedMembers = await this.resolveMembers(config.members);
+        const targetNames = new Set(unresolvedTargets.map((m) => m.name));
+        const targets = resolvedMembers.filter((m) => targetNames.has(m.name));
 
         const groupMembers: GroupMemberPart[] = targets.map((m) => ({
             name: m.name,
@@ -82,11 +127,13 @@ export class MultiModelGroupProvider implements IModelProvider {
             status: 'pending'
         }));
 
-        this.activeMemberProviders = [];
-        this.activeSummarizerProvider = null;
-
         const startedAt = Date.now();
-        logGroup('send-start', { memberCount: targets.length, members: targets.map((m) => ({ name: m.name, providerId: m.providerId, modelId: m.modelId })) });
+        logGroup('send-start', {
+            memberCount: targets.length,
+            members: targets.map((m) => ({ name: m.name, providerId: m.providerId, modelId: m.modelId })),
+            hasHistory: (options.history?.length ?? 0) > 0,
+            resumeSessions: options.groupMemberSessions ?? null
+        });
 
         const memberIndexByName = new Map(targets.map((m, i) => [m.name, i]));
 
@@ -104,11 +151,12 @@ export class MultiModelGroupProvider implements IModelProvider {
                 .join('\n\n');
         };
 
-        const memberTasks = targets.map((member) => {
-            const memberProvider = this.deps.resolveMemberProvider(member.providerId);
-            this.activeMemberProviders.push(memberProvider);
+        const memberTasks = targets.map((member, i) => {
+            // targets 由 resolvedMembers 按 unresolvedTargets 的 name 过滤而来，顺序与
+            // memberProviders（按 unresolvedTargets 同序同步登记的快照）一一对应。
+            const memberProvider = memberProviders[i];
 
-            const memberPrompt = composeMemberPrompt(member, config.members, options.history, prompt);
+            const memberPrompt = composeMemberPrompt(member, resolvedMembers, options.history, prompt);
             const idx = memberIndexByName.get(member.name)!;
             groupMembers[idx].status = 'streaming';
             logGroup('member-start', { name: member.name, providerId: member.providerId, modelId: member.modelId });
@@ -116,7 +164,7 @@ export class MultiModelGroupProvider implements IModelProvider {
 
             const sendPromise = memberProvider.sendMessage(
                 memberPrompt,
-                { ...options, modelId: member.modelId },
+                { ...options, modelId: member.modelId, resumeConversationUrl: options.groupMemberSessions?.[member.providerId] },
                 (chunk: ProviderStreamUpdate) => {
                     if (!firstChunkLogged && chunk.text) {
                         firstChunkLogged = true;
@@ -135,7 +183,8 @@ export class MultiModelGroupProvider implements IModelProvider {
                 .then((result) => {
                     groupMembers[idx].content = result.text;
                     groupMembers[idx].status = 'done';
-                    logGroup('member-done', { name: member.name, textLen: result.text.length, sinceStartMs: Date.now() - startedAt });
+                    groupMembers[idx].conversationUrl = result.conversationUrl;
+                    logGroup('member-done', { name: member.name, textLen: result.text.length, conversationUrl: result.conversationUrl, sinceStartMs: Date.now() - startedAt });
                 })
                 .catch((err: unknown) => {
                     groupMembers[idx].status = 'error';
@@ -180,14 +229,17 @@ export class MultiModelGroupProvider implements IModelProvider {
                     this.activeSummarizerProvider = summarizerProvider;
                     const summaryPrompt = composeGroupSummaryPrompt(successfulMembers, summarizerConfig.systemPrompt);
                     groupSummary.phase = 'streaming';
-                    const summaryHistory = this.hasActiveSummaryConversation
+                    groupSummary.providerId = summarizerConfig.providerId;
+                    // 有落盘的总结器会话 URL 时按「恢复轮」发送（history 非空触发续聊 + 导航回原对话）；
+                    // 否则首次总结，开全新总结对话。
+                    const summarizerResumeUrl = options.groupMemberSessions?.[summarizerConfig.providerId];
+                    const summaryHistory = summarizerResumeUrl
                         ? [{ role: 'user' as const, content: '继续沿用当前总结对话。' }]
                         : undefined;
-                    this.hasActiveSummaryConversation = true;
 
-                    await summarizerProvider.sendMessage(
+                    const summaryResult = await summarizerProvider.sendMessage(
                         summaryPrompt,
-                        { modelId: summarizerConfig.modelId, history: summaryHistory },
+                        { modelId: summarizerConfig.modelId, history: summaryHistory, resumeConversationUrl: summarizerResumeUrl },
                         (chunk: ProviderStreamUpdate) => {
                             groupSummary!.content = chunk.text;
                             groupSummary!.phase = 'streaming';
@@ -200,7 +252,8 @@ export class MultiModelGroupProvider implements IModelProvider {
                     );
 
                     groupSummary.phase = 'done';
-                    logGroup('summary-done', { textLen: groupSummary.content.length, sinceStartMs: Date.now() - startedAt });
+                    groupSummary.conversationUrl = summaryResult.conversationUrl;
+                    logGroup('summary-done', { textLen: groupSummary.content.length, conversationUrl: summaryResult.conversationUrl, sinceStartMs: Date.now() - startedAt });
                 } catch (err: unknown) {
                     groupSummary.phase = 'error';
                     groupSummary.error = err instanceof Error ? err.message : String(err);

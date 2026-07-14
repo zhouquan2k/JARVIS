@@ -58,12 +58,15 @@ export interface GroupMemberPart {
     content: string;
     status: GroupMemberStatus;
     error?: string;
+    conversationUrl?: string;
 }
 
 export interface GroupSummaryPart {
     phase: GroupSummaryPhase;
     content: string;
     error?: string;
+    providerId?: string;
+    conversationUrl?: string;
 }
 
 export interface ConversationMessage {
@@ -362,7 +365,8 @@ function normalizeGroupMembers(value: unknown[]): GroupMemberPart[] {
             modelId: entry.modelId,
             content: typeof entry.content === 'string' ? entry.content : '',
             status,
-            error: typeof entry.error === 'string' ? entry.error : undefined
+            error: typeof entry.error === 'string' ? entry.error : undefined,
+            conversationUrl: typeof entry.conversationUrl === 'string' ? entry.conversationUrl : undefined
         });
     }
     return result;
@@ -436,7 +440,9 @@ function normalizeGroupSummary(value: unknown): GroupSummaryPart | undefined {
     return {
         phase,
         content: typeof value.content === 'string' ? value.content : '',
-        error: typeof value.error === 'string' ? value.error : undefined
+        error: typeof value.error === 'string' ? value.error : undefined,
+        providerId: typeof value.providerId === 'string' ? value.providerId : undefined,
+        conversationUrl: typeof value.conversationUrl === 'string' ? value.conversationUrl : undefined
     };
 }
 

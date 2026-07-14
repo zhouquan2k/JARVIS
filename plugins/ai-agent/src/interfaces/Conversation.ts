@@ -1,7 +1,7 @@
 import type { AnalysisResult } from './AnalysisResult';
 import type { ConversationOrigin } from './IExternalConversationProvider';
 import type { ReasoningEffort } from './IModelProvider';
-import type { GroupMember } from '../group/groupTypes';
+import type { PersistedGroupMember } from '../group/groupTypes';
 
 export type ConversationRole = 'user' | 'assistant';
 
@@ -15,12 +15,18 @@ export interface GroupMemberPart {
     content: string;
     status: GroupMemberStatus;
     error?: string;
+    /** 该成员在站点侧的真实会话 URL（如 chatgpt.com/c/<id>），用于重启后导航恢复对话。 */
+    conversationUrl?: string;
 }
 
 export interface GroupSummaryPart {
     phase: GroupSummaryPhase;
     content: string;
     error?: string;
+    /** 总结器 provider id（如 gemini-dom-summary），用于按 providerId 定位其恢复 URL。 */
+    providerId?: string;
+    /** 总结器在站点侧的真实会话 URL，用于重启后导航恢复总结对话。 */
+    conversationUrl?: string;
 }
 export type MessageAttachmentType = 'image' | 'file';
 export type MessageFunctionalPartKind = 'tool_call' | 'tool_result' | 'tool_exchange' | 'function_call' | 'search' | 'trace';
@@ -121,7 +127,7 @@ export interface ConversationModelSelection {
      */
     explicit?: boolean;
     /** providerId 为 'group' 时，本会话勾选参与的成员列表（顶部勾选区持久化结果）。 */
-    groupMembers?: GroupMember[];
+    groupMembers?: PersistedGroupMember[];
 }
 
 export interface ConversationArchiveMetadata {
@@ -547,7 +553,7 @@ export function normalizeConversation(conversation: Conversation): Conversation 
                 ...(Array.isArray(modelSelection.groupMembers)
                     ? {
                         groupMembers: modelSelection.groupMembers
-                            .filter((member): member is GroupMember => {
+                            .filter((member): member is PersistedGroupMember => {
                                 return Boolean(member)
                                     && typeof member.providerId === 'string'
                                     && typeof member.modelId === 'string'

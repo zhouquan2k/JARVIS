@@ -57,7 +57,7 @@
 
 - `packages/node` 的存在前提是“同一份 Node-only 实现需要被多个 Node 宿主复用”。
 - 当前它应只保留本地文件上下文链路，例如本地文件上下文 provider 与其配套的文档身份索引等。
-- 文件任务存储、Google Calendar 同步、Bilibili 字幕抓取这类仅由 `apps/server` 使用的实现，不再放在 `packages/node`，而是直接归属 `apps/server`。
+- Google Calendar 同步、Bilibili 字幕抓取这类仅由 `apps/server` 使用的实现，不再放在 `packages/node`，而是直接归属 `apps/server`。任务存储已不再是文件形态——任务与会话一样，以 hub 上的 SQLite 为真值，经同步 API 复制到各端（见 4.4）。
 - Desktop 不再为 Bilibili 导入提供 main-process 直连桥；插件统一通过 `apps/server` 暴露的 `/api/import/*` 后端接口完成导入抓取。
 
 ### 3.2 插件的定位与边界
@@ -141,7 +141,7 @@ viewer 模式下的插入操作（文档工具栏触发的链接 / 会话引用 
 Desktop 存在两种受支持的运行形态：
 
 - **server-origin / dev-server 模式**：renderer 与 API **同源**，所有 `/api/*` 走**相对路径**。
-- **local-bundle 模式**：renderer 从本地 bundle 加载，main 进程向 renderer 注入绝对 hub URL；文档工作区通过 IPC 访问 main 进程持有的本地文件上下文能力，而不是把远端 `/api/context` 作为主链路；远程 sync/codex 通过 main 代理链路访问 VPS。
+- **local-bundle 模式**：renderer 从本地 bundle 加载，main 进程向 renderer 注入绝对 hub URL；文档工作区通过 IPC 访问 main 进程持有的本地文件上下文能力，而不是把远端 `/api/context` 作为主链路；远程 sync/codex 通过 main 代理链路访问远程 hub（当前部署为 NAS，见 4.4）。
 
 - **dev**：renderer 由本地开发服务器托管，并将 `/api`、`/health` 等请求代理到本地 server。
 - **server-origin / prod / e2e**：renderer 由 server 静态托管，renderer 与 API 天然同源；web2 的 PWA / 离线 E2E 也必须跑在这一模式下，才能真实覆盖 Service Worker 预缓存与运行时缓存。
@@ -158,11 +158,30 @@ Desktop 存在两种受支持的运行形态：
 - 相对路径对部署端口 / host 无感知，迁移与打包更稳健。
 - Web 宿主的离线边界是"静态壳 + 最近读取文档的只读缓存 + IndexedDB 中的会话/任务副本"；文档真身仍在文件域，不把浏览器缓存提升为主存。
 
+### 4.4 单一 Hub 部署：NAS Server + Dropbox 文件同步 + 数据库记录同步
+
+**概述**
+
+在实际部署的拓扑中，`apps/server` 只有**唯一一个**运行实例——托管于 NAS 上的一个 Docker 容器，而不是每台机器各跑一份。所有需要在线后端的能力都收敛到这一个实例；Mac 本地的 `dev:server` 仅作为同一份代码的开发/调试镜像，从不是第二个生产 hub。
+
+**决策**
+
+- **Server**：唯一的、部署在 NAS 上的 `apps/server` 实例即 hub。Web（桌面与手机浏览器）由该实例同源托管，直接调用其 `/api/*`；desktop 在 local-bundle 模式（见 4.3）下的 `sync`、`codex`、`provider-config` 流量同样指向这一个实例，而文档访问仍走本地 IPC。
+- **文件（knowledge root）**：knowledge root 保持纯文件树形态。hub 与各台 desktop 机器之间由 Dropbox 各自独立同步（NAS 侧一个 Dropbox 客户端，Mac 侧另一个）——Dropbox 是同步机制本身，不是 JARVIS 实现的能力。hub 经 `/api/context` 把这棵树提供给 Web/手机；desktop 则通过 4.3 所述的 IPC 版 `FileSystemContextProvider` 读写自己本地的 Dropbox 同步副本，从不经由 hub 的 HTTP context API。
+- **记录（会话与任务）**：两者的真值均为 hub 上的 SQLite，存放目录刻意置于 Dropbox 同步的 knowledge root **之外**——文件同步工具不理解 SQLite 的 write-ahead log，若放入同步目录可能导致其损坏。每个客户端（Web、Desktop、Extension）都持有 local-first 副本（IndexedDB），通过同一套同步模式与 hub 对账：变更即推、启动补推、窗口重新获得焦点或变为可见时再补推一次（带节流），按 `updatedAt` 逐记录合并（last-write-wins）。该模式在会话（`SyncStorageProvider`）与任务（`ReplicaTaskService`）上实现完全一致；不再存在基于文件的任务 provider。
+
+**影响**
+
+- 一旦各端都完成过一次同步，会话与任务会在所有设备上收敛为同一状态。手机上完成一个任务后，desktop 要等它的副本下一次 pull 才能看到；若某端窗口始终保持前台且未重新获得焦点，会在下一次同步前一直显示陈旧数据。
+- knowledge root 在 hub 与每台 desktop 机器上都仍是一等公民的文件域产物：Obsidian、git、外部 agent 以及 `codex` CLI 都可以直接操作任一侧的 Dropbox 同步副本。
+- 把 SQLite 放在同步目录之外，意味着 Dropbox 永远看不到、也碰不到它，消除了当初"记录不能进文件域"这条设计动机所针对的损坏风险。
+- `my-README.md` 中"开发态"一节记录的 Mac 本地 server 不属于生产拓扑，它的唯一作用是在变更部署到 NAS 之前，用同一份 server 代码复现与调试问题。
+
 ## 5. 运行时与外部依赖链路
 
 - Web、Extension、Desktop 通过共享运行时契约调用外部模型提供方。
 - Extension 和 Desktop 还会桥接浏览器控制页面以访问 ChatGPT 和 Gemini 历史。
-- Sync Server 与 Desktop 宿主都可以通过文件系统适配层访问知识资料库；知识资料库即使部署在本地也视为外部依赖。
+- Sync Server 与 Desktop 宿主都可以通过文件系统适配层访问知识资料库；知识资料库即使部署在本地也视为外部依赖。在当前部署中，这个文件系统由 Dropbox（见 4.4）在 hub 与各 desktop 机器之间保持一致，这是 JARVIS 之外的外部机制。
 
 ## 6. 多模型协作与 DOM 自动化 Provider
 
@@ -180,7 +199,7 @@ Desktop 存在两种受支持的运行形态：
 - **定位**：以一个专用 provider 身份在单个会话内编排多个模型并发协作。
 - **编排语义**：
   - 无 `@name`：广播，预设内所有成员并发应答（`Promise.all`）。
-  - `@成员名`（可多个）：仅点名成员应答，仍并发；成员名单展示于会话顶部名片栏，点击成员即可自动插入 `@name`。
+  - `@成员名`（可多个）：仅点名成员应答，仍并发；成员名单展示于输入区下方的模型工具区，每个模型统一提供受控窗口链接、选择 checkbox 与 `@name` 快捷链接。
   - 同轮各成员看不到对方「本轮」回复；跨轮可见上一轮合并 transcript（经 `options.history` 传入）。
 - **输出**：按成员分段的合并 transcript（`### {成员名}\n{文本}`），作为单条 assistant 消息返回。
 - **成员解析**：成员 provider 由统一运行时按 provider 标识解析；Group 侧不保留 provider-specific 特判。

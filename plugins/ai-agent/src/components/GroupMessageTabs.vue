@@ -94,13 +94,16 @@ import { computed, ref, watch } from 'vue';
 import type { GroupMemberPart, GroupSummaryPart, GroupMemberStatus } from '../interfaces/Conversation';
 import { MarkdownContent, useWorkspaceI18n } from '@packages/ui';
 import { SUMMARY_SECTION_ANCHORS } from '../group/groupSummaryPrompt';
+import { useChatStore } from '../store/chat';
 
 const props = defineProps<{
+  messageId: string;
   groupMembers: GroupMemberPart[];
   groupSummary?: GroupSummaryPart;
 }>();
 
 const { t } = useWorkspaceI18n();
+const chatStore = useChatStore();
 
 const showSummaryTab = computed(() => props.groupMembers.length > 1);
 
@@ -112,12 +115,16 @@ const initialTab = computed(() => {
   return props.groupMembers[0]?.name ?? 'summary';
 });
 
-const activeTab = ref<string>(initialTab.value);
-const userHasSwitched = ref(false);
+// 视图切换（workspace/对话）会重挂载本组件；若 store 已保存该消息选中的 tab 则恢复，
+// 并视为“用户已切换”，避免后续 auto-switch / reset watch 覆盖恢复的选择。
+const persistedTab = chatStore.messageGroupActiveTabs[props.messageId];
+const activeTab = ref<string>(persistedTab ?? initialTab.value);
+const userHasSwitched = ref(typeof persistedTab === 'string');
 
 function selectTab(name: string): void {
   activeTab.value = name;
   userHasSwitched.value = true;
+  chatStore.setMessageGroupActiveTab(props.messageId, name);
 }
 
 // Auto-switch to summary when summarization completes (if user hasn't manually switched)

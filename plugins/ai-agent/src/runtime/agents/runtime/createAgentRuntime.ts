@@ -277,7 +277,8 @@ export function createAgentRuntime(options: CreateAgentRuntimeOptions): AgentRun
                         history: request.history,
                         modelOptions: request.modelOptions,
                         reasoningEffort: request.reasoningEffort,
-                        groupMembers: request.groupMembers
+                        groupMembers: request.groupMembers,
+                        groupMemberSessions: request.groupMemberSessions
                     },
                     onUpdate
                 );

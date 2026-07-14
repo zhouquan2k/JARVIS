@@ -1527,4 +1527,41 @@ describe('useDocumentWorkspaceStore', () => {
         expect(store.draftContent).toBe('# On disk');
         expect(store.dirtyPaths['/notes.md']).toBe(false);
     });
+
+    it('toggles conversation focus mode independently from the normal panel sizes and middle pane mode', () => {
+        const store = useDocumentWorkspaceStore();
+        const initialPanelSizes = store.panelSizes;
+
+        expect(store.conversationFocusMode).toBe(false);
+        expect(store.conversationFocusPanelSizes).toEqual([25, 75]);
+
+        store.enterConversationFocus();
+        expect(store.conversationFocusMode).toBe(true);
+        expect(store.panelSizes).toEqual(initialPanelSizes);
+        expect(store.middlePaneMode).toBe('default');
+
+        store.setConversationFocusPanelSizes([40, 60]);
+        expect(store.conversationFocusPanelSizes).toEqual([40, 60]);
+
+        store.exitConversationFocus();
+        expect(store.conversationFocusMode).toBe(false);
+        expect(store.panelSizes).toEqual(initialPanelSizes);
+        expect(store.conversationFocusPanelSizes).toEqual([40, 60]);
+
+        store.toggleConversationFocus();
+        expect(store.conversationFocusMode).toBe(true);
+        store.toggleConversationFocus();
+        expect(store.conversationFocusMode).toBe(false);
+    });
+
+    it('normalizes conversation focus panel sizes within bounds and falls back on invalid input', () => {
+        const store = useDocumentWorkspaceStore();
+
+        store.setConversationFocusPanelSizes([5, 95]);
+        expect(store.conversationFocusPanelSizes[0]).toBe(15);
+        expect(store.conversationFocusPanelSizes[1]).toBe(85);
+
+        store.setConversationFocusPanelSizes([0, 0]);
+        expect(store.conversationFocusPanelSizes).toEqual([50, 50]);
+    });
 });

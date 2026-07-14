@@ -135,7 +135,8 @@ test('web2 task views read from the replica offline and converge after reconnect
 
     await page.getByText(editedTodayTaskTitle, { exact: true }).click();
     await expect(page.getByTestId('document-workspace')).toBeVisible();
-    await expect(page.getByTestId('agent-task-open-list')).toContainText(editedTodayTaskTitle);
+    await expect(page.getByTestId('task-editor-inline')).toBeVisible();
+    await expect(page.getByTestId('task-editor-title')).toHaveValue(editedTodayTaskTitle);
 
     offlineState.enabled = false;
     await page.reload();

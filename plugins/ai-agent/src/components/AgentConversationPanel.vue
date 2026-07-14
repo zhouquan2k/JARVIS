@@ -31,11 +31,12 @@
           type="button"
           class="agent-conversation-panel__icon-btn"
           data-testid="agent-conversation-expand"
-          :title="t('shared.expandConversation')"
-          :aria-label="t('shared.expandConversation')"
-          @click="switchWorkspace('/chat')"
+          :title="documentStore.conversationFocusMode ? t('shared.collapseConversation') : t('shared.expandConversation')"
+          :aria-label="documentStore.conversationFocusMode ? t('shared.collapseConversation') : t('shared.expandConversation')"
+          @click="toggleConversationFocus"
         >
-          <PanelRightOpen :size="16" />
+          <PanelRightClose v-if="documentStore.conversationFocusMode" :size="16" />
+          <PanelRightOpen v-else :size="16" />
         </button>
         <button
           v-if="showRebindConversationAction"
@@ -151,13 +152,17 @@
       @cancel-rename="cancelRenameFromList"
       @delete="deleteConversationFromList"
     />
-    <NormalChatView v-else class="agent-conversation-panel__detail" />
+    <NormalChatView
+      v-else
+      class="agent-conversation-panel__detail"
+      :show-question-index="documentStore.conversationFocusMode"
+    />
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import { Archive, ArrowLeft, Files, PanelRightOpen, Pencil, Plus } from 'lucide-vue-next';
+import { Archive, ArrowLeft, Files, PanelRightClose, PanelRightOpen, Pencil, Plus } from 'lucide-vue-next';
 import type { ContextDocument, Conversation, IContextProvider, ProjectDocumentEntry, ResolvedAgentConfig } from '@plugins/ai-agent/src/internal';
 import { toConversationQueryProvider } from '../providers/context/HttpConversationQueryProvider';
 import {
@@ -167,7 +172,7 @@ import {
 import AgentDocumentConversationList from './AgentDocumentConversationList.vue';
 import NormalChatView from '../views/NormalChatView.vue';
 import { useChatStore } from '../store/chat';
-import { useWorkspaceI18n, type ChatRoutePath, type OpenConversationRequest } from '@packages/ui';
+import { useDocumentWorkspaceStore, useWorkspaceI18n, type ChatRoutePath, type OpenConversationRequest } from '@packages/ui';
 import { formatConversationTitle, extractNodeNameFromPath } from '../utils/conversationTitle';
 
 type PanelMode = 'list' | 'detail';
@@ -184,6 +189,7 @@ const props = defineProps<{
 }>();
 
 const chatStore = useChatStore();
+const documentStore = useDocumentWorkspaceStore();
 const { t } = useWorkspaceI18n();
 const emit = defineEmits<{
   (event: 'request-workspace-switch', path: ChatRoutePath): void;
@@ -307,13 +313,15 @@ const listConversations = computed(() => {
     return baseConversations;
   }
 
-  // When the user manually returns from detail mode, keep the currently open
-  // workspace conversation visible in the list even if its scoped linkage has
-  // not been re-fetched from the backing provider yet.
+  // Document-level lists are strict: the selected conversation must already
+  // match documentPaths/documentIds above. Keep any in-flight conversation
+  // running in the store without exposing it on unrelated documents.
   if (isDocumentSelection.value) {
-    return [activeConversation, ...baseConversations];
+    return baseConversations;
   }
 
+  // Scope-level lists may retain the selected local conversation before the
+  // backing provider catches up.
   const normalizedAgentKey = chatStore.resolveConversationAgentKey(activeScopeKey.value ?? null);
   const activeConversationAgentKey = chatStore.resolveConversationAgentKey(activeConversation.agentKey ?? null);
   if (normalizedAgentKey && normalizedAgentKey === activeConversationAgentKey) {
@@ -550,8 +558,16 @@ async function archiveConversationFromToolbar(): Promise<void> {
   await chatStore.archiveCurrentConversationToDocument();
 }
 
+// 暂未使用：原"跳转到独立对话路由"方案，已由 toggleConversationFocus 的原地布局切换取代，待后续评估后删除。
 function switchWorkspace(path: ChatRoutePath): void {
   emit('request-workspace-switch', path);
+}
+
+function toggleConversationFocus(): void {
+  documentStore.toggleConversationFocus();
+  if (documentStore.conversationFocusMode) {
+    chatStore.setQuestionIndexPanelOpen(true);
+  }
 }
 
 function consumeRestoreConversationId(): void {

@@ -507,8 +507,23 @@ export function createAiAgentPlugin(options: AiAgentPluginOptions): PluginManife
                     const documentId = input.activeDocument?.documentId;
                     if (documentPath && contextProvider) {
                         try {
-                            const conversations = await toConversationQueryProvider(contextProvider, options.env).getConversations({ documentPath, documentId });
-                            return conversations.filter(
+                            const queriedConversations = await toConversationQueryProvider(contextProvider, options.env).getConversations({ documentPath, documentId });
+                            const conversationsById = new Map(
+                                queriedConversations.map((conversation) => [conversation.id, conversation])
+                            );
+                            const localCandidates = [
+                                ...chatStore.conversations,
+                                ...(chatStore.currentConversation ? [chatStore.currentConversation] : [])
+                            ];
+                            for (const conversation of localCandidates) {
+                                const matchesPath = conversation.documentPaths?.includes(documentPath) === true;
+                                const matchesId = !!documentId && conversation.documentIds?.includes(documentId) === true;
+                                if (matchesPath || matchesId) {
+                                    conversationsById.set(conversation.id, conversation);
+                                }
+                            }
+
+                            return [...conversationsById.values()].filter(
                                 (conversation) => !conversation.compare
                                     && !conversation.sync?.deleted
                                     && (!activeAgentKey || conversation.agentKey === activeAgentKey)

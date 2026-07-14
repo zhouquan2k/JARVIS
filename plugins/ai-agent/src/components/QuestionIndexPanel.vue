@@ -196,7 +196,7 @@ async function confirmDelete(questionId: string) {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  width: 272px;
+  width: 220px;
   height: 100%;
   min-height: 0;
   gap: 0;
@@ -506,7 +506,7 @@ async function confirmDelete(questionId: string) {
 
 @media (max-width: 1180px) {
   .question-index-panel {
-    width: 252px;
+    width: 200px;
   }
 }
 

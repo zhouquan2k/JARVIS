@@ -30,7 +30,8 @@ export interface ProviderConfig {
     nameKey?: string;
     models: ModelConfig[];
     defaultModel: string;
-    preferredDefaultModel?: string;
+    /** 动态目录就绪后按此优先级取第一个可用模型作为默认；单值等价于 1 元素列表。 */
+    preferredDefaultModel?: string | string[];
     supportedRuntimeModes: RuntimeMode[];
     requiredCapabilities?: string[];
     enabled?: boolean;
@@ -57,7 +58,8 @@ export interface AnalyzerConfig {
 
 export interface GroupMemberConfig {
     providerId: string;
-    modelId: string;
+    /** 按此优先级取该 provider 目录中第一个可用模型；单值等价于 1 元素列表。 */
+    modelId: string | string[];
     name: string;
 }
 
@@ -65,6 +67,41 @@ export interface GroupSummarizerConfig {
     providerId: string;
     modelId: string;
     systemPrompt?: string;
+}
+
+function normalizeModelToken(value: string): string {
+    return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/** 把 preferredDefaultModel / GroupMemberConfig.modelId 归一为去空、trim 过的优先级列表。 */
+export function normalizePreferredDefaultModels(preferred: string | string[] | undefined): string[] {
+    const list = Array.isArray(preferred) ? preferred : preferred ? [preferred] : [];
+    return list.map((item) => item.trim()).filter((item) => item.length > 0);
+}
+
+/** 按优先级列表在 models 中查找第一个可用项（id/name 精确匹配，或规范化 token 匹配）。 */
+export function findPreferredModel<T extends { id: string; name: string }>(
+    models: T[],
+    preferred: string | string[] | undefined
+): T | undefined {
+    for (const candidate of normalizePreferredDefaultModels(preferred)) {
+        const normalizedCandidate = normalizeModelToken(candidate);
+        const matched = models.find((model) => {
+            return model.id === candidate
+                || model.name === candidate
+                || normalizeModelToken(model.id) === normalizedCandidate
+                || normalizeModelToken(model.name) === normalizedCandidate;
+        });
+        if (matched) {
+            return matched;
+        }
+    }
+    return undefined;
+}
+
+/** 取优先级列表中的第一项（用于持久化等只能存具体字符串的场景）。 */
+export function firstPreferredModel(preferred: string | string[] | undefined): string | undefined {
+    return normalizePreferredDefaultModels(preferred)[0];
 }
 
 export const DEFAULT_SYNC_KEY = '0';
@@ -142,7 +179,7 @@ export const APP_CONFIG: {
     analyzer: AnalyzerConfig;
     lightweightModels: LightweightModelConfig;
     groupPresets: Record<string, GroupMemberConfig[]>;
-    /** 群聊可选成员池：顶部勾选区展示的全部候选 DOM 成员（实际可用性再按运行模式过滤）。 */
+    /** 群聊可选成员池：输入区模型工具栏展示的全部候选 DOM 成员（实际可用性再按运行模式过滤）。 */
     groupCandidates: GroupMemberConfig[];
     /** 按群预设 ID 配置总结模型；undefined 表示该预设不启用自动总结。 */
     groupSummarizers: Record<string, GroupSummarizerConfig>;
@@ -441,7 +478,7 @@ export const APP_CONFIG: {
             ],
             defaultModel: 'dom',
             // 群聊 DOM 模式下跟随此默认模型（无法逐个手选时的兜底）。
-            preferredDefaultModel: 'GPT-5.5',
+            preferredDefaultModel: 'GPT-5.6 Sol',
             supportedRuntimeModes: ['desktop'],
             requiredCapabilities: ['controlled-page']
         },
@@ -488,8 +525,8 @@ export const APP_CONFIG: {
                 }
             ],
             defaultModel: 'dom',
-            // 动态目录就绪后默认选中 "Opus 4.8"（Claude 高能力模型，支持 extended thinking）。
-            preferredDefaultModel: 'Opus 4.8',
+            // 动态目录就绪后按优先级选取第一个可用模型：优先 "Fable 5"，不可用时回退 "Opus 4.8"。
+            preferredDefaultModel: ['Fable 5', 'Opus 4.8'],
             supportedRuntimeModes: ['desktop'],
             requiredCapabilities: ['controlled-page']
         }
@@ -501,16 +538,16 @@ export const APP_CONFIG: {
     groupPresets: {
         // 群聊 DOM 模式：各成员使用 provider 的 preferredDefaultModel，无需用户逐个手选。
         'dom': [
-            { providerId: 'chatgpt-dom', modelId: 'GPT-5.5', name: 'ChatGPT' },
+            { providerId: 'chatgpt-dom', modelId: 'GPT-5.6 Sol', name: 'ChatGPT' },
             { providerId: 'gemini-dom', modelId: '3.1 Pro', name: 'Gemini' }
         ]
     },
-    // 群聊顶部勾选区的候选成员（含默认未勾选项，如 Claude）。
+    // 群聊输入区模型工具栏的候选成员（含默认未勾选项，如 Claude）。
     // modelId 使用各 provider 的 preferredDefaultModel，使 group 模式下页面自动切换到对应模型。
     groupCandidates: [
-        { providerId: 'chatgpt-dom', modelId: 'GPT-5.5', name: 'ChatGPT' },
+        { providerId: 'chatgpt-dom', modelId: 'GPT-5.6 Sol', name: 'ChatGPT' },
         { providerId: 'gemini-dom', modelId: '3.1 Pro', name: 'Gemini' },
-        { providerId: 'claude-dom', modelId: 'Opus 4.8', name: 'Claude' }
+        { providerId: 'claude-dom', modelId: ['Fable 5', 'Opus 4.8'], name: 'Claude' }
     ],
     groupSummarizers: {
         'dom': {

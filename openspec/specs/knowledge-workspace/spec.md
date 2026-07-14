@@ -493,6 +493,39 @@ The knowledge workspace main Markdown document viewer SHALL provide a user-visib
 - **WHEN** the active text viewer document has `mimeType` other than `text/markdown`
 - **THEN** the system MUST NOT require Mermaid or Markdown image preview controls to be shown for that document
 
+### Requirement: Knowledge workspace Markdown viewer SHALL support collapsing heading sections in viewer mode
+In `viewer` mode the knowledge workspace Markdown viewer SHALL render a fold toggle control before every heading so the user can collapse or expand the section that heading introduces. Collapsing a heading MUST hide the blocks that follow it up to the next heading of the same or higher level, including nested lower-level headings and their content. The collapsed state is session-only in-memory viewer state scoped to the current editor instance; it MUST NOT modify the Markdown document content and is NOT persisted across document switches or reloads. Folding controls SHALL apply only in `viewer` mode, not in raw-source `edit` mode.
+
+#### Scenario: Collapse a heading section
+- **WHEN** the user activates the fold toggle of a heading in `viewer` mode
+- **THEN** the system MUST hide the following blocks up to the next same-or-higher-level heading, including nested headings and their content
+- **AND** the toggle MUST indicate the collapsed state and the underlying Markdown content MUST remain unchanged
+
+#### Scenario: Expand a previously collapsed heading section
+- **WHEN** the user activates the fold toggle of a collapsed heading
+- **THEN** the system MUST restore visibility of that heading's hidden section
+
+#### Scenario: Folding state is not persisted
+- **WHEN** the user collapses one or more headings and then switches documents or reloads the viewer
+- **THEN** the reopened document MUST render with all headings expanded
+
+### Requirement: Knowledge workspace Markdown viewer SHALL provide a toolbar control to collapse or expand all headings at once
+When the Markdown viewer is in `viewer` mode, the document editor toolbar SHALL expose a single toggle control that collapses every heading in the document, or expands every heading, without requiring the user to activate each heading's individual fold toggle. The control MUST reflect which action it will perform next and MUST NOT be shown in raw-source `edit` mode.
+
+#### Scenario: Collapse every heading from the toolbar
+- **WHEN** the user activates the toolbar fold-all control while no heading is collapsed
+- **THEN** the system MUST collapse every heading in the document, including nested headings, per the same fold rules as an individual toggle
+- **AND** the control MUST subsequently indicate that activating it again will expand all headings
+
+#### Scenario: Expand every heading from the toolbar
+- **WHEN** the user activates the toolbar fold-all control while at least one heading is collapsed
+- **THEN** the system MUST expand every heading in the document
+- **AND** the control MUST subsequently indicate that activating it again will collapse all headings
+
+#### Scenario: Fold-all control is unavailable outside viewer mode
+- **WHEN** the Markdown editor is in raw-source `edit` mode
+- **THEN** the toolbar MUST NOT show the fold-all control
+
 ### Requirement: Knowledge workspace Markdown viewer SHALL render Mermaid diagrams in viewer mode
 The knowledge workspace main Markdown viewer SHALL render fenced code blocks whose language is `mermaid` as diagrams in `viewer` mode by using the official `mermaid` package. In `edit` mode, those same blocks MUST remain visible as editable source text.
 

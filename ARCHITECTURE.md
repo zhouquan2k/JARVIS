@@ -147,8 +147,27 @@ Desktop supports two runtime shapes:
 - Relative paths are agnostic to deployment port / host, making migration and packaging more robust.
 - The Web host's offline boundary is "static shell + read-only cache for recently viewed documents + IndexedDB replicas for conversations/tasks"; browser cache remains a projection layer, not the source of truth for documents.
 
+### 4.4 Single-Hub Deployment: NAS Server, Dropbox File Sync, Database-Backed Record Sync
+
+**Overview**
+
+In the deployed topology there is exactly one running `apps/server` instance — a Docker container on a NAS — rather than one instance per machine. Every host converges on it for the capabilities that require a live backend; a Mac-local `dev:server` instance exists only as a development/debugging mirror of the same code and is never a second production hub.
+
+**Decision**
+
+- **Server**: the single NAS-hosted `apps/server` instance is the hub. Web (both desktop and mobile browsers) is served same-origin by this instance and calls its `/api/*` endpoints directly. Desktop's `sync`, `codex`, and `provider-config` traffic also targets this same instance in local-bundle mode (4.3), while document access stays local through IPC.
+- **Files (knowledge root)**: the knowledge root stays a plain filesystem tree. It is kept in sync between the hub and each desktop machine by Dropbox, running independently on each side (a Dropbox client on the NAS, another on the Mac) — Dropbox is the sync mechanism, not something JARVIS implements. The hub serves this tree to Web/mobile through `/api/context`; Desktop reads and writes its own local Dropbox-synced copy through the IPC-backed `FileSystemContextProvider` described in 4.3, never through the hub's HTTP context API.
+- **Records (conversations and tasks)**: the source of truth for both is SQLite on the hub, stored in a data directory kept deliberately outside the Dropbox-synced knowledge root — file-sync tools do not understand SQLite's write-ahead log and can corrupt it if it sits inside a synced folder. Every client (Web, Desktop, Extension) holds a local-first replica (IndexedDB) and reconciles with the hub through one shared sync pattern: push on mutation, pull on startup, and pull again when the window regains focus or becomes visible (throttled), merged per record by `updatedAt` (last-write-wins). This pattern is implemented identically for conversations (`SyncStorageProvider`) and tasks (`ReplicaTaskService`); there is no file-backed task provider anymore.
+
+**Consequences**
+
+- Conversations and tasks converge to one state across every device once each has synced. Completing a task on mobile becomes visible on desktop after the desktop replica's next pull; a client that stays foregrounded without regaining focus will show stale data until its next sync.
+- The knowledge root remains a first-class file-domain artifact on both the hub and each desktop machine: Obsidian, git, external agents, and the `codex` CLI can all operate directly on either Dropbox-synced copy.
+- Keeping SQLite outside the synced directory means Dropbox never sees or touches it, eliminating the corruption risk that motivated keeping records out of the file domain in the first place.
+- The Mac-local server documented as the "development mode" entry in `my-README.md` is not part of the production topology; it exists solely to reproduce and debug issues against the same server code before a change is deployed to the NAS.
+
 ## 5. Runtime and External Dependency Chain
 
 - Web, Extension, and Desktop call external model providers through shared runtime contracts.
 - Extension and Desktop also bridge browser-controlled pages to access ChatGPT and Gemini history.
-- Both the Sync Server and the Desktop host can access the knowledge base through a filesystem adapter layer; the knowledge base is treated as an external dependency even when deployed locally.
+- Both the Sync Server and the Desktop host can access the knowledge base through a filesystem adapter layer; the knowledge base is treated as an external dependency even when deployed locally. In the current deployment this filesystem is kept consistent across the hub and desktop machines by Dropbox (see 4.4), external to JARVIS itself.

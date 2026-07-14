@@ -4,12 +4,13 @@ English | [Chinese](spec.zh-CN.md)
 Define the visible provider selector and cascading model selector behavior in chat interfaces across supported hosts.
 
 ## Requirements
-### Requirement: Group membership MUST be chosen via a top-of-conversation member checklist
-The provider/model selector SHALL list the `group` provider. Once the `group` provider is selected, the participating members SHALL be chosen through a checklist rendered at the top of the conversation rather than through a fixed cascading preset model. The checklist SHALL present every configured group candidate (the desktop DOM providers available in the current runtime), with unselected candidates shown in a de-emphasized (greyed) state and selected candidates highlighted. The configured `dom-group` preset SHALL act only as the default selection for a fresh group conversation. The selection SHALL be persisted per conversation (`modelSelection.groupMembers`) and restored on load. At least one member MUST remain selected.
+### Requirement: Group membership MUST be chosen via the input-area model tools
+The provider/model selector SHALL list the `group` provider. Once the `group` provider is selected, the participating members SHALL be chosen through model tools rendered below the conversation in the input-area toolbar rather than through a fixed cascading preset model. Each configured group candidate (the desktop DOM providers available in the current runtime) SHALL expose an open-window link, a selection checkbox, and an `@member` shortcut in one model item. Unselected candidates SHALL remain visible but de-emphasized, while selected candidates SHALL be highlighted. The configured `dom-group` preset SHALL act only as the default selection for a fresh group conversation. The selection SHALL be persisted per conversation (`modelSelection.groupMembers`) and restored on load. At least one member MUST remain selected.
 
 #### Scenario: Candidate members appear as a checklist
 - **WHEN** the user selects the `group` provider for a conversation
-- **THEN** the top of the conversation MUST present each available group candidate as a toggleable entry
+- **THEN** the input-area model tools MUST present each available group candidate as a toggleable entry
+- **AND** each entry MUST expose an open-window link, a selection checkbox, and an `@member` shortcut
 - **AND** unselected candidates MUST be visually de-emphasized while selected candidates are highlighted
 - **AND** a fresh group conversation MUST default to the configured `dom-group` preset members
 
@@ -19,8 +20,8 @@ The provider/model selector SHALL list the `group` provider. Once the `group` pr
 - **AND** the resulting selection MUST be persisted to the conversation and restored when it is reopened
 - **AND** the last remaining member MUST NOT be removable
 
-#### Scenario: Selected member names double as @mention shortcuts
-- **WHEN** the user clicks a member's name in the checklist
+#### Scenario: Model tools expose @mention shortcuts
+- **WHEN** the user clicks a member's `@member` link in the input-area model tools
 - **THEN** an `@member` mention MUST be inserted into the draft prompt
 
 ### Requirement: Model selector MUST expose desktop-only DOM providers

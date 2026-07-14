@@ -1,6 +1,10 @@
 <template>
   <aside class="knowledge-assistant-pane" data-testid="workspace-right-pane">
-    <div class="workspace-right-pane__tabs" data-testid="workspace-right-pane-tabs">
+    <div
+      v-if="!documentStore.conversationFocusMode"
+      class="workspace-right-pane__tabs"
+      data-testid="workspace-right-pane-tabs"
+    >
       <button
         v-for="tab in rightPanelTabs"
         :key="tab.id"
@@ -40,6 +44,7 @@ import type { ChatRoutePath } from '../routes';
 import { contributionQueryKey, workspaceNavigationStateKey, workspaceRuntimeContextKey, workspaceRouteKey } from '../plugins/injectionKeys';
 import type { OpenConversationRequest } from '../types/conversationLink';
 import { useWorkspaceI18n } from '../i18n';
+import { useDocumentWorkspaceStore } from '../store/documentWorkspace';
 
 const props = defineProps<{
   activeScopeData?: Record<string, unknown> | null;
@@ -53,6 +58,7 @@ const props = defineProps<{
   openConversationRequest?: OpenConversationRequest | null;
 }>();
 const { t } = useWorkspaceI18n();
+const documentStore = useDocumentWorkspaceStore();
 const contributionQuery = inject(contributionQueryKey, null);
 const runtimeContext = inject(workspaceRuntimeContextKey, null);
 const workspaceNavigationState = inject(workspaceNavigationStateKey, null);

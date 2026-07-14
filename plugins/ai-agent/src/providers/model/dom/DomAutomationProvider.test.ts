@@ -1,19 +1,22 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DomAutomationProvider } from './DomAutomationProvider';
+import { DomAutomationProvider, isSignedOutLandingUrl } from './DomAutomationProvider';
 import type { DomTransport } from './domTransport';
 import type { ControlledPageEvent } from '@packages/core';
 
 function makeTransport(dynamicModels?: { id: string; name: string }[]): DomTransport & {
     emit: (event: ControlledPageEvent) => void;
-    openCalls: Array<{ reset?: boolean } | undefined>;
+    openCalls: Array<{ reset?: boolean; resumeUrl?: string } | undefined>;
+    setConversationUrl: (url: string) => void;
 } {
     let listener: ((event: ControlledPageEvent) => void) | null = null;
-    const openCalls: Array<{ reset?: boolean } | undefined> = [];
+    const openCalls: Array<{ reset?: boolean; resumeUrl?: string } | undefined> = [];
+    let conversationUrl = 'https://chatgpt.com/c/live-conversation';
     return {
         openCalls,
-        open: vi.fn(async (openOptions?: { reset?: boolean }) => { openCalls.push(openOptions); }),
+        open: vi.fn(async (openOptions?: { reset?: boolean; resumeUrl?: string }) => { openCalls.push(openOptions); }),
         setWebSearch: vi.fn(async () => {}),
         readFinalText: vi.fn(async () => 'final-from-fallback'),
+        readConversationUrl: vi.fn(async () => conversationUrl),
         injectAndSubmit: vi.fn(async () => {}),
         subscribe: vi.fn((onEvent: (event: ControlledPageEvent) => void) => {
             listener = onEvent;
@@ -22,7 +25,8 @@ function makeTransport(dynamicModels?: { id: string; name: string }[]): DomTrans
         readAvailableModels: vi.fn(async () => dynamicModels ?? []),
         setModel: vi.fn(async () => {}),
         setReasoningEffort: vi.fn(async () => {}),
-        emit: (event: ControlledPageEvent) => listener?.(event)
+        emit: (event: ControlledPageEvent) => listener?.(event),
+        setConversationUrl: (url: string) => { conversationUrl = url; }
     };
 }
 
@@ -32,14 +36,19 @@ function makeProvider(dynamicModels?: { id: string; name: string }[]) {
     return { transport, provider };
 }
 
-async function drive(provider: DomAutomationProvider, transport: ReturnType<typeof makeTransport>, history?: { role: 'user' | 'assistant'; content: string }[]) {
-    const sendPromise = provider.sendMessage('hi', { history }, () => {});
-    // 等待 open() + setReasoningEffort() + setWebSearch() + injectAndSubmit() 各自的 await 完成。
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    const requestId = (transport.injectAndSubmit as ReturnType<typeof vi.fn>).mock.calls[0][1] as string;
+async function drive(
+    provider: DomAutomationProvider,
+    transport: ReturnType<typeof makeTransport>,
+    history?: { role: 'user' | 'assistant'; content: string }[],
+    options?: { resumeConversationUrl?: string }
+) {
+    const sendPromise = provider.sendMessage('hi', { history, resumeConversationUrl: options?.resumeConversationUrl }, () => {});
+    const injectMock = transport.injectAndSubmit as ReturnType<typeof vi.fn>;
+    // 等待前置 await 链（open/readConversationUrl/syncModel/setWebSearch）全部推进到 injectAndSubmit 被调用。
+    for (let i = 0; i < 20 && injectMock.mock.calls.length === 0; i += 1) {
+        await Promise.resolve();
+    }
+    const requestId = injectMock.mock.calls[0][1] as string;
     transport.emit({ providerId: 'chatgpt-dom', requestId, type: 'done', text: 'answer' });
     return sendPromise;
 }
@@ -61,10 +70,52 @@ describe('DomAutomationProvider session continuity', () => {
         expect(transport.openCalls[0]).toEqual({ reset: true });
     });
 
-    it('follow-up turn (with history) continues the same conversation (reset:false)', async () => {
+    it('follow-up turn without stored URL continues the same conversation (reset:false)', async () => {
         const { provider, transport } = makeProvider();
         await drive(provider, transport, [{ role: 'user', content: 'previous' }]);
         expect(transport.openCalls[0]).toEqual({ reset: false });
+    });
+
+    it('follow-up turn with stored URL navigates back to that conversation (resumeUrl)', async () => {
+        const { provider, transport } = makeProvider();
+        transport.setConversationUrl('https://chatgpt.com/c/abc123');
+        await drive(provider, transport, [{ role: 'user', content: 'previous' }], {
+            resumeConversationUrl: 'https://chatgpt.com/c/abc123'
+        });
+        expect(transport.openCalls[0]).toEqual({ resumeUrl: 'https://chatgpt.com/c/abc123' });
+    });
+
+    it('falls back to a fresh conversation when resume lands on home while logged in (id mismatch, not signed out)', async () => {
+        const { provider, transport } = makeProvider();
+        // 已登录但对话失效：站点把删除/换号的对话重定向到首页（无 id 段，非登录页）。
+        // 恢复应降级为开全新对话继续，而不是抛错中断本次总结。
+        transport.setConversationUrl('https://chatgpt.com/');
+        await drive(provider, transport, [{ role: 'user', content: 'previous' }], {
+            resumeConversationUrl: 'https://chatgpt.com/c/abc123'
+        });
+        expect(transport.openCalls[0]).toEqual({ resumeUrl: 'https://chatgpt.com/c/abc123' });
+        expect(transport.openCalls[1]).toEqual({ reset: true });
+        expect(transport.injectAndSubmit).toHaveBeenCalled();
+    });
+
+    it('throws a login-hint error when resume lands on a signed-out page', async () => {
+        const { provider, transport } = makeProvider();
+        // 未登录：站点把恢复导航重定向到 Google 账号页。应抛出明确的登录引导错误，不注入、不降级。
+        transport.setConversationUrl('https://accounts.google.com/ServiceLogin?continue=https://gemini.google.com/app');
+        await expect(
+            provider.sendMessage('hi', {
+                history: [{ role: 'user', content: 'previous' }],
+                resumeConversationUrl: 'https://gemini.google.com/app/abc123'
+            }, () => {})
+        ).rejects.toThrow(/未登录/);
+        expect(transport.injectAndSubmit).not.toHaveBeenCalled();
+    });
+
+    it('captures the site conversation URL in the result on finish', async () => {
+        const { provider, transport } = makeProvider();
+        transport.setConversationUrl('https://chatgpt.com/c/new-xyz');
+        const result = await drive(provider, transport, []);
+        expect(result.conversationUrl).toBe('https://chatgpt.com/c/new-xyz');
     });
 
     it('falls back to reading final text on timeout', async () => {
@@ -298,5 +349,25 @@ describe('DomAutomationProvider.applyPageDefaults', () => {
         (transport.open as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('page-not-ready'));
         const provider = new DomAutomationProvider({ id: 'claude-dom', label: 'Claude (DOM)', transport });
         await expect(provider.applyPageDefaults({ modelId: 'opus-4-8', reasoningEffort: 'high' })).resolves.toBeUndefined();
+    });
+});
+
+describe('isSignedOutLandingUrl', () => {
+    it('detects Google account redirect (Gemini signed out)', () => {
+        expect(isSignedOutLandingUrl('https://accounts.google.com/ServiceLogin?continue=https://gemini.google.com/app')).toBe(true);
+    });
+
+    it('detects generic login/auth landing pages', () => {
+        expect(isSignedOutLandingUrl('https://claude.ai/login')).toBe(true);
+        expect(isSignedOutLandingUrl('https://auth.openai.com/authorize')).toBe(true);
+    });
+
+    it('returns false for a real conversation/home page (logged in)', () => {
+        expect(isSignedOutLandingUrl('https://gemini.google.com/app/abc123')).toBe(false);
+        expect(isSignedOutLandingUrl('https://chatgpt.com/')).toBe(false);
+    });
+
+    it('returns false for empty/invalid input', () => {
+        expect(isSignedOutLandingUrl('')).toBe(false);
     });
 });

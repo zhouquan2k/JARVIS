@@ -119,7 +119,8 @@
 - [ ] hub SQLite 建 tasks 表;`/api/sync` 扩展任务资源(或新增端点),按 task id + `updatedAt` LWW 合并。
 - [ ] 服务端为 task 建**白名单 normalizer**(教训:新增持久化字段不进 normalizer 会在 reload 后丢失)。
 - [x] task-mgr 插件数据层:从"HTTP 现读"改为"IndexedDB 副本 + 同步"(离线可读写任务)。
-- 同步节奏(已定):**变更即推 + 启动补推**,启动时增量拉取;不设周期定时器。
+- 同步节奏(已定):**变更即推 + 启动补推 + 窗口 focus/页面可见时 pull**(带节流);不设周期定时器。
+  - 注:仅"变更即推 + 启动补推"会导致多端切换时另一端显示陈旧数据(已修复,见 `ReplicaTaskService` 的 visibilitychange/focus 触发)。
 - [x] Google Calendar 同步迁至 hub(凭据只配 VPS)。
 - [ ] 迁移脚本:tasks.json 一次性导入 DB;`.chatprism/` 从文件域退役。
 - 过渡期纪律(阶段 2 落地前):**任务单写者**——日常只经一个 server 改任务,避免 Dropbox 冲突副本。

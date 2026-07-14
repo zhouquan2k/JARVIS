@@ -27,6 +27,7 @@ import {
     isTextDocumentMimeType
 } from '@plugins/ai-agent/src/internal';
 import {
+    firstPreferredModel,
     resolveLightweightModelSelection,
     type ModelConfig,
     type ModelOptionDefinition,
@@ -126,6 +127,21 @@ export interface ChatState {
     currentModelSelectionExplicit: boolean;
     /** group provider 当前勾选参与的成员（顶部勾选区状态，仅 group 模式有意义）。 */
     currentGroupMembers: GroupMember[];
+    /**
+     * 会话消息区的滚动位置（key = 会话 id）。纯内存 UI 态，不参与 server sync。
+     * 用于 workspace/对话 视图切换（组件重挂载）后恢复滚动位置。
+     */
+    conversationScrollTops: Record<string, number>;
+    /**
+     * group 消息当前选中的成员 tab（key = 消息 id）。纯内存 UI 态，不参与 server sync。
+     * 用于视图切换后恢复用户在 GroupMessageTabs 里选择的 tab。
+     */
+    messageGroupActiveTabs: Record<string, string>;
+    /**
+     * DOM provider 模型目录尚未就绪时，记录用户/会话期望的 modelId（如持久化的上次选择），
+     * 待真实目录异步加载完成后据此重新解析，避免被 defaultModel 覆盖。
+     */
+    pendingProviderModelId: Record<string, string>;
     questionIndexFilter: QuestionIndexFilter;
     isQuestionIndexPanelOpen: boolean;
     activeQuestionId: string | null;
@@ -588,9 +604,15 @@ function buildConversationModelSelection(
         reasoningEffort,
         // 仅在用户显式覆盖时携带该字段，保持与历史持久化数据/默认选择的结构一致。
         ...(explicit ? { explicit: true } : {}),
-        // group provider 才持久化成员勾选结果。
+        // group provider 才持久化成员勾选结果；modelId 可能是优先级列表，持久化时收窄为具体字符串（取首项）。
         ...(providerId === GROUP_PROVIDER_ID && groupMembers.length > 0
-            ? { groupMembers: groupMembers.map((member) => ({ ...member })) }
+            ? {
+                groupMembers: groupMembers.map((member) => ({
+                    providerId: member.providerId,
+                    modelId: (Array.isArray(member.modelId) ? firstPreferredModel(member.modelId) : member.modelId) || '',
+                    name: member.name
+                }))
+            }
             : {})
     };
 }
@@ -716,6 +738,33 @@ function buildProviderHistory(messages: ConversationMessage[]) {
                 ? message.requestSnapshot.attachments.map((attachment) => ({ ...attachment }))
                 : undefined
     }));
+}
+
+/**
+ * 从会话历史构建 group provider 的会话恢复映射：providerId → 站点会话 URL。
+ * 从新到旧扫描所有 assistant 消息，为每个成员/总结器取「最近一条带 conversationUrl」的落盘 URL，
+ * 供重启后导航回各自站点对话续聊。不因最近一轮某成员出错/未带 URL 而整体丢失恢复能力。
+ * 无任何可用 URL 时返回 undefined。
+ */
+function buildGroupMemberSessions(messages: ConversationMessage[]): Record<string, string> | undefined {
+    const sessions: Record<string, string> = {};
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index];
+        if (message.role !== 'assistant') {
+            continue;
+        }
+        for (const member of message.groupMembers ?? []) {
+            if (member.conversationUrl && !sessions[member.providerId]) {
+                sessions[member.providerId] = member.conversationUrl;
+            }
+        }
+        if (message.groupSummary?.providerId
+            && message.groupSummary.conversationUrl
+            && !sessions[message.groupSummary.providerId]) {
+            sessions[message.groupSummary.providerId] = message.groupSummary.conversationUrl;
+        }
+    }
+    return Object.keys(sessions).length > 0 ? sessions : undefined;
 }
 
 function buildImportKey(origin?: Conversation['origin'], externalId?: string): string | null {
@@ -945,6 +994,9 @@ export const useChatStore = defineStore('chat', {
         currentReasoningEffort: DEFAULT_REASONING_EFFORT,
         currentModelSelectionExplicit: false,
         currentGroupMembers: [],
+        conversationScrollTops: {},
+        messageGroupActiveTabs: {},
+        pendingProviderModelId: {},
         questionIndexFilter: 'all',
         isQuestionIndexPanelOpen: true,
         activeQuestionId: null,
@@ -1360,11 +1412,23 @@ export const useChatStore = defineStore('chat', {
                     ? this.currentConversation.modelSelection.modelOptions
                     : this.currentModelOptions;
                 if (provider && !provider.models.some((model) => model.id === this.currentModelId)) {
+                    // 真实目录就绪前若曾因未就绪而记下期望的 modelId（如会话持久化的上次选择），
+                    // 优先用它在新目录里重新解析，而不是无条件回退到 provider.defaultModel。
+                    const pendingModelId = this.pendingProviderModelId[providerId];
+                    const resolvedPendingModelId = pendingModelId
+                        ? resolveProviderModelId(provider, pendingModelId)
+                        : null;
+                    if (resolvedPendingModelId) {
+                        const nextPending = { ...this.pendingProviderModelId };
+                        delete nextPending[providerId];
+                        this.pendingProviderModelId = nextPending;
+                    }
+                    const targetModelId = resolvedPendingModelId || provider.defaultModel;
                     const nextSourceOptions = this.currentConversation?.modelSelection?.providerId === providerId
-                        && this.currentConversation.modelSelection.modelId === provider.defaultModel
+                        && this.currentConversation.modelSelection.modelId === targetModelId
                         ? this.currentConversation.modelSelection.modelOptions
                         : selectionBackfill;
-                    this.applyCurrentModelState(provider.defaultModel, nextSourceOptions);
+                    this.applyCurrentModelState(targetModelId, nextSourceOptions);
                     return;
                 }
 
@@ -1489,12 +1553,30 @@ export const useChatStore = defineStore('chat', {
             this.currentReasoningEffort = this.currentConversation?.modelSelection?.reasoningEffort || this.currentReasoningEffort || DEFAULT_REASONING_EFFORT;
             this.currentError = null;
 
+            // group 成员勾选状态必须在 ensureProviderModelsLoaded 之前恢复：该调用内部
+            // （applyProviderModelCatalog）可能在目录就绪时就地触发 sync，此时若
+            // currentGroupMembers 仍是空的，会用空成员覆盖会话持久化的 groupMembers，
+            // 导致后续读取时已丢失，静默回退到默认预设。
+            if (providerId === GROUP_PROVIDER_ID) {
+                this.ensureGroupMembersInitialized();
+            }
+
             const provider = await this.ensureProviderModelsLoaded(providerId);
             if (!provider) {
                 return;
             }
 
             const requestedModelId = resolveProviderModelId(provider, modelId);
+            // 目录尚未真正就绪（DOM provider 抓取中）且请求的 modelId 暂时解析不到时，
+            // 记住期望的 modelId，待目录异步就绪后重新解析，避免被 defaultModel 覆盖。
+            if (modelId && !requestedModelId && !this.providerModelStates[providerId]?.loaded) {
+                this.pendingProviderModelId = { ...this.pendingProviderModelId, [providerId]: modelId };
+            } else if (this.pendingProviderModelId[providerId]) {
+                const nextPending = { ...this.pendingProviderModelId };
+                delete nextPending[providerId];
+                this.pendingProviderModelId = nextPending;
+            }
+
             const nextModelId = requestedModelId || provider.defaultModel;
             const sourceOptions = this.currentConversation?.modelSelection?.providerId === providerId
                 && this.currentConversation.modelSelection.modelId === nextModelId
@@ -1502,14 +1584,9 @@ export const useChatStore = defineStore('chat', {
                 : this.currentModelOptions;
 
             this.applyCurrentModelState(nextModelId, sourceOptions);
-            if (providerId === GROUP_PROVIDER_ID) {
-                this.ensureGroupMembersInitialized();
-                this.syncCurrentConversationModelSelection();
-            }
             await this.ensureAttachmentCapabilityLoaded(providerId);
             if (!this.currentProviderSupportsAttachments && this.draftAttachments.length > 0) {
                 this.draftAttachments = [];
-                this.setAttachmentUnsupportedError();
             }
         },
 
@@ -1597,7 +1674,7 @@ export const useChatStore = defineStore('chat', {
             }));
         },
 
-        /** 顶部勾选区切换某候选成员的参与状态（保证至少保留 1 个）。 */
+        /** 输入区模型工具栏切换某候选成员的参与状态（保证至少保留 1 个）。 */
         toggleGroupMember(providerId: string) {
             const candidates = this.groupCandidateMembers;
             if (!candidates.some((candidate) => candidate.providerId === providerId)) {
@@ -1651,10 +1728,6 @@ export const useChatStore = defineStore('chat', {
             this.draftPrompt = prompt;
         },
 
-        setAttachmentUnsupportedError() {
-            this.attachmentError = translateWorkspaceMessage('shared.providerAttachmentsUnsupported');
-        },
-
         async ensureAttachmentCapabilityLoaded(providerId?: string): Promise<void> {
             const targetProviderId = providerId || this.attachmentProviderId;
             if (!targetProviderId) {
@@ -1697,6 +1770,20 @@ export const useChatStore = defineStore('chat', {
 
         setActiveAgentContext(agent: ResolvedAgentConfig | null) {
             this.activeAgentContext = agent ? cloneResolvedAgentConfig(agent) : null;
+        },
+
+        setConversationScrollTop(conversationId: string, scrollTop: number) {
+            if (!conversationId) {
+                return;
+            }
+            this.conversationScrollTops[conversationId] = scrollTop;
+        },
+
+        setMessageGroupActiveTab(messageId: string, tab: string) {
+            if (!messageId) {
+                return;
+            }
+            this.messageGroupActiveTabs[messageId] = tab;
         },
 
         async applyActiveAgentContextSelection(agent?: ResolvedAgentConfig | null) {
@@ -3122,6 +3209,15 @@ export const useChatStore = defineStore('chat', {
 
             const history = buildProviderHistory(activeConversation.messages);
             const isFirstTurn = history.length === 0;
+            // group 恢复映射需在追加本轮空消息前，从既往轮次的 groupMembers/groupSummary URL 构建。
+            const groupMemberSessions = buildGroupMemberSessions(activeConversation.messages);
+            console.log('[chatStore]', JSON.stringify({
+                stage: 'build-group-member-sessions',
+                conversationId: activeConversationId,
+                messageCount: activeConversation.messages.length,
+                assistantWithGroupMembers: activeConversation.messages.filter((m) => m.role === 'assistant' && (m.groupMembers?.length ?? 0) > 0).length,
+                sessions: groupMemberSessions ?? null
+            }));
             const boundConversationAgentKey = normalizeAgentScopeKey(activeConversation.agentKey);
             const agentContext = boundConversationAgentKey
                 ? await this.resolveAgentContextByKey(boundConversationAgentKey)
@@ -3288,6 +3384,7 @@ export const useChatStore = defineStore('chat', {
                             modelOptions: cloneModelOptions(sendTarget.modelOptions),
                             reasoningEffort: sendTarget.reasoningEffort,
                             groupMembers: sendTarget.groupMembers,
+                            groupMemberSessions,
                             context: { conversationId: backendId }
                         },
                         onUpdate
@@ -3304,7 +3401,8 @@ export const useChatStore = defineStore('chat', {
                                 history,
                                 modelOptions: cloneModelOptions(sendTarget.modelOptions),
                                 reasoningEffort: sendTarget.reasoningEffort,
-                                groupMembers: sendTarget.groupMembers
+                                groupMembers: sendTarget.groupMembers,
+                                groupMemberSessions
                             },
                             onUpdate
                         );
@@ -3427,7 +3525,6 @@ export const useChatStore = defineStore('chat', {
             this.attachmentError = null;
             await this.ensureAttachmentCapabilityLoaded();
             if (!this.currentProviderSupportsAttachments) {
-                this.setAttachmentUnsupportedError();
                 return;
             }
 

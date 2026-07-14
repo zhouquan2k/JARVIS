@@ -26,7 +26,7 @@ function mountView(props: Record<string, unknown> = {}) {
         global: {
             stubs: {
                 AttachmentComposer: {
-                    props: ['disabled', 'disabledReason', 'error'],
+                    props: ['disabled', 'disabledReason', 'error', 'compact', 'mode'],
                     emits: ['select-files', 'remove'],
                     template: `
                       <div
@@ -34,6 +34,8 @@ function mountView(props: Record<string, unknown> = {}) {
                         :data-disabled="disabled === true"
                         :data-disabled-reason="disabledReason || ''"
                         :data-error="error || ''"
+                        :data-compact="compact !== undefined"
+                        :data-mode="mode || 'full'"
                       />
                     `
                 },
@@ -392,11 +394,20 @@ describe('NormalChatView', () => {
         expect(wrapper.find('.selector-row [data-testid="model-option-toggle-group"]').exists()).toBe(true);
     });
 
-    it('shows the summary dom page button first for group conversations and removes bottom raw links', async () => {
+    it('merges group window, selection, and mention controls into the bottom model tools', async () => {
         const store = useChatStore();
         store.workspaceMode = 'conversation';
         store.currentProviderId = 'group';
         store.currentModelId = 'dom';
+        store.availableProviders = [
+            { id: 'group', name: 'Group', defaultModel: 'dom', models: [{ id: 'dom', name: 'DOM Group' }] },
+            { id: 'chatgpt-dom', name: 'ChatGPT', defaultModel: 'dom', models: [{ id: 'dom', name: 'DOM' }] },
+            { id: 'gemini-dom', name: 'Gemini', defaultModel: 'dom', models: [{ id: 'dom', name: 'DOM' }] },
+            { id: 'claude-dom', name: 'Claude', defaultModel: 'dom', models: [{ id: 'dom', name: 'DOM' }] }
+        ];
+        store.providerModelStates = {
+            group: { loading: false, loaded: true }
+        };
         store.currentGroupMembers = [
             { providerId: 'chatgpt-dom', modelId: 'GPT-5.5', name: 'ChatGPT' },
             { providerId: 'gemini-dom', modelId: '3.1 Pro', name: 'Gemini' }
@@ -421,16 +432,42 @@ describe('NormalChatView', () => {
         const wrapper = mountView();
         await flushPromises();
 
-        const pageButtons = wrapper.findAll('.dom-pages-bar .dom-page-btn');
-        expect(pageButtons).toHaveLength(3);
-        expect(pageButtons[0]?.text()).toContain('Summary');
-        expect(pageButtons[1]?.text()).toContain('ChatGPT');
-        expect(pageButtons[2]?.text()).toContain('Gemini');
+        expect(wrapper.find('[data-testid="group-member-banner"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid="group-model-tools"]').exists()).toBe(false);
+        await wrapper.get('[data-testid="toolbar-collapse-toggle"]').trigger('click');
+        const tools = wrapper.get('[data-testid="group-model-tools"]');
+        const toolItems = tools.findAll('.group-model-tool');
+        expect(toolItems).toHaveLength(4);
+        expect(toolItems[3]?.attributes('data-testid')).toBe('group-summary-tool');
+        expect(toolItems[3]?.text()).toContain('Summary');
+
+        const chatgptTool = tools.get('[data-testid="group-model-tool-chatgpt-dom"]');
+        expect(chatgptTool.attributes('data-selected')).toBe('true');
+        expect(chatgptTool.find('[data-testid="group-member-toggle-chatgpt-dom"]').exists()).toBe(true);
+        expect(chatgptTool.find('[data-testid="dom-page-btn-chatgpt-dom"]').exists()).toBe(true);
+        expect(chatgptTool.get('[data-testid="group-member-mention-chatgpt-dom"]').text()).toBe('@');
+
+        const claudeTool = tools.get('[data-testid="group-model-tool-claude-dom"]');
+        expect(claudeTool.attributes('data-selected')).toBe('false');
+        expect(claudeTool.find('[data-testid="dom-page-btn-claude-dom"]').exists()).toBe(true);
+        expect(claudeTool.find('[data-testid="group-member-mention-claude-dom"]').exists()).toBe(true);
         expect(wrapper.find('[data-testid^="group-dom-conversation-link-"]').exists()).toBe(false);
         expect(wrapper.find('[data-testid^="dom-conversation-link-"]').exists()).toBe(false);
 
-        await pageButtons[0].trigger('click');
+        const summaryButton = tools.get('[data-testid="dom-page-btn-gemini-dom-summary"]');
+        expect(summaryButton.classes()).toContain('group-model-link');
+        expect(summaryButton.text()).toBe('↗');
+        await summaryButton.trigger('click');
         expect(revealSpy).toHaveBeenCalledWith('gemini-dom-summary');
+
+        await chatgptTool.get('[data-testid="dom-page-btn-chatgpt-dom"]').trigger('click');
+        expect(revealSpy).toHaveBeenCalledWith('chatgpt-dom');
+
+        await claudeTool.get('[data-testid="group-member-toggle-claude-dom"]').setValue(true);
+        expect(store.currentGroupMembers.some((member) => member.providerId === 'claude-dom')).toBe(true);
+
+        await claudeTool.get('[data-testid="group-member-mention-claude-dom"]').trigger('click');
+        expect(store.draftPrompt).toContain('@Claude ');
     });
 
     it('collapses the top selector row by default in agent mode', async () => {
@@ -652,9 +689,17 @@ describe('NormalChatView', () => {
         const wrapper = mountView();
         await flushPromises();
 
-        const composer = wrapper.get('[data-testid="attachment-composer-stub"]');
+        const composer = wrapper.findAll('[data-testid="attachment-composer-stub"]')
+            .find((candidate) => candidate.attributes('data-mode') === 'trigger');
+        expect(composer).toBeDefined();
+        if (!composer) {
+            throw new Error('Expected compact attachment trigger');
+        }
+        expect(composer.attributes('data-compact')).toBe('true');
+        expect(composer.attributes('data-mode')).toBe('trigger');
+        expect(wrapper.find('[data-testid="selector-row"] [data-testid="attachment-composer-stub"]').exists()).toBe(false);
         expect(composer.attributes('data-disabled')).toBe('true');
-        expect(composer.attributes('data-disabled-reason')).toBe('The current provider does not support file uploads.');
+        expect(composer.attributes('data-disabled-reason')).toBe('');
     });
 
     it('shows an unsupported upload message when pasting files for a provider without upload support', async () => {
@@ -691,8 +736,8 @@ describe('NormalChatView', () => {
         await wrapper.vm.$nextTick();
 
         expect(store.queueAttachments).not.toHaveBeenCalled();
-        expect(store.attachmentError).toBe('The current provider does not support file uploads.');
-        expect(wrapper.get('[data-testid="attachment-composer-stub"]').attributes('data-error')).toBe('The current provider does not support file uploads.');
+        expect(store.attachmentError).toBeNull();
+        expect(wrapper.get('[data-testid="attachment-composer-stub"]').attributes('data-error')).toBe('');
     });
 
     it('renders a new chat action below the send button and calls the existing store entry', async () => {

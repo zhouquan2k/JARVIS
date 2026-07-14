@@ -1159,6 +1159,85 @@ describe('DocumentEditorPane', () => {
         expect(wrapper.get('[data-testid="document-toolbar-group-actions"] .save-button:nth-child(3)').attributes('data-testid')).toBe('document-middle-pane-toggle');
     });
 
+    it('closes a toolbar picker when a pointer interaction is outside its trigger and menu', async () => {
+        const editor = { content: '# Draft' };
+        createMarkdownEditor.mockResolvedValue(editor);
+        readMarkdownDocument.mockImplementation((value: { content: string }) => value.content);
+
+        const { default: DocumentEditorPane } = await import('./DocumentEditorPane.vue');
+        const wrapper = mount(DocumentEditorPane, {
+            attachTo: document.body,
+            props: {
+                activePath: '/draft.md',
+                activeDocument: {
+                    path: '/draft.md',
+                    mimeType: 'text/markdown',
+                    dataBase64: encodeTextDocument('# Draft'),
+                    canWrite: true
+                },
+                activeViewerId: 'text',
+                activePaneMode: 'viewer',
+                modelValue: '# Draft',
+                isSaving: false,
+                isDirty: false,
+                middlePaneMode: 'default',
+                latestFileChange: null,
+                diffEntries: [],
+                canUndo: false,
+                canRedo: false
+            }
+        });
+
+        await Promise.resolve();
+        await wrapper.vm.$nextTick();
+        await wrapper.get('[data-testid="markdown-style-picker-trigger"]').trigger('click');
+        expect(wrapper.find('[data-testid="markdown-style-picker"]').exists()).toBe(true);
+
+        document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+        await wrapper.vm.$nextTick();
+
+        expect(wrapper.find('[data-testid="markdown-style-picker"]').exists()).toBe(false);
+    });
+
+    it('hides the toolbar but keeps the title when hideToolbar is true', async () => {
+        const editor = { content: '# Draft' };
+        createMarkdownEditor.mockResolvedValue(editor);
+        readMarkdownDocument.mockImplementation((value: { content: string }) => value.content);
+
+        const { default: DocumentEditorPane } = await import('./DocumentEditorPane.vue');
+        const wrapper = mount(DocumentEditorPane, {
+            props: {
+                activePath: '/draft.md',
+                activeDocument: {
+                    path: '/draft.md',
+                    mimeType: 'text/markdown',
+                    dataBase64: encodeTextDocument('# Draft'),
+                    canWrite: true
+                },
+                activeViewerId: 'text',
+                activePaneMode: 'viewer',
+                hideToolbar: true,
+                modelValue: '# Draft',
+                isSaving: false,
+                isDirty: false,
+                middlePaneMode: 'default',
+                latestFileChange: null,
+                diffEntries: [],
+                canUndo: false,
+                canRedo: false
+            }
+        });
+
+        await Promise.resolve();
+        await wrapper.vm.$nextTick();
+
+        expect(wrapper.get('[data-testid="document-editor-title"]').text()).toBe('draft');
+        expect(wrapper.find('[data-testid="document-toolbar-group-mode"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid="document-toolbar-group-insert"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid="document-toolbar-group-actions"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid="document-middle-pane-toggle"]').exists()).toBe(false);
+    });
+
     it('keeps the title bar and editor shell outside the zoomed content surface', async () => {
         const editor = { content: '# Draft' };
         createMarkdownEditor.mockResolvedValue(editor);

@@ -1,6 +1,5 @@
-import { injectPrompt, observeReply } from '../domChat/domChatObserver';
+import { injectPrompt, observeReply, waitForConversationSettled } from '../domChat/domChatObserver';
 import {
-    countReplyBubbles,
     readAvailableModels,
     readLatestReply,
     setActiveModel,
@@ -44,8 +43,9 @@ export function installGeminiDomBridge(deps: {
         disposeObserver?.();
         disposeObserver = null;
 
-        const baselineText = readLatestReply(document, PROVIDER);
-        const baselineBubbleCount = countReplyBubbles(document, PROVIDER);
+        // 捕获基线前先等会话历史渲染稳定：resume 追问轮 loadURL 后 SPA 仍在水合，
+        // 立即数气泡会低估基线，导致后补渲染的旧气泡被误当成本轮回复。
+        const { text: baselineText, bubbleCount: baselineBubbleCount } = await waitForConversationSettled(document, PROVIDER);
 
         const result = await injectPrompt(document, PROVIDER, prompt);
         if (!result.ok) {

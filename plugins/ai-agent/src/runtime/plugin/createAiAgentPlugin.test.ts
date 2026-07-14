@@ -15,7 +15,9 @@ const mocks = vi.hoisted(() => {
 
     const chatStore = {
         currentError: null as string | null,
-        currentConversation: null,
+        currentConversation: null as any,
+        conversations: [] as any[],
+        getConversationsByAgent: vi.fn(() => []),
         setProviderCatalog: vi.fn(),
         setHistoryProviders: vi.fn(),
         setAgentRuntime: vi.fn(),
@@ -33,6 +35,8 @@ const mocks = vi.hoisted(() => {
             reasoningEffort: 'high'
         }))
     };
+
+    const getConversations = vi.fn(async () => [] as any[]);
 
     const compareStore = {
         analysisError: null as string | null,
@@ -56,6 +60,7 @@ const mocks = vi.hoisted(() => {
     return {
         mockProvider,
         chatStore,
+        getConversations,
         compareStore,
         runtime
     };
@@ -115,7 +120,7 @@ vi.mock('../../store/workspaceBridge', () => ({
 
 vi.mock('../../providers/context/HttpConversationQueryProvider', () => ({
     toConversationQueryProvider: vi.fn(() => ({
-        getConversations: vi.fn(async () => [])
+        getConversations: mocks.getConversations
     }))
 }));
 
@@ -142,12 +147,18 @@ describe('createAiAgentPlugin', () => {
         mocks.chatStore.initializeProviderCatalog.mockClear();
         mocks.chatStore.init.mockClear();
         mocks.chatStore.resolveSendTarget.mockClear();
+        mocks.chatStore.currentConversation = null;
+        mocks.chatStore.conversations = [];
+        mocks.chatStore.getConversationsByAgent.mockClear();
+        mocks.getConversations.mockReset();
+        mocks.getConversations.mockResolvedValue([]);
         mocks.compareStore.setRuntime.mockClear();
     });
 
-    it('registers a shared language-model contribution that proxies to the current send target', async () => {
+    it('registers language-model and document-scoped conversation contributions', async () => {
         const { createAiAgentPlugin } = await import('./createAiAgentPlugin');
         const registerLanguageModel = vi.fn();
+        const registerRightPanelTab = vi.fn();
 
         await createAiAgentPlugin({
             runtimeMode: 'web',
@@ -163,7 +174,7 @@ describe('createAiAgentPlugin', () => {
         }).setup({
             registerLanguageModel,
             registerGlobalView: vi.fn(),
-            registerRightPanelTab: vi.fn(),
+            registerRightPanelTab,
             registerWorkspaceSelectionView: vi.fn(),
             registerInsertLinkType: vi.fn(),
             registerDocumentImport: vi.fn(),
@@ -235,5 +246,43 @@ describe('createAiAgentPlugin', () => {
             },
             expect.any(Function)
         );
+
+        const inFlightConversation = {
+            id: 'conversation-in-flight',
+            title: 'Guide discussion',
+            origin: 'local',
+            agentKey: '/docs/',
+            documentPaths: ['/docs/guide.md'],
+            updatedAt: 1,
+            messages: []
+        };
+        mocks.chatStore.currentConversation = inFlightConversation;
+        mocks.chatStore.conversations = [];
+
+        const conversationTab = registerRightPanelTab.mock.calls
+            .map(([contribution]) => contribution)
+            .find((contribution) => contribution.id === 'conversations');
+        expect(conversationTab).toBeDefined();
+
+        await expect(conversationTab.getBadgeCount({
+            activeScopeKey: '/docs/',
+            activeDocument: {
+                path: '/docs/guide.md',
+                mimeType: 'text/markdown',
+                dataBase64: ''
+            },
+            contextProvider: {} as any
+        })).resolves.toBe(1);
+
+        await expect(conversationTab.getBadgeCount({
+            activeScopeKey: '/docs/',
+            activeDocument: {
+                path: '/docs/other.md',
+                mimeType: 'text/markdown',
+                dataBase64: ''
+            },
+            contextProvider: {} as any
+        })).resolves.toBe(0);
+        expect(mocks.chatStore.currentConversation).toBe(inFlightConversation);
     });
 });

@@ -38,4 +38,10 @@ export interface TaskService {
     updateTask(task: Task): Promise<Task>;
     deleteTask(taskId: string): Promise<void>;
     setTaskCompleted(taskId: string, completed: boolean): Promise<Task>;
+    /**
+     * Subscribe to task-set changes, including remote updates pulled in from
+     * other devices. Returns an unsubscribe function. Optional: only sync-backed
+     * implementations emit; HTTP/mock services may omit it.
+     */
+    onChange?(listener: () => void): () => void;
 }

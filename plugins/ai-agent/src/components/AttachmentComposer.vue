@@ -1,6 +1,7 @@
 <template>
-  <div class="attachment-composer">
+  <div :class="['attachment-composer', { 'is-compact': compact }]">
     <input
+      v-if="mode !== 'draft-list'"
       ref="fileInputRef"
       class="file-input"
       type="file"
@@ -8,7 +9,7 @@
       @change="onInputChange"
     />
 
-    <div class="composer-actions">
+    <div v-if="mode !== 'draft-list'" class="composer-actions">
       <button
         class="attach-btn"
         type="button"
@@ -18,13 +19,13 @@
         @click="fileInputRef?.click()"
       >
         <span class="attach-btn-icon">+</span>
-        <span>{{ t('shared.attachments') }}</span>
+        <span v-if="!compact">{{ t('shared.attachments') }}</span>
       </button>
       <p v-if="disabledReason" class="hint-text" data-testid="attachment-disabled-reason">{{ disabledReason }}</p>
       <p v-if="error" class="error-text" data-testid="attachment-error">{{ error }}</p>
     </div>
 
-    <div v-if="attachments.length > 0" class="draft-list">
+    <div v-if="mode !== 'trigger' && attachments.length > 0" class="draft-list">
       <button
         v-for="attachment in attachments"
         :key="attachment.id"
@@ -54,6 +55,8 @@ defineProps<{
   disabled?: boolean;
   disabledReason?: string | null;
   error?: string | null;
+  compact?: boolean;
+  mode?: 'full' | 'trigger' | 'draft-list';
 }>();
 
 const emit = defineEmits<{
@@ -88,6 +91,13 @@ function formatSize(size: number): string {
   align-items: center;
   gap: 10px;
   min-width: 0;
+}
+
+.attachment-composer.is-compact .attach-btn {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  justify-content: center;
 }
 
 .file-input {

@@ -2,11 +2,13 @@
 
 import { describe, it, expect } from 'vitest';
 import { mount } from '@vue/test-utils';
+import { createPinia, setActivePinia } from 'pinia';
 import { createWorkspaceI18n } from '@packages/ui';
 import GroupMessageTabs from './GroupMessageTabs.vue';
 import type { GroupMemberPart, GroupSummaryPart } from '../interfaces/Conversation';
 
 function mountWithLocale(content: string, locale: 'en' | 'zh-CN') {
+    setActivePinia(createPinia());
     // 通过 storage 注入初始 locale，避免在 setup 外调用 setLocale
     const storage = { getItem: () => locale, setItem: () => {} };
     const i18n = createWorkspaceI18n({ storage });
@@ -17,7 +19,7 @@ function mountWithLocale(content: string, locale: 'en' | 'zh-CN') {
     const groupSummary: GroupSummaryPart = { phase: 'done', content };
 
     return mount(GroupMessageTabs, {
-        props: { groupMembers: members, groupSummary },
+        props: { messageId: 'test-message', groupMembers: members, groupSummary },
         global: { plugins: [i18n] }
     });
 }

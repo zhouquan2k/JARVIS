@@ -6,38 +6,6 @@
     <div class="chat-main">
       <div class="chat-thread">
         <div class="chat-messages" ref="messagesRef" data-testid="normal-messages" @scroll="onMessagesScroll">
-          <div
-            v-if="isLiveGroupConversation && groupCandidateMembers.length > 0"
-            class="group-member-banner"
-            data-testid="group-member-banner"
-          >
-            <div
-              v-for="member in groupCandidateMembers"
-              :key="member.providerId"
-              class="group-member-chip"
-              :class="{ 'is-selected': isGroupMemberSelected(member.providerId) }"
-              :data-testid="`group-member-chip-${member.providerId}`"
-              :data-selected="isGroupMemberSelected(member.providerId) ? 'true' : 'false'"
-            >
-              <button
-                type="button"
-                class="group-member-toggle"
-                :aria-pressed="isGroupMemberSelected(member.providerId)"
-                :data-testid="`group-member-toggle-${member.providerId}`"
-                @click="onToggleGroupMember(member.providerId)"
-              >
-                <span class="group-member-checkbox" aria-hidden="true">{{ isGroupMemberSelected(member.providerId) ? '☑' : '☐' }}</span>
-              </button>
-              <button
-                type="button"
-                class="group-member-label"
-                :data-testid="`group-member-mention-${member.providerId}`"
-                @click="insertMention(member.name)"
-              >{{ member.name }}</button>
-            </div>
-            <span class="group-member-hint">{{ t('shared.groupMemberBannerHint') }}</span>
-          </div>
-
           <div v-if="chatStore.isExternalPreviewLoading" class="loading-banner" data-testid="external-preview-loading">
             {{ t('shared.loadingConversation') }}
           </div>
@@ -99,6 +67,7 @@
                   <!-- New structured group message: ≥2 members → tabbed view -->
                   <template v-if="msg.groupMembers && msg.groupMembers.length > 1">
                     <GroupMessageTabs
+                      :message-id="msg.id"
                       :group-members="msg.groupMembers"
                       :group-summary="msg.groupSummary"
                     />
@@ -200,33 +169,71 @@
       <template v-if="!isPreviewing">
         <div class="toolbar-stack">
           <div
-            v-if="domGroupMembers.length > 0 || currentSingleDomProvider !== null"
+            v-if="showSelectorRow && isLiveGroupConversation && groupCandidateMembers.length > 0"
+            class="group-model-tools"
+            data-testid="group-model-tools"
+          >
+            <span class="dom-pages-label">{{ t('shared.openDomPageHint') }}</span>
+            <div
+              v-for="member in groupCandidateMembers"
+              :key="member.providerId"
+              class="group-model-tool"
+              :class="{ 'is-selected': isGroupMemberSelected(member.providerId) }"
+              :data-testid="`group-model-tool-${member.providerId}`"
+              :data-selected="isGroupMemberSelected(member.providerId) ? 'true' : 'false'"
+            >
+              <label
+                class="group-member-toggle"
+              >
+                <input
+                  type="checkbox"
+                  class="group-member-checkbox"
+                  :checked="isGroupMemberSelected(member.providerId)"
+                  :data-testid="`group-member-toggle-${member.providerId}`"
+                  @change="onToggleGroupMember(member.providerId)"
+                />
+                <span>{{ member.name }}</span>
+              </label>
+              <button
+                type="button"
+                class="group-model-link"
+                :data-testid="`dom-page-btn-${member.providerId}`"
+                @click="chatStore.revealControlledPage(member.providerId)"
+              >↗</button>
+              <button
+                type="button"
+                class="group-model-link"
+                :data-testid="`group-member-mention-${member.providerId}`"
+                @click="insertMention(member.name)"
+              >@</button>
+            </div>
+            <div
+              v-if="summaryDomPageButton"
+              class="group-model-tool group-summary-tool"
+              data-testid="group-summary-tool"
+            >
+              <span>{{ summaryDomPageButton.label }}</span>
+              <button
+                type="button"
+                class="group-model-link"
+                aria-label="打开总结窗口"
+                :data-testid="`dom-page-btn-${summaryDomPageButton.id}`"
+                @click="chatStore.revealControlledPage(summaryDomPageButton.id)"
+              >↗</button>
+            </div>
+          </div>
+          <div
+            v-else-if="currentSingleDomProvider !== null"
             class="dom-pages-bar"
             data-testid="dom-pages-bar"
           >
             <span class="dom-pages-label">{{ t('shared.openDomPageHint') }}</span>
             <button
-              v-if="summaryDomPageButton"
-              type="button"
-              class="dom-page-btn"
-              :data-testid="`dom-page-btn-${summaryDomPageButton.id}`"
-              @click="chatStore.revealControlledPage(summaryDomPageButton.id)"
-            >{{ summaryDomPageButton.label }}</button>
-            <button
-              v-if="currentSingleDomProvider !== null"
               type="button"
               class="dom-page-btn"
               :data-testid="`dom-page-btn-${currentSingleDomProvider.id}`"
               @click="chatStore.revealControlledPage(currentSingleDomProvider.id)"
             >{{ currentSingleDomProvider.name }} ↗</button>
-            <button
-              v-for="member in domGroupMembers"
-              :key="member.providerId"
-              type="button"
-              class="dom-page-btn"
-              :data-testid="`dom-page-btn-${member.providerId}`"
-              @click="chatStore.revealControlledPage(member.providerId)"
-            >{{ member.name }} ↗</button>
           </div>
           <div
             v-if="isEditingQuestion"
@@ -251,15 +258,6 @@
             class="selector-row"
             data-testid="selector-row"
           >
-            <AttachmentComposer
-              :attachments="chatStore.draftAttachments"
-              :disabled="attachmentsDisabled"
-              :disabled-reason="attachmentDisabledReason"
-              :error="chatStore.attachmentError"
-              @select-files="onSelectFiles"
-              @remove="chatStore.removeDraftAttachment"
-            />
-
             <ProviderModelSelector
               :providers="chatStore.availableProviders"
               :current-provider-id="chatStore.currentProviderId"
@@ -312,6 +310,12 @@
         </div>
 
         <div class="input-row">
+          <AttachmentComposer
+            class="input-attachment-drafts"
+            mode="draft-list"
+            :attachments="chatStore.draftAttachments"
+            @remove="chatStore.removeDraftAttachment"
+          />
           <textarea
             ref="inputRef"
             data-testid="normal-input"
@@ -324,6 +328,15 @@
           />
           <div class="input-actions">
             <div v-if="!chatStore.isGenerating" class="secondary-actions" data-testid="secondary-actions">
+              <AttachmentComposer
+                compact
+                mode="trigger"
+                :attachments="chatStore.draftAttachments"
+                :disabled="attachmentsDisabled"
+                :disabled-reason="null"
+                :error="chatStore.attachmentError"
+                @select-files="onSelectFiles"
+              />
               <button
                 v-if="!isAgentMode"
                 type="button"
@@ -336,7 +349,7 @@
                 <PanelRightClose class="action-icon" :size="16" aria-hidden="true" />
               </button>
               <button
-                v-if="isAgentMode"
+                v-if="shouldShowToolbarCollapseToggle"
                 type="button"
                 class="toolbar-collapse-toggle"
                 :aria-expanded="!isTopToolbarCollapsed"
@@ -721,6 +734,7 @@ const modelOptionDefinitions = computed(() => chatStore.currentModelOptionDefini
 const isAgentMode = computed(() => chatStore.workspaceMode === 'agent');
 const hasDraftAttachments = computed(() => chatStore.draftAttachments.length > 0);
 const showSelectorRow = computed(() => !isTopToolbarCollapsed.value || hasDraftAttachments.value);
+const shouldShowToolbarCollapseToggle = computed(() => isAgentMode.value || isLiveGroupConversation.value);
 const archiveProgressParts = computed(() => {
   return chatStore.archiveConversationProgressPart ? [chatStore.archiveConversationProgressPart] : [];
 });
@@ -789,21 +803,8 @@ const resolvedHostRecoveryActionDisabled = computed(() => {
 const isInputDisabled = computed(() => {
   return chatStore.isGenerating || !effectiveIsAuthenticated.value || chatStore.isCurrentProviderModelsLoading || !chatStore.currentModelId;
 });
-const attachmentDisabledReason = computed(() => {
-  if (isInputDisabled.value) {
-    return null;
-  }
-
-  if (!chatStore.currentProviderSupportsAttachments) {
-    return chatStore.isAttachmentCapabilityLoading
-      ? t('shared.checkingAttachmentSupport')
-      : t('shared.providerAttachmentsUnsupported');
-  }
-
-  return null;
-});
 const attachmentsDisabled = computed(() => {
-  return isInputDisabled.value || !!attachmentDisabledReason.value;
+  return isInputDisabled.value || !chatStore.currentProviderSupportsAttachments;
 });
 const messageQuestionMeta = computed(() => {
   const meta = new Map<string, { questionKey: string; starred: boolean; root: boolean }>();
@@ -862,6 +863,11 @@ onMounted(async () => {
   await refreshAuthStatus();
   nextTick(() => {
     syncInputHeight();
+    // 视图切换（workspace/对话）会重挂载本组件，此处恢复上次滚动位置。
+    // 双层等待（nextTick + rAF）让 Markdown 渲染后的高度基本稳定再定位。
+    requestAnimationFrame(() => {
+      restoreMessagesScrollTop();
+    });
   });
 });
 
@@ -916,14 +922,14 @@ watch(
   { immediate: true }
 );
 
-watch(isAgentMode, (value) => {
-  isTopToolbarCollapsed.value = value;
+watch([isAgentMode, isLiveGroupConversation], ([agentMode, liveGroupMode]) => {
+  isTopToolbarCollapsed.value = agentMode || liveGroupMode;
 }, { immediate: true });
 
 watch(hasDraftAttachments, (value) => {
   if (value) {
     isTopToolbarCollapsed.value = false;
-  } else if (isAgentMode.value) {
+  } else if (shouldShowToolbarCollapseToggle.value) {
     isTopToolbarCollapsed.value = true;
   }
 });
@@ -1109,7 +1115,34 @@ function onMessagesScroll() {
   scrollSyncFrame = requestAnimationFrame(() => {
     scrollSyncFrame = null;
     syncActiveQuestionFromScroll();
+    persistMessagesScrollTop();
   });
+}
+
+function persistMessagesScrollTop(): void {
+  const container = messagesRef.value;
+  const conversationId = chatStore.displayConversation?.id;
+  if (!container || !conversationId) {
+    return;
+  }
+
+  chatStore.setConversationScrollTop(conversationId, container.scrollTop);
+}
+
+function restoreMessagesScrollTop(): void {
+  const container = messagesRef.value;
+  const conversationId = chatStore.displayConversation?.id;
+  if (!container || !conversationId) {
+    return;
+  }
+
+  const savedScrollTop = chatStore.conversationScrollTops[conversationId];
+  if (typeof savedScrollTop !== 'number') {
+    return;
+  }
+
+  container.scrollTop = savedScrollTop;
+  syncActiveQuestionFromScroll();
 }
 
 function syncInputHeight() {
@@ -1139,7 +1172,6 @@ async function rejectUnsupportedAttachmentInput() {
     return false;
   }
 
-  chatStore.setAttachmentUnsupportedError();
   return true;
 }
 
@@ -1305,37 +1337,44 @@ async function startNewChat() {
   font-size: 13px;
 }
 
-.group-member-banner {
+.group-model-tools {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
-  padding: 8px 12px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  width: min(100%, 840px);
+  gap: 8px;
+  padding: 4px 0;
 }
 
-.group-member-chip {
+.group-model-tool {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 6px 2px 4px;
-  border-radius: 12px;
-  /* 未勾选：置灰 */
-  background: rgba(255, 255, 255, 0.05);
+  gap: 7px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: transparent;
   color: var(--cp-text-secondary, rgba(255, 255, 255, 0.45));
   font-size: 12px;
   font-weight: 500;
-  border: 1px solid transparent;
+  border: 1px solid var(--cp-border);
   transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
 }
 
-.group-member-chip.is-selected {
+.group-model-tool.is-selected {
   background: rgba(99, 179, 237, 0.15);
   color: #90cdf4;
   border-color: rgba(99, 179, 237, 0.35);
+}
+
+.group-summary-tool {
+  color: var(--cp-text-muted);
+}
+
+.group-summary-tool .group-model-link {
+  display: inline-flex;
+  min-width: 1em;
+  color: var(--cp-accent);
+  font-weight: 700;
+  opacity: 1;
 }
 
 .group-member-toggle {
@@ -1348,25 +1387,30 @@ async function startNewChat() {
   color: inherit;
   font-size: 13px;
   line-height: 1;
+  gap: 4px;
 }
 
-.group-member-label {
-  padding: 0 2px;
+.group-member-checkbox {
+  margin: 0;
+  accent-color: var(--cp-accent);
+  cursor: pointer;
+}
+
+.group-model-link {
+  padding: 0;
   background: none;
   border: none;
   cursor: pointer;
   color: inherit;
   font: inherit;
-}
-
-.group-member-chip.is-selected .group-member-label:hover {
   text-decoration: underline;
+  text-underline-offset: 2px;
+  opacity: 0.85;
 }
 
-.group-member-hint {
-  color: var(--cp-text-secondary, rgba(255, 255, 255, 0.4));
-  font-size: 12px;
-  margin-left: 4px;
+.group-model-link:hover {
+  opacity: 1;
+  color: var(--cp-text-primary);
 }
 
 .preview-actions h3 {
@@ -1743,6 +1787,13 @@ async function startNewChat() {
 .preview-button-row {
   display: flex;
   gap: 10px;
+}
+
+.chat-container.standard-mode .input-attachment-drafts {
+  position: absolute;
+  right: calc(var(--standard-action-column-width) + 14px);
+  bottom: calc(100% + 8px);
+  max-width: min(680px, 72vw);
 }
 
 .chat-container.standard-mode .input-row {

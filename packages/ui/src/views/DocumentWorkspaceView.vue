@@ -8,7 +8,7 @@
     >
       <div
         class="grid-pane grid-pane--tree"
-        :class="{ 'grid-pane--tree-open': treeDrawerOpen }"
+        :class="{ 'grid-pane--tree-open': treeDrawerOpen, 'grid-pane--collapsed': documentStore.conversationFocusMode }"
       >
         <DocumentFileTree
           :nodes="documentStore.nodes"
@@ -51,6 +51,7 @@
       </div>
       <div
         class="resize-handle"
+        :class="{ 'resize-handle--hidden': documentStore.conversationFocusMode }"
         data-testid="document-resize-left"
         @pointerdown="startResize(0, $event)"
       />
@@ -65,6 +66,7 @@
             <component
               :is="activeWorkspaceSelectionComponent"
               v-if="activeWorkspaceSelectionComponent"
+              v-bind="workspaceSelectionInput"
               @open-document-link="onOpenDocumentLink"
               @open-conversation-link="onOpenConversationLink"
             />
@@ -74,6 +76,8 @@
               :active-document="displayedDocument"
               :active-viewer-id="displayedViewerId"
               :active-pane-mode="displayedPaneMode"
+              :hide-toolbar="documentStore.conversationFocusMode"
+              :active-scope-label="activeScopeLabel"
               :model-value="displayedDraftContent"
               :linkable-markdown-documents="activeLinkableMarkdownDocuments"
               :linkable-reference-resources="activeLinkableReferenceResources"
@@ -108,7 +112,10 @@
       />
       <div
         class="grid-pane grid-pane--assistant"
-        :class="{ 'grid-pane--collapsed': documentStore.middlePaneMode === 'maximized' }"
+        :class="{
+          'grid-pane--collapsed': documentStore.middlePaneMode === 'maximized',
+          'grid-pane--assistant-open': assistantDrawerOpen
+        }"
       >
         <slot name="assistant-pane">
         <WorkspaceRightPane
@@ -138,9 +145,25 @@
       class="tree-drawer-toggle"
       data-testid="tree-drawer-toggle"
       :aria-label="treeDrawerOpen ? t('shared.closeFileTree') : t('shared.openFileTree')"
-      @click="treeDrawerOpen = !treeDrawerOpen"
+      @click="toggleTreeDrawer"
     >
       <PanelLeft :size="20" />
+    </button>
+    <div
+      v-if="isNarrowViewport && assistantDrawerOpen"
+      class="assistant-drawer-backdrop"
+      data-testid="assistant-drawer-backdrop"
+      @click="assistantDrawerOpen = false"
+    />
+    <button
+      v-if="isNarrowViewport && documentStore.middlePaneMode !== 'maximized'"
+      type="button"
+      class="assistant-drawer-toggle"
+      data-testid="assistant-drawer-toggle"
+      :aria-label="assistantDrawerOpen ? t('shared.closeAssistant') : t('shared.openAssistant')"
+      @click="toggleAssistantDrawer"
+    >
+      <PanelRight :size="20" />
     </button>
   </section>
 </template>
@@ -155,7 +178,7 @@ import {
   type ContextNode,
   type IContextProvider
 } from '@packages/core/src';
-import { PanelLeft } from 'lucide-vue-next';
+import { PanelLeft, PanelRight } from 'lucide-vue-next';
 import WorkspaceRightPane from '../components/WorkspaceRightPane.vue';
 import DocumentEditorPane from '../components/DocumentEditorPane.vue';
 import DocumentFileTree from '../components/DocumentFileTree.vue';
@@ -191,10 +214,16 @@ const shellRef = ref<HTMLElement | null>(null);
 const viewportRef = ref<HTMLElement | null>(null);
 const isNarrowViewport = useIsNarrowViewport();
 const treeDrawerOpen = ref(false);
+const assistantDrawerOpen = ref(false);
 const panelSizes = computed(() => documentStore.panelSizes);
+const conversationFocusPanelSizes = computed(() => documentStore.conversationFocusPanelSizes);
 const gridTemplateColumns = computed(() => {
   if (isNarrowViewport.value) {
     return 'minmax(0, 1fr)';
+  }
+
+  if (documentStore.conversationFocusMode) {
+    return `0px 0px minmax(0, calc((100% - 4px) * ${conversationFocusPanelSizes.value[0]} / 100)) 4px minmax(0, calc((100% - 4px) * ${conversationFocusPanelSizes.value[1]} / 100))`;
   }
 
   if (documentStore.middlePaneMode === 'maximized') {
@@ -238,6 +267,10 @@ const displayedIsSaving = computed(() => {
 const displayedDocumentIsDirty = computed(() => {
   const path = displayedDocumentPath.value;
   return !!path && documentStore.dirtyPaths[path] === true;
+});
+const activeScopeLabel = computed(() => {
+  const name = documentStore.activeScopeData?.name;
+  return typeof name === 'string' ? name : null;
 });
 const activeLinkableMarkdownDocuments = computed(() => {
   return documentStore.getLinkableMarkdownDocuments(displayedDocumentPath.value);
@@ -438,6 +471,16 @@ async function syncWorkspaceConversationSelection(): Promise<void> {
     contextProvider: props.contextProvider,
     onFileChanged: handleAssistantFileChanged
   });
+}
+
+function toggleTreeDrawer(): void {
+  assistantDrawerOpen.value = false;
+  treeDrawerOpen.value = !treeDrawerOpen.value;
+}
+
+function toggleAssistantDrawer(): void {
+  treeDrawerOpen.value = false;
+  assistantDrawerOpen.value = !assistantDrawerOpen.value;
 }
 
 async function onOpenNode(path: string) {
@@ -739,6 +782,15 @@ function startResize(handleIndex: 0 | 1, event: PointerEvent) {
     return;
   }
 
+  if (documentStore.conversationFocusMode) {
+    if (handleIndex === 0) {
+      return;
+    }
+
+    startConversationFocusResize(shell, event);
+    return;
+  }
+
   event.preventDefault();
   const startX = event.clientX;
   const startSizes = [...documentStore.panelSizes] as [number, number, number];
@@ -757,6 +809,32 @@ function startResize(handleIndex: 0 | 1, event: PointerEvent) {
     }
 
     documentStore.setPanelSizes(nextSizes);
+  };
+
+  const onUp = () => {
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    cleanupResize = null;
+  };
+
+  cleanupResize?.();
+  cleanupResize = onUp;
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+}
+
+function startConversationFocusResize(shell: HTMLElement, event: PointerEvent) {
+  event.preventDefault();
+  const startX = event.clientX;
+  const startSizes = [...documentStore.conversationFocusPanelSizes] as [number, number];
+  const shellWidth = shell.getBoundingClientRect().width;
+
+  const onMove = (moveEvent: PointerEvent) => {
+    const deltaPercent = ((moveEvent.clientX - startX) / shellWidth) * 100;
+    documentStore.setConversationFocusPanelSizes([
+      startSizes[0] + deltaPercent,
+      startSizes[1] - deltaPercent
+    ]);
   };
 
   const onUp = () => {
@@ -855,7 +933,21 @@ onBeforeUnmount(() => {
 }
 
 .knowledge-grid--narrow .grid-pane--assistant {
-  display: none;
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(90vw, 420px);
+  z-index: 60;
+  transform: translateX(100%);
+  transition: transform 0.2s ease;
+  background: linear-gradient(180deg, #060b12, #0b1220);
+  border-left: 1px solid rgba(56, 189, 248, 0.25);
+  box-shadow: 0 0 32px rgba(2, 6, 12, 0.6);
+}
+
+.knowledge-grid--narrow .grid-pane--assistant.grid-pane--assistant-open {
+  transform: translateX(0);
 }
 
 .knowledge-grid--narrow .grid-pane--tree {
@@ -886,6 +978,31 @@ onBeforeUnmount(() => {
 .tree-drawer-toggle {
   position: fixed;
   left: 14px;
+  bottom: 18px;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  background: rgba(11, 18, 32, 0.92);
+  color: #7dd3fc;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(2, 6, 12, 0.55);
+}
+
+.assistant-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(2, 6, 12, 0.55);
+}
+
+.assistant-drawer-toggle {
+  position: fixed;
+  right: 14px;
   bottom: 18px;
   z-index: 70;
   display: flex;

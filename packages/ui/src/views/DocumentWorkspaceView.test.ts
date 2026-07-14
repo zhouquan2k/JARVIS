@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount } from '@vue/test-utils';
 import { computed, ref } from 'vue';
@@ -253,11 +253,28 @@ function mountDocumentWorkspace(options: Parameters<typeof mount<typeof Document
     });
 }
 
+function setNarrowViewport(narrow: boolean) {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+        matches: narrow,
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        onchange: null,
+        dispatchEvent: () => false
+    }) as unknown as MediaQueryList);
+}
+
 describe('DocumentWorkspaceView', () => {
     beforeEach(() => {
         setActivePinia(createPinia());
         resetMockChatStore();
         localStorage.clear();
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
     });
 
     it('renders the three-pane document workspace shell with the root agent editor selected', async () => {
@@ -294,7 +311,21 @@ describe('DocumentWorkspaceView', () => {
                         `
                     },
                     AgentView: {
-                        props: ['scopeKey', 'ownerNode'],
+                        setup() {
+                            const documentStore = useDocumentWorkspaceStore();
+                            const ownerNode = computed(() => {
+                                if (documentStore.selectedNodePath === '/' && documentStore.activeScopeData) {
+                                    return { path: '/' };
+                                }
+                                return documentStore.activeNode?.kind === 'directory' && documentStore.activeNode.ownsMetadata
+                                    ? documentStore.activeNode
+                                    : null;
+                            });
+                            return {
+                                ownerNode,
+                                scopeKey: computed(() => documentStore.activeScopeKey)
+                            };
+                        },
                         template: `
                           <div
                             data-testid="agent-view-stub"
@@ -322,6 +353,49 @@ describe('DocumentWorkspaceView', () => {
         expect(wrapper.get('[data-testid="agent-pane"]').attributes('data-agent-name')).toBe('Root Agent');
         expect(wrapper.get('.knowledge-grid').attributes('style')).toContain('100% - 8px');
         expect(wrapper.findAll('.grid-pane')).toHaveLength(3);
+    });
+
+    it('reveals the assistant pane on narrow viewports via the assistant drawer toggle', async () => {
+        setNarrowViewport(true);
+
+        const wrapper = mountDocumentWorkspace({
+            props: {
+                contextProvider: createMockContextProvider({
+                    nodes: [
+                        { path: '/welcome.md', name: 'welcome.md', kind: 'file' }
+                    ],
+                    documents: {
+                        '/welcome.md': '# Welcome'
+                    }
+                })
+            },
+            global: {
+                stubs: {
+                    WorkspaceRightPane: {
+                        template: '<div data-testid="agent-pane" />'
+                    },
+                    DocumentEditorPane: {
+                        template: '<div data-testid="document-editor" />'
+                    }
+                }
+            }
+        });
+
+        await flushPromises();
+        await wrapper.vm.$nextTick();
+
+        const assistantPane = wrapper.get('.grid-pane--assistant');
+        expect(assistantPane.classes()).not.toContain('grid-pane--assistant-open');
+
+        const toggle = wrapper.get('[data-testid="assistant-drawer-toggle"]');
+        await toggle.trigger('click');
+
+        expect(assistantPane.classes()).toContain('grid-pane--assistant-open');
+        expect(wrapper.find('[data-testid="assistant-drawer-backdrop"]').exists()).toBe(true);
+
+        await wrapper.get('[data-testid="assistant-drawer-backdrop"]').trigger('click');
+
+        expect(assistantPane.classes()).not.toContain('grid-pane--assistant-open');
     });
 
     it('opens the import wizard from the tree and defaults the target directory to the selected directory', async () => {
@@ -1592,6 +1666,52 @@ describe('DocumentWorkspaceView', () => {
         await flushPromises();
         expect(documentStore.middlePaneMode).toBe('default');
         expect(documentStore.middlePaneZoom).toBe(1);
+    });
+
+    it('collapses the tree column and expands the assistant pane when conversation focus mode is on', async () => {
+        const wrapper = mountDocumentWorkspace({
+            props: {
+                contextProvider: createMockContextProvider({ nodes: [], documents: {} })
+            },
+            global: {
+                stubs: {
+                    WorkspaceRightPane: {
+                        template: '<div data-testid="agent-pane" />'
+                    },
+                    DocumentEditorPane: {
+                        props: ['hideToolbar'],
+                        template: '<div data-testid="document-editor" :data-hide-toolbar="hideToolbar ? \'true\' : \'false\'" />'
+                    }
+                }
+            }
+        });
+
+        await flushPromises();
+        const documentStore = useDocumentWorkspaceStore();
+
+        const grid = wrapper.get('.knowledge-grid');
+        const treePane = wrapper.get('[data-testid="document-workspace"] .grid-pane--tree');
+        const leftHandle = wrapper.get('[data-testid="document-resize-left"]');
+
+        expect(treePane.classes()).not.toContain('grid-pane--collapsed');
+        expect(leftHandle.classes()).not.toContain('resize-handle--hidden');
+
+        documentStore.enterConversationFocus();
+        await wrapper.vm.$nextTick();
+
+        expect(grid.attributes('style')).toContain('0px 0px');
+        expect(grid.attributes('style')).toContain('25');
+        expect(grid.attributes('style')).toContain('75');
+        expect(wrapper.get('[data-testid="document-editor"]').attributes('data-hide-toolbar')).toBe('true');
+        expect(treePane.classes()).toContain('grid-pane--collapsed');
+        expect(leftHandle.classes()).toContain('resize-handle--hidden');
+
+        documentStore.exitConversationFocus();
+        await wrapper.vm.$nextTick();
+
+        expect(wrapper.get('[data-testid="document-editor"]').attributes('data-hide-toolbar')).toBe('false');
+        expect(treePane.classes()).not.toContain('grid-pane--collapsed');
+        expect(leftHandle.classes()).not.toContain('resize-handle--hidden');
     });
 
 });

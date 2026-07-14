@@ -56,6 +56,87 @@ describe('ConversationSidebar', () => {
         expect(wrapper.emitted('delete-local')).toEqual([['local-1']]);
     });
 
+    it('reveals a swipe delete action on narrow viewports that enters the confirm step', async () => {
+        const originalMatchMedia = window.matchMedia;
+        window.matchMedia = ((query: string) => ({
+            matches: true,
+            media: query,
+            onchange: null,
+            addEventListener: () => undefined,
+            removeEventListener: () => undefined,
+            addListener: () => undefined,
+            removeListener: () => undefined,
+            dispatchEvent: () => false
+        })) as unknown as typeof window.matchMedia;
+
+        try {
+            const wrapper = mount(ConversationSidebar, {
+                props: {
+                    collapsed: false,
+                    historySource: 'local',
+                    localItems: [createLocalConversation('local-1', '第一条会话')],
+                    externalProviders,
+                    externalItems: [],
+                    externalHistoryLoading: false,
+                    externalHistoryQuery: '',
+                    activeExternalProviderId: 'chatgpt-web',
+                    isCompareMode: false
+                }
+            });
+
+            // The revealed delete button exists without opening the ⋯ menu first.
+            const swipeDelete = wrapper.get('[data-testid="local-history-swipe-delete"]');
+            expect(wrapper.emitted('delete-local')).toBeUndefined();
+
+            // Tapping it does not delete immediately; it enters the existing confirm step.
+            await swipeDelete.trigger('click');
+            expect(wrapper.emitted('delete-local')).toBeUndefined();
+            expect(wrapper.find('[data-testid="local-history-delete-confirm"]').exists()).toBe(true);
+
+            await wrapper.get('[data-testid="local-history-delete-confirm"]').trigger('click');
+            expect(wrapper.emitted('delete-local')).toEqual([['local-1']]);
+        } finally {
+            window.matchMedia = originalMatchMedia;
+        }
+    });
+
+    it('hides the desktop delete menu item on narrow viewports, leaving only swipe delete', async () => {
+        const originalMatchMedia = window.matchMedia;
+        window.matchMedia = ((query: string) => ({
+            matches: true,
+            media: query,
+            onchange: null,
+            addEventListener: () => undefined,
+            removeEventListener: () => undefined,
+            addListener: () => undefined,
+            removeListener: () => undefined,
+            dispatchEvent: () => false
+        })) as unknown as typeof window.matchMedia;
+
+        try {
+            const wrapper = mount(ConversationSidebar, {
+                props: {
+                    collapsed: false,
+                    historySource: 'local',
+                    localItems: [createLocalConversation('local-1', '第一条会话')],
+                    externalProviders,
+                    externalItems: [],
+                    externalHistoryLoading: false,
+                    externalHistoryQuery: '',
+                    activeExternalProviderId: 'chatgpt-web',
+                    isCompareMode: false
+                }
+            });
+
+            await wrapper.get('[data-testid="local-history-actions-menu"]').trigger('click');
+            expect(wrapper.find('[data-testid="local-history-delete"]').exists()).toBe(false);
+            // Other menu actions remain available on narrow viewports.
+            expect(wrapper.find('[data-testid="local-history-rename"]').exists()).toBe(true);
+        } finally {
+            window.matchMedia = originalMatchMedia;
+        }
+    });
+
     it('keeps delete confirmation actions interactive above the local history row button', async () => {
         const wrapper = mount(ConversationSidebar, {
             attachTo: document.body,

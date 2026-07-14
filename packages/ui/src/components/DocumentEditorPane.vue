@@ -3,8 +3,11 @@
     <header class="editor-header">
       <div class="editor-meta">
         <span class="editor-path" data-testid="document-editor-title">{{ editorTitleLabel }}</span>
+        <span v-if="props.activeScopeLabel" class="editor-scope-label" data-testid="document-editor-scope-label">
+          {{ props.activeScopeLabel }}
+        </span>
       </div>
-      <div class="editor-actions">
+      <div v-if="!props.hideToolbar" class="editor-actions">
         <div
           v-if="isMarkdownDocument"
           class="editor-action-group"
@@ -27,28 +30,46 @@
               aria-hidden="true"
             />
           </button>
+          <button
+            v-if="markdownViewerMode === 'viewer'"
+            type="button"
+            class="save-button"
+            data-testid="markdown-fold-all-toggle"
+            :title="foldAllToggleLabel"
+            :aria-label="foldAllToggleLabel"
+            @click="toggleFoldAllHeadings"
+          >
+            <component
+              :is="foldAllCollapsed ? ChevronsUpDown : ChevronsDownUp"
+              class="save-icon"
+              :size="18"
+              aria-hidden="true"
+            />
+          </button>
         </div>
         <div
           v-if="showMarkdownLinkPicker || showMarkdownStylePicker"
           class="editor-action-group"
           data-testid="document-toolbar-group-insert"
         >
-          <div v-if="showMarkdownLinkPicker" class="editor-link-picker">
+          <DropdownMenu v-if="showMarkdownLinkPicker" v-model="isLinkPickerOpen" class="editor-link-picker">
+            <template #trigger="{ triggerProps }">
             <button
               type="button"
+              v-bind="triggerProps"
               class="save-button save-button--link-picker"
               data-testid="markdown-insert-link"
               :title="t('shared.insertMarkdownLink')"
               :aria-label="t('shared.insertMarkdownLink')"
-              :aria-expanded="isLinkPickerOpen ? 'true' : 'false'"
               :disabled="!canInsertAnyLink"
               @mousedown.prevent
               @click="toggleLinkPicker"
             >
               <Link2 class="save-icon" :size="18" aria-hidden="true" />
             </button>
+            </template>
+            <template #menu>
             <div
-              v-if="isLinkPickerOpen"
               class="editor-link-menu"
               data-testid="markdown-link-picker"
             >
@@ -168,22 +189,25 @@
               </p>
             </div>
             </div>
-          </div>
-          <div v-if="showMarkdownStylePicker" class="editor-link-picker">
+            </template>
+          </DropdownMenu>
+          <DropdownMenu v-if="showMarkdownStylePicker" v-model="isStylePickerOpen" class="editor-link-picker">
+            <template #trigger="{ triggerProps }">
             <button
               type="button"
+              v-bind="triggerProps"
               class="save-button save-button--link-picker"
               data-testid="markdown-style-picker-trigger"
               :title="t('shared.insertMarkdownStyle')"
               :aria-label="t('shared.insertMarkdownStyle')"
-              :aria-expanded="isStylePickerOpen ? 'true' : 'false'"
               @mousedown.prevent
               @click="toggleMarkdownStylePicker"
             >
               <Highlighter class="save-icon" :size="18" aria-hidden="true" />
             </button>
+            </template>
+            <template #menu>
             <div
-              v-if="isStylePickerOpen"
               class="editor-link-menu"
               data-testid="markdown-style-picker"
             >
@@ -218,22 +242,25 @@
                 {{ t('shared.markdownStyleStrikethrough') }}
               </button>
             </div>
-          </div>
-          <div v-if="showMarkdownStylePicker" class="editor-link-picker">
+            </template>
+          </DropdownMenu>
+          <DropdownMenu v-if="showMarkdownStylePicker" v-model="isBlockPickerOpen" class="editor-link-picker">
+            <template #trigger="{ triggerProps }">
             <button
               type="button"
+              v-bind="triggerProps"
               class="save-button save-button--link-picker"
               data-testid="markdown-block-picker-trigger"
               :title="t('shared.insertMarkdownBlock')"
               :aria-label="t('shared.insertMarkdownBlock')"
-              :aria-expanded="isBlockPickerOpen ? 'true' : 'false'"
               @mousedown.prevent
               @click="toggleMarkdownBlockPicker"
             >
               <LayoutList class="save-icon" :size="18" aria-hidden="true" />
             </button>
+            </template>
+            <template #menu>
             <div
-              v-if="isBlockPickerOpen"
               class="editor-link-menu"
               data-testid="markdown-block-picker"
             >
@@ -258,7 +285,8 @@
                 {{ t('shared.markdownBlockTable') }}
               </button>
             </div>
-          </div>
+            </template>
+          </DropdownMenu>
         </div>
         <div class="editor-action-group" data-testid="document-toolbar-group-actions">
           <button
@@ -392,7 +420,8 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
-import { Bold, Eye, Highlighter, LayoutList, Link2, Maximize2, MessageSquareQuote, Minimize2, PencilLine, RotateCcw, Save, SquareCheck, Strikethrough, Table, Upload } from 'lucide-vue-next';
+import { Bold, ChevronsDownUp, ChevronsUpDown, Eye, Highlighter, LayoutList, Link2, Maximize2, MessageSquareQuote, Minimize2, PencilLine, RotateCcw, Save, SquareCheck, Strikethrough, Table, Upload } from 'lucide-vue-next';
+import DropdownMenu from './DropdownMenu.vue';
 import type { ContextDocument, ContextNode } from '@packages/core/src';
 import { useWorkspaceI18n } from '../i18n';
 import { resolveDocumentViewer } from '../document-viewers';
@@ -408,6 +437,8 @@ const props = withDefaults(defineProps<{
   activeDocument: ContextDocument | null;
   activeViewerId: string | null;
   activePaneMode: 'empty' | 'viewer' | 'unsupported';
+  hideToolbar?: boolean;
+  activeScopeLabel?: string | null;
   modelValue: string;
   linkableMarkdownDocuments?: ContextNode[];
   linkableReferenceResources?: ContextNode[];
@@ -432,6 +463,8 @@ const props = withDefaults(defineProps<{
   canUndo: boolean;
   canRedo: boolean;
 }>(), {
+  hideToolbar: false,
+  activeScopeLabel: null,
   isDirty: false,
   linkableMarkdownDocuments: () => [],
   linkableReferenceResources: () => [],
@@ -497,6 +530,11 @@ const markdownModeToggleLabel = computed(() => {
     ? t('shared.markdownEditMode')
     : t('shared.markdownViewerMode');
 });
+const foldAllToggleLabel = computed(() => {
+  return foldAllCollapsed.value
+    ? t('shared.expandAllHeadings')
+    : t('shared.collapseAllHeadings');
+});
 const isMarkdownDocument = computed(() => {
   return props.activeDocument?.mimeType === 'text/markdown';
 });
@@ -517,6 +555,7 @@ const markdownViewerRef = ref<(Partial<DocumentViewerSearchHandle> & {
   toggleHighlightInViewer?: () => boolean;
   toggleMarkInViewer?: (markName: string) => boolean;
   insertTaskListItemInViewer?: () => boolean;
+  toggleAllHeadingsInViewer?: () => boolean | undefined;
 }) | null>(null);
 const searchInputRef = ref<HTMLInputElement | null>(null);
 const isSearchOpen = ref(false);
@@ -525,6 +564,7 @@ const isBlockPickerOpen = ref(false);
 const isLinkPickerOpen = ref(false);
 const activeLinkPickerTab = ref<string>('document');
 const linkInsertionPointMissing = ref(false);
+const foldAllCollapsed = ref(false);
 const searchQuery = ref('');
 const activeSearchMatchIndex = ref(0);
 const searchMatchCount = ref(0);
@@ -589,6 +629,7 @@ watch(
     isStylePickerOpen.value = false;
     activeLinkPickerTab.value = 'document';
     linkInsertionPointMissing.value = false;
+    foldAllCollapsed.value = false;
     closeViewerSearch();
   },
   { immediate: true }
@@ -601,8 +642,16 @@ watch(
     isStylePickerOpen.value = false;
     activeLinkPickerTab.value = 'document';
     linkInsertionPointMissing.value = false;
+    foldAllCollapsed.value = false;
   }
 );
+
+// The viewer's fold state lives on the Milkdown editor instance, which is
+// torn down and recreated on every mode switch — so the fold-all button
+// state resets alongside it rather than trying to track the destroyed state.
+watch(markdownViewerMode, () => {
+  foldAllCollapsed.value = false;
+});
 
 onMounted(() => {
   window.addEventListener('keydown', onGlobalKeydown);
@@ -619,6 +668,13 @@ function toggleMarkdownViewerMode() {
   }
 
   markdownViewerMode.value = nextMode;
+}
+
+function toggleFoldAllHeadings() {
+  const result = markdownViewerRef.value?.toggleAllHeadingsInViewer?.();
+  if (result !== undefined) {
+    foldAllCollapsed.value = result;
+  }
 }
 
 function getViewerSearchHandle(): DocumentViewerSearchHandle | null {
